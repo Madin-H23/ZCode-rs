@@ -19,6 +19,7 @@ pub mod runtime_env;
 pub mod settings;
 pub mod store;
 pub mod system;
+pub mod tasks;
 
 use main_bridge::MainBridge;
 
@@ -73,6 +74,8 @@ pub struct ServiceContext {
 /// 需要在 Host 退出时清理的资源。
 pub struct Installed {
     agent: agent::AgentRuntime,
+    /// 观察者只被弱引用的生命周期任务持有，必须留在这里才能存活。
+    _observer: Arc<agent::sessions_index::SessionsIndexObserver>,
 }
 
 impl Installed {
@@ -151,7 +154,25 @@ pub fn install(
         agent::service::CHANNEL,
         agent::service::AgentChannel::new(agent.clone(), fallback),
     );
-    Installed { agent }
+    registry.implement(agent::session::service(agent.clone()));
+    let observer = agent::sessions_index::SessionsIndexObserver::start(agent.clone());
+    agent::session::warm_up(
+        agent.clone(),
+        context
+            .init
+            .agent_warmup_targets
+            .iter()
+            .map(|target| agent::WorkspaceTarget {
+                workspace_path: target.workspace_path.clone(),
+                workspace_identity: target.workspace_identity.clone(),
+                remote_session_id: None,
+            })
+            .collect(),
+    );
+    Installed {
+        agent,
+        _observer: observer,
+    }
 }
 
 #[cfg(test)]

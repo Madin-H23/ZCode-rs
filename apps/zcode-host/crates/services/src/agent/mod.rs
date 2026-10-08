@@ -4,6 +4,9 @@ pub mod command;
 pub mod process;
 pub mod runtime;
 pub mod service;
+pub mod session;
+pub mod sessions_index;
+pub mod wire;
 
 pub use runtime::{
     AgentProcess, AgentRuntime, AgentRuntimeConfig, Frame, FrameKind, RuntimePolicy,

@@ -13,7 +13,9 @@ use tokio::net::TcpListener;
 use zcode_host_control::ClientMode;
 use zcode_host_kit::{CallContext, Reply, RpcValue, ServiceChannel};
 use zcode_host_services::agent::service::AgentChannel;
+use zcode_host_services::agent::sessions_index::{IndexEvent, SessionsIndexObserver};
 use zcode_host_services::agent::{AgentRuntime, AgentRuntimeConfig};
+use zcode_host_services::agent::{WorkspaceTarget, session};
 use zcode_host_services::providers::ProviderRuntime;
 use zcode_host_services::settings::SettingStore;
 
@@ -186,6 +188,8 @@ async fn core_chat_flow_against_rust_cli() {
         providers,
     );
     let channel = AgentChannel::new(runtime.clone(), None);
+    let observer = SessionsIndexObserver::start(runtime.clone());
+    let mut index_events = Box::pin(observer.events().subscribe());
     let context = CallContext {
         connection: 1,
         attachment_id: "test".into(),
@@ -299,6 +303,41 @@ async fn core_chat_flow_against_rust_cli() {
     .await
     .expect("assistant reply not streamed");
     assert!(reply_seen > 0);
+
+    // Host 自己的 sessions-index 观察者：进程可用后自动订阅，拿到含新会话的摘要。
+    let observed = tokio::time::timeout(Duration::from_secs(30), async {
+        while let Some(event) = index_events.next().await {
+            let sessions: Vec<Value> = match event.as_ref() {
+                IndexEvent::Snapshot { sessions, .. } => sessions.clone(),
+                IndexEvent::Upserted { session, .. } => vec![session.clone()],
+                _ => continue,
+            };
+            if sessions
+                .iter()
+                .any(|summary| summary["sessionId"] == session_id.as_str())
+            {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .expect("observer never saw the session");
+    assert!(observed);
+    assert!(observer.sessions(&workspace_path).contains_key(&session_id));
+
+    let presentation = session::read_workspace_presentation(
+        &runtime,
+        &WorkspaceTarget::local(workspace_path.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        presentation["workspace"]["workspaceKey"],
+        workspace_path.as_str()
+    );
+    assert!(presentation["slashCommands"].is_array());
+    assert!(presentation["executionCapabilities"]["permissionModes"].is_array());
 
     // 进程已在运行：sessions-index（existing-only）现在可以订阅。
     let index = call(
