@@ -1,0 +1,763 @@
+{
+  "source": "scripts/rust-host/bots-fixtures.ts",
+  "commands": [
+    {
+      "text": "hello",
+      "command": {
+        "type": "message",
+        "text": "hello"
+      }
+    },
+    {
+      "text": "  /BIND abc123 ",
+      "command": {
+        "type": "bind",
+        "code": "abc123"
+      }
+    },
+    {
+      "text": "/bind",
+      "command": {
+        "type": "unknown",
+        "name": "bind",
+        "raw": "/bind"
+      }
+    },
+    {
+      "text": "/help",
+      "command": {
+        "type": "help"
+      }
+    },
+    {
+      "text": "/帮助",
+      "command": {
+        "type": "help"
+      }
+    },
+    {
+      "text": "/cancel",
+      "command": {
+        "type": "selection.cancel"
+      }
+    },
+    {
+      "text": "0",
+      "command": {
+        "type": "selection.cancel"
+      }
+    },
+    {
+      "text": " 0 ",
+      "command": {
+        "type": "selection.cancel"
+      }
+    },
+    {
+      "text": "/status",
+      "command": {
+        "type": "status"
+      }
+    },
+    {
+      "text": "/状态",
+      "command": {
+        "type": "status"
+      }
+    },
+    {
+      "text": "/new",
+      "command": {
+        "type": "new"
+      }
+    },
+    {
+      "text": "/clear",
+      "command": {
+        "type": "new"
+      }
+    },
+    {
+      "text": "/reconnect",
+      "command": {
+        "type": "reconnect"
+      }
+    },
+    {
+      "text": "/workspace",
+      "command": {
+        "type": "workspace.list"
+      }
+    },
+    {
+      "text": "/project 2",
+      "command": {
+        "type": "workspace.set",
+        "value": "2"
+      }
+    },
+    {
+      "text": "/model",
+      "command": {
+        "type": "model.list"
+      }
+    },
+    {
+      "text": "/model provider p1",
+      "command": {
+        "type": "model.provider.set",
+        "value": "p1"
+      }
+    },
+    {
+      "text": "/model model m1",
+      "command": {
+        "type": "model.set",
+        "value": "m1"
+      }
+    },
+    {
+      "text": "/model glm-5",
+      "command": {
+        "type": "model.set",
+        "value": "glm-5"
+      }
+    },
+    {
+      "text": "/mode plan",
+      "command": {
+        "type": "mode.set",
+        "value": "plan"
+      }
+    },
+    {
+      "text": "/think",
+      "command": {
+        "type": "thoughtLevel.list"
+      }
+    },
+    {
+      "text": "/thought-level high",
+      "command": {
+        "type": "thoughtLevel.set",
+        "value": "high"
+      }
+    },
+    {
+      "text": "/task",
+      "command": {
+        "type": "task.list"
+      }
+    },
+    {
+      "text": "/task 3",
+      "command": {
+        "type": "task.set",
+        "value": "3"
+      }
+    },
+    {
+      "text": "/reply summary",
+      "command": {
+        "type": "reply.set",
+        "value": "summary"
+      }
+    },
+    {
+      "text": "/stop",
+      "command": {
+        "type": "stop"
+      }
+    },
+    {
+      "text": "/permission",
+      "command": {
+        "type": "unknown",
+        "name": "permission",
+        "raw": "/permission"
+      }
+    },
+    {
+      "text": "/permission 1",
+      "command": {
+        "type": "permission.respond",
+        "value": "1"
+      }
+    },
+    {
+      "text": "/answer submit",
+      "command": {
+        "type": "elicitation.submit"
+      }
+    },
+    {
+      "text": "/回答 完成",
+      "command": {
+        "type": "elicitation.submit"
+      }
+    },
+    {
+      "text": "/answer yes",
+      "command": {
+        "type": "elicitation.respond",
+        "value": "yes"
+      }
+    },
+    {
+      "text": "/approve r1 o1",
+      "command": {
+        "type": "approve",
+        "requestId": "r1",
+        "optionId": "o1"
+      }
+    },
+    {
+      "text": "/approve r1",
+      "command": {
+        "type": "unknown",
+        "name": "approve",
+        "raw": "/approve r1"
+      }
+    },
+    {
+      "text": "/deny r1",
+      "command": {
+        "type": "deny",
+        "requestId": "r1"
+      }
+    },
+    {
+      "text": "/unknown thing",
+      "command": {
+        "type": "unknown",
+        "name": "unknown",
+        "raw": "/unknown thing"
+      }
+    },
+    {
+      "text": "/",
+      "command": {
+        "type": "unknown",
+        "name": "",
+        "raw": "/"
+      }
+    },
+    {
+      "text": "/Status\textra",
+      "command": {
+        "type": "status"
+      }
+    }
+  ],
+  "normalize": [
+    {
+      "input": {
+        "id": " bot-1 ",
+        "name": " Bot ",
+        "enabled": true,
+        "allowedWorkspaces": [],
+        "allowedCommands": {
+          "status": true,
+          "new": true,
+          "workspace": true,
+          "model": true,
+          "thoughtLevel": true,
+          "reply": true
+        },
+        "currentOptions": {},
+        "provider": "feishu"
+      },
+      "output": {
+        "id": " bot-1 ",
+        "name": " Bot ",
+        "enabled": true,
+        "allowedWorkspaces": ["*"],
+        "allowedCommands": {
+          "status": true,
+          "new": true,
+          "workspace": true,
+          "model": true,
+          "mode": true,
+          "thoughtLevel": true,
+          "reply": true
+        },
+        "currentOptions": {},
+        "provider": "feishu",
+        "replyMode": "streaming_card"
+      }
+    },
+    {
+      "input": {
+        "id": " bot-1 ",
+        "name": " Bot ",
+        "enabled": true,
+        "allowedWorkspaces": [],
+        "allowedCommands": {
+          "status": true,
+          "new": true,
+          "workspace": true,
+          "model": true,
+          "thoughtLevel": true,
+          "reply": true
+        },
+        "currentOptions": {},
+        "provider": "lark",
+        "replyMode": "assistant_changes"
+      },
+      "output": {
+        "id": " bot-1 ",
+        "name": " Bot ",
+        "enabled": true,
+        "allowedWorkspaces": ["*"],
+        "allowedCommands": {
+          "status": true,
+          "new": true,
+          "workspace": true,
+          "model": true,
+          "mode": true,
+          "thoughtLevel": true,
+          "reply": true
+        },
+        "currentOptions": {},
+        "provider": "lark",
+        "replyMode": "streaming_card"
+      }
+    },
+    {
+      "input": {
+        "id": " bot-1 ",
+        "name": " Bot ",
+        "enabled": true,
+        "allowedWorkspaces": [" /a ", "/b", "/a", ""],
+        "allowedCommands": {
+          "status": false,
+          "new": true,
+          "workspace": true,
+          "model": true,
+          "thoughtLevel": true,
+          "reply": true,
+          "cli": true,
+          "sandboxMode": false
+        },
+        "currentOptions": {
+          "cli": "glm",
+          "mode": "plan",
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          }
+        },
+        "provider": "telegram",
+        "replyMode": "streaming_card"
+      },
+      "output": {
+        "id": " bot-1 ",
+        "name": " Bot ",
+        "enabled": true,
+        "allowedWorkspaces": ["/a", "/b"],
+        "allowedCommands": {
+          "status": false,
+          "new": true,
+          "workspace": true,
+          "model": true,
+          "mode": true,
+          "thoughtLevel": true,
+          "reply": true,
+          "sandboxMode": false
+        },
+        "currentOptions": {
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "mode": "plan"
+        },
+        "provider": "telegram",
+        "replyMode": "assistant_changes"
+      }
+    },
+    {
+      "input": {
+        "id": " bot-1 ",
+        "name": " Bot ",
+        "enabled": true,
+        "allowedWorkspaces": [],
+        "allowedCommands": {
+          "status": true,
+          "new": true,
+          "workspace": true,
+          "model": true,
+          "thoughtLevel": true,
+          "reply": true
+        },
+        "currentOptions": {
+          "modelSelection": {
+            "providerId": "",
+            "modelId": "m"
+          },
+          "approvalPolicy": "never"
+        },
+        "provider": "weixin",
+        "webhookUrl": "https://example.invalid/hook"
+      },
+      "output": {
+        "id": " bot-1 ",
+        "name": " Bot ",
+        "enabled": true,
+        "allowedWorkspaces": ["*"],
+        "allowedCommands": {
+          "status": true,
+          "new": true,
+          "workspace": true,
+          "model": true,
+          "mode": true,
+          "thoughtLevel": true,
+          "reply": true
+        },
+        "currentOptions": {
+          "approvalPolicy": "never"
+        },
+        "provider": "weixin",
+        "replyMode": "assistant_changes"
+      }
+    },
+    {
+      "input": {
+        "id": " bot-1 ",
+        "name": " Bot ",
+        "enabled": true,
+        "allowedWorkspaces": ["*", "/a"],
+        "allowedCommands": {
+          "status": true,
+          "new": true,
+          "workspace": true,
+          "model": true,
+          "thoughtLevel": true,
+          "reply": true
+        },
+        "currentOptions": {},
+        "provider": "webhook",
+        "replyMode": "summary_changes"
+      },
+      "output": {
+        "id": " bot-1 ",
+        "name": " Bot ",
+        "enabled": true,
+        "allowedWorkspaces": ["*"],
+        "allowedCommands": {
+          "status": true,
+          "new": true,
+          "workspace": true,
+          "model": true,
+          "mode": true,
+          "thoughtLevel": true,
+          "reply": true
+        },
+        "currentOptions": {},
+        "provider": "webhook",
+        "replyMode": "summary_changes"
+      }
+    }
+  ],
+  "allowedWorkspaces": [
+    {
+      "input": [],
+      "output": ["*"]
+    },
+    {
+      "input": [" "],
+      "output": ["*"]
+    },
+    {
+      "input": ["*"],
+      "output": ["*"]
+    },
+    {
+      "input": ["/a", " /a ", "/b"],
+      "output": ["/a", "/b"]
+    },
+    {
+      "input": ["/a", "*"],
+      "output": ["*"]
+    }
+  ],
+  "legacyConfig": [
+    {
+      "input": {
+        "version": 2,
+        "bots": [
+          {
+            "id": "legacy-1",
+            "name": "Legacy",
+            "enabled": true,
+            "allowedWorkspaces": [],
+            "allowedCommands": {
+              "status": true,
+              "new": true,
+              "workspace": true,
+              "model": true,
+              "thoughtLevel": true,
+              "reply": true
+            },
+            "currentOptions": {
+              "cli": "glm",
+              "model": "builtin:bigmodel-coding-plan/glm-4.6",
+              "thoughtLevel": "high"
+            },
+            "provider": "telegram",
+            "replyMode": "assistant_changes"
+          },
+          {
+            "id": "legacy-2",
+            "name": "Legacy 2",
+            "enabled": true,
+            "allowedWorkspaces": [],
+            "allowedCommands": {
+              "status": true,
+              "new": true,
+              "workspace": true,
+              "model": true,
+              "thoughtLevel": true,
+              "reply": true
+            },
+            "currentOptions": {
+              "model": "custom:my%20provider:model%2Fx"
+            },
+            "provider": "feishu",
+            "replyMode": "streaming_card"
+          },
+          {
+            "id": "legacy-3",
+            "name": "Legacy 3",
+            "enabled": true,
+            "allowedWorkspaces": [],
+            "allowedCommands": {
+              "status": true,
+              "new": true,
+              "workspace": true,
+              "model": true,
+              "thoughtLevel": true,
+              "reply": true
+            },
+            "currentOptions": {
+              "modelSelection": {
+                "providerId": "builtin:zai",
+                "modelId": "glm-4.5"
+              }
+            },
+            "provider": "telegram",
+            "replyMode": "assistant_changes"
+          },
+          {
+            "id": "legacy-4",
+            "name": "Legacy 4",
+            "enabled": true,
+            "allowedWorkspaces": [],
+            "allowedCommands": {
+              "status": true,
+              "new": true,
+              "workspace": true,
+              "model": true,
+              "thoughtLevel": true,
+              "reply": true
+            },
+            "currentOptions": {
+              "modelSelection": {
+                "providerId": "builtin:unknown",
+                "modelId": "x"
+              },
+              "mode": "yolo"
+            },
+            "provider": "telegram",
+            "replyMode": "assistant_changes"
+          }
+        ]
+      },
+      "output": {
+        "version": 3,
+        "bots": [
+          {
+            "id": "legacy-1",
+            "name": "Legacy",
+            "provider": "telegram",
+            "enabled": true,
+            "allowedWorkspaces": [],
+            "allowedCommands": {
+              "status": true,
+              "new": true,
+              "workspace": true,
+              "model": true,
+              "thoughtLevel": true,
+              "reply": true
+            },
+            "currentOptions": {
+              "modelSelection": {
+                "providerId": "account:bigmodel-individual-coding-plan",
+                "modelId": "GLM-4.6",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              }
+            },
+            "replyMode": "assistant_changes"
+          },
+          {
+            "id": "legacy-2",
+            "name": "Legacy 2",
+            "provider": "feishu",
+            "enabled": true,
+            "allowedWorkspaces": [],
+            "allowedCommands": {
+              "status": true,
+              "new": true,
+              "workspace": true,
+              "model": true,
+              "thoughtLevel": true,
+              "reply": true
+            },
+            "currentOptions": {
+              "modelSelection": {
+                "providerId": "my provider",
+                "modelId": "model/x"
+              }
+            },
+            "replyMode": "streaming_card"
+          },
+          {
+            "id": "legacy-3",
+            "name": "Legacy 3",
+            "provider": "telegram",
+            "enabled": true,
+            "allowedWorkspaces": [],
+            "allowedCommands": {
+              "status": true,
+              "new": true,
+              "workspace": true,
+              "model": true,
+              "thoughtLevel": true,
+              "reply": true
+            },
+            "currentOptions": {
+              "modelSelection": {
+                "providerId": "zai-api",
+                "modelId": "GLM-4.5"
+              }
+            },
+            "replyMode": "assistant_changes"
+          },
+          {
+            "id": "legacy-4",
+            "name": "Legacy 4",
+            "provider": "telegram",
+            "enabled": true,
+            "allowedWorkspaces": [],
+            "allowedCommands": {
+              "status": true,
+              "new": true,
+              "workspace": true,
+              "model": true,
+              "thoughtLevel": true,
+              "reply": true
+            },
+            "currentOptions": {
+              "mode": "yolo"
+            },
+            "replyMode": "assistant_changes"
+          }
+        ]
+      }
+    }
+  ],
+  "legacyState": [
+    {
+      "input": {
+        "version": 2,
+        "bots": {
+          "legacy-1": {
+            "botId": "legacy-1",
+            "workspacePath": "/w",
+            "mode": "draft",
+            "activeTaskId": null,
+            "draftOptions": {
+              "provider": "claude",
+              "model": "builtin:zai-start-plan/GLM-4.7",
+              "thoughtLevel": "",
+              "mode": "plan"
+            },
+            "extra": "dropped",
+            "updatedAt": 5
+          },
+          "legacy-2": {
+            "botId": "legacy-2",
+            "workspacePath": "/w2",
+            "workspaceIdentity": "remote:x",
+            "mode": "task",
+            "activeTaskId": "t1",
+            "pendingPermissionOptions": [
+              {
+                "requestId": "r",
+                "optionId": "o",
+                "command": "approve",
+                "label": "Allow",
+                "response": {
+                  "decision": "allow",
+                  "reason": "ok"
+                },
+                "stray": 1
+              }
+            ],
+            "telegramOffset": 7,
+            "updatedAt": 6
+          }
+        }
+      },
+      "output": {
+        "version": 3,
+        "bots": {
+          "legacy-1": {
+            "botId": "legacy-1",
+            "workspacePath": "/w",
+            "mode": "draft",
+            "activeTaskId": null,
+            "draftOptions": {
+              "provider": "glm",
+              "modelSelection": {
+                "providerId": "account:zai-start-plan",
+                "modelId": "GLM-4.7"
+              },
+              "mode": "plan"
+            },
+            "updatedAt": 5
+          },
+          "legacy-2": {
+            "botId": "legacy-2",
+            "workspacePath": "/w2",
+            "workspaceIdentity": "remote:x",
+            "mode": "task",
+            "activeTaskId": "t1",
+            "pendingPermissionOptions": [
+              {
+                "requestId": "r",
+                "optionId": "o",
+                "command": "approve",
+                "label": "Allow",
+                "response": {
+                  "decision": "allow",
+                  "reason": "ok"
+                }
+              }
+            ],
+            "telegramOffset": 7,
+            "updatedAt": 6
+          }
+        }
+      }
+    }
+  ]
+}

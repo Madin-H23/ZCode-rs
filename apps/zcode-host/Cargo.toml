@@ -41,6 +41,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # automation 的 cron 按本地时区计算下次触发（与 croner 相同）。
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 sha2 = "0.10"
+# bots：凭据文件与 Node 相同的 AES-256-GCM（enc:v1）与 base64url 编码。
+ring = "0.17"
+base64 = "0.22"
 # 与 Node Host 共用 tasks-index.sqlite；bundled 固定 SQLite 版本，不依赖系统库。
 rusqlite = { version = "0.37", features = ["bundled"] }
 url = "2"
