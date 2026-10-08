@@ -133,3 +133,24 @@ impl TasksIndex {
         .await
     }
 }
+
+impl TasksIndex {
+    /// 让一行重新可见（`archived = 0, deleted = 0`）；行不存在时为 None。Claude 重新导入用。
+    pub async fn restore_task_visibility(
+        &self,
+        workspace_key: String,
+        task_id: String,
+    ) -> anyhow::Result<Option<Value>> {
+        self.call(move |conn, _| {
+            let changed = conn.execute(
+                "UPDATE tasks SET archived = 0, deleted = 0 WHERE workspace_key = ? AND task_id = ?",
+                (&workspace_key, &task_id),
+            )?;
+            if changed == 0 {
+                return Ok(None);
+            }
+            Ok(super::repo::get_task_meta(conn, &workspace_key, &task_id)?.map(|meta| meta.to_value()))
+        })
+        .await
+    }
+}

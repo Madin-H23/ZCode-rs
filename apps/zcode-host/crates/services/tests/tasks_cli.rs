@@ -315,3 +315,119 @@ async fn task_lifecycle_against_rust_cli() {
     assert_eq!(deleted, vec![task_id.clone()]);
     runtime.dispose_all().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn claude_import_against_rust_cli() {
+    let Some(cli) = cli_binary() else {
+        eprintln!("skipped: Rust CLI release binary not found");
+        return;
+    };
+    let home = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let workspace_path = workspace.path().to_string_lossy().into_owned();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(serve_mock_model(listener));
+    let personal = write_provider_config(home.path(), port);
+    let builtin = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../config/provider/zcode-builtin.json");
+    let home_text = home.path().to_string_lossy().into_owned();
+    let runtime = AgentRuntime::new(
+        AgentRuntimeConfig {
+            base_env: BTreeMap::from([
+                ("HOME".to_owned(), home_text.clone()),
+                ("ZCODE_DATA_BASE_DIR".to_owned(), home_text.clone()),
+                ("PATH".to_owned(), std::env::var("PATH").unwrap_or_default()),
+                ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
+            ]),
+            command_vars: BTreeMap::from([
+                (
+                    "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
+                    cli.to_string_lossy().into_owned(),
+                ),
+                (
+                    "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
+                    "zcode-cli-rust".to_owned(),
+                ),
+            ]),
+            search_roots: Vec::new(),
+            fallback_cwd: None,
+        },
+        SettingStore::new(home.path()),
+        ProviderRuntime::new(Some(builtin), personal),
+    );
+    let index = TasksIndex::open(home.path().join(".zcode/v2/tasks-index.sqlite"), |_| {})
+        .await
+        .unwrap();
+    let events = WorkspaceEvents::new();
+    let tasks = TaskService::new(Arc::new(index.clone()), events.clone(), runtime.clone());
+    let context = TaskContext::new(
+        TaskPaths {
+            user_home: home.path().into(),
+            data_base_dir: home.path().into(),
+            log_dir: None,
+        },
+        index.clone(),
+        tasks,
+        runtime.clone(),
+        SettingStore::new(home.path()),
+    );
+    let lifecycle = TaskLifecycle::start(context);
+    // 一个普通会话、一个侧链会话、一个 worktree 下的会话；只有第一个可导入。
+    let project = home.path().join(".claude/projects/-tmp-project");
+    std::fs::create_dir_all(project.join("subagents")).unwrap();
+    let line = |value: Value| format!("{value}\n");
+    std::fs::write(
+        project.join("sess-1.jsonl"),
+        [
+            line(json!({"type": "user", "cwd": workspace_path, "timestamp": "2026-01-01T00:00:00Z", "message": {"content": "Explain the build"}})),
+            line(json!({"type": "assistant", "cwd": workspace_path, "timestamp": "2026-01-01T00:00:05Z", "message": {"model": "claude-x", "content": [{"type": "text", "text": "Sure."}]}})),
+        ]
+        .concat(),
+    )
+    .unwrap();
+    std::fs::write(project.join("side.jsonl"), line(json!({"type": "user", "isSidechain": true, "cwd": workspace_path, "message": {"content": "x"}}))).unwrap();
+    std::fs::write(
+        project.join("subagents/sub.jsonl"),
+        line(json!({"type": "user", "cwd": workspace_path, "message": {"content": "x"}})),
+    )
+    .unwrap();
+
+    let candidates = lifecycle
+        .scan_claude_sessions(&json!({"workspacePath": workspace_path}))
+        .await;
+    let candidates = candidates.as_array().unwrap();
+    assert_eq!(candidates.len(), 1, "{candidates:?}");
+    assert_eq!(candidates[0]["sessionId"], "sess-1");
+    assert_eq!(candidates[0]["previewTitle"], "Explain the build");
+
+    let key = workspace_path.clone();
+    let mut workspace_events = Box::pin(events.subscribe_filtered(move |e| e.workspace_key == key));
+    let result = lifecycle
+        .import_claude_sessions(&json!({"workspacePath": workspace_path, "sessionIds": ["sess-1", " sess-1 ", "missing"]}))
+        .await;
+    assert_eq!(result["failed"], json!([]), "{result}");
+    assert_eq!(
+        result["skipped"][0]["reason"],
+        "session_not_found_or_workspace_mismatch"
+    );
+    let task_id = result["imported"][0]["taskId"].as_str().unwrap().to_owned();
+    assert!(task_id.starts_with("claude-import-"));
+    let event = next_matching(&mut workspace_events, "import event", |e| {
+        e.event["reason"] == "task_meta_changed"
+    })
+    .await;
+    assert_eq!(event.event["taskMeta"]["migrationSource"], "claudeCode");
+    let listed = index
+        .query_task_list(json!({"kind": "timeline", "workspaceScopes": [{"workspacePath": workspace_path}], "search": "build"}), Some("glm".into()))
+        .await
+        .unwrap();
+    assert_eq!(listed["items"][0]["taskId"], task_id.as_str());
+    // CLI 里是真实会话：可以读回导入的历史。
+    let resumed = lifecycle
+        .resume_task(&json!({"taskId": task_id, "workspacePath": workspace_path}))
+        .await
+        .unwrap();
+    assert_eq!(resumed["taskId"], task_id.as_str());
+    runtime.dispose_all().await;
+}

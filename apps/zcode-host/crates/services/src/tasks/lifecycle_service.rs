@@ -122,6 +122,12 @@ pub fn service(lifecycle: Arc<TaskLifecycle>) -> ServiceBuilder {
         .get_model_trajectory(&p)
         .await
         .map(Reply::Value));
+    let b = member!(b, "scanImportableClaudeSessions", lifecycle, |l, p| Ok(
+        Reply::Value(super::claude_import::scan(&l.context, &p).await)
+    ));
+    let b = member!(b, "importClaudeSessions", lifecycle, |l, p| Ok(
+        Reply::Value(l.import_claude_sessions(&p).await)
+    ));
     let b = member!(b, "getTaskNativeSessionLogFile", lifecycle, |l, _p| Ok(
         Reply::Value(l.get_native_session_log_file().await)
     ));

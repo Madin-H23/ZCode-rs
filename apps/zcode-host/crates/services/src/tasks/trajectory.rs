@@ -148,7 +148,7 @@ pub fn parse_time(text: &str) -> f64 {
     parse_iso(text).unwrap_or(0.0)
 }
 
-fn parse_iso(text: &str) -> Option<f64> {
+pub(crate) fn parse_iso(text: &str) -> Option<f64> {
     let digits = |s: &str| -> Option<i64> {
         (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse().ok())?
     };
