@@ -6,17 +6,17 @@
 
 在 Rust Host 上实现下列 channel，使设置页的技能、插件、命令、Memory、Hooks、MCP、Subagent 页面，以及 Composer 的 `/` 选择器在 Rust Host 与 Node Host 上行为一致。Node 实现位于 `packages/services/src/<channel>/`。
 
-| channel       | 成员                                                                                                                                                                                                         | 数据来源                                                     |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| `skills`      | `list`、`setEnabled`、`buildPromptContext`、`copyToCommon`、`removeFromCommon`、`deleteSkill`                                                                                                                | 技能目录、插件目录、`~/.zcode/cli/config.json`              |
-| `skill-sync`  | `listLocalUserSkillCandidates`、`listRemoteUserSkillStatuses`、`exportSkillsArchive`、`checkRemoteUserSkillWriteAccess`、`importSkillsArchive`                                                               | 用户技能目录，tar.gz 归档                                    |
-| `plugins`     | `getOverview`、`addMarketplace`、`removeMarketplace`、`updateMarketplace`、`installPlugin`、`uninstallPlugin`、`setPluginEnabled`                                                                            | 已退役：Node 固定回空概览，其余抛错                          |
-| `plugin-sync` | `listLocalUserPluginCandidates`、`listRemoteUserPluginStatuses`、`exportPluginsArchive`、`exportMarketplaceSourceArchive`、`importPluginsArchive`、`checkRemoteUserPluginWriteAccess`、`importMarketplaceSourceArchive` | `plugins.dirs`、插件目录、marketplace 清单，tar.gz 归档      |
-| `commands`    | `list`、`writeCommandFile`、`updateCommandFile`、`deleteCommandFile`、`setCommandEnabled`、`getPrimaryUserCommandsDirectory`                                                                                 | 命令目录、插件目录、`config.json` 的 `command`               |
-| `memory`      | `listProjectMemories`、`readProjectMemoryFile`                                                                                                                                                               | `{dataBaseDir}/.zcode/cli/memories/projects`                 |
-| `hooks`       | `loadHooks`、`saveHooks`、`grantWorkspaceHookTrust`                                                                                                                                                          | 用户与项目 `config.json`、旧 settings、trust store；CLI       |
-| `mcp-sync`    | `loadMcpFromUserDirectory`、`saveMcpToUserDirectory`、`listLocalUserMcpCandidates`、`listRemoteUserMcpStatuses`、`exportMcpServers`、`checkRemoteUserMcpWriteAccess`、`importMcpServers`、`listWorkspaceMcpServerStatuses` | `config.json` 的 `mcp.servers`、`.agents/mcp.json`；CLI      |
-| `subagents`   | `list`、`setEnabled`、`setBuiltInModelOverride`、`setPluginAgentModelOverride`、`getPrimaryUserAgentsDirectory`、`createAgent`、`updateAgent`、`deleteAgent`；另有 Host 内部的 `prepareRuntimeState`      | agents 目录、`{storage}/v2/agents-state.json`、插件目录       |
+| channel       | 成员                                                                                                                                                                                                                       | 数据来源                                                |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `skills`      | `list`、`setEnabled`、`buildPromptContext`、`copyToCommon`、`removeFromCommon`、`deleteSkill`                                                                                                                              | 技能目录、插件目录、`~/.zcode/cli/config.json`          |
+| `skill-sync`  | `listLocalUserSkillCandidates`、`listRemoteUserSkillStatuses`、`exportSkillsArchive`、`checkRemoteUserSkillWriteAccess`、`importSkillsArchive`                                                                             | 用户技能目录，tar.gz 归档                               |
+| `plugins`     | `getOverview`、`addMarketplace`、`removeMarketplace`、`updateMarketplace`、`installPlugin`、`uninstallPlugin`、`setPluginEnabled`                                                                                          | 已退役：Node 固定回空概览，其余抛错                     |
+| `plugin-sync` | `listLocalUserPluginCandidates`、`listRemoteUserPluginStatuses`、`exportPluginsArchive`、`exportMarketplaceSourceArchive`、`importPluginsArchive`、`checkRemoteUserPluginWriteAccess`、`importMarketplaceSourceArchive`    | `plugins.dirs`、插件目录、marketplace 清单，tar.gz 归档 |
+| `commands`    | `list`、`writeCommandFile`、`updateCommandFile`、`deleteCommandFile`、`setCommandEnabled`、`getPrimaryUserCommandsDirectory`                                                                                               | 命令目录、插件目录、`config.json` 的 `command`          |
+| `memory`      | `listProjectMemories`、`readProjectMemoryFile`                                                                                                                                                                             | `{dataBaseDir}/.zcode/cli/memories/projects`            |
+| `hooks`       | `loadHooks`、`saveHooks`、`grantWorkspaceHookTrust`                                                                                                                                                                        | 用户与项目 `config.json`、旧 settings、trust store；CLI |
+| `mcp-sync`    | `loadMcpFromUserDirectory`、`saveMcpToUserDirectory`、`listLocalUserMcpCandidates`、`listRemoteUserMcpStatuses`、`exportMcpServers`、`checkRemoteUserMcpWriteAccess`、`importMcpServers`、`listWorkspaceMcpServerStatuses` | `config.json` 的 `mcp.servers`、`.agents/mcp.json`；CLI |
+| `subagents`   | `list`、`setEnabled`、`setBuiltInModelOverride`、`setPluginAgentModelOverride`、`getPrimaryUserAgentsDirectory`、`createAgent`、`updateAgent`、`deleteAgent`；另有 Host 内部的 `prepareRuntimeState`                       | agents 目录、`{storage}/v2/agents-state.json`、插件目录 |
 
 `zcode-agent` 与 `plugin-management` 两个 channel（插件 lane、`getSkillReferenceCatalog` 等）属于 agent 子系统，不在本文范围。
 
@@ -30,6 +30,7 @@
 4. **JSON 文本**：读取按 `JSON.parse` 语义（重复键取最后一个，数组下标形态的键排在前面）；写回按 `JSON.stringify(value, null, 2)`（数字按 ECMAScript 规则输出），末尾加换行，与各 Node 写入方逐字节一致。
 5. **YAML frontmatter**：技能、Subagent 的 frontmatter 先按 YAML 解析，失败时走与 Node 相同的宽松读取。
 6. **排序**：`localeCompare` 用 `support::collate` 的 ICU 根排序近似。
+7. **目录遍历顺序**：Node `readdir` 在 Unix 上经 libuv `scandir(3)` 按 `strcmp` 排序，而命令列表、同名去重（先到先得）都依赖遍历顺序；Rust 的 `fsx::read_dir` 同样按字节序排序（Windows 两边都用文件系统顺序）。
 
 ### 2.2 skills
 
@@ -95,15 +96,17 @@ Rust Host (skills.setEnabled)          Node Host / Main (commands, mcp)         
 
 ## 4. 状态所有者与事件顺序
 
-| 状态                                       | 唯一所有者                                       |
-| ------------------------------------------ | ------------------------------------------------ |
-| 技能/命令/agent 的 Markdown 与目录         | 文件系统（每次调用重新扫描，Host 不缓存）        |
-| 启用覆盖（skills、command、mcp、plugins）  | `~/.zcode/cli/config.json`（持锁读改写）         |
-| Subagent 状态                              | `agents-state.json`；Host 内写入经 `SubagentStore` 串行 |
-| hooks trust                                | CLI（Host 只读 trust store）                     |
-| MCP 运行态、插件运行态                     | 各 workspace 的 CLI 进程                         |
+| 状态                                      | 唯一所有者                                              |
+| ----------------------------------------- | ------------------------------------------------------- |
+| 技能/命令/agent 的 Markdown 与目录        | 文件系统（每次调用重新扫描，Host 不缓存）               |
+| 启用覆盖（skills、command、mcp、plugins） | `~/.zcode/cli/config.json`（持锁读改写）                |
+| Subagent 状态                             | `agents-state.json`；Host 内写入经 `SubagentStore` 串行 |
+| hooks trust                               | CLI（Host 只读 trust store）                            |
+| MCP 运行态、插件运行态                    | 各 workspace 的 CLI 进程                                |
 
-这些 channel 没有事件。UI 在每次修改后重新调用 `list`；CLI 侧的生效依赖 `zcode-agent.onAgentRuntimeRestarted`（AgentRuntime 所有，本文不改）。`prepareRuntimeState` 的顺序：
+这些 channel 没有事件。UI 在每次修改后重新调用 `list`；CLI 侧的生效依赖 `zcode-agent.onAgentRuntimeRestarted`（AgentRuntime 所有，本文不改）。
+
+Composer 的 `/` 选择器有三个数据源，只有 AGENTS 分组来自本文：COMMANDS 是 CLI 上报的命令（`useSlashCommands`），SKILLS 是 `zcode-agent.getSkillReferenceCatalog`（agent 子系统），AGENTS 是 `subagents.list`。设置页 Skills、Commands 页里的“插件分组”按 `plugin-management` 的已安装列表聚合，也不由本文决定。`prepareRuntimeState` 的顺序：
 
 ```text
 AgentRuntime.start(target)
@@ -117,25 +120,29 @@ AgentRuntime.start(target)
 
 ## 5. 有意与 Node 不同之处
 
-| Node 行为                                                                                     | Rust Host                                                         | 理由                                                                                                         |
-| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| skills、commands 在原文件上 `writeFile`，不持锁                                               | 持锁原子写，0600                                                  | 修复跨进程丢更新；0600 与 mcp-sync、hooks、CLI 一致（文件含 MCP 密钥）                                        |
-| `mcp/list` 走独立的 mcp-status lane（插件管理 workspace，5 分钟空闲回收）                      | 发给该 workspace 自己的 CLI（`AgentRuntime::get_client`）           | Rust CLI 校验请求 workspace 与进程 workspace 一致；Rust Host 尚无 mcp-status lane（agent 子系统）             |
-| CLI 写插件启用状态（`plugins/setEnabled`）不持锁                                              | 不变                                                              | 不改 CLI；与 Host 写入同时发生的窗口只在用户同时操作两个页面时出现                                            |
-| settings-sync 写 `config.json` 不持锁                                                         | 不在本文                                                          | settings-sync 属 R1，由其负责方接入同一 helper                                                                |
-| Subagent `mcpServers` 对象数组用 `yaml` 库 `stringify` 写回                                   | 自带的 YAML 块风格输出                                            | 常见结构（字符串、数字、布尔、嵌套对象/数组）输出相同；特殊字符串一律双引号                                    |
-| YAML 解析用 `yaml` 包                                                                         | `yaml-rust2`                                                      | name/description 等标量结果相同；非法 YAML 都回退到相同的宽松读取                                             |
-| `localeCompare` 为 ICU                                                                         | ASCII 范围一致的近似                                              | 只影响非 ASCII 名称的并列排序                                                                                 |
+| Node 行为                                                                 | Rust Host                                                 | 理由                                                                                              |
+| ------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| skills、commands 在原文件上 `writeFile`，不持锁                           | 持锁原子写，0600                                          | 修复跨进程丢更新；0600 与 mcp-sync、hooks、CLI 一致（文件含 MCP 密钥）                            |
+| `mcp/list` 走独立的 mcp-status lane（插件管理 workspace，5 分钟空闲回收） | 发给该 workspace 自己的 CLI（`AgentRuntime::get_client`） | Rust CLI 校验请求 workspace 与进程 workspace 一致；Rust Host 尚无 mcp-status lane（agent 子系统） |
+| CLI 写插件启用状态（`plugins/setEnabled`）不持锁                          | 不变                                                      | 不改 CLI；与 Host 写入同时发生的窗口只在用户同时操作两个页面时出现                                |
+| settings-sync 写 `config.json` 不持锁                                     | 不在本文                                                  | settings-sync 属 R1，由其负责方接入同一 helper                                                    |
+| Subagent `mcpServers` 对象数组用 `yaml` 库 `stringify` 写回               | 自带的 YAML 块风格输出                                    | 常见结构（字符串、数字、布尔、嵌套对象/数组）输出相同；特殊字符串一律双引号                       |
+| YAML 解析用 `yaml` 包                                                     | `yaml-rust2`                                              | name/description 等标量结果相同；非法 YAML 都回退到相同的宽松读取                                 |
+| `localeCompare` 为 ICU                                                    | ASCII 范围一致的近似                                      | 只影响非 ASCII 名称的并列排序                                                                     |
+| `prepareRuntimeState` 的状态文件迁移遇到 IO 错误时 reject，CLI 不启动     | 记 warn 后照常启动                                        | env contributor 不能失败；迁移失败时 CLI 读到的是未迁移的旧字段，与迁移前行为相同                 |
+| gzip 用 Node zlib                                                         | flate2（默认压缩级别）                                    | tar 内容逐字节相同，gzip 字节可能不同；`archiveBytes` 随之不同，两边都能解对方的归档              |
+| JSON 解析失败的报错文案来自 V8                                            | 来自 serde_json                                           | 只出现在配置损坏时的错误消息里，前缀（`无法解析 MCP 配置文件 …`）相同                             |
 
 ## 6. 验收
 
-- `cargo test -p zcode-host-services extensions`：
-  - 差分：`pnpm exec tsx scripts/rust-host/extensions-fixtures.ts [--check]` 用真实 TS 服务在固定的文件树上执行 `extensions-scenarios.json` 的调用，生成 `fixtures/extensions-parity.json`；Rust 在同一文件树上执行同样的调用，结果（抹掉临时根与 hash）与文件副作用逐项相同；
-  - 归档互通：Rust 导出、TS 解包；TS 导出、Rust 导入；
-  - 并发：Rust 与 TS 两个进程交替对 `config.json` 各写 N 次不同的键，最终所有键都在；
-  - 单元：frontmatter、digest、命令文件生成、tar 头、路径越界。
-- TS：`packages/services` 的相关测试与新增的锁测试通过。
-- 真实 App（`node scripts/rust-host/e2e-desktop.mjs --scenario <name>`）：
-  - `extensions-skills`：设置页技能列表显示 workspace、用户、插件技能，开关写入 `config.json`；Composer 的 `/` 选择器列出命令；
-  - `extensions-plugins`：插件提供的技能、命令在设置页出现；
-  - `extensions-memory`：Memory 设置页列出项目 Memory 并能打开预览。
+- `cargo test -p zcode-host-services extensions`（`--lib`）：
+  - **差分**：`pnpm exec tsx scripts/rust-host/extensions-fixtures.ts [--check]` 用真实 TS 服务在 `extensions-scenarios.ts` 描述的文件树上执行 57 次调用（9 个 channel 的全部本地成员，含报错路径），把结果与 11 个文件的最终内容写进 `extensions/fixtures/extensions-parity.json`；Rust 的 `parity_tests` 在同样的文件树上经真实 channel 复现，结果（抹掉临时根、路径相关 hash 与时间）与文件内容逐项相同。hooks 的声明 digest 与 bundle digest 不做归一化，直接比较。`scripts/rust-host/test.mjs` 先跑 `--check`；
+  - 单元：frontmatter（YAML 与宽松读取）、命令文件生成、JSON 键序与数字、tar 头与越界路径、Subagent Markdown 与旧 Provider 迁移、hooks schema、MCP 路径改写、锁内并发。
+- `cargo test -p zcode-host-services --test extensions_interop`（需要 node 与 tsx）：
+  - Rust 与 TS 两个进程各写 150 次 `config.json`（命令开关、MCP upsert），最终 300 个键都在；用修复前的 TS 写入方运行时失败；
+  - Rust 导出的 skill / plugin 归档由 TS 解包（含插件元数据与可执行位），TS 导出的 skill 归档由 Rust 导入。
+- `node --import tsx --test packages/services/test/cliConfigCrossProcess.test.ts`：4 个 Node 进程并发写 `config.json` 不丢键（修复前失败）。
+- 真实 App（`ZCODE_E2E_CLI_RUST_BINARY=… node scripts/rust-host/e2e-desktop.mjs --scenario <name>`）：
+  - `extensions-memory`：Memory 设置页列出预置项目与文件；磁盘新增文件后刷新，列表随之更新；
+  - `extensions-skills`：`/` 选择器 AGENTS 列出内置与用户 Subagent；设置页 Skills 列出用户（`.zcode` 与 `.agents`）与 workspace 技能，关闭开关写入 `config.json`；Commands 页列出用户与 workspace 命令，关闭开关写入 `config.json` 且不覆盖技能开关；SKILLS 分组在 `getSkillReferenceCatalog` 实现后必须列出预置技能；
+  - `extensions-plugins`：marketplace 安装的插件 agent 出现在 `/` 选择器与 Subagents 页的插件分组，选模型写入 `agents-state.json` 的插件覆盖；插件页可用（列表由 plugin-management 提供）。
