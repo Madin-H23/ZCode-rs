@@ -4,6 +4,10 @@
 //! 数据所有者：tasks-index.sqlite 的行（membership、未读、标题覆盖）归 Host；会话的实时活性归 CLI
 //! （经 sessions-index）；window-controller 只是两者在内存里的投影，不持久化任何东西。
 pub mod controller;
+pub mod meta;
+pub mod repo;
+pub mod service;
+pub mod syncer;
 
 use std::sync::Arc;
 

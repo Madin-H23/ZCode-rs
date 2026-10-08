@@ -339,6 +339,24 @@ async fn core_chat_flow_against_rust_cli() {
     assert!(presentation["slashCommands"].is_array());
     assert!(presentation["executionCapabilities"]["permissionModes"].is_array());
 
+    if std::env::var_os("ZCODE_TEST_DUMP_SESSION_READ").is_some() {
+        let process = runtime
+            .existing(&WorkspaceTarget::local(workspace_path.clone()))
+            .await
+            .unwrap();
+        let snapshot = process
+            .request_value(
+                "session/read",
+                &json!({"sessionId": session_id, "messageLimit": 20}),
+            )
+            .await
+            .unwrap();
+        eprintln!(
+            "SESSION_READ {}",
+            serde_json::to_string_pretty(&snapshot).unwrap()
+        );
+    }
+
     // 进程已在运行：sessions-index（existing-only）现在可以订阅。
     let index = call(
         &channel,
