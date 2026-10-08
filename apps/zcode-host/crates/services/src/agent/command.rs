@@ -17,6 +17,9 @@ pub struct AgentCommand {
     pub env: BTreeMap<String, String>,
     /// 普通 `app-server --stdio` 进程会先发 `startup/storageState`：请求要等存储就绪。
     pub supports_storage_startup: bool,
+    /// TS bundle 的存储专用入口（Node `storagePreparationEntry`）；原生 CLI 为 None，
+    /// 以同一命令加 `--prepare-storage` 准备会话库（`storagePreparationMode: "process"`）。
+    pub storage_entry: Option<PathBuf>,
 }
 
 fn non_empty<'a>(vars: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
@@ -97,6 +100,7 @@ pub fn resolve(
             ),
             env: BTreeMap::new(),
             supports_storage_startup: rust,
+            storage_entry: None,
         })
     } else {
         let node = non_empty(vars, "ZCODE_HOST_NODE_EXEC_PATH").map(PathBuf::from);
@@ -117,6 +121,12 @@ pub fn resolve(
                     program: node,
                     args,
                     cwd: None,
+                    // 字节码入口只给常驻进程用；存储准备沿用 JS 入口（V8 snapshot 可能不同）。
+                    storage_entry: Some(if bytecode {
+                        bundle.with_file_name("zcode.cjs")
+                    } else {
+                        bundle
+                    }),
                     // 以纯 Node 模式运行 Electron，否则子进程会被当成 Chromium 进程卡在 GPU 初始化。
                     env: BTreeMap::from([("ELECTRON_RUN_AS_NODE".to_owned(), "1".to_owned())]),
                     supports_storage_startup: true,
@@ -128,6 +138,7 @@ pub fn resolve(
                 cwd: None,
                 env: BTreeMap::new(),
                 supports_storage_startup: false,
+                storage_entry: None,
             }),
         }
     };

@@ -226,6 +226,23 @@ pub struct DatabaseStartupState {
     pub failed_phase: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<&'static str>,
+    /// 各数据库迁移事实的聚合（`databaseMigrationFactsSchema`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub migration: Option<Value>,
+    /// 本次报告对应数据库的迁移事实。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_migration: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub migration_baselines: Option<Vec<Value>>,
+    /// 会话库准备时：是否是最后一个目录。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub final_database: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sqlite_code: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub migration_id: Option<String>,
     pub disk: Vec<Value>,
 }
 
@@ -249,6 +266,13 @@ impl DatabaseStartupState {
             database_phase: None,
             failed_phase: None,
             error_code: None,
+            migration: None,
+            current_migration: None,
+            migration_baselines: None,
+            final_database: None,
+            sqlite_code: None,
+            system_code: None,
+            migration_id: None,
             disk: Vec::new(),
         }
     }

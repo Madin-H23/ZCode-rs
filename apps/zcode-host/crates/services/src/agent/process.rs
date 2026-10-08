@@ -425,6 +425,7 @@ mod tests {
             cwd: None,
             env: BTreeMap::new(),
             supports_storage_startup: false,
+            storage_entry: None,
         };
         let env = BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]);
         let mut spawned = spawn(&command, Path::new("/"), &env).unwrap();

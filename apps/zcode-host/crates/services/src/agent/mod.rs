@@ -15,6 +15,7 @@ pub mod service;
 pub mod session;
 pub mod session_events;
 pub mod sessions_index;
+pub mod storage_prep;
 pub mod wire;
 
 pub use runtime::{
