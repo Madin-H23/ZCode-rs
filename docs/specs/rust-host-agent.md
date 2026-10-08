@@ -21,11 +21,11 @@ R2 只实现了 `zcode-agent` 的 V4 核心成员。本规格补齐 agent 子系
 
 ### 2.1 三个 lane
 
-| lane               | 进程 key                         | 用途                                                                         | 超时与回收                                                                              |
-| ------------------ | -------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| chat               | `workspaceIdentity \|\| path`    | 会话、V4 订阅与命令、技能与插件引用目录、已保存工作流、用量、生成文本等      | 请求 180 s，超时回收；不做空闲回收                                                      |
-| plugin-management  | `<dataBaseDir>/.zcode/plugin-workspace` | 插件列表、市场、安装卸载、配置、启停、推荐插件解析；全局工作流的兜底载体 | 变更类请求 5 min，`plugins/list` 180 s（超时回收后重试一次），`cancelOperation` 5 s   |
-| mcp-status         | 同上                             | 仅 `mcp/list`（MCP 状态探测）                                                | 请求 180 s；无在途请求且存储已就绪后空闲 5 min 回收整棵进程树                           |
+| lane              | 进程 key                                | 用途                                                                     | 超时与回收                                                                          |
+| ----------------- | --------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| chat              | `workspaceIdentity \|\| path`           | 会话、V4 订阅与命令、技能与插件引用目录、已保存工作流、用量、生成文本等  | 请求 180 s，超时回收；不做空闲回收                                                  |
+| plugin-management | `<dataBaseDir>/.zcode/plugin-workspace` | 插件列表、市场、安装卸载、配置、启停、推荐插件解析；全局工作流的兜底载体 | 变更类请求 5 min，`plugins/list` 180 s（超时回收后重试一次），`cancelOperation` 5 s |
+| mcp-status        | 同上                                    | 仅 `mcp/list`（MCP 状态探测）                                            | 请求 180 s；无在途请求且存储已就绪后空闲 5 min 回收整棵进程树                       |
 
 1. 三个 lane 共用命令解析、spawn 环境、扩展点（反向请求、环境贡献者）与通知分发；各自独立的进程表、进程代、请求队列与 watchdog。
 2. plugin-management 与 mcp-status 的工作目录在首次使用时 `mkdir -p`；真实 workspace 只作为协议参数传给 CLI。
@@ -37,39 +37,39 @@ R2 只实现了 `zcode-agent` 的 V4 核心成员。本规格补齐 agent 子系
 
 “只读 client”指 `get_client(start-if-needed)`（不过 provider 门禁）；“写 client”指 `get_ready_client`（provider/model 门禁）。
 
-| 成员                                                                                   | 规则                                                                                                                                                                                                 |
-| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prepareStorage`                                                                       | 启动 chat 进程（不过门禁、不回放偏好），等存储门禁进入 ready；failed 时以 `SQLite startup failed: <code>` 失败                                                                                       |
-| `getStorageStartupState`                                                               | 无进程时 `null`，否则 `{generation, state}`（state 为最近一帧 `startup/storageState` 或 `null`）                                                                                                     |
-| `onDynamicStorageStartupState(target)`                                                 | 该 workspace 每次新进程启动发一次 `{generation, state:null}`，之后每个被接受的存储帧发一次                                                                                                         |
-| `getWorkspaceRuntimeIdentity`                                                          | 只观察已有进程；没有进程时回 `ZCODE_AGENT_RUNTIME_UNAVAILABLE`                                                                                                                                       |
-| `createSession` / `resumeSession`                                                      | 写 client；先执行使用前钩子（`CreateSession` / `SessionResume`）；参数构造与 Node 相同，`-32602` 且只含已知可选键的 `unrecognized_keys` 时省略这些键重试一次；create 因 thoughtLevel 被省略时补发 `session/setThoughtLevel` |
-| `listSessions` / `readSession`                                                         | 按 `runtimePolicy` 取 client；`readSession` 非 existing-only 时执行 `SessionRead` 钩子                                                                                                               |
-| `readSessionMessages` / `readSessionEvents` / `listSessionSubagents`                   | 只读 client；返回 CLI 结果的 `messages` / `events` / 整个结果；`endedLimit` 缺省 20                                                                                                                 |
-| `readSessionDebug`                                                                     | existing-only                                                                                                                                                                                        |
-| `readWorkspacePresentation`                                                            | 与 `zcode-session` 同一实现                                                                                                                                                                          |
-| `grantWorkspaceHookTrust`                                                              | 只读 client，`workspace/hooks/trustGrant`                                                                                                                                                           |
-| `sendPrompt`                                                                           | 写 client；未带 `browserAmbientContext` 时收集浏览器环境（2.5）；兼容重试同 create                                                                                                                  |
-| `compactSession`（ACK 超时 5 min）/ `goalSession` / `closeSession` / `setModel` / `setThoughtLevel` / `setMode` | 写 client；`closeSession` 返回 `closed ?? true`                                                                                                                             |
-| `respondSessionRuntimePreferences` / `onDynamicSessionRuntimePreferencesRequest`       | 本地 Host 的偏好权威是 local（2.4 节反向请求直接作答），永远没有待转发请求：事件不触发，respond 回 `ZCode session runtime preferences request not found: <id>`                                       |
-| `onDynamicSessionEvent`                                                                | legacy 订阅面：见 2.6                                                                                                                                                                                |
-| `listMcpServerStatuses`                                                                | mcp-status lane；`mode:"status"` 被旧 CLI 拒绝时回 `ZCODE_AGENT_MCP_STATUS_MODE_UNSUPPORTED`；其余未识别键省略重试；`mcp/list` 超时后重试一次                                                         |
-| 插件管理成员（18 个，与 `plugin-management` channel 相同）                              | plugin-management lane；参数逐字段同 Node（`undefined` 不发）；`getPluginReferenceCatalog` 例外：走 chat lane，先 `plugins/referenceCatalogWithCategory`，`-32601` 时退回 `plugins/referenceCatalog` |
-| `onDynamicPluginOperationProgress(operationId)`                                        | 来自任意 lane 的 `plugins/operationProgress` 通知按 operationId 分发                                                                                                                                |
-| `getSkillReferenceCatalog`                                                             | chat lane，`skills/referenceCatalog`                                                                                                                                                                 |
-| 已保存工作流（list/get/updateMeta/delete/runs）                                        | 带 workspacePath 时走该 workspace 的只读 client；只给 `scope:"global"` 时复用任一本地 chat 进程，没有则用 plugin-management lane；`scope` 只在有值时下推                                            |
-| `moveSavedWorkflow`                                                                    | 只读 client，`workflows/move`                                                                                                                                                                        |
-| `collectLocalRuntimeChildProcesses`                                                    | 枚举三个 lane 的存活、存储已就绪进程，各发 `process/childProcesses`（800 ms，观察型：超时不回收），失败时该进程 children 为空                                                                        |
-| `getAppUsageStats`                                                                     | 任一已运行的 chat 进程上 `v4/usage/stats`；没有时回 `no_active_workspace`                                                                                                                           |
-| `getTaskTokenUsage`                                                                    | 只读 client，`v4/conversation/usage`                                                                                                                                                                 |
-| `generateWorkspaceText`                                                                | 写 client + `GenerateText` 钩子；`requestTimeoutMs` 生效；调用 future 被丢弃（RPC 取消或连接关闭）时发 `workspace/cancelGenerateText {operationId}`（5 s，观察型：超时不回收）                     |
-| `testModelConnectivity`                                                                | 写 client + `TestModelConnectivity` 钩子；`provider/testModelConnectivity`                                                                                                                          |
-| `conversationWorkflowRun{Events,Artifacts,ArtifactData,ArtifactRead,Workspace,NodeResult}V4` | 只读 client 透传，可选字段缺省不发                                                                                                                                                             |
-| `backgroundBashOutputV4`                                                               | 握手后；existing-only；`-32601` → `{kind:"unsupported"}`，runtime 不可用 → `{kind:"unavailable"}`                                                                                                   |
-| `conversationAttachmentReadV4` / `conversationAttachmentStatV4`                        | 握手后；只读 client 透传                                                                                                                                                                             |
-| workspace-config topic                                                                 | 与 sessions-index 同构：`subscribeWorkspaceConfigV4` 按 `runtimePolicy` 取 client，topic `workspace-config/<key>`；unsubscribe / resync / `onDynamicWorkspaceConfigFrame` 走同一套所有权规则         |
-| `hasActiveCuaOperationTurn`                                                            | `false`（CUA 操作追踪不在本规格，见第 5 节）                                                                                                                                                         |
-| `disposeWorkspace` / `disposeAll`                                                      | 回收该 workspace 的 chat 进程 / 回收全部 lane                                                                                                                                                        |
+| 成员                                                                                                            | 规则                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prepareStorage`                                                                                                | 启动 chat 进程（不过门禁、不回放偏好），等存储门禁进入 ready；failed 时以 `SQLite startup failed: <code>` 失败                                                                                                              |
+| `getStorageStartupState`                                                                                        | 无进程时 `null`，否则 `{generation, state}`（state 为最近一帧 `startup/storageState` 或 `null`）                                                                                                                            |
+| `onDynamicStorageStartupState(target)`                                                                          | 该 workspace 每次新进程启动发一次 `{generation, state:null}`，之后每个被接受的存储帧发一次                                                                                                                                  |
+| `getWorkspaceRuntimeIdentity`                                                                                   | 只观察已有进程；没有进程时回 `ZCODE_AGENT_RUNTIME_UNAVAILABLE`                                                                                                                                                              |
+| `createSession` / `resumeSession`                                                                               | 写 client；先执行使用前钩子（`CreateSession` / `SessionResume`）；参数构造与 Node 相同，`-32602` 且只含已知可选键的 `unrecognized_keys` 时省略这些键重试一次；create 因 thoughtLevel 被省略时补发 `session/setThoughtLevel` |
+| `listSessions` / `readSession`                                                                                  | 按 `runtimePolicy` 取 client；`readSession` 非 existing-only 时执行 `SessionRead` 钩子                                                                                                                                      |
+| `readSessionMessages` / `readSessionEvents` / `listSessionSubagents`                                            | 只读 client；返回 CLI 结果的 `messages` / `events` / 整个结果；`endedLimit` 缺省 20                                                                                                                                         |
+| `readSessionDebug`                                                                                              | existing-only                                                                                                                                                                                                               |
+| `readWorkspacePresentation`                                                                                     | 与 `zcode-session` 同一实现                                                                                                                                                                                                 |
+| `grantWorkspaceHookTrust`                                                                                       | 只读 client，`workspace/hooks/trustGrant`                                                                                                                                                                                   |
+| `sendPrompt`                                                                                                    | 写 client；未带 `browserAmbientContext` 时收集浏览器环境（2.5）；兼容重试同 create                                                                                                                                          |
+| `compactSession`（ACK 超时 5 min）/ `goalSession` / `closeSession` / `setModel` / `setThoughtLevel` / `setMode` | 写 client；`closeSession` 返回 `closed ?? true`                                                                                                                                                                             |
+| `respondSessionRuntimePreferences` / `onDynamicSessionRuntimePreferencesRequest`                                | 本地 Host 的偏好权威是 local（2.4 节反向请求直接作答），永远没有待转发请求：事件不触发，respond 回 `ZCode session runtime preferences request not found: <id>`                                                              |
+| `onDynamicSessionEvent`                                                                                         | legacy 订阅面：见 2.6                                                                                                                                                                                                       |
+| `listMcpServerStatuses`                                                                                         | mcp-status lane；`mode:"status"` 被旧 CLI 拒绝时回 `ZCODE_AGENT_MCP_STATUS_MODE_UNSUPPORTED`；其余未识别键省略重试；`mcp/list` 超时后重试一次                                                                               |
+| 插件管理成员（18 个，与 `plugin-management` channel 相同）                                                      | plugin-management lane；参数逐字段同 Node（`undefined` 不发）；`getPluginReferenceCatalog` 例外：走 chat lane，先 `plugins/referenceCatalogWithCategory`，`-32601` 时退回 `plugins/referenceCatalog`                        |
+| `onDynamicPluginOperationProgress(operationId)`                                                                 | 来自任意 lane 的 `plugins/operationProgress` 通知按 operationId 分发                                                                                                                                                        |
+| `getSkillReferenceCatalog`                                                                                      | chat lane，`skills/referenceCatalog`                                                                                                                                                                                        |
+| 已保存工作流（list/get/updateMeta/delete/runs）                                                                 | 带 workspacePath 时走该 workspace 的只读 client；只给 `scope:"global"` 时复用任一本地 chat 进程，没有则用 plugin-management lane；`scope` 只在有值时下推                                                                    |
+| `moveSavedWorkflow`                                                                                             | 只读 client，`workflows/move`                                                                                                                                                                                               |
+| `collectLocalRuntimeChildProcesses`                                                                             | 枚举三个 lane 的存活、存储已就绪进程，各发 `process/childProcesses`（800 ms，观察型：超时不回收），失败时该进程 children 为空                                                                                               |
+| `getAppUsageStats`                                                                                              | 任一已运行的 chat 进程上 `v4/usage/stats`；没有时回 `no_active_workspace`                                                                                                                                                   |
+| `getTaskTokenUsage`                                                                                             | 只读 client，`v4/conversation/usage`                                                                                                                                                                                        |
+| `generateWorkspaceText`                                                                                         | 写 client + `GenerateText` 钩子；`requestTimeoutMs` 生效；调用 future 被丢弃（RPC 取消或连接关闭）时发 `workspace/cancelGenerateText {operationId}`（5 s，观察型：超时不回收）                                              |
+| `testModelConnectivity`                                                                                         | 写 client + `TestModelConnectivity` 钩子；`provider/testModelConnectivity`                                                                                                                                                  |
+| `conversationWorkflowRun{Events,Artifacts,ArtifactData,ArtifactRead,Workspace,NodeResult}V4`                    | 只读 client 透传，可选字段缺省不发                                                                                                                                                                                          |
+| `backgroundBashOutputV4`                                                                                        | 握手后；existing-only；`-32601` → `{kind:"unsupported"}`，runtime 不可用 → `{kind:"unavailable"}`                                                                                                                           |
+| `conversationAttachmentReadV4` / `conversationAttachmentStatV4`                                                 | 握手后；只读 client 透传                                                                                                                                                                                                    |
+| workspace-config topic                                                                                          | 与 sessions-index 同构：`subscribeWorkspaceConfigV4` 按 `runtimePolicy` 取 client，topic `workspace-config/<key>`；unsubscribe / resync / `onDynamicWorkspaceConfigFrame` 走同一套所有权规则                                |
+| `hasActiveCuaOperationTurn`                                                                                     | `false`（CUA 操作追踪不在本规格，见第 5 节）                                                                                                                                                                                |
+| `disposeWorkspace` / `disposeAll`                                                                               | 回收该 workspace 的 chat 进程 / 回收全部 lane                                                                                                                                                                               |
 
 ### 2.3 V4 命令信封
 
@@ -84,10 +84,10 @@ R2 只实现了 `zcode-agent` 的 V4 核心成员。本规格补齐 agent 子系
 
 在 R2 表格基础上：
 
-| 方法                          | 应答                                                                                                                                                      |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `interaction/browserList`     | 参数非对象 → `-32602`；否则 `{browsers:[IAB 描述]}`（2.5）                                                                                                |
-| `interaction/browserExecute`  | 参数缺 `sessionId` / `command` → `-32602`；否则经 Main 执行，结果原样回给 CLI；内部失败回 `{ok:false,error:{code:"execution_error",message},elapsedMs:0}` |
+| 方法                         | 应答                                                                                                                                                      |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `interaction/browserList`    | 参数非对象 → `-32602`；否则 `{browsers:[IAB 描述]}`（2.5）                                                                                                |
+| `interaction/browserExecute` | 参数缺 `sessionId` / `command` → `-32602`；否则经 Main 执行，结果原样回给 CLI；内部失败回 `{ok:false,error:{code:"execution_error",message},elapsedMs:0}` |
 
 ### 2.5 浏览器控制（Host ↔ Main）
 
@@ -132,19 +132,19 @@ Node 的两个门禁在 Rust Host 由扩展点提供（`Extensions::set_off_peak
 
 ### 2.9 CLI 通知
 
-| 通知                             | 处理                                                                                                                                                                        |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `v4/conversation/frame`          | R2 路由                                                                                                                                                                     |
-| `process/resourceSample`         | 补 lane 标签后发 Main `agent-resource-sample {runtimeSurface:"local", sample}`                                                                                              |
-| `process/mcpTelemetry`           | Main `mcp-telemetry {runtimeSurface:"local", event}`                                                                                                                        |
-| `process/mcpResourceSamples`     | Main `mcp-resource-samples {runtimeSurface:"local", samples}`                                                                                                               |
-| `process/toolExecResource`       | Main `tool-exec-resource {runtimeSurface:"local", sample}`                                                                                                                  |
-| `plugins/operationProgress`      | `onDynamicPluginOperationProgress(operationId)`                                                                                                                              |
-| `v4/telemetry/local-ttft`        | 仅本地 workspace（无 identity、无 remoteSessionId）→ `onDynamicLocalTtftFacts(target)`                                                                                      |
-| `v4/telemetry/event`             | `onDynamicConversationTelemetryFact(target)`                                                                                                                                |
-| `v4/cua/permission-observation`  | 仅本地 workspace → `onDynamicCuaPermissionObservation`，附 `workspacePath` / `workspaceIdentity`                                                                           |
-| `session/event`、`state.updated` | 2.6                                                                                                                                                                         |
-| 其他                             | debug 日志后丢弃                                                                                                                                                            |
+| 通知                             | 处理                                                                                             |
+| -------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `v4/conversation/frame`          | R2 路由                                                                                          |
+| `process/resourceSample`         | 补 lane 标签后发 Main `agent-resource-sample {runtimeSurface:"local", sample}`                   |
+| `process/mcpTelemetry`           | Main `mcp-telemetry {runtimeSurface:"local", event}`                                             |
+| `process/mcpResourceSamples`     | Main `mcp-resource-samples {runtimeSurface:"local", samples}`                                    |
+| `process/toolExecResource`       | Main `tool-exec-resource {runtimeSurface:"local", sample}`                                       |
+| `plugins/operationProgress`      | `onDynamicPluginOperationProgress(operationId)`                                                  |
+| `v4/telemetry/local-ttft`        | 仅本地 workspace（无 identity、无 remoteSessionId）→ `onDynamicLocalTtftFacts(target)`           |
+| `v4/telemetry/event`             | `onDynamicConversationTelemetryFact(target)`                                                     |
+| `v4/cua/permission-observation`  | 仅本地 workspace → `onDynamicCuaPermissionObservation`，附 `workspacePath` / `workspaceIdentity` |
+| `session/event`、`state.updated` | 2.6                                                                                              |
+| 其他                             | debug 日志后丢弃                                                                                 |
 
 Main 侧负责这些消息的 schema 校验（`hostResponseMessageSchema`，不合法则丢弃）；发给 Renderer 的三类事实由 Host 校验（见下）。
 
@@ -162,13 +162,13 @@ Main 侧负责这些消息的 schema 校验（`hostResponseMessageSchema`，不�
 
 chat 与 mcp-status lane（Node 只给这两个 process manager 注入了 reporter）向 Main 报告：
 
-| 时机                                  | 消息                                                                                                                         |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| spawn 成功                            | `agent-process-spawned {pid, provider:"glm", workspacePath, command, args, startedAt, runtimeGeneration, runtimeInstanceId, lane?}` |
-| 首次通过 provider 门禁（每进程一次）  | `agent-process-ready {…, readyAt, startupDurationMs}`                                                                        |
-| spawn 失败                            | `agent-process-error {pid:null, errorName, errorCode?, errorMessage, occurredAt, …}`                                         |
-| 进程退出                              | `agent-process-exited {exitCode, signal, endedAt, terminationKind, terminationReason?, runtimeReady, uptimeMs, stderrLineCount, stderrTail?}` |
-| stderr 出现进程诊断行                 | `agent-process-exception {…, diagnostic}`                                                                                    |
+| 时机                                 | 消息                                                                                                                                          |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| spawn 成功                           | `agent-process-spawned {pid, provider:"glm", workspacePath, command, args, startedAt, runtimeGeneration, runtimeInstanceId, lane?}`           |
+| 首次通过 provider 门禁（每进程一次） | `agent-process-ready {…, readyAt, startupDurationMs}`                                                                                         |
+| spawn 失败                           | `agent-process-error {pid:null, errorName, errorCode?, errorMessage, occurredAt, …}`                                                          |
+| 进程退出                             | `agent-process-exited {exitCode, signal, endedAt, terminationKind, terminationReason?, runtimeReady, uptimeMs, stderrLineCount, stderrTail?}` |
+| stderr 出现进程诊断行                | `agent-process-exception {…, diagnostic}`                                                                                                     |
 
 1. `terminationKind`：Host 主动回收（dispose、空闲回收、Host 退出）为 `expected`，请求超时为 `watchdog_recycle`，其余 `unexpected`；`terminationReason` 用 Node 的原因名（`workspace-dispose`、`idle-timeout`、`manager-dispose`、`request-timeout`、`protocol-close`）。只有 `unexpected` 才带 `stderrTail`。
 2. **进程诊断**：stderr 行以 `[zcode-process-exception] ` 开头、总长 ≤ 128 KiB，其后 JSON 满足 `zcodeProcessDiagnosticSchema`（strict：version 1、errorId 为 UUID、kind/origin 为 `uncaughtException`/`unhandledRejection`、name 1–128、message ≤ 4000、stack ≤ 16000、occurredAt 非负整数）。这类行不进 stderr tail；name/message/stack 脱敏后再截到上限，发 `agent-process-exception`。Node 也只发给 Main（崩溃遥测），不发给 UI。
@@ -205,18 +205,18 @@ chat 与 mcp-status lane（Node 只给这两个 process manager 注入了 report
 
 ## 3. 状态所有者
 
-| 状态                                                       | 唯一所有者                                                      |
-| ---------------------------------------------------------- | --------------------------------------------------------------- |
-| 每个 lane 的进程表、进程代、空闲计时                       | 各 lane 的 `AgentRuntime`（`agent/runtime.rs`）                 |
-| 反向请求处理器、环境贡献者、使用前钩子、功能门禁、通知总线、进程事件总线 | `Extensions`（三个 lane 共享）                       |
-| app 运行时偏好（最新值与版本）、每个进程已推版本           | chat lane 的 `AgentRuntime`                                     |
-| 浏览器请求的在途表、IAB 描述                               | `BrowserBridge`（`agent/browser.rs`）                           |
-| Host ↔ Main 请求关联                                       | `MainBridge`                                                    |
-| 插件进度、TTFT、telemetry、CUA 观察的分发                  | `AgentEvents`（`agent/notifications.rs`）                       |
-| legacy 会话事件源与 seq 补号                               | `SessionEvents`（`agent/session_events.rs`）                    |
-| 草稿表、API 重试运行态                                     | `zcode-session` 门面（`agent/session.rs`）                      |
-| 本次启动已准备的会话库真实路径                             | `prepare_session_storage` 调用（host-core 启动流程内的局部状态）|
-| 会话、插件、MCP、工作流的事实                              | CLI                                                             |
+| 状态                                                                     | 唯一所有者                                                       |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| 每个 lane 的进程表、进程代、空闲计时                                     | 各 lane 的 `AgentRuntime`（`agent/runtime.rs`）                  |
+| 反向请求处理器、环境贡献者、使用前钩子、功能门禁、通知总线、进程事件总线 | `Extensions`（三个 lane 共享）                                   |
+| app 运行时偏好（最新值与版本）、每个进程已推版本                         | chat lane 的 `AgentRuntime`                                      |
+| 浏览器请求的在途表、IAB 描述                                             | `BrowserBridge`（`agent/browser.rs`）                            |
+| Host ↔ Main 请求关联                                                     | `MainBridge`                                                     |
+| 插件进度、TTFT、telemetry、CUA 观察的分发                                | `AgentEvents`（`agent/notifications.rs`）                        |
+| legacy 会话事件源与 seq 补号                                             | `SessionEvents`（`agent/session_events.rs`）                     |
+| 草稿表、API 重试运行态                                                   | `zcode-session` 门面（`agent/session.rs`）                       |
+| 本次启动已准备的会话库真实路径                                           | `prepare_session_storage` 调用（host-core 启动流程内的局部状态） |
+| 会话、插件、MCP、工作流的事实                                            | CLI                                                              |
 
 ## 4. 事件顺序
 
@@ -267,23 +267,23 @@ get_client(target)：进程 applied < latest.v ─► lock(prefs) ─► 推 lat
 
 ## 5. 有意与 Node 不同之处
 
-| Node 行为                                                                  | Rust Host                                                     | 理由                                                                                         |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| 解析不到 CLI 命令时会话库准备以 `unsupported_runtime` 失败                 | 解析不到命令时跳过会话库准备（warn），首次使用 Agent 时报 `ZCODE_AGENT_RUNTIME_UNAVAILABLE` | Rust Host 运行开发态 `zcode.cjs` 需要 Main 传 `ZCODE_HOST_NODE_EXEC_PATH`；没有 CLI 的环境（单测、端到端 Host 测试）不应让 Host 启动失败。命令可解析但不支持存储启动时仍按 Node 失败 |
-| TS CLI 的会话库准备在 Node Worker 里运行 `storagePreparationEntry`         | 以子进程运行同一入口：`<node> zcode.cjs app-server --stdio --prepare-storage --cwd <dir>` | Rust 进程没有 Worker；stdin/stdout 协议相同                                                  |
-| 启动期采样磁盘可用空间（`StartupDiskSampler`）                             | `disk` 始终为空数组                                           | 只用于诊断；随启动诊断另行移植                                                               |
-| `onDynamicSessionEvent` 的 replay 与 live 事件经 strict zod 解析           | 只校验 `eventId`、`sessionId`、`type`、`seq`、`timestamp` 的类型 | legacy 订阅面，V4 界面不使用                                                                 |
-| Claude Code 导入会话的空历史修复（`repairImportedClaudeSessionSnapshot`）  | 不修复，原样返回快照                                          | 依赖 Claude 导入仓库与解析器，随导入功能迁移                                                 |
-| CUA product MCP（broker socket / token）注入 session MCP                   | 不注入                                                        | CUA 能力不在本规格                                                                           |
-| CUA 操作追踪（Windows 顶部提示、macOS PiP 生命周期）、`hasActiveCuaOperationTurn` | 返回 `false`；`computer-use/operation-event` 留在通知总线上 | CUA 能力不在本规格；后续 CUA service 可直接订阅通知总线                                     |
-| 远端 workspace 的浏览器录制上传                                             | 回 `remote Browser recording materialization is unavailable for this session` | 远端随 R6                                                                                    |
-| `syncAppRuntimePreferences` 推送调用时的快照，靠 Promise 链保序            | 在 workspace 锁内推送当时最新值                               | 结果相同（最终值是最新值），且不依赖调用到达顺序                                             |
-| 新进程偏好补推失败后，下一次 getReadOnlyClient 重新登记并补推              | 进程记住已推版本，下次取 client 时补推                        | 结果相同                                                                                     |
-| `listMcpServerStatuses` 在 `mcp/list` 超时后由 process manager 回收再重试   | 同；超时由 `AgentProcess::request` 关闭连接，下一次请求懒启动 | —                                                                                            |
-| 发给 Renderer 的 telemetry/TTFT/CUA 事实用 zod 校验                         | 用等价的键白名单与类型检查                                     | 规则逐字段对应 TS schema，测试用 TS 生成的样本对照                                           |
-| `interaction/browserExecute` 先用完整 `browserCommandSchema` 校验，非法回 `-32602` | 只检查 `command.method`；命令细节由 Main 校验，非法命令被 Main 丢弃后按超时结束 | 命令 schema 很大且只有 Main 执行它；CLI 生成的命令本身经 CLI schema 约束 |
-| `generateWorkspaceText` 只在调用方带 AbortSignal 时生成 operationId 并在 abort 时取消 | 总是带 operationId；调用 future 被丢弃时取消 | RPC 调用方无法传 AbortSignal；调用方已离开时继续生成只浪费模型调用 |
-| `zcode-agent.initialize` 失败结果 | 同 Node：带 `protocolName` / `protocolVersion` | R2 曾省略，这里补齐 |
+| Node 行为                                                                             | Rust Host                                                                                   | 理由                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 解析不到 CLI 命令时会话库准备以 `unsupported_runtime` 失败                            | 解析不到命令时跳过会话库准备（warn），首次使用 Agent 时报 `ZCODE_AGENT_RUNTIME_UNAVAILABLE` | Rust Host 运行开发态 `zcode.cjs` 需要 Main 传 `ZCODE_HOST_NODE_EXEC_PATH`；没有 CLI 的环境（单测、端到端 Host 测试）不应让 Host 启动失败。命令可解析但不支持存储启动时仍按 Node 失败 |
+| TS CLI 的会话库准备在 Node Worker 里运行 `storagePreparationEntry`                    | 以子进程运行同一入口：`<node> zcode.cjs app-server --stdio --prepare-storage --cwd <dir>`   | Rust 进程没有 Worker；stdin/stdout 协议相同                                                                                                                                          |
+| 启动期采样磁盘可用空间（`StartupDiskSampler`）                                        | `disk` 始终为空数组                                                                         | 只用于诊断；随启动诊断另行移植                                                                                                                                                       |
+| `onDynamicSessionEvent` 的 replay 与 live 事件经 strict zod 解析                      | 只校验 `eventId`、`sessionId`、`type`、`seq`、`timestamp` 的类型                            | legacy 订阅面，V4 界面不使用                                                                                                                                                         |
+| Claude Code 导入会话的空历史修复（`repairImportedClaudeSessionSnapshot`）             | 不修复，原样返回快照                                                                        | 依赖 Claude 导入仓库与解析器，随导入功能迁移                                                                                                                                         |
+| CUA product MCP（broker socket / token）注入 session MCP                              | 不注入                                                                                      | CUA 能力不在本规格                                                                                                                                                                   |
+| CUA 操作追踪（Windows 顶部提示、macOS PiP 生命周期）、`hasActiveCuaOperationTurn`     | 返回 `false`；`computer-use/operation-event` 留在通知总线上                                 | CUA 能力不在本规格；后续 CUA service 可直接订阅通知总线                                                                                                                              |
+| 远端 workspace 的浏览器录制上传                                                       | 回 `remote Browser recording materialization is unavailable for this session`               | 远端随 R6                                                                                                                                                                            |
+| `syncAppRuntimePreferences` 推送调用时的快照，靠 Promise 链保序                       | 在 workspace 锁内推送当时最新值                                                             | 结果相同（最终值是最新值），且不依赖调用到达顺序                                                                                                                                     |
+| 新进程偏好补推失败后，下一次 getReadOnlyClient 重新登记并补推                         | 进程记住已推版本，下次取 client 时补推                                                      | 结果相同                                                                                                                                                                             |
+| `listMcpServerStatuses` 在 `mcp/list` 超时后由 process manager 回收再重试             | 同；超时由 `AgentProcess::request` 关闭连接，下一次请求懒启动                               | —                                                                                                                                                                                    |
+| 发给 Renderer 的 telemetry/TTFT/CUA 事实用 zod 校验                                   | 用等价的键白名单与类型检查                                                                  | 规则逐字段对应 TS schema，测试用 TS 生成的样本对照                                                                                                                                   |
+| `interaction/browserExecute` 先用完整 `browserCommandSchema` 校验，非法回 `-32602`    | 只检查 `command.method`；命令细节由 Main 校验，非法命令被 Main 丢弃后按超时结束             | 命令 schema 很大且只有 Main 执行它；CLI 生成的命令本身经 CLI schema 约束                                                                                                             |
+| `generateWorkspaceText` 只在调用方带 AbortSignal 时生成 operationId 并在 abort 时取消 | 总是带 operationId；调用 future 被丢弃时取消                                                | RPC 调用方无法传 AbortSignal；调用方已离开时继续生成只浪费模型调用                                                                                                                   |
+| `zcode-agent.initialize` 失败结果                                                     | 同 Node：带 `protocolName` / `protocolVersion`                                              | R2 曾省略，这里补齐                                                                                                                                                                  |
 
 ### 5.1 Rust CLI 的已知限制（CLI 侧，Node Host 同样受影响）
 

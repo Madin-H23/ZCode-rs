@@ -10,7 +10,10 @@ import { conversationTelemetryFactSchema } from "../../packages/shared/src/zcode
 import { cuaPermissionObservationSchema } from "../../packages/shared/src/zcode-protocol-v4/cuaPermission.js";
 
 const root = resolve(import.meta.dirname, "../..");
-const output = resolve(root, "apps/zcode-host/crates/services/src/agent/fixtures/schema-cases.json");
+const output = resolve(
+  root,
+  "apps/zcode-host/crates/services/src/agent/fixtures/schema-cases.json",
+);
 
 type Json = Record<string, unknown>;
 const schemas = {
@@ -131,7 +134,13 @@ const cases: Array<{ name: string; schema: SchemaName; input: unknown }> = [
   {
     name: "ttft full optional",
     schema: "localTtftFacts",
-    input: { ...ttft, sendMode: "queued", outputKind: "tool", terminal: "rejected", truncated: true },
+    input: {
+      ...ttft,
+      sendMode: "queued",
+      outputKind: "tool",
+      terminal: "rejected",
+      truncated: true,
+    },
   },
   { name: "ttft not object", schema: "localTtftFacts", input: [ttft] },
   { name: "cua valid", schema: "cuaPermissionObservation", input: cua },

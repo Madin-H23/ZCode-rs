@@ -33,7 +33,8 @@ async function startupSnapshot(page) {
       new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error("no startup snapshot")), 10_000);
         const onMessage = (event) => {
-          if (event.source !== window || event.data?.type !== "zcode:database-startup-state") return;
+          if (event.source !== window || event.data?.type !== "zcode:database-startup-state")
+            return;
           clearTimeout(timer);
           window.removeEventListener("message", onMessage);
           resolve(event.data.state);
