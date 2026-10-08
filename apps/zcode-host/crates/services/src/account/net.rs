@@ -741,9 +741,11 @@ impl ApiClient {
                 tokio::spawn(handler(url.clone(), headers.clone()));
             }
         }
+        // 最终 URL（重定向后）；调用方用它确认响应仍属于发起时的端点。
+        let final_url = response.url().to_string();
         Ok(ApiResponse {
             status,
-            url,
+            url: final_url,
             method,
             headers: response_headers,
             response,

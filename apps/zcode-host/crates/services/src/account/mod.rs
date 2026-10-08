@@ -8,6 +8,7 @@ pub mod account_providers;
 pub mod auth;
 pub mod availability;
 pub mod cli;
+pub mod client_config;
 pub mod credential;
 pub mod endpoint;
 mod legacy_stub;
@@ -169,6 +170,10 @@ impl AccountStack {
     pub fn register(&self, registry: &mut ChannelRegistry, tasks_index: TasksIndex, app_config_dir: std::path::PathBuf) {
         registry.implement(credential::service(self.credentials.clone()));
         registry.implement(oauth::service(self.oauth.clone()));
+        registry.implement(client_config::client_config_service(
+            client_config::ClientConfig::new(self.api.clone()),
+        ));
+        registry.implement(client_config::client_scenes_service(self.api.clone()));
         let repo = self.repo.clone();
         let records = onboarding::OnboardingRecords::new(
             app_config_dir,
