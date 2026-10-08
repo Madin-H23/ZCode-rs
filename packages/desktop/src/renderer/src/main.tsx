@@ -1,4 +1,4 @@
-import { DatabaseStartupAdmission } from "./databaseStartupAdmission.js";
+import { DatabaseStartupAdmission, type ServiceConnector } from "./databaseStartupAdmission.js";
 import { initializeDesktopLocalTtft } from "./localTtftBootstrap.js";
 import { createRoot } from "react-dom/client";
 import { useEffect } from "react";
@@ -16,9 +16,15 @@ import {
   setReactErrorArmsReporter,
 } from "@zcode/ui";
 import "@zcode/ui/styles.css";
-import { connectViaMessagePort, createMessagePortServiceConnection } from "@zcode/client";
+import {
+  connectViaMessagePort,
+  createMessagePortServiceConnection,
+  createWebSocketServiceConnection,
+} from "@zcode/client";
 import {
   InternalChannels,
+  RUST_HOST_CAPABILITY_SUBPROTOCOL_PREFIX,
+  RUST_HOST_RPC_SUBPROTOCOL,
   databaseStartupStateSchema,
   type DatabaseStartupControl,
   collectTelemetryRendererContext,
@@ -188,8 +194,8 @@ function renderDatabaseStartup(): void {
 }
 function enterAppIfPrepared(): void {
   if (appInitialized) return;
-  const port = databaseStartupAdmission.takeReadyPort();
-  if (port) initializeBusinessRoot(port);
+  const connector = databaseStartupAdmission.takeReadyConnector();
+  if (connector) initializeBusinessRoot(connector);
 }
 const firstStartupStateTimer =
   windowKind === "update-status"
@@ -289,6 +295,18 @@ function handleServicePortMessage(event: MessageEvent): void {
   }
 
   if (
+    event.source === window &&
+    event.data?.type === InternalChannels.ServiceEndpoint &&
+    !appInitialized
+  ) {
+    // Rust Host（开发开关）：Main 下发 WebSocket endpoint 而不是 MessagePort。
+    const { type: _type, ...payload } = event.data as Record<string, unknown>;
+    databaseStartupAdmission.acceptEndpoint(payload);
+    enterAppIfPrepared();
+    return;
+  }
+
+  if (
     event.source !== window ||
     event.data?.type !== InternalChannels.ServicePort ||
     appInitialized
@@ -300,9 +318,38 @@ function handleServicePortMessage(event: MessageEvent): void {
   enterAppIfPrepared();
 }
 
-function initializeBusinessRoot(port: MessagePort): void {
+function initializeBusinessRoot(connector: ServiceConnector): void {
   appInitialized = true;
-  const services = connectViaMessagePort(port);
+  if (connector.kind === "port") {
+    renderBusinessRoot(connectViaMessagePort(connector.port));
+    return;
+  }
+  void createWebSocketServiceConnection(connector.url, {
+    protocols: [
+      RUST_HOST_RPC_SUBPROTOCOL,
+      `${RUST_HOST_CAPABILITY_SUBPROTOCOL_PREFIX}${connector.capability}`,
+    ],
+  }).then(
+    (connection) => renderBusinessRoot(connection.services),
+    () => {
+      // 握手失败时显示启动失败页，而不是停在空白；reload 窗口会重新签发 endpoint。
+      appInitialized = false;
+      const previous = databaseStartupAdmission.state;
+      if (!previous) return;
+      databaseStartupAdmission.state = {
+        ...previous,
+        sequence: previous.sequence + 1,
+        updatedAt: Date.now(),
+        phase: "failed",
+        failedPhase: previous.phase,
+        errorCode: "transport_closed",
+      };
+      renderDatabaseStartup();
+    },
+  );
+}
+
+function renderBusinessRoot(services: IServiceAccessor): void {
   baseServicesForRemoteSessions = services;
   registerBaseWorkspaceServices(services);
   flushPendingRemoteWorkspaceServicePorts();

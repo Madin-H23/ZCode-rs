@@ -489,6 +489,8 @@ export const InternalChannels = {
   DatabaseStartupControl: "zcode:database-startup-control",
   /** main → renderer 转发 MessagePort（通过 webContents.postMessage） */
   ServicePort: "zcode:service-port",
+  /** main → renderer 下发 Rust Host 的 WebSocket endpoint（docs/specs/rust-host-r0.md §4.2） */
+  ServiceEndpoint: "zcode:service-endpoint",
   /** main → renderer 转发窗口 Host 的 scoped MessagePort */
   ScopedServicePort: "zcode:scoped-service-port",
   /** renderer → main：scoped MessagePort 已注册，可安全切换 attachment */
@@ -496,6 +498,10 @@ export const InternalChannels = {
   /** preload → renderer：主进程已确认系统通知展示，renderer 可播放提示音 */
   TaskNotificationSound: "zcode:task-notification-sound",
 } as const;
+
+/** Rust Host WebSocket 的 rpc 子协议；capability 以 `zcode-cap.<hex>` 作为第二个子协议传递。 */
+export const RUST_HOST_RPC_SUBPROTOCOL = "zcode-rpc.v1";
+export const RUST_HOST_CAPABILITY_SUBPROTOCOL_PREFIX = "zcode-cap.";
 
 /** @deprecated `/ws` 已忽略该头；保留常量仅供旧客户端兼容。 */
 export const ZCODE_RPC_CLIENT_MODE_HEADER = "x-zcode-rpc-client-mode";
@@ -523,6 +529,8 @@ export const HostMessageTypes = {
   AttachServicePort: "attach-service-port",
   /** main → host：精确释放一个 RPC MessagePort attachment */
   DetachServicePort: "detach-service-port",
+  /** main → Rust Host：为一个 attachment 签发 WebSocket endpoint 与一次性 capability */
+  IssueAttachmentEndpoint: "issue-attachment-endpoint",
   /** 窗口关闭，清理资源 */
   Dispose: "dispose",
   /** 广播消息中转 */
@@ -569,6 +577,10 @@ export const HostMessageTypes = {
 /** host process → main process 的反馈消息类型 */
 export const HostResponseTypes = {
   DatabaseStartupState: "database-startup-state",
+  /** Rust Host → main：WebSocket 监听已就绪 */
+  HostEndpointReady: "host-endpoint-ready",
+  /** Rust Host → main：attachment endpoint 签发结果，按 requestId 关联 */
+  AttachmentEndpointIssued: "attachment-endpoint-issued",
   /** window Host → main：按 requestId 上报远程连接过程日志 */
   RemoteWorkspaceConnectionLog: "remote-workspace-connection-log",
   /** window Host → main：远程 logical session 已建立 */

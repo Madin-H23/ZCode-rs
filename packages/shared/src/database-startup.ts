@@ -153,6 +153,18 @@ export const databaseStartupPortPayloadSchema = z
     databaseStartupId: z.string().min(1).max(128),
   })
   .strict();
+/**
+ * Rust Host 的 WebSocket endpoint（docs/specs/rust-host-r0.md §4.2）。
+ * 只接受本机回环地址与 32 字节十六进制 capability；同代准入规则与 MessagePort 相同。
+ */
+export const serviceEndpointPayloadSchema = z
+  .object({
+    databaseStartupId: z.string().min(1).max(128),
+    url: z.string().regex(/^ws:\/\/127\.0\.0\.1:\d{1,5}\/rpc$/),
+    capability: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+export type ServiceEndpointPayload = z.infer<typeof serviceEndpointPayloadSchema>;
 export const databaseStartupControlSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("snapshot") }).strict(),
   z.object({ action: z.literal("exit") }).strict(),

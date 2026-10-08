@@ -54,6 +54,11 @@ import { ingestCliResourceSample } from "./processResourceCliSource.js";
 import { ingestHostSelfResourceSample } from "./processResourceSelfHeapSource.js";
 import { createFeedbackLogArchiveFromExportLogs } from "./exportLogs.js";
 import { buildHostE2ECoverageEnv } from "./e2eCoverage.js";
+import {
+  isRustDesktopHostEnabled,
+  sendRustHostServiceEndpoint,
+  spawnRustHostProcess,
+} from "./rustDesktopHost.js";
 
 export interface WindowBootstrapOptions {
   restoreSession?: boolean;
@@ -254,29 +259,36 @@ export function spawnHostProcess(
     ...(RUNTIME_ZCODE_DEBUG ? [`--inspect-brk=${RUNTIME_ZCODE_DEBUG}`] : []),
     "--no-warnings",
   ];
-  const child = electronUtilityProcess.fork(hostModulePath, [], {
-    serviceName: formatZCodeHostProcessName(label),
-    execArgv,
-    env: {
-      ...buildHostProcessEnv(dependencies.hostProcessLocalEnv),
-      ...buildHostE2ECoverageEnv(),
-      ZCODE_PROCESS_LABEL: label,
-      // macOS-only: the Computer Use Helper launcher runs inside this forked host utilityProcess, whose
-      // code-signing identity is a nested Electron helper (NOT dev.zcode.app). Publish THIS (main
-      // Electron) process's pid — which IS dev.zcode.app — so helperLauncher passes it as
-      // `--launcher-pid` and the Helper's signature/peer verification succeeds instead of
-      // health-timing out. Env-name mirror of services' LAUNCHER_PID_ENV. Not set on
-      // Windows/Linux (CUA is macOS-only; nothing reads it there) to keep the host env pristine.
-      ...(process.platform === "darwin" ? { ZCODE_CUA_LAUNCHER_PID: String(process.pid) } : {}),
-      ...(dependencies.desktopContextPromptEnabled
-        ? {
-            [ZCODE_DESKTOP_CONTEXT_PROMPT_ENABLED_ENV]: dependencies.desktopContextPromptEnabled()
-              ? "1"
-              : "0",
-          }
-        : {}),
-    },
-  });
+  const hostEnv = {
+    ...buildHostProcessEnv(dependencies.hostProcessLocalEnv),
+    ...buildHostE2ECoverageEnv(),
+    ZCODE_PROCESS_LABEL: label,
+    // macOS-only: the Computer Use Helper launcher runs inside this forked host utilityProcess, whose
+    // code-signing identity is a nested Electron helper (NOT dev.zcode.app). Publish THIS (main
+    // Electron) process's pid — which IS dev.zcode.app — so helperLauncher passes it as
+    // `--launcher-pid` and the Helper's signature/peer verification succeeds instead of
+    // health-timing out. Env-name mirror of services' LAUNCHER_PID_ENV. Not set on
+    // Windows/Linux (CUA is macOS-only; nothing reads it there) to keep the host env pristine.
+    ...(process.platform === "darwin" ? { ZCODE_CUA_LAUNCHER_PID: String(process.pid) } : {}),
+    ...(dependencies.desktopContextPromptEnabled
+      ? {
+          [ZCODE_DESKTOP_CONTEXT_PROMPT_ENABLED_ENV]: dependencies.desktopContextPromptEnabled()
+            ? "1"
+            : "0",
+        }
+      : {}),
+  };
+  // 开发开关打开时改起原生 Rust Host（docs/specs/rust-host-r0.md）；adapter 对下面的代码表现为 UtilityProcess。
+  const rustHost = isRustDesktopHostEnabled()
+    ? spawnRustHostProcess(label, hostEnv, dependencies.logger)
+    : null;
+  const child =
+    rustHost?.asUtilityProcess() ??
+    electronUtilityProcess.fork(hostModulePath, [], {
+      serviceName: formatZCodeHostProcessName(label),
+      execArgv,
+      env: hostEnv,
+    });
 
   dependencies.logger.info(
     `[spawnHostProcess] forked host process for (${label}), pid=${child.pid}`,
@@ -566,7 +578,6 @@ export function spawnHostProcess(
       return;
     }
 
-
     if (result.data.type === HostResponseTypes.BotRemoteWorkspaceReconnectRequest) {
       const request = result.data;
       const handler = dependencies.handleBotRemoteWorkspaceReconnectRequest;
@@ -711,7 +722,25 @@ export function spawnHostProcess(
       }
     : { ...initMessage, databaseStartupId: databaseStartupRelay.startupId };
 
-  if (options?.attachInitialServicePort === false) {
+  if (rustHost) {
+    child.postMessage(hostInitMessage);
+    if (
+      options?.attachInitialServicePort === false ||
+      options?.onPortReady ||
+      options?.internalChannel === InternalChannels.ScopedServicePort
+    ) {
+      dependencies.logger.warn(
+        `[spawnHostProcess] Rust Host supports only the window's own renderer attachment (${label})`,
+      );
+    } else {
+      void sendRustHostServiceEndpoint(
+        win,
+        rustHost,
+        databaseStartupRelay.startupId,
+        dependencies.logger,
+      );
+    }
+  } else if (options?.attachInitialServicePort === false) {
     child.postMessage(hostInitMessage);
   } else {
     const { port1, port2 } = new MessageChannelMain();

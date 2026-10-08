@@ -2,6 +2,7 @@ import {
   databaseStartupControlSchema,
   databaseStartupStateSchema,
   databaseStartupPortPayloadSchema,
+  serviceEndpointPayloadSchema,
 } from "@zcode/shared";
 /* eslint-disable max-lines -- preload bridge 集中暴露桌面平台 IPC，拆散会让 contextBridge 权限边界更难审计。 */
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
@@ -834,6 +835,14 @@ ipcRenderer.on(InternalChannels.ServicePort, (event, payload: unknown) => {
   if (port && parsed.success)
     window.postMessage({ type: InternalChannels.ServicePort, ...parsed.data }, "*", [port]);
   else port?.close();
+});
+
+// Rust Host 的 Renderer 经 WebSocket 接入（docs/specs/rust-host-r0.md §4.2）。endpoint 是纯数据，
+// 与 ServicePort 同样只转发给本窗口，并在 preload 校验，页面只收到合规的回环地址与 capability。
+ipcRenderer.on(InternalChannels.ServiceEndpoint, (_event, payload: unknown) => {
+  const parsed = serviceEndpointPayloadSchema.safeParse(payload);
+  if (parsed.success)
+    window.postMessage({ type: InternalChannels.ServiceEndpoint, ...parsed.data }, "*");
 });
 
 ipcRenderer.on(

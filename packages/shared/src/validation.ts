@@ -467,6 +467,49 @@ export type HostResourceUsageSnapshotRequestMessage = z.infer<
   typeof hostResourceUsageSnapshotRequestMessageSchema
 >;
 
+// Rust Host 专用控制消息（docs/specs/rust-host-r0.md §4.1）。Node Host 不接收，所以不并入下面的联合。
+const rustHostCapabilitySchema = z.string().regex(/^[0-9a-f]{64}$/);
+export const hostIssueAttachmentEndpointMessageSchema = z
+  .object({
+    type: z.literal("issue-attachment-endpoint"),
+    requestId: nonEmptyStringSchema,
+    attachmentId: nonEmptyStringSchema,
+    clientMode: z.literal("desktop-continuous"),
+    scope: z.object({ kind: z.literal("local") }).strict(),
+  })
+  .strict();
+export type HostIssueAttachmentEndpointMessage = z.infer<
+  typeof hostIssueAttachmentEndpointMessageSchema
+>;
+export const hostEndpointReadyResponseSchema = z
+  .object({
+    type: z.literal("host-endpoint-ready"),
+    wsPort: z.number().int().min(1).max(65535),
+  })
+  .strict();
+export const hostAttachmentEndpointIssuedResponseSchema = z.discriminatedUnion("ok", [
+  z
+    .object({
+      type: z.literal("attachment-endpoint-issued"),
+      requestId: nonEmptyStringSchema,
+      ok: z.literal(true),
+      url: z.string().regex(/^ws:\/\/127\.0\.0\.1:\d{1,5}\/rpc$/),
+      capability: rustHostCapabilitySchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("attachment-endpoint-issued"),
+      requestId: nonEmptyStringSchema,
+      ok: z.literal(false),
+      error: z.string(),
+    })
+    .strict(),
+]);
+export type HostAttachmentEndpointIssuedResponse = z.infer<
+  typeof hostAttachmentEndpointIssuedResponseSchema
+>;
+
 export const hostIncomingMessageSchema = z.discriminatedUnion("type", [
   z
     .object({ type: z.literal("database-startup-control"), control: databaseStartupControlSchema })

@@ -8,6 +8,7 @@ import { createBrowserWindow } from "./desktopWindowChrome.js";
 import type { HostInitMessage, WindowBootstrapOptions } from "./desktopHostProcess.js";
 import type { StartupWorkspaceWarmupTarget } from "./startupWorkspace.js";
 import { handleDarwinWindowCloseRequest } from "./desktopDarwinCloseBehavior.js";
+import { asRustHostProcess, sendRustHostServiceEndpoint } from "./rustDesktopHost.js";
 import {
   parseWindowUnreadCount,
   sumWindowUnreadCounts,
@@ -144,6 +145,23 @@ export function createWindow(options: {
       try {
         const startupPayload = getDatabaseStartupPortPayload(oldChild);
         if (!startupPayload) throw new Error("Previous Host startup binding is unavailable");
+        const rustHost = asRustHostProcess(oldChild);
+        if (rustHost) {
+          // Rust Host 的 Renderer 经 WebSocket 接入：reload 只需为存活的 Host 重新签发 endpoint。
+          void sendRustHostServiceEndpoint(
+            win,
+            rustHost,
+            startupPayload.databaseStartupId,
+            options.logger,
+          );
+          options.logger.info(
+            `[createWindow] renderer reloaded, reissued Rust Host endpoint (${label}), pid=${oldChild.pid}`,
+          );
+          options.syncAutoUpdaterStateToWindow(win);
+          options.syncReadyUpdateToWindow(win);
+          options.syncPostUpdateReleaseNotesToWindow(win);
+          return;
+        }
         const { port1, port2 } = new MessageChannelMain();
         oldChild.postMessage(
           {
