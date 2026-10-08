@@ -12,7 +12,7 @@ use zcode_host_kit::{CallContext, Reply, RpcError, RpcValue, ServiceChannel};
 
 use super::agent_scope::RemoteAgentChannel;
 use super::fake_remote::{FakeRemote, FakeTransport, unavailable};
-use super::provisioning::{CredentialCipher, ProvisioningSource};
+use super::provisioning::ProvisioningSource;
 use super::{RemoteConfig, install_with};
 use crate::agent::WorkspaceTarget;
 use crate::tasks::controller::Controller;
@@ -41,6 +41,10 @@ fn reply_value(reply: Reply) -> Value {
     match reply {
         Reply::Value(value) => value,
         Reply::Undefined => Value::Null,
+        Reply::Encoded(body) => zcode_host_rpc::Reader::new(&body)
+            .value()
+            .unwrap()
+            .into_json(),
         other => panic!("unexpected reply {other:?}"),
     }
 }
@@ -321,11 +325,7 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
             transport: Arc::new(transport),
             settings: crate::settings::SettingStore::new(home.path()),
             control: Arc::new(Control(sink)),
-            provisioning: ProvisioningSource {
-                personal_config_file: home.path().join("p.json"),
-                credential_file: home.path().join("c.json"),
-                cipher: CredentialCipher::new(Some("s"), home.path(), None),
-            },
+            provisioning: ProvisioningSource::for_test(home.path()),
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),
         },
@@ -495,4 +495,178 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
     let empty = reply_value(call(&*service, &ui, "listTaskList", query).await.unwrap());
     assert_eq!(empty["total"], 0);
     assert!(local.0.lock().unwrap().is_empty());
+}
+
+fn sha256_hex(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// 远端 CLI / MCP 的资源事实经 Host 转给 Main（runtimeSurface remote，按环境身份分组）。
+#[tokio::test]
+async fn remote_resource_facts_reach_main() {
+    let (remote, client) = FakeRemote::start();
+    let transport = FakeTransport(Mutex::new(vec![remote.connection(client)]));
+    let home = tempfile::tempdir().unwrap();
+    let (sink, mut messages) = mpsc::unbounded_channel();
+    let mut router = ControlRouter::default();
+    let _workspaces = install_with(
+        RemoteConfig {
+            transport: Arc::new(transport),
+            settings: crate::settings::SettingStore::new(home.path()),
+            control: Arc::new(Control(sink)),
+            provisioning: ProvisioningSource::for_test(home.path()),
+            media_range_enabled: true,
+            wsl_idle_ttl: Duration::from_secs(60),
+        },
+        &mut router,
+    );
+    assert!(router.dispatch(
+        "connect-remote-workspace",
+        json!({"type": "connect-remote-workspace", "requestId": "r1",
+               "target": {"kind": "docker", "container": "c"}, "remoteAssets": {}, "workspacePath": "/w"}),
+    ));
+    expect_message(&mut messages, "remote-workspace-connected").await;
+    settle().await;
+    let environment_key = sha256_hex("docker:c");
+    remote.fire(
+        "zcode-agent.onDynamicProcessResourceSample",
+        json!({"cpuPercent": 3}),
+    );
+    let sample = expect_message(&mut messages, "agent-resource-sample").await;
+    assert_eq!(
+        sample,
+        json!({"type": "agent-resource-sample", "runtimeSurface": "remote",
+               "environmentKey": environment_key, "sample": {"cpuPercent": 3}})
+    );
+    remote.fire(
+        "zcode-agent.onDynamicMcpTelemetry",
+        json!({"kind": "spawn"}),
+    );
+    assert_eq!(
+        expect_message(&mut messages, "mcp-telemetry").await,
+        json!({"type": "mcp-telemetry", "runtimeSurface": "remote", "event": {"kind": "spawn"}})
+    );
+    remote.fire(
+        "zcode-agent.onDynamicMcpResourceSamples",
+        json!([{"pid": 1}]),
+    );
+    assert_eq!(
+        expect_message(&mut messages, "mcp-resource-samples").await,
+        json!({"type": "mcp-resource-samples", "runtimeSurface": "remote",
+               "environmentKey": environment_key, "samples": [{"pid": 1}]})
+    );
+    remote.fire("zcode-agent.onDynamicToolExecResource", json!({"ms": 9}));
+    assert_eq!(
+        expect_message(&mut messages, "tool-exec-resource").await,
+        json!({"type": "tool-exec-resource", "runtimeSurface": "remote", "sample": {"ms": 9}})
+    );
+}
+
+/// 远端 attachment 上的本机服务与 Node 的远端集合一致：App 用量读远端 Agent，分享导入不可用。
+#[tokio::test]
+async fn remote_attachments_route_usage_and_share_like_node() {
+    use zcode_host_kit::{ChannelRegistry, ServiceBuilder};
+    let (remote, client) = FakeRemote::start();
+    remote.on("zcode-agent.getAppUsageStats", |_, params| {
+        Ok(json!({"source": "remote", "params": params}))
+    });
+    let transport = FakeTransport(Mutex::new(vec![remote.connection(client)]));
+    let home = tempfile::tempdir().unwrap();
+    let (sink, mut messages) = mpsc::unbounded_channel();
+    let mut router = ControlRouter::default();
+    let workspaces = install_with(
+        RemoteConfig {
+            transport: Arc::new(transport),
+            settings: crate::settings::SettingStore::new(home.path()),
+            control: Arc::new(Control(sink)),
+            provisioning: ProvisioningSource::for_test(home.path()),
+            media_range_enabled: true,
+            wsl_idle_ttl: Duration::from_secs(60),
+        },
+        &mut router,
+    );
+    assert!(router.dispatch(
+        "connect-remote-workspace",
+        json!({"type": "connect-remote-workspace", "requestId": "r1",
+               "target": {"kind": "docker", "container": "c"}, "remoteAssets": {}, "workspacePath": "/w"}),
+    ));
+    let connected = expect_message(&mut messages, "remote-workspace-connected").await;
+    let scope = super::RemoteScope {
+        remote_session_id: connected["descriptor"]["remoteSessionId"]
+            .as_str()
+            .unwrap()
+            .into(),
+        workspace_path: "/w".into(),
+        workspace_identity: "remote:docker:c:/w".into(),
+    };
+    let marker = |name: &'static str| {
+        move |_: CallContext, _: zcode_host_kit::Args| async move {
+            Ok(Reply::Value(json!({"source": "local", "method": name})))
+        }
+    };
+    let mut local = ChannelRegistry::empty();
+    local.implement(
+        ServiceBuilder::new("usage-stats")
+            .method("getAppUsageSnapshot", marker("getAppUsageSnapshot"))
+            .method(
+                "getCodingPlanUsageSnapshot",
+                marker("getCodingPlanUsageSnapshot"),
+            ),
+    );
+    local.implement(
+        ServiceBuilder::new("conversation-share")
+            .method("importShare", marker("importShare"))
+            .method("getPreview", marker("getPreview")),
+    );
+    let desktop = context(1);
+    let attachment = workspaces
+        .attach("a1", ClientMode::DesktopContinuous, &scope, &local)
+        .await
+        .unwrap();
+    let usage = attachment.registry.get("usage-stats").unwrap();
+    let app = reply_value(
+        call(
+            &*usage,
+            &desktop,
+            "getAppUsageSnapshot",
+            json!({"range": "7d"}),
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(app, json!({"source": "remote", "params": {"range": "7d"}}));
+    let plan = reply_value(
+        call(&*usage, &desktop, "getCodingPlanUsageSnapshot", json!({}))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(plan["source"], "local");
+
+    let share = attachment.registry.get("conversation-share").unwrap();
+    let import = call(&*share, &desktop, "importShare", json!({"shareCode": "x"}))
+        .await
+        .unwrap_err();
+    assert_eq!(import.message, "Conversation share import is unavailable");
+    assert_eq!(import.field("kind"), Some(&json!("feature_disabled")));
+    let preview = reply_value(
+        call(&*share, &desktop, "getPreview", json!({}))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(preview["source"], "local");
+    // replayable 连接交给本机实现（它先按 desktop-only 拒绝写操作）。
+    let replay = CallContext {
+        client_mode: ClientMode::WebRemoteReplayable,
+        ..context(2)
+    };
+    let delegated = reply_value(
+        call(&*share, &replay, "importShare", json!({}))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(delegated["method"], "importShare");
 }

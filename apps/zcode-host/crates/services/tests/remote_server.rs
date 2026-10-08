@@ -13,7 +13,8 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use zcode_host_control::{ClientMode, ControlRouter, ControlSink, HostToMain};
 use zcode_host_kit::{CallContext, ChannelRegistry, Reply, RpcValue};
-use zcode_host_services::remote::provisioning::{CredentialCipher, ProvisioningSource};
+use zcode_host_services::account::credential::CredentialStore;
+use zcode_host_services::remote::provisioning::ProvisioningSource;
 use zcode_host_services::remote::transport::ProcessTransport;
 use zcode_host_services::remote::{RemoteConfig, RemoteScope, install_with};
 use zcode_host_services::settings::SettingStore;
@@ -85,8 +86,14 @@ async fn call(
 fn value(reply: Reply) -> Value {
     match reply {
         Reply::Value(value) => value,
+        Reply::Encoded(body) => decoded(&body).into_json(),
         other => panic!("expected a JSON reply, got {other:?}"),
     }
+}
+
+/// 转发结果保持远端编码（Reply::Encoded）：测试里解码后比较。
+fn decoded(body: &[u8]) -> RpcValue {
+    zcode_host_rpc::Reader::new(body).value().unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -156,8 +163,7 @@ async fn remote_workspace_against_a_real_zcode_server() {
             control: Arc::new(Control(sink)),
             provisioning: ProvisioningSource {
                 personal_config_file: local_home.join(".zcode/v2/provider_config.json"),
-                credential_file: local_home.join(".zcode/v2/credentials.json"),
-                cipher: CredentialCipher::new(Some("test-secret"), &local_home, None),
+                credentials: CredentialStore::new(&local_home.join(".zcode/v2"), "test-secret"),
             },
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),
@@ -273,7 +279,10 @@ async fn remote_workspace_against_a_real_zcode_server() {
     )
     .await
     .unwrap();
-    assert_eq!(bytes, Reply::Bytes(b"remote".to_vec()));
+    let Reply::Encoded(body) = bytes else {
+        panic!("forwarded reads keep the remote encoding");
+    };
+    assert_eq!(decoded(&body), RpcValue::Bytes(b"remote".to_vec()));
     let missing = call(
         &registry,
         &desktop,

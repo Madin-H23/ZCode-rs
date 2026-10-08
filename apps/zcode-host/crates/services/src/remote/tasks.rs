@@ -20,7 +20,7 @@ use zcode_host_kit::{
 use zcode_host_rpc::RpcClient;
 
 use super::registry::{RemoteScope, workspace_key};
-use super::scope::{ForwardChannel, rpc_reply};
+use super::scope::ForwardChannel;
 use super::sources::RemoteSources;
 
 const TASK_CHANNEL: &str = "zcode-task";
@@ -419,7 +419,7 @@ impl RemoteTaskChannel {
                 .is_some_and(|task_id| self.tracker.begin(task_id));
         let result = self
             .client
-            .call(TASK_CHANNEL, method, vec![RpcValue::Json(params.clone())])
+            .call_encoded(TASK_CHANNEL, method, vec![RpcValue::Json(params.clone())])
             .await;
         if result.is_err()
             && tracked
@@ -427,7 +427,7 @@ impl RemoteTaskChannel {
         {
             self.tracker.finish(task_id);
         }
-        result.map(rpc_reply)
+        result.map(Reply::Encoded)
     }
 }
 
@@ -453,17 +453,16 @@ impl ServiceChannel for RemoteTaskChannel {
         {
             let release = method == "releaseWorkspacePreparation";
             let params = first_arg(&args);
-            let call = self.client.call(TASK_CHANNEL, &method, args);
+            let call = self.client.call_encoded(TASK_CHANNEL, &method, args);
             return Box::pin(async move {
-                let result = call.await?;
+                let encoded = call.await?;
                 if release {
                     channel.tracker.clear_workspace(&params);
-                } else {
-                    channel
-                        .tracker
-                        .remember_from_result(&result.clone().into_json());
+                } else if let Ok(result) = zcode_host_rpc::Reader::new(&encoded).value() {
+                    channel.tracker.remember_from_result(&result.into_json());
                 }
-                Ok(rpc_reply(result))
+                // 结果保持远端编码原样交给 Renderer。
+                Ok(Reply::Encoded(encoded))
             });
         }
         self.forward.call(context, &method, args)
@@ -517,9 +516,9 @@ impl ServiceChannel for RemoteSessionChannel {
             .await?;
             channel
                 .client
-                .call(SESSION_CHANNEL, "sendPrompt", vec![RpcValue::Json(params)])
+                .call_encoded(SESSION_CHANNEL, "sendPrompt", vec![RpcValue::Json(params)])
                 .await
-                .map(rpc_reply)
+                .map(Reply::Encoded)
         })
     }
 

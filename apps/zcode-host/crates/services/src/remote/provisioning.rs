@@ -4,19 +4,21 @@
 //!
 //! envelope 含解密后的凭据：只在本进程与远端 rpc 之间传递，绝不进日志。
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use ring::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
+use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
+use tokio::task::AbortHandle;
+use zcode_host_control::{ControlSink, HostToMain};
 use zcode_host_kit::RpcValue;
 use zcode_host_rpc::RpcClient;
+
+use crate::account::credential::CredentialStore;
 
 pub const TARGET_CHANNEL: &str = "provider-provisioning-target";
 
 /// `PROVIDER_PROVISIONING_OAUTH_CREDENTIAL_KEYS`。
-const OAUTH_CREDENTIAL_KEYS: &[&str] = &[
+pub const OAUTH_CREDENTIAL_KEYS: &[&str] = &[
     "oauth:active_provider",
     "oauth:zai:access_token",
     "oauth:zai:refresh_token",
@@ -27,10 +29,8 @@ const OAUTH_CREDENTIAL_KEYS: &[&str] = &[
     "zcodejwttoken",
 ];
 
-const CIPHER_PREFIX: &str = "enc:v1:";
-
 /// `isProviderProvisioningAccountCredentialKey`：`^account-provider:.+:api-key$` 且无首尾空白。
-fn is_account_credential_key(key: &str) -> bool {
+pub fn is_account_credential_key(key: &str) -> bool {
     key.trim() == key
         && key
             .strip_prefix("account-provider:")
@@ -38,102 +38,15 @@ fn is_account_credential_key(key: &str) -> bool {
             .is_some_and(|middle| !middle.is_empty())
 }
 
-/// Node `os.platform()`。
-fn node_platform() -> &'static str {
-    match std::env::consts::OS {
-        "macos" => "darwin",
-        "windows" => "win32",
-        other => other,
-    }
-}
-
-/// Node `os.userInfo().username`。
-#[cfg(unix)]
-#[allow(unsafe_code)]
-fn username() -> Option<String> {
-    // SAFETY: getpwuid_r 只写调用方提供的缓冲区；返回的指针只在本函数内读取。
-    unsafe {
-        let uid = libc::geteuid();
-        let mut passwd: libc::passwd = std::mem::zeroed();
-        let mut buffer = vec![0 as libc::c_char; 4096];
-        let mut result: *mut libc::passwd = std::ptr::null_mut();
-        let status = libc::getpwuid_r(
-            uid,
-            &mut passwd,
-            buffer.as_mut_ptr(),
-            buffer.len(),
-            &mut result,
-        );
-        if status != 0 || result.is_null() || passwd.pw_name.is_null() {
-            return None;
-        }
-        Some(
-            std::ffi::CStr::from_ptr(passwd.pw_name)
-                .to_string_lossy()
-                .into_owned(),
-        )
-    }
-}
-
-#[cfg(not(unix))]
-fn username() -> Option<String> {
-    None
-}
-
-/// `credentialCipherProvider.ts` 的解密：key = sha256(`ZCODE_CREDENTIAL_SECRET` 或 fallback 串)。
-pub struct CredentialCipher {
-    key: LessSafeKey,
-}
-
-impl CredentialCipher {
-    pub fn new(secret: Option<&str>, home: &Path, user: Option<String>) -> Self {
-        let secret = match secret.filter(|secret| !secret.is_empty()) {
-            Some(secret) => secret.to_owned(),
-            None => format!(
-                "zcode-credential-fallback:{}:{}:{}",
-                node_platform(),
-                home.display(),
-                user.or_else(username).unwrap_or_else(|| "unknown".into())
-            ),
-        };
-        let digest = Sha256::digest(secret.as_bytes());
-        let key = UnboundKey::new(&AES_256_GCM, &digest).expect("AES-256 key is 32 bytes");
-        Self {
-            key: LessSafeKey::new(key),
-        }
-    }
-
-    /// 非 `enc:v1:` 前缀的旧明文原样返回。
-    pub fn decrypt(&self, value: &str) -> Result<String, String> {
-        let Some(payload) = value.strip_prefix(CIPHER_PREFIX) else {
-            return Ok(value.to_owned());
-        };
-        let fail = |reason: &str| format!("凭据解密失败：{reason}");
-        let parts: Vec<&str> = payload.split('.').collect();
-        if parts.len() != 3 || parts.iter().any(|part| part.is_empty()) {
-            return Err(fail("密文格式非法"));
-        }
-        let decode = |part: &str| URL_SAFE_NO_PAD.decode(part.trim_end_matches('='));
-        let iv = decode(parts[0]).map_err(|_| fail("IV 长度非法"))?;
-        let tag = decode(parts[1]).map_err(|_| fail("AuthTag 长度非法"))?;
-        let mut buffer = decode(parts[2]).map_err(|_| fail("密钥不匹配或密文已损坏"))?;
-        if tag.len() != 16 {
-            return Err(fail("AuthTag 长度非法"));
-        }
-        let nonce = Nonce::try_assume_unique_for_key(&iv).map_err(|_| fail("IV 长度非法"))?;
-        buffer.extend_from_slice(&tag);
-        let plain = self
-            .key
-            .open_in_place(nonce, Aad::empty(), &mut buffer)
-            .map_err(|_| fail("密钥不匹配或密文已损坏"))?;
-        String::from_utf8(plain.to_vec()).map_err(|_| fail("密钥不匹配或密文已损坏"))
-    }
+/// 凭据是否属于 Provisioning 的同步事实（OAuth 会话或账号 Provider 的 API key）。
+pub fn is_provisioned_credential(key: &str) -> bool {
+    OAUTH_CREDENTIAL_KEYS.contains(&key) || is_account_credential_key(key)
 }
 
 pub struct ProvisioningSource {
     pub personal_config_file: PathBuf,
-    pub credential_file: PathBuf,
-    pub cipher: CredentialCipher,
+    /// 账号部分的凭据存储（`credentials.json` 的唯一读写实现）。
+    pub credentials: CredentialStore,
 }
 
 fn empty_personal_config() -> Value {
@@ -186,37 +99,34 @@ fn personal_config(raw: Option<&str>, path: &Path) -> Result<Value, String> {
 }
 
 impl ProvisioningSource {
-    fn credentials(&self, raw: Option<&str>) -> Result<Vec<Value>, String> {
-        let Some(raw) = raw else {
-            return Ok(Vec::new());
-        };
-        let parsed: Value = serde_json::from_str(raw)
-            .map_err(|error| format!("Credential Store 无法解析：{error}"))?;
-        let Some(object) = parsed.as_object() else {
-            return Err("Credential Store 必须是 JSON 对象".into());
-        };
-        let mut entries = Vec::new();
-        for (key, encrypted) in object {
-            let scope = if OAUTH_CREDENTIAL_KEYS.contains(&key.as_str()) {
-                "oauth-session"
-            } else if is_account_credential_key(key) {
-                "account-provider"
-            } else {
-                // allowlist 之外的历史记录不是同步事实，值损坏也不阻断合法凭据。
-                continue;
-            };
-            let Some(encrypted) = encrypted.as_str() else {
-                return Err(format!(
-                    "Credential allowlist value must be a string: {key}"
-                ));
-            };
-            let value = self.cipher.decrypt(encrypted)?;
-            if value.trim().is_empty() {
-                continue;
-            }
-            entries.push(json!({"scope": scope, "key": key, "value": value}));
+    /// 测试用：空的临时目录。
+    #[cfg(test)]
+    pub(crate) fn for_test(dir: &Path) -> Self {
+        Self {
+            personal_config_file: dir.join("provider_config.json"),
+            credentials: CredentialStore::new(dir, "test-secret"),
         }
-        Ok(entries)
+    }
+
+    /// allowlist 内的凭据（readProvisioningCredentials）：解密后为空的跳过。
+    async fn credential_entries(&self) -> Result<Vec<Value>, String> {
+        let selected = self
+            .credentials
+            .load_selected(is_provisioned_credential)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(selected
+            .into_iter()
+            .filter(|(_, value)| !value.trim().is_empty())
+            .map(|(key, value)| {
+                let scope = if OAUTH_CREDENTIAL_KEYS.contains(&key.as_str()) {
+                    "oauth-session"
+                } else {
+                    "account-provider"
+                };
+                json!({"scope": scope, "key": key, "value": value})
+            })
+            .collect())
     }
 
     /// 组装 envelope（`providerProvisioningEnvelopeSchema`）。
@@ -229,7 +139,6 @@ impl ProvisioningSource {
             }
         };
         let personal = read(self.personal_config_file.clone()).await?;
-        let credentials = read(self.credential_file.clone()).await?;
         let domain = match settings["providerFamilyDomain"].as_str() {
             Some(domain @ ("zai" | "bigmodel")) => json!(domain),
             _ => Value::Null,
@@ -247,7 +156,7 @@ impl ProvisioningSource {
                 "providerFamilyDomain": domain,
                 "providerFamilyConnectionSelections": selections,
             },
-            "credentials": self.credentials(credentials.as_deref())?,
+            "credentials": self.credential_entries().await?,
         }))
     }
 }
@@ -290,35 +199,30 @@ mod tests {
     const NODE_CIPHERTEXT: &str = "enc:v1:tTO2tJu_lZkZJwgA.-4ZIv62JA9WlgfcIO9wx6g.05-gxQ4Y4w";
 
     #[test]
-    fn decrypts_node_ciphertext_and_legacy_plaintext() {
-        let cipher = CredentialCipher::new(Some("test-secret"), Path::new("/h"), None);
-        assert_eq!(cipher.decrypt(NODE_CIPHERTEXT).unwrap(), "token-1");
-        assert_eq!(cipher.decrypt("plain").unwrap(), "plain");
-        assert!(cipher.decrypt("enc:v1:a.b").is_err());
+    fn allowlist_matches_typescript() {
+        assert!(is_provisioned_credential("zcodejwttoken"));
+        assert!(is_provisioned_credential("account-provider:zai:api-key"));
+        assert!(!is_provisioned_credential("account-provider::api-key"));
+        assert!(!is_provisioned_credential(" account-provider:zai:api-key"));
+        assert!(!is_provisioned_credential("account-provider:zai:identity"));
     }
 
     #[tokio::test]
     async fn envelope_keeps_only_allowlisted_credentials() {
-        let dir = std::env::temp_dir().join(format!("zcode-provisioning-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let credentials = dir.join("credentials.json");
+        let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            &credentials,
+            dir.path().join("credentials.json"),
             json!({
                 "zcodejwttoken": NODE_CIPHERTEXT,
                 "account-provider:zai:api-key": "plain-key",
                 "account-provider:zai:identity": "ignored",
                 "oauth:zai:user_info": "  ",
-                "unrelated": 3,
+                "unrelated": "x",
             })
             .to_string(),
         )
         .unwrap();
-        let source = ProvisioningSource {
-            personal_config_file: dir.join("provider_config.json"),
-            credential_file: credentials,
-            cipher: CredentialCipher::new(Some("test-secret"), Path::new("/h"), None),
-        };
+        let source = ProvisioningSource::for_test(dir.path());
         let envelope = source
             .read("sync-1", &json!({"providerFamilyDomain": "zai"}))
             .await
@@ -336,7 +240,7 @@ mod tests {
             })
         );
         std::fs::write(
-            dir.join("provider_config.json"),
+            dir.path().join("provider_config.json"),
             json!({"schemaVersion": 1, "config": {"providerOrder": ["a"], "providerConfigRules": {"providerRules": [{"id": "a"}]}}}).to_string(),
         )
         .unwrap();
@@ -350,6 +254,168 @@ mod tests {
             envelope["accountSettings"]["providerFamilyDomain"],
             Value::Null
         );
-        std::fs::remove_dir_all(&dir).unwrap();
+        // 密钥不匹配：解密失败让本次同步失败，而不是带着缺失的凭据继续。
+        let wrong = ProvisioningSource {
+            personal_config_file: dir.path().join("provider_config.json"),
+            credentials: CredentialStore::new(dir.path(), "other-secret"),
+        };
+        assert!(
+            wrong
+                .read("sync-3", &json!({}))
+                .await
+                .unwrap_err()
+                .starts_with("凭据解密失败")
+        );
     }
+
+    struct Sink(std::sync::Mutex<Vec<Value>>);
+
+    impl ControlSink for Sink {
+        fn send(&self, message: HostToMain) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(serde_json::to_value(&message).unwrap());
+        }
+    }
+
+    fn builtin_path() -> PathBuf {
+        PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../../config/provider/zcode-builtin.json"
+        ))
+    }
+
+    /// 三个写入方提交成功后各自触发一次同步；无关的设置键与凭据不触发（node.ts 的触发规则）。
+    #[tokio::test]
+    async fn committed_writes_notify_main_to_resync_remote_environments() {
+        let dir = tempfile::tempdir().unwrap();
+        let sink = Arc::new(Sink(std::sync::Mutex::new(Vec::new())));
+        let providers = crate::providers::ProviderRuntime::new(
+            Some(builtin_path()),
+            dir.path().join("provider_config.json"),
+        );
+        let sources = ProvisioningSources {
+            settings: crate::settings::SettingStore::new(dir.path()),
+            credentials: CredentialStore::new(dir.path(), "test-secret"),
+            providers: providers.clone(),
+        };
+        let tasks = watch_sources(&sources, sink.clone());
+        let triggers = || -> Vec<String> {
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|message| {
+                    assert_eq!(message["type"], "provider-provisioning-source-changed");
+                    message["trigger"].as_str().unwrap().to_owned()
+                })
+                .collect()
+        };
+        let settle = || tokio::time::sleep(std::time::Duration::from_millis(50));
+
+        sources
+            .settings
+            .update(
+                &vec![("providerFamilyDomain".into(), Some(json!("zai")))],
+                None,
+            )
+            .await
+            .unwrap();
+        sources
+            .settings
+            .update(&vec![("memoryEnabled".into(), Some(json!(true)))], None)
+            .await
+            .unwrap();
+        sources
+            .credentials
+            .save("zcodejwttoken", "jwt")
+            .await
+            .unwrap();
+        sources.credentials.save("unrelated", "x").await.unwrap();
+        sources
+            .credentials
+            .delete("account-provider:zai:api-key")
+            .await
+            .unwrap();
+        crate::providers::personal::PersonalWriter::new(providers)
+            .create_provider(&json!({"initialConfig": {
+                "api": {"type": "openai-chat-completions", "baseUrl": "https://api.example.com/v1"},
+                "access": {"type": "api-key", "apiKey": "sk-x"}}}))
+            .await
+            .unwrap();
+        settle().await;
+        let mut seen = triggers();
+        seen.sort();
+        assert_eq!(
+            seen,
+            [
+                "account-settings",
+                "credential",
+                "credential",
+                "personal-config"
+            ]
+        );
+        for task in tasks {
+            task.abort();
+        }
+    }
+}
+
+/// 本机的三个 Provisioning 事实源（各自是唯一写入方）。
+#[derive(Clone)]
+pub struct ProvisioningSources {
+    pub settings: crate::settings::SettingStore,
+    pub credentials: CredentialStore,
+    pub providers: crate::providers::ProviderRuntime,
+}
+
+/// 写入方提交成功后通知 Main：`provider-provisioning-source-changed{trigger}`，Main 再让每个在线的
+/// 远端 Environment 重新同步（node.ts 的三个触发；合并与排队由 Main 的 coordinator 负责，Host 不防抖）。
+/// - Personal Provider Config：本进程提交的写入 → `personal-config`；
+/// - 设置里的 `providerFamilyDomain` / `providerFamilyConnectionSelections` → `account-settings`；
+/// - allowlist 内的凭据保存或删除 → `credential`。
+pub fn watch_sources(
+    sources: &ProvisioningSources,
+    control: Arc<dyn ControlSink>,
+) -> Vec<AbortHandle> {
+    let notify = move |trigger: &'static str| {
+        control.send(HostToMain::Raw(json!({
+            "type": "provider-provisioning-source-changed",
+            "trigger": trigger,
+        })));
+    };
+    let personal = sources.providers.personal_updates().subscribe();
+    let settings = sources.settings.on_updated().subscribe();
+    let credentials = sources.credentials.mutations().subscribe();
+    let (on_personal, on_settings, on_credential) = (notify.clone(), notify.clone(), notify);
+    vec![
+        tokio::spawn(async move {
+            let mut personal = Box::pin(personal);
+            while personal.next().await.is_some() {
+                on_personal("personal-config");
+            }
+        })
+        .abort_handle(),
+        tokio::spawn(async move {
+            let mut settings = Box::pin(settings);
+            while let Some(keys) = settings.next().await {
+                if keys.iter().any(|key| {
+                    key == "providerFamilyDomain" || key == "providerFamilyConnectionSelections"
+                }) {
+                    on_settings("account-settings");
+                }
+            }
+        })
+        .abort_handle(),
+        tokio::spawn(async move {
+            let mut credentials = Box::pin(credentials);
+            while let Some(mutation) = credentials.next().await {
+                if is_provisioned_credential(&mutation.key) {
+                    on_credential("credential");
+                }
+            }
+        })
+        .abort_handle(),
+    ]
 }

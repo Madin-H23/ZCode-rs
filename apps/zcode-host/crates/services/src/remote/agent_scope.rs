@@ -23,7 +23,13 @@ use zcode_host_kit::{
 };
 use zcode_host_rpc::RpcClient;
 
-use super::scope::rpc_reply;
+/// 解码一条已序列化的远端结果，只用于读取其中的字段。
+fn decode(encoded: &[u8]) -> Value {
+    zcode_host_rpc::Reader::new(encoded)
+        .value()
+        .map(RpcValue::into_json)
+        .unwrap_or(Value::Null)
+}
 use crate::agent::service::{CHANNEL, parse_client_hello, uuid_v4};
 
 const TRUSTED_CONNECTION_FIELD: &str = "__zcodeTrustedV4Connection";
@@ -291,16 +297,16 @@ impl Scope {
         Ok(())
     }
 
-    async fn forward(&self, method: &str, params: Value) -> Result<Reply, RpcError> {
+    /// 写入可信 carrier 后转发；结果保持远端编码原样交给 Renderer。
+    async fn forward(&self, method: &str, params: Value) -> Result<Vec<u8>, RpcError> {
         let carrier = self.carrier();
         self.client
-            .call(
+            .call_encoded(
                 CHANNEL,
                 method,
                 vec![RpcValue::Json(with_trusted_connection(&params, &carrier))],
             )
             .await
-            .map(rpc_reply)
     }
 
     fn owns(state: &ScopeState, kind: Kind, workspace_key: &str, frame: &Value) -> bool {
@@ -425,23 +431,23 @@ impl Scope {
         let carrier = self.carrier();
         let result = self
             .client
-            .call(
+            .call_encoded(
                 CHANNEL,
                 kind.subscribe(),
                 vec![RpcValue::Json(with_trusted_connection(&params, &carrier))],
             )
             .await;
-        let value = match result {
-            Ok(value) => value,
+        let encoded = match result {
+            Ok(encoded) => encoded,
             Err(error) => {
                 self.take_pending(pending_id);
                 return Err(error);
             }
         };
-        let ack = value.clone().into_json();
+        let ack = decode(&encoded);
         let Some(subscription_id) = ack["ack"]["subscriptionId"].as_str().map(str::to_owned) else {
             self.take_pending(pending_id);
-            return Ok(rpc_reply(value));
+            return Ok(Reply::Encoded(encoded));
         };
         let entry = Owned {
             kind,
@@ -494,7 +500,7 @@ impl Scope {
                 }
             }
         }
-        Ok(rpc_reply(value))
+        Ok(Reply::Encoded(encoded))
     }
 
     fn find_owned(&self, kind: Kind, params: &Value) -> Option<Owned> {
@@ -540,9 +546,9 @@ impl Scope {
         };
         let forwarded = with_unsubscribe_route(&params, &entry.topic, &self.connection_id);
         self.client
-            .call(CHANNEL, kind.resync(), vec![RpcValue::Json(forwarded)])
+            .call_encoded(CHANNEL, kind.resync(), vec![RpcValue::Json(forwarded)])
             .await
-            .map(rpc_reply)
+            .map(Reply::Encoded)
     }
 
     fn invalidate(&self, workspace_key: &str, generation: u64) {
@@ -769,7 +775,10 @@ impl ServiceChannel for RemoteAgentChannel {
                 if params["envelope"]["clientId"].as_str() != bound.as_deref() {
                     return Err(fault("fault.command.clientMismatch"));
                 }
-                scope.forward("sendConversationCommandV4", params).await
+                scope
+                    .forward("sendConversationCommandV4", params)
+                    .await
+                    .map(Reply::Encoded)
             }),
             "queryConversationCommandsV4" => Box::pin(async move {
                 scope.assert_ready()?;
@@ -785,12 +794,15 @@ impl ServiceChannel for RemoteAgentChannel {
                     }
                     state.query_workspace = Some(key);
                 }
-                scope.forward("queryConversationCommandsV4", params).await
+                scope
+                    .forward("queryConversationCommandsV4", params)
+                    .await
+                    .map(Reply::Encoded)
             }),
             "attachmentBeginV4" => Box::pin(async move {
                 scope.assert_ready()?;
                 let reply = scope.forward("attachmentBeginV4", params.clone()).await?;
-                let staging = matches!(&reply, Reply::Value(value) if value["state"] == "staging");
+                let staging = decode(&reply)["state"] == "staging";
                 if staging {
                     let closed = scope.lock().closed;
                     if closed {
@@ -803,19 +815,19 @@ impl ServiceChannel for RemoteAgentChannel {
                         .attachment_routes
                         .insert(workspace_key(&params), workspace_target(&params));
                 }
-                Ok(reply)
+                Ok(Reply::Encoded(reply))
             }),
             ready if READY_FORWARDED.contains(&ready) => {
                 let method = ready.to_owned();
                 Box::pin(async move {
                     scope.assert_ready()?;
-                    scope.forward(&method, params).await
+                    scope.forward(&method, params).await.map(Reply::Encoded)
                 })
             }
             other => {
                 // 其余成员原样转发（Proxy 透传）。
-                let call = self.client.call(CHANNEL, other, args);
-                Box::pin(async move { call.await.map(rpc_reply) })
+                let call = self.client.call_encoded(CHANNEL, other, args);
+                Box::pin(async move { call.await.map(Reply::Encoded) })
             }
         }
     }
@@ -832,7 +844,9 @@ impl ServiceChannel for RemoteAgentChannel {
             || -> Result<EventStream, RpcError> { Ok(Box::pin(futures_util::stream::pending())) };
         let forward = |arg: RpcValue| -> Result<EventStream, RpcError> {
             Ok(Box::pin(
-                self.client.listen(CHANNEL, event, arg).map(rpc_reply),
+                self.client
+                    .listen_encoded(CHANNEL, event, arg)
+                    .map(Reply::Encoded),
             ))
         };
         let continuous = context.client_mode == ClientMode::DesktopContinuous;

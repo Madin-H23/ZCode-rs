@@ -36,6 +36,8 @@ struct Inner {
     changed: EventHub<()>,
     /// 内置配置内容变化（账号层据此重新解析，reason `config:zcodeBuiltin:file-changed`）。
     builtin_changed: EventHub<()>,
+    /// 本进程成功提交的个人配置写入（Node `personal:updated`）；轮询发现的外部变化不算。
+    personal_updated: EventHub<()>,
     /// 账号层已接入时，首份账号快照发布前的读取要等待它（TS 的 Registry 同样等账号源首读）。
     account_ready: tokio::sync::watch::Sender<bool>,
 }
@@ -121,6 +123,7 @@ impl ProviderRuntime {
                 state: RwLock::new(State::default()),
                 changed: EventHub::new(),
                 builtin_changed: EventHub::new(),
+                personal_updated: EventHub::new(),
                 account_ready: tokio::sync::watch::channel(true).0,
             }),
         }
@@ -360,6 +363,15 @@ impl ProviderRuntime {
             state.resolved.clone(),
             state.personal_revision.clone(),
         )
+    }
+
+    /// 本进程提交的个人配置写入（Provider Provisioning 的 `personal-config` 触发）。
+    pub fn personal_updates(&self) -> EventHub<()> {
+        self.inner.personal_updated.clone()
+    }
+
+    pub(crate) fn notify_personal_updated(&self) {
+        self.inner.personal_updated.emit(());
     }
 
     pub fn builtin_changes(&self) -> EventHub<()> {

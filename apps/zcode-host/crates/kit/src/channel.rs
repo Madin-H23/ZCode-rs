@@ -26,6 +26,9 @@ pub enum Reply {
     RawJson(String),
     /// 顶层二进制（RPC Buffer 标签，Renderer 收到 Uint8Array）。
     Bytes(Vec<u8>),
+    /// 已序列化的 rpc 值（标签 + 内容），原样写出：远端 workspace 的转发结果与事件逐字节保持
+    /// 远端 server 的编码（docs/specs/rust-host-remote.md §2.2）。
+    Encoded(Vec<u8>),
 }
 
 impl Reply {

@@ -362,7 +362,16 @@ pub fn install(
         ),
     );
     // ── remote ──
-    let remote = remote::install(&context, settings.clone(), &controller, router);
+    let remote = remote::install(
+        &context,
+        remote::provisioning::ProvisioningSources {
+            settings: settings.clone(),
+            credentials: account.credentials.clone(),
+            providers: providers.clone(),
+        },
+        &controller,
+        router,
+    );
 
     // ── integration ──（docs/specs/rust-host-integration.md）
     // 动态工作流门禁的唯一写入方：coding-plan-subscription 的 client config（Node

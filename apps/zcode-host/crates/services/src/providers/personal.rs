@@ -456,6 +456,8 @@ impl PersonalWriter {
             .await;
         let result = outcome.map_err(|error| RpcError::new("Error", format!("{error:#}")))??;
         self.runtime.reload().await;
+        // 只有本进程成功提交的写入才通知（Node `personal:updated`），远端 Environment 据此重新同步。
+        self.runtime.notify_personal_updated();
         Ok(result)
     }
 

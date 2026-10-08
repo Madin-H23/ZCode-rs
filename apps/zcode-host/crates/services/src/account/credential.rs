@@ -346,6 +346,24 @@ impl CredentialStore {
         }
     }
 
+    /// 读出并解密 `select` 选中的键（文件里的顺序）。Provider Provisioning 用它导出 allowlist 凭据
+    /// （providerProvisioningSource.ts），解密只有这一份实现。
+    pub async fn load_selected(
+        &self,
+        select: impl Fn(&str) -> bool,
+    ) -> Result<Vec<(String, String)>, CredentialError> {
+        let record = self.read_all().await?;
+        let mut selected = Vec::new();
+        for (key, raw) in record {
+            if !select(&key) {
+                continue;
+            }
+            let raw = raw.as_str().unwrap_or_default();
+            selected.push((key, self.cipher.decrypt(raw)?));
+        }
+        Ok(selected)
+    }
+
     /// 读改写持锁；`mutate` 返回 false 时不写回（锁仍覆盖读取）。
     async fn mutate(
         &self,

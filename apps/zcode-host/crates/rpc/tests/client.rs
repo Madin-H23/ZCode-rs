@@ -227,3 +227,47 @@ async fn non_error_rejection_keeps_the_payload() {
     let error = call.await.unwrap().unwrap_err();
     assert_eq!(error.data.as_deref(), Some(&json!({"reason": "nope"})));
 }
+
+/// 转发用的 encoded 调用与事件：body 逐字节保持远端编码（数组里的 undefined、VSBuffer 标签）。
+#[tokio::test]
+async fn encoded_calls_and_events_keep_remote_bytes() {
+    let (client, mut peer) = start();
+    peer.to_client.send(codec::initialize()).unwrap();
+    // [undefined, VSBuffer(0xaa 0xbb)]：Array 标签 4、长度 2、Undefined 0、VSBuffer 3 + 长度 2。
+    let body = vec![4u8, 2, 0, 3, 2, 0xaa, 0xbb];
+    let call = tokio::spawn(client.call_encoded("file", "x", vec![]));
+    let request = peer.next().await;
+    let mut response = Vec::new();
+    codec::write_array_header(&mut response, 2);
+    codec::write_int(&mut response, 201);
+    codec::write_int(&mut response, request.id);
+    response.extend_from_slice(&body);
+    peer.to_client.send(response).unwrap();
+    assert_eq!(call.await.unwrap().unwrap(), body);
+    assert_eq!(
+        codec::response_encoded(201, request.id, &body)[..],
+        codec::split_response(&codec::response_encoded(201, request.id, &body))
+            .map(|(kind, id, rest)| {
+                assert_eq!((kind, id), (201, Some(request.id)));
+                codec::response_encoded(kind, request.id, &rest)
+            })
+            .unwrap()[..]
+    );
+
+    let mut events = client.listen_encoded("terminal", "onData", RpcValue::Undefined);
+    let listen = peer.next().await;
+    let mut fire = Vec::new();
+    codec::write_array_header(&mut fire, 2);
+    codec::write_int(&mut fire, 204);
+    codec::write_int(&mut fire, listen.id);
+    fire.extend_from_slice(&body);
+    peer.to_client.send(fire).unwrap();
+    assert_eq!(events.next().await, Some(body.clone()));
+    // 头之后没有 body：按 undefined 交出。
+    let mut bare = Vec::new();
+    codec::write_array_header(&mut bare, 2);
+    codec::write_int(&mut bare, 204);
+    codec::write_int(&mut bare, listen.id);
+    peer.to_client.send(bare).unwrap();
+    assert_eq!(events.next().await, Some(vec![0]));
+}
