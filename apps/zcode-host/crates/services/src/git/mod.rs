@@ -3,6 +3,10 @@
 //! 运行真实的 git CLI（[`command`]），解析逻辑在 [`parse`]，仓库级流程在 [`repo`]；本文件负责
 //! 按 workspace 作用域把状态快照切成 UI 用的变更列表。`generateCommitMessage` 需要回调 Agent，
 //! 仍由契约 stub 应答。
+pub mod checkpoint;
+pub mod checkpoint_store;
+#[cfg(all(test, unix))]
+mod checkpoint_tests;
 pub mod command;
 pub mod parse;
 pub mod repo;

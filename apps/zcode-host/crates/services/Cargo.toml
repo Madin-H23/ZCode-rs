@@ -20,6 +20,8 @@ regex.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# git checkpoint 的 workspace hash（与 Node getWorkspaceHash 相同的 sha256 前 12 位）。
+sha2 = "0.10"
 tokio.workspace = true
 toml.workspace = true
 url.workspace = true
@@ -35,5 +37,4 @@ libc.workspace = true
 windows-sys.workspace = true
 
 [dev-dependencies]
-sha2 = "0.10"
 tempfile = "3"

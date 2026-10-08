@@ -531,6 +531,11 @@ impl GitRepo {
         &self.inner.git
     }
 
+    /// checkpoint 与提交信息生成复用同一个 git 执行器（同一份清洗后的环境与二进制探测）。
+    pub fn runner(&self) -> &GitRunner {
+        &self.inner.git
+    }
+
     pub fn invalidate(&self, workspace_path: &str) {
         self.inner.resolutions.invalidate(workspace_path);
         self.inner.workspace_infos.invalidate(workspace_path);
