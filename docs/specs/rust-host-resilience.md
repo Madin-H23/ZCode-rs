@@ -1,0 +1,138 @@
+# Rust Host 韧性：自动重启、启动重试与流控
+
+日期：2026-10-08。上级规格：[rust-host.md](rust-host.md) 3.4 与第 10 节 D2，[rust-host-r2.md](rust-host-r2.md) 第 8 节。分支：`feat/rust-host-p-resilience`。
+
+## 1. 目标与范围
+
+1. **D2 自动重启（已定：自动重启）**：窗口的 Rust Host 意外退出后，Main 有界重试地重新拉起它；用户始终看到明确状态，不会停在没有响应的旧界面。
+2. **启动失败页的重试与退出**：迁移失败后，Retry 让 Host 以新的 attemptId 重新准备存储；Exit 退出 App。
+3. **流控**：WebSocket 发送积压作为 `v4/connection/flow` 的 `saturated` / `drained` 转发给 CLI。
+4. **R2 性能验收**：N ≥ 4 个 workspace 同时流式时，控制 RPC p95 ≤ 20 ms。
+
+只改 Rust Host 路径（`ZCODE_DESKTOP_HOST=rust`）。Node Host 的行为不变。
+
+## 2. 产品规则
+
+### 2.1 Host 意外退出与自动重启（D2）
+
+1. **什么算意外退出**：窗口自己的本地 Rust Host 退出，而 Main 没有对它发起过 dispose。窗口关闭、App 退出、reload 回退路径都会先 dispose（进入 `disposingHostProcesses`），因此不算。退出码不参与判断。
+2. **重启方式：reload 窗口**，复用已有的“reload 时找不到 Host 就重新拉起”路径（`desktopWindowLifecycle.ts` 的 dom-ready）。新 Host 与冷启动走同一条路：`init-local` → 启动状态 → ready → 签发 endpoint。
+
+   不选“原地重连 WebSocket”：Renderer 的握手状态、连接缓存和大量 zustand store 都以服务对象为 key（rust-host.md 3.4）。原地换服务对象需要逐一清空这些状态，否则会留下旧连接的过期事实；reload 由页面生命周期统一清空，而且 reload → 重新 attach 已有 E2E 覆盖。
+
+3. **有界重试**：每个窗口独立计数，任意 60 s 内最多自动重启 3 次，第 n 次之前等待 500 ms、2 s、5 s。超出后不再自动重启。
+4. **用户看到的状态**（Renderer）：
+   - WebSocket 在连上之后关闭，或收到 Main 的“正在重启”通知：立即切到“本地服务已断开，正在重启”页面（带进度动画和第 n/3 次），不再显示无法操作的旧界面。挂起的调用照旧立即被拒绝（rust-host-r0.md 规则 5）。
+   - 收到“已放弃”通知：显示“本地服务多次意外退出”，提供“重新加载”和“退出”。重新加载由页面自身 `location.reload()` 触发，dom-ready 照常拉起新 Host；退出走启动控制的 `exit`。
+5. **CLI 与会话**：旧 Host 的 CLI 在 stdin EOF 后自行退出，正在进行的 run 中断（与 Node Host 崩溃相同）。新 Host 按窗口创建时的预热名单拉起 CLI，其余懒启动。会话事实在 CLI 的持久化存储里，reload 后按已有恢复逻辑展示。
+6. **未发送的草稿**：与手动 reload 相同。
+
+### 2.2 启动失败页的重试与退出
+
+1. **Host 是启动状态的唯一所有者**（`host-core` 的 `StartupCoordinator`，每个 Host 一个）。`startupId` 取自 `init-local`；每次尝试有新的随机 `attemptId`；`sequence` 在同一 `startupId` 内跨尝试严格递增。
+2. **`database-startup-control`**（Main 已按今天的 relay 转发，Rust Host 新增处理）：
+   - `snapshot`：重发最近一次状态（与 Node `coordinator.publish()` 相同，sequence 不变）。
+   - `retry{attemptId}`：只在“没有尝试在运行、最近状态是 failed、`canRetryDatabaseStartup` 为真、attemptId 等于当前尝试”时接受；否则忽略（幂等，重复点击、旧页面的过期请求都不会启动第二个执行者）。接受后生成新 attemptId、`startedAt` 取当前时间，从 `starting` 重新执行 `prepare_storage` → `starting_services` → 安装服务 → `ready`。
+   - `exit`：由 Main 处理（退出 App），Host 忽略。
+3. **挂起的 attachment**：失败期间建立的连接继续挂起，任何一次尝试 ready 后才发 `[200]`。
+4. **endpoint 在 ready 时签发**：Main 对 Rust Host 不再在拉起时立即签发 Renderer endpoint，而是在每个 attemptId 第一次进入 `ready` 时签发一次。capability 只有 30 s 有效期，若在拉起时签发，迁移超过 30 s 或用户 30 s 后才点重试，Renderer 拿到的就是过期 capability。reload 时为存活 Host 重新签发的逻辑不变。
+
+### 2.3 流控（WebSocket 背压）
+
+1. **观测点**：每条 WebSocket 连接上，core 已交给写任务、但还没写进 socket 的字节数。Renderer 读得慢时 TCP 发送缓冲写满，`send` 挂起，积压随之增长。
+2. **水位**：超过 1 MiB 进入 `saturated`，饱和后回落到 256 KiB 以下发 `drained`（与 `PersistentProtocol` 默认值相同）。只在边沿通知。
+3. **转发**：host-core 把边沿交给 `ChannelRegistry::connection_flow`，`zcode-agent` 的连接 scope 向本连接用过的每个 workspace（有存活进程时）发 `v4/connection/flow {connectionId, state}`。
+   - 同一连接的 `saturated`、`drained`、`closed` 串行、按发生顺序发送；`closed` 之后不再发其他状态。
+   - 每个 workspace 只在状态变化时发送；连接处于 `saturated` 时新用到的 workspace 立即补发 `saturated`。
+4. CLI 收到 `saturated` 后暂停向该连接投递帧（合并缓冲），`drained` 后刷新，必要时走快照恢复（`app-server/src/routes.rs` `flow`）。
+
+## 3. 状态所有者
+
+| 状态                                             | 唯一所有者                                                  |
+| ------------------------------------------------ | ----------------------------------------------------------- |
+| 是否重启、重启计数与退避                         | Main：`rustHostRestart.ts`（每个窗口一个计数）              |
+| 窗口 → Host 映射                                 | Main `windowHostProcessMap`（不变）                         |
+| 启动状态（startupId、attemptId、sequence、阶段） | Host：`host-core` 的 `StartupCoordinator`                   |
+| 启动状态的中继与 Renderer 侧镜像                 | Main `databaseStartupRelay`（不变）                         |
+| Renderer endpoint 的签发时机                     | Main：按 Host 报告的 ready 触发                             |
+| “本地服务已断开”页面状态                         | Renderer 启动代码（`main.tsx`），只消费 Main 通知与连接关闭 |
+| 连接积压字节与饱和边沿                           | Rust Host 接入层（`ws.rs` 的 `FlowGauge`）                  |
+| 已向各 workspace 转发的流控状态                  | `zcode-agent` 连接 scope（`agent/flow.rs`）                 |
+
+## 4. 事件顺序
+
+### 4.1 Host 意外退出 → 自动重启
+
+```mermaid
+sequenceDiagram
+    participant H as Rust Host（第 1 代）
+    participant M as Main
+    participant P as Renderer
+    participant H2 as Rust Host（第 2 代）
+    H--xM: exit（未经 dispose）
+    H--xP: WebSocket 关闭
+    P->>P: 拒绝挂起调用；显示“正在重启”
+    M->>M: relay 记录 failed/transport_closed；删除窗口映射
+    M->>M: 重启计数：60 s 内第 n 次（n ≤ 3）
+    M->>P: zcode:host-connection-state{restarting, attempt n, delayMs}
+    Note over M: 等待退避（500 ms / 2 s / 5 s）
+    M->>M: 若窗口已有 Host（用户已手动 reload）则跳过；否则释放旧 relay 绑定
+    M->>P: webContents.reload()
+    P->>M: DOM ready
+    M->>H2: spawn + init-local{新 databaseStartupId}
+    H2-->>M: starting → … → ready
+    M->>H2: issue-attachment-endpoint（ready 后）
+    M->>P: startup state + endpoint（同代）
+    P->>H2: WebSocket 握手 → [200] → 挂载 Root
+    Note over M,P: 超出 3 次：M→P {failed}；不再 reload，页面提供“重新加载 / 退出”
+```
+
+释放旧 relay 绑定是为了让 reload 后的页面在 `snapshot` 时拿不到上一代的 `failed/transport_closed`，从而显示“正在启动”而不是一闪而过的失败页。
+
+### 4.2 启动失败 → 重试
+
+```text
+Renderer                 Main relay                    Host StartupCoordinator
+│ failed(attempt A, seq k) ◄──────────────────────────── prepare_storage 失败
+│ 点击 Retry
+│ control{retry, A} ─────►│ 转发 database-startup-control ►│ A 是当前尝试、failed、可重试、未运行
+│                         │                               │ 新 attempt B，seq k+1：starting
+│ starting(B) ◄───────────┤◄──────────────────────────────┤ prepare_storage …
+│ ready(B) ◄──────────────┤◄──────────────────────────────┤ install → ready(seq k+n)
+│                         │ ready(B) 首次 → issue endpoint ►│ capability（30 s，从此刻计）
+│ endpoint ◄──────────────┤◄──────────────────────────────┤
+│ WebSocket 握手 → [200] → 挂载 Root
+```
+
+### 4.3 流控
+
+```text
+Renderer 读慢 → TCP 缓冲满 → ws 写任务 send 挂起 → FlowGauge 积压 > 1 MiB
+  → watch 边沿 saturated → host-core serve 循环 → registry.connection_flow(ctx, saturated)
+  → agent scope（串行）→ 每个用过的 workspace：v4/connection/flow{connectionId, saturated}
+写任务追上 → 积压 ≤ 256 KiB → drained，同一路径；连接关闭 → closed（排在已入队的边沿之后）
+```
+
+## 5. 有意与 Node Host 不同之处
+
+| Node Host                                                                         | Rust Host                                                    | 理由                                                                                                |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Host 退出后不恢复，界面停在最后状态                                               | Main 有界自动重启，Renderer 显示断开/重启状态                | D2 已定为自动重启                                                                                   |
+| 本地 MessagePort 在 `init-local` 时一并交付                                       | endpoint 在每次尝试 ready 时签发                             | capability 30 s 过期；拉起时签发会让长迁移和延迟重试拿到过期凭据                                    |
+| 桌面 Renderer 不发 MessagePort 流控边带（`sendFlowState` 没有调用方），从不被暂停 | 按 WebSocket 发送积压发 `saturated` / `drained`              | 积压可以在 Host 侧直接观测；暂停后由 CLI 合并缓冲，避免 Host 无界堆积帧                             |
+| 启动失败后的 `retry` 由 Node `DatabaseStartupCoordinator` 处理                    | 同样语义，由 `host-core` 实现；`starting_services` 不会失败 | Rust 的服务安装是同步的，没有可失败的步骤；该阶段失败不可重试的规则照搬，便于今后出现可失败步骤时沿用 |
+
+## 6. 验收
+
+| 场景                                                                                       | 验证方式                                                                                  |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| 重启策略：退避序列、60 s 内第 4 次放弃、窗口外的退出不计入                                 | `packages/desktop/test/rustHostRestartPolicy.test.ts`（node:test）                        |
+| 启动重试：失败 → retry（错误 attemptId 被忽略）→ 新 attemptId、sequence 递增 → ready；snapshot 重发 | `crates/zcode-host/tests/startup_retry.rs`（真实二进制）                                  |
+| 启动重试真实 App：迁移失败页 → 等 30 s 以上 → 移除故障 → Retry → 进入主界面；Exit 退出 App | E2E `resilience-startup`                                                                  |
+| CLI 崩溃 → 懒重启：只杀本次隔离运行的 CLI，再发消息成功                                     | E2E `resilience-cli-crash`                                                                |
+| Renderer reload → 重新 attach，会话仍能流式                                                 | E2E `resilience-reload`                                                                   |
+| AskUserQuestion：模型提问，用户在界面作答，模型继续                                         | E2E `resilience-ask-user`                                                                 |
+| 图片附件经 attachmentBegin/Chunk/Commit 上传并被模型收到                                    | E2E `resilience-attachment`                                                               |
+| Rust Host 崩溃 → 自动重启 → App 再次可用                                                    | E2E `resilience-host-crash`                                                               |
+| 流控：积压超过高水位发 saturated、回落发 drained；scope 去重、补发、closed 之后不再发送     | `zcode-host` 的 `FlowGauge` 单元测试；`agent/flow.rs` 单元测试                            |
+| R2 性能：4 个 workspace 同时流式时控制 RPC p95 ≤ 20 ms                                      | `crates/zcode-host/tests/control_latency.rs`（真实 Host + 真实 CLI + mock 模型，无 UI）   |

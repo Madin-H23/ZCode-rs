@@ -57,6 +57,23 @@ pub struct CallContext {
     pub client_mode: ClientMode,
 }
 
+/// 接入层观测到的连接发送积压边沿（docs/specs/rust-host-resilience.md §2.3）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlowState {
+    Saturated,
+    Drained,
+}
+
+impl FlowState {
+    /// `v4/connection/flow` 的 `state` 取值。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FlowState::Saturated => "saturated",
+            FlowState::Drained => "drained",
+        }
+    }
+}
+
 pub trait ServiceChannel: Send + Sync {
     fn call(&self, context: &CallContext, method: &str, args: Vec<RpcValue>) -> CallFuture;
     fn listen(
@@ -67,6 +84,8 @@ pub trait ServiceChannel: Send + Sync {
     ) -> Result<EventStream, RpcError>;
     /// attachment 断开：按连接持有状态的 channel（如 V4 订阅归属）在这里清理。
     fn connection_closed(&self, _context: &CallContext) {}
+    /// 连接发送积压越过水位：按连接持有下游订阅的 channel（如 V4 连接 scope）在这里转发。
+    fn connection_flow(&self, _context: &CallContext, _state: FlowState) {}
 }
 
 pub struct ChannelRegistry {
@@ -120,6 +139,12 @@ impl ChannelRegistry {
     pub fn connection_closed(&self, context: &CallContext) {
         for channel in self.channels.values() {
             channel.connection_closed(context);
+        }
+    }
+
+    pub fn connection_flow(&self, context: &CallContext, state: FlowState) {
+        for channel in self.channels.values() {
+            channel.connection_flow(context, state);
         }
     }
 }

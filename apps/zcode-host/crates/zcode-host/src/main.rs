@@ -5,6 +5,7 @@
 //! - `127.0.0.1:<系统分配端口>`：Renderer 的 WebSocket 接入，凭一次性 capability 连接。
 //!
 //! 本文件是唯一读取 argv 与环境变量的地方。
+mod flow;
 mod ws;
 
 use std::net::Ipv4Addr;

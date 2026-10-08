@@ -15,6 +15,8 @@ use zcode_host_core::{AttachmentMeta, HostCore};
 use zcode_host_kit::log;
 use zcode_host_rpc::{FrameReader, frame};
 
+use crate::flow::FlowGauge;
+
 pub const RPC_SUBPROTOCOL: &str = "zcode-rpc.v1";
 const CAPABILITY_PREFIX: &str = "zcode-cap.";
 /// 单窗口只有少量 attachment；上限防止本机其他进程开大量空连接占资源。
@@ -155,10 +157,24 @@ async fn handle(stream: TcpStream, core: HostCore, policy: Arc<Policy>) {
     let (mut sink, mut source) = socket.split();
     let (to_core, inbound) = mpsc::unbounded_channel();
     let (outbound, mut from_core) = mpsc::unbounded_channel::<Vec<u8>>();
-    core.attach(meta, inbound, outbound);
+    let (gauge, flow) = FlowGauge::new();
+    let gauge = Arc::new(gauge);
+    core.attach_with_flow(meta, inbound, outbound, flow);
 
+    // core → 计数 → 写任务：计数任务只搬运消息，积压因此等于“已交出、未写进 socket”的字节数。
+    let (to_writer, mut writer_queue) = mpsc::unbounded_channel::<Vec<u8>>();
+    let counted = gauge.clone();
     tokio::spawn(async move {
         while let Some(message) = from_core.recv().await {
+            counted.queued(message.len());
+            if to_writer.send(message).is_err() {
+                return;
+            }
+        }
+    });
+    tokio::spawn(async move {
+        while let Some(message) = writer_queue.recv().await {
+            let size = message.len();
             if sink
                 .send(Message::Binary(frame(&message).into()))
                 .await
@@ -166,6 +182,7 @@ async fn handle(stream: TcpStream, core: HostCore, policy: Arc<Policy>) {
             {
                 break;
             }
+            gauge.written(size);
         }
         let _ = sink.close().await;
     });

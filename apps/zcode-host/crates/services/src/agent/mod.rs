@@ -2,6 +2,7 @@
 pub mod client;
 pub mod command;
 pub mod extensions;
+mod flow;
 pub mod process;
 pub mod runtime;
 pub mod service;

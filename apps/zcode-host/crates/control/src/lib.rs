@@ -13,6 +13,7 @@ use serde_json::Value;
 pub const INIT_LOCAL: &str = "init-local";
 pub const ISSUE_ATTACHMENT_ENDPOINT: &str = "issue-attachment-endpoint";
 pub const DISPOSE: &str = "dispose";
+pub const DATABASE_STARTUP_CONTROL: &str = "database-startup-control";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MainToHost {
@@ -24,6 +25,8 @@ pub enum MainToHost {
         error: String,
     },
     Dispose,
+    /// 启动失败页的控制（`databaseStartupControlSchema`），由 Main 的 relay 转发。
+    DatabaseStartupControl(DatabaseStartupControl),
     /// 本 crate 不解析的消息原样保留，由 [`ControlRouter`] 交给登记了该 `type` 的 service。
     Other {
         kind: String,
@@ -83,6 +86,27 @@ pub struct IssueAttachmentEndpoint {
     pub scope: AttachmentScope,
 }
 
+/// `databaseStartupControlSchema`（packages/shared/src/database-startup.ts），strict。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "action", rename_all = "camelCase", deny_unknown_fields)]
+pub enum DatabaseStartupControl {
+    // 空结构体变体：内部标签枚举的单元变体会忽略多余字段，结构体变体才受 deny_unknown_fields 约束。
+    Snapshot {},
+    Exit {},
+    #[serde(rename_all = "camelCase")]
+    Retry {
+        attempt_id: String,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatabaseStartupControlMessage {
+    #[serde(rename = "type")]
+    _kind: String,
+    control: DatabaseStartupControl,
+}
+
 pub fn parse_main_to_host(line: &str) -> Result<MainToHost> {
     let value: Value = serde_json::from_str(line).context("control line is not JSON")?;
     let kind = value
@@ -107,6 +131,11 @@ pub fn parse_main_to_host(line: &str) -> Result<MainToHost> {
             }
         }
         DISPOSE => MainToHost::Dispose,
+        DATABASE_STARTUP_CONTROL => MainToHost::DatabaseStartupControl(
+            serde_json::from_value::<DatabaseStartupControlMessage>(value)
+                .context("invalid database-startup-control")?
+                .control,
+        ),
         _ => MainToHost::Other {
             kind,
             message: value,
@@ -295,6 +324,33 @@ mod tests {
             message,
             MainToHost::InvalidIssueAttachmentEndpoint { request_id, .. } if request_id == "r1"
         ));
+    }
+
+    #[test]
+    fn parses_database_startup_control_strictly() {
+        assert_eq!(
+            parse_main_to_host(
+                r#"{"type":"database-startup-control","control":{"action":"retry","attemptId":"a1"}}"#
+            )
+            .unwrap(),
+            MainToHost::DatabaseStartupControl(DatabaseStartupControl::Retry {
+                attempt_id: "a1".into()
+            })
+        );
+        assert_eq!(
+            parse_main_to_host(
+                r#"{"type":"database-startup-control","control":{"action":"snapshot"}}"#
+            )
+            .unwrap(),
+            MainToHost::DatabaseStartupControl(DatabaseStartupControl::Snapshot {})
+        );
+        for invalid in [
+            r#"{"type":"database-startup-control","control":{"action":"retry"}}"#,
+            r#"{"type":"database-startup-control","control":{"action":"exit","x":1}}"#,
+            r#"{"type":"database-startup-control","control":{"action":"other"}}"#,
+        ] {
+            assert!(parse_main_to_host(invalid).is_err(), "{invalid}");
+        }
     }
 
     #[test]

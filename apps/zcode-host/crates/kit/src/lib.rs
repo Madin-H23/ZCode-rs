@@ -12,7 +12,7 @@ pub mod log;
 pub use args::Args;
 pub use builder::ServiceBuilder;
 pub use channel::{
-    CallContext, CallFuture, ChannelRegistry, EventStream, NOT_IMPLEMENTED_CODE, Reply,
+    CallContext, CallFuture, ChannelRegistry, EventStream, FlowState, NOT_IMPLEMENTED_CODE, Reply,
     ServiceChannel, StubChannel,
 };
 pub use events::{EventHub, replies};

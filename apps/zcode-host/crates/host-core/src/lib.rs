@@ -5,6 +5,7 @@
 //! Main 给的路径与环境构建；构建完成前建立的 attachment 先挂起，之后才发 `[200]`。
 pub mod attachments;
 mod server;
+mod startup;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,13 +14,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use zcode_host_control::{
-    AttachmentEndpointResult, AttachmentScope, ClientMode, ControlRouter, DatabaseStartupState,
+    AttachmentEndpointResult, AttachmentScope, ClientMode, ControlRouter, DatabaseStartupControl,
     False, HostToMain, InitLocal, MainToHost, True,
 };
-use zcode_host_kit::{CallContext, ChannelRegistry, contract, log};
+use zcode_host_kit::{CallContext, ChannelRegistry, FlowState, contract, log};
 use zcode_host_services::{HostEnvironment, Installed, ServiceContext};
 
 pub use attachments::{AttachmentMeta, AttachmentRegistry};
+use startup::StartupCoordinator;
 pub use zcode_host_control::ControlSink;
 
 /// capability 有效期（rust-host-r0.md §3）。
@@ -51,53 +53,8 @@ struct Inner {
     router: Mutex<ControlRouter>,
     installed: Mutex<Option<Arc<Installed>>>,
     initializing: AtomicBool,
-}
-
-/// 把启动进度作为 `DatabaseStartupState` 发给 Main；同一次启动的 sequence 严格递增。
-struct StartupReporter {
-    control: Arc<dyn ControlSink>,
-    startup_id: String,
-    attempt_id: String,
-    started_at: u64,
-    sequence: AtomicU64,
-}
-
-impl StartupReporter {
-    fn new(control: Arc<dyn ControlSink>, startup_id: String) -> Self {
-        Self {
-            control,
-            startup_id,
-            attempt_id: random_hex(16),
-            started_at: now_ms(),
-            sequence: AtomicU64::new(0),
-        }
-    }
-
-    fn state(&self, phase: &'static str) -> DatabaseStartupState {
-        DatabaseStartupState::new(
-            self.startup_id.clone(),
-            self.attempt_id.clone(),
-            self.sequence.fetch_add(1, Ordering::SeqCst),
-            self.started_at,
-            now_ms(),
-            phase,
-        )
-    }
-
-    fn send(&self, phase: &'static str, database_phase: Option<&'static str>) {
-        let mut state = self.state(phase);
-        state.database_phase = database_phase;
-        self.control
-            .send(HostToMain::DatabaseStartupState { state });
-    }
-
-    fn fail(&self, failed_phase: &'static str, error_code: &'static str) {
-        let mut state = self.state("failed");
-        state.failed_phase = Some(failed_phase);
-        state.error_code = Some(error_code);
-        self.control
-            .send(HostToMain::DatabaseStartupState { state });
-    }
+    /// `init-local` 与启动状态的所有者；失败后的 retry 用同一份 `init-local` 重新执行。
+    startup: Mutex<Option<(InitLocal, Arc<StartupCoordinator>)>>,
 }
 
 impl HostCore {
@@ -112,6 +69,7 @@ impl HostCore {
                 router: Mutex::new(ControlRouter::default()),
                 installed: Mutex::new(None),
                 initializing: AtomicBool::new(false),
+                startup: Mutex::new(None),
             }),
         }
     }
@@ -152,6 +110,7 @@ impl HostCore {
                     });
             }
             MainToHost::Dispose => return ControlOutcome::Shutdown,
+            MainToHost::DatabaseStartupControl(control) => self.on_startup_control(control),
             MainToHost::Other { kind, message } => {
                 if !self.lock_router().dispatch(&kind, message) {
                     log::debug(format!(
@@ -178,14 +137,48 @@ impl HostCore {
 
     /// InitLocal 之后的启动顺序（docs/specs/rust-host-r2.md §5.1）：
     /// starting → preparing_host_storage（tasks-index 迁移）→ starting_services → ready。
-    /// 迁移失败报 failed 并停在这里：已建立的 attachment 继续挂起，Renderer 显示启动失败页。
+    /// 迁移失败报 failed 并停在这里：已建立的 attachment 继续挂起，Renderer 显示启动失败页，
+    /// 用户点 Retry 后由 [`Self::on_startup_control`] 重新执行（rust-host-resilience.md §2.2）。
     async fn initialize(&self, init: InitLocal) {
         let startup_id = init
             .database_startup_id
             .clone()
             .filter(|id| !id.trim().is_empty())
             .unwrap_or_else(|| "rust-host".to_owned());
-        let reporter = Arc::new(StartupReporter::new(self.inner.control.clone(), startup_id));
+        let coordinator = Arc::new(StartupCoordinator::begin(
+            self.inner.control.clone(),
+            startup_id,
+        ));
+        *self.lock_startup() = Some((init, coordinator));
+        self.run_startup().await;
+    }
+
+    fn on_startup_control(&self, control: DatabaseStartupControl) {
+        let Some((_, coordinator)) = self.lock_startup().clone() else {
+            // init-local 之前没有启动状态；Main 自己持有最新镜像。
+            return;
+        };
+        match control {
+            DatabaseStartupControl::Snapshot {} => coordinator.republish(),
+            DatabaseStartupControl::Retry { attempt_id } => {
+                if coordinator.try_retry(&attempt_id) {
+                    log::info("database startup retry accepted");
+                    let core = self.clone();
+                    tokio::spawn(async move { core.run_startup().await });
+                } else {
+                    log::debug("database startup retry ignored");
+                }
+            }
+            // 退出 App 由 Main 处理。
+            DatabaseStartupControl::Exit {} => {}
+        }
+    }
+
+    /// 执行一次启动尝试；调用方保证同一时间只有一个尝试在运行。
+    async fn run_startup(&self) {
+        let Some((init, reporter)) = self.lock_startup().clone() else {
+            return;
+        };
         reporter.send("starting", None);
         let progress = reporter.clone();
         let storage = match zcode_host_services::prepare_storage(
@@ -219,6 +212,15 @@ impl HostCore {
         reporter.send("ready", None);
         self.inner.registry.send_replace(Some(Arc::new(registry)));
         log::info("init-local received; services installed");
+    }
+
+    fn lock_startup(
+        &self,
+    ) -> std::sync::MutexGuard<'_, Option<(InitLocal, Arc<StartupCoordinator>)>> {
+        self.inner
+            .startup
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn lock_router(&self) -> std::sync::MutexGuard<'_, ControlRouter> {
@@ -257,6 +259,20 @@ impl HostCore {
         inbound: mpsc::UnboundedReceiver<Vec<u8>>,
         outbound: mpsc::UnboundedSender<Vec<u8>>,
     ) -> JoinHandle<()> {
+        // 不观测背压的接入方：流控状态恒为 drained。
+        let (_flow, flow_rx) = watch::channel(FlowState::Drained);
+        self.attach_with_flow(meta, inbound, outbound, flow_rx)
+    }
+
+    /// 同 [`Self::attach`]，并把接入层观测到的发送积压边沿（`saturated` / `drained`）交给
+    /// 按连接持有状态的 channel（rust-host-resilience.md §2.3）。
+    pub fn attach_with_flow(
+        &self,
+        meta: AttachmentMeta,
+        inbound: mpsc::UnboundedReceiver<Vec<u8>>,
+        outbound: mpsc::UnboundedSender<Vec<u8>>,
+        flow: watch::Receiver<FlowState>,
+    ) -> JoinHandle<()> {
         static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
         let context = CallContext {
             connection: NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed),
@@ -268,6 +284,7 @@ impl HostCore {
             self.inner.registry.subscribe(),
             inbound,
             outbound,
+            flow,
         ))
     }
 }
