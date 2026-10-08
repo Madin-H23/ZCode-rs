@@ -7,6 +7,7 @@ pub mod archive;
 pub mod cli_config;
 pub mod commands;
 pub mod fsx;
+pub mod hooks;
 pub mod json;
 pub mod mcp_sync;
 pub mod memory;

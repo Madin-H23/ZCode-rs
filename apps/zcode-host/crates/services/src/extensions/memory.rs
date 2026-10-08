@@ -209,7 +209,7 @@ impl MemoryService {
                         "path": path,
                         "kind": if index { "index" } else { "item" },
                         "size": meta.len(),
-                        "updatedAt": updated_at,
+                        "updatedAt": super::json::number(updated_at),
                     }),
                 ));
             }
@@ -232,7 +232,7 @@ impl MemoryService {
                 json!({
                     "id": project.name,
                     "label": workspace_label(&project.name),
-                    "updatedAt": updated_at,
+                    "updatedAt": super::json::number(updated_at),
                     "files": files.into_iter().map(|file| file.3).collect::<Vec<_>>(),
                 }),
             ));
@@ -378,7 +378,7 @@ impl MemoryService {
         }
         Ok(json!({
             "content": String::from_utf8_lossy(&content),
-            "updatedAt": mtime_ns(&last) as f64 / 1_000_000.0,
+            "updatedAt": super::json::number(mtime_ns(&last) as f64 / 1_000_000.0),
         }))
     }
 }

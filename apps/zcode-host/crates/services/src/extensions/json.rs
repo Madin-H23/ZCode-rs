@@ -147,6 +147,15 @@ pub fn pretty_line(value: &Value) -> String {
     out
 }
 
+/// JS number → JSON 值：安全整数写成整数（否则 serde 会输出 `5000.0`），其余为浮点。
+pub fn number(value: f64) -> Value {
+    const SAFE: f64 = 9_007_199_254_740_991.0;
+    if value.fract() == 0.0 && value.abs() <= SAFE {
+        return Value::Number(serde_json::Number::from(value as i64));
+    }
+    serde_json::Number::from_f64(value).map_or(Value::Null, Value::Number)
+}
+
 pub fn is_record(value: &Value) -> bool {
     value.is_object()
 }
