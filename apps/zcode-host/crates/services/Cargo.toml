@@ -32,6 +32,7 @@ tokio.workspace = true
 toml.workspace = true
 url.workspace = true
 yaml-rust2.workspace = true
+zip.workspace = true
 zcode-cli-domain.workspace = true
 zcode-host-control.workspace = true
 zcode-host-kit.workspace = true

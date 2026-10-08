@@ -58,6 +58,8 @@ tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.28"
 toml = "1"
 yaml-rust2 = "0.10"
+# 反馈诊断日志归档（Node yazl）：只启用 deflate。
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 windows-sys = { version = "0.61", features = [
   "Wdk_System_SystemServices",
   "Win32_Foundation",

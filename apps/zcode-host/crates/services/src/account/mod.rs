@@ -18,6 +18,7 @@ pub mod oauth_adapters;
 pub mod oauth_repo;
 pub mod official_mcp;
 pub mod onboarding;
+pub mod privacy;
 pub mod usage;
 #[cfg(test)]
 pub(crate) mod oauth_tests;
