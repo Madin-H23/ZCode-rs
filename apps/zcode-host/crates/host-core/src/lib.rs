@@ -13,8 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use zcode_host_control::{
-    AttachmentEndpointResult, AttachmentScope, ClientMode, ControlRouter, DatabaseStartupState,
-    False, HostToMain, InitLocal, MainToHost, True,
+    AttachmentEndpointResult, AttachmentScope, ControlRouter, DatabaseStartupState, False,
+    HostToMain, InitLocal, MainToHost, True,
 };
 use zcode_host_kit::{CallContext, ChannelRegistry, contract, log};
 use zcode_host_services::{HostEnvironment, Installed, ServiceContext};
