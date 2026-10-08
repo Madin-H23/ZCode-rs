@@ -92,6 +92,100 @@ impl ServiceChannel for ForwardChannel {
     }
 }
 
+/// 远端 attachment 上的 `usage-stats`（remoteWorkspaceServiceCollection.ts 的 createUsageStatsService）：
+/// App 用量统计读远端 Agent 数据库（`zcode-agent.getAppUsageStats`），其余（套餐额度等）用本机账号。
+pub struct RemoteUsageStatsChannel {
+    local: Arc<dyn ServiceChannel>,
+    client: RpcClient,
+}
+
+impl RemoteUsageStatsChannel {
+    pub fn new(local: Arc<dyn ServiceChannel>, client: RpcClient) -> Arc<Self> {
+        Arc::new(Self { local, client })
+    }
+}
+
+impl ServiceChannel for RemoteUsageStatsChannel {
+    fn call(&self, context: &CallContext, method: &str, args: Vec<RpcValue>) -> CallFuture {
+        if method != "getAppUsageSnapshot" {
+            return self.local.call(context, method, args);
+        }
+        let request = args
+            .into_iter()
+            .next()
+            .map(RpcValue::into_json)
+            .unwrap_or(serde_json::Value::Null);
+        // `{range: request.range, timeZone: request.timeZone}`：缺省字段不出现在 JSON 里。
+        let mut params = serde_json::Map::new();
+        for key in ["range", "timeZone"] {
+            if let Some(value) = request.get(key).filter(|value| !value.is_null()) {
+                params.insert(key.to_owned(), value.clone());
+            }
+        }
+        let call = self.client.call_encoded(
+            "zcode-agent",
+            "getAppUsageStats",
+            vec![RpcValue::Json(serde_json::Value::Object(params))],
+        );
+        Box::pin(async move { call.await.map(Reply::Encoded) })
+    }
+
+    fn listen(
+        &self,
+        context: &CallContext,
+        event: &str,
+        arg: RpcValue,
+    ) -> Result<EventStream, RpcError> {
+        self.local.listen(context, event, arg)
+    }
+
+    fn connection_closed(&self, context: &CallContext) {
+        self.local.connection_closed(context);
+    }
+}
+
+/// 远端 attachment 上的 `conversation-share`：Node 为远端集合构造的 ConversationShareService 没有
+/// session 服务，导入以 `feature_disabled`（`Conversation share import is unavailable`）拒绝；能力发现、
+/// 预览、续接与已导入副本走本机实现。replayable 连接仍由本机实现先按 desktop-only 拒绝。
+pub struct RemoteConversationShareChannel {
+    local: Arc<dyn ServiceChannel>,
+}
+
+impl RemoteConversationShareChannel {
+    pub fn new(local: Arc<dyn ServiceChannel>) -> Arc<Self> {
+        Arc::new(Self { local })
+    }
+}
+
+impl ServiceChannel for RemoteConversationShareChannel {
+    fn call(&self, context: &CallContext, method: &str, args: Vec<RpcValue>) -> CallFuture {
+        if method == "importShare"
+            && context.client_mode == zcode_host_control::ClientMode::DesktopContinuous
+        {
+            let error = crate::conversation_share::errors::ServiceError::new(
+                "feature_disabled",
+                "Conversation share import is unavailable",
+            )
+            .to_rpc();
+            return Box::pin(async move { Err(error) });
+        }
+        self.local.call(context, method, args)
+    }
+
+    fn listen(
+        &self,
+        context: &CallContext,
+        event: &str,
+        arg: RpcValue,
+    ) -> Result<EventStream, RpcError> {
+        self.local.listen(context, event, arg)
+    }
+
+    fn connection_closed(&self, context: &CallContext) {
+        self.local.connection_closed(context);
+    }
+}
+
 /// 组装一条远端 attachment 的 channel 表：先转发与本地 channel，再由调用方覆盖包装过的 channel。
 pub fn base_registry(client: &RpcClient, local: &ChannelRegistry) -> ChannelRegistry {
     let mut registry = ChannelRegistry::empty();
@@ -102,6 +196,18 @@ pub fn base_registry(client: &RpcClient, local: &ChannelRegistry) -> ChannelRegi
         if let Some(local) = local.get(channel) {
             registry.register(*channel, local);
         }
+    }
+    if let Some(usage) = local.get("usage-stats") {
+        registry.register(
+            "usage-stats",
+            RemoteUsageStatsChannel::new(usage, client.clone()),
+        );
+    }
+    if let Some(share) = local.get("conversation-share") {
+        registry.register(
+            "conversation-share",
+            RemoteConversationShareChannel::new(share),
+        );
     }
     registry
 }

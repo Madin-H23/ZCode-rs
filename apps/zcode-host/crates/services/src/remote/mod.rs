@@ -97,6 +97,8 @@ pub struct RemoteWorkspaces {
     provisioning: ProvisioningSource,
     media_range_enabled: bool,
     leases: Mutex<Vec<Lease>>,
+    /// Host 生命周期内的后台任务（Provisioning 触发监听），退出时结束。
+    background: Mutex<Vec<AbortHandle>>,
     /// requestId → 连接日志是否仍在上报（连接 settle 后停止，同 `remoteConnectionProgressContext`）。
     progress: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
@@ -189,6 +191,7 @@ impl RemoteWorkspaces {
                 provisioning: config.provisioning,
                 media_range_enabled: config.media_range_enabled,
                 leases: Mutex::new(Vec::new()),
+                background: Mutex::new(Vec::new()),
                 progress,
             }
         })
@@ -592,8 +595,17 @@ impl RemoteWorkspaces {
         })
     }
 
+    fn lock_background(&self) -> std::sync::MutexGuard<'_, Vec<AbortHandle>> {
+        self.background
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Host 退出：关闭全部远端 attachment，释放全部连接。
     pub async fn shutdown(&self) {
+        for task in self.lock_background().drain(..) {
+            task.abort();
+        }
         self.close_leases(|_| true);
         self.registry.dispose().await;
     }
@@ -680,10 +692,15 @@ async fn connect_handle(
         })
         .await?;
     let connection = Arc::new(connection);
-    let background = vec![runtime_preferences_bridge(
+    let mut background = vec![runtime_preferences_bridge(
         connection.client.clone(),
         settings,
     )];
+    background.extend(resource_telemetry(
+        &connection.client,
+        &control,
+        telemetry_environment_key(&request.target),
+    ));
     // 运行中任务数（WSL 释放屏障）回到窗口 registry。
     let tracker = tasks::TaskTracker::new(
         connection.client.clone(),
@@ -711,7 +728,7 @@ async fn connect_handle(
 /// （`out/host/remoteConnector.js`）给出；缺任一项时建连明确失败。
 pub fn install(
     context: &crate::ServiceContext,
-    settings: SettingStore,
+    sources: provisioning::ProvisioningSources,
     controller: &Arc<crate::tasks::controller::Controller>,
     router: &mut ControlRouter,
 ) -> Arc<RemoteWorkspaces> {
@@ -744,19 +761,11 @@ pub fn install(
     let remote = install_with(
         RemoteConfig {
             transport,
-            settings,
+            settings: sources.settings.clone(),
             control: context.control.clone(),
             provisioning: ProvisioningSource {
                 personal_config_file: environment.app_config_dir().join("provider_config.json"),
-                credential_file: environment.app_config_dir().join("credentials.json"),
-                cipher: provisioning::CredentialCipher::new(
-                    environment
-                        .vars
-                        .get("ZCODE_CREDENTIAL_SECRET")
-                        .map(String::as_str),
-                    &environment.user_home,
-                    None,
-                ),
+                credentials: sources.credentials.clone(),
             },
             media_range_enabled: non_empty("ZCODE_REMOTE_MEDIA_RANGE_PREVIEW_ENABLED").as_deref()
                 != Some("0"),
@@ -765,6 +774,10 @@ pub fn install(
         router,
     );
     remote.sources.attach_to(controller);
+    remote.lock_background().extend(provisioning::watch_sources(
+        &sources,
+        context.control.clone(),
+    ));
     remote
 }
 
@@ -773,6 +786,66 @@ pub fn install_with(config: RemoteConfig, router: &mut ControlRouter) -> Arc<Rem
     let remote = RemoteWorkspaces::new(config);
     remote.register_control(router);
     remote
+}
+
+/// 资源分组用的环境身份（`resolveResourceTelemetryEnvironmentKey`）：sha256(buildRemoteEnvironmentKey)。
+fn telemetry_environment_key(target: &RemoteTarget) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(target.environment_key().as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// 远端 CLI / MCP 的资源事实转给 Main（`registerHostServiceResourceTelemetry`，runtimeSurface
+/// 为 remote）：远端 stdio server 以 trusted-host-relay 角色提供这些事件，Host 只透传。
+fn resource_telemetry(
+    client: &zcode_host_rpc::RpcClient,
+    control: &Arc<dyn ControlSink>,
+    environment_key: String,
+) -> Vec<AbortHandle> {
+    // (远端事件, Main 消息类型, 载荷字段, 是否带 environmentKey)
+    const EVENTS: [(&str, &str, &str, bool); 4] = [
+        (
+            "onDynamicProcessResourceSample",
+            "agent-resource-sample",
+            "sample",
+            true,
+        ),
+        ("onDynamicMcpTelemetry", "mcp-telemetry", "event", false),
+        (
+            "onDynamicMcpResourceSamples",
+            "mcp-resource-samples",
+            "samples",
+            true,
+        ),
+        (
+            "onDynamicToolExecResource",
+            "tool-exec-resource",
+            "sample",
+            false,
+        ),
+    ];
+    EVENTS
+        .iter()
+        .map(|(event, kind, field, with_environment)| {
+            let mut events = client.listen("zcode-agent", event, RpcValue::Undefined);
+            let (control, environment_key) = (control.clone(), environment_key.clone());
+            tokio::spawn(async move {
+                while let Some(payload) = events.next().await {
+                    let mut message = Map::new();
+                    message.insert("type".into(), json!(kind));
+                    message.insert("runtimeSurface".into(), json!("remote"));
+                    if *with_environment {
+                        message.insert("environmentKey".into(), json!(environment_key));
+                    }
+                    message.insert((*field).into(), payload.into_json());
+                    control.send(raw(Value::Object(message)));
+                }
+            })
+            .abort_handle()
+        })
+        .collect()
 }
 
 /// 远端 Agent 的 app-global 偏好仍以本机设置为权威（`runtimePreferencesBridge`）。

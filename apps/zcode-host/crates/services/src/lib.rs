@@ -356,7 +356,16 @@ pub fn install(
         ),
     );
     // ── remote ──
-    let remote = remote::install(&context, settings.clone(), &controller, router);
+    let remote = remote::install(
+        &context,
+        remote::provisioning::ProvisioningSources {
+            settings: settings.clone(),
+            credentials: account.credentials.clone(),
+            providers: providers.clone(),
+        },
+        &controller,
+        router,
+    );
 
     agent::session::warm_up(
         agent.clone(),

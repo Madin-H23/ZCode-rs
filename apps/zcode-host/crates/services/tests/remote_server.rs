@@ -13,7 +13,8 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use zcode_host_control::{ClientMode, ControlRouter, ControlSink, HostToMain};
 use zcode_host_kit::{CallContext, ChannelRegistry, Reply, RpcValue};
-use zcode_host_services::remote::provisioning::{CredentialCipher, ProvisioningSource};
+use zcode_host_services::account::credential::CredentialStore;
+use zcode_host_services::remote::provisioning::ProvisioningSource;
 use zcode_host_services::remote::transport::ProcessTransport;
 use zcode_host_services::remote::{RemoteConfig, RemoteScope, install_with};
 use zcode_host_services::settings::SettingStore;
@@ -162,8 +163,7 @@ async fn remote_workspace_against_a_real_zcode_server() {
             control: Arc::new(Control(sink)),
             provisioning: ProvisioningSource {
                 personal_config_file: local_home.join(".zcode/v2/provider_config.json"),
-                credential_file: local_home.join(".zcode/v2/credentials.json"),
-                cipher: CredentialCipher::new(Some("test-secret"), &local_home, None),
+                credentials: CredentialStore::new(&local_home.join(".zcode/v2"), "test-secret"),
             },
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),
