@@ -26,6 +26,7 @@ use zcode_host_kit::{
     ServiceChannel, log, replies,
 };
 
+use super::extensions::UseReason;
 use super::runtime::{
     AgentProcess, AgentRuntime, Frame, FrameKind, RUNTIME_UNAVAILABLE_CODE, RuntimePolicy,
     WorkspaceTarget,
@@ -490,6 +491,11 @@ impl Scope {
     ) -> Result<Reply, RpcError> {
         let process = self.runtime.get_client(target, policy).await?;
         self.touch(target);
+        if kind == FrameKind::Conversation {
+            self.runtime
+                .before_use(&process, UseReason::ConversationSubscribe)
+                .await?;
+        }
         let mut cli = Map::new();
         cli.insert("topic".into(), json!(topic));
         cli.extend(self.connection_fields(kind == FrameKind::Conversation));
@@ -624,6 +630,11 @@ impl Scope {
         }
         let process = self.runtime.get_ready_client(&target).await?;
         self.touch(&target);
+        if envelope["type"] == "createSession" {
+            self.runtime
+                .before_use(&process, UseReason::CreateSession)
+                .await?;
+        }
         let payload = &envelope["payload"];
         let plan_enabled = payload["planEnabled"] == json!(true)
             || payload["config"]["planEnabled"] == json!(true)

@@ -30,6 +30,7 @@ use zcode_host_kit::{EventHub, RpcError, log};
 
 use super::client::{ClientError, ClientHandler, Notification, ProtocolClient, ReverseRequest};
 use super::command::{self, AgentCommand};
+use super::extensions::{Extensions, ReverseContext, ReverseReply, UseReason};
 use super::process::{self, StderrTail};
 use crate::providers::ProviderRuntime;
 use crate::settings::SettingStore;
@@ -314,6 +315,7 @@ struct RuntimeInner {
     app_preferences: Mutex<Option<Value>>,
     monitors: Mutex<Vec<JoinHandle<()>>>,
     disposed: AtomicBool,
+    extensions: Arc<Extensions>,
 }
 
 #[derive(Clone)]
@@ -346,8 +348,26 @@ impl AgentRuntime {
                 app_preferences: Mutex::new(None),
                 monitors: Mutex::new(Vec::new()),
                 disposed: AtomicBool::new(false),
+                extensions: Arc::new(Extensions::default()),
             }),
         }
+    }
+
+    /// 其他服务登记反向请求处理器、spawn 环境与使用前钩子的入口。
+    pub fn extensions(&self) -> &Arc<Extensions> {
+        &self.inner.extensions
+    }
+
+    /// 依次执行使用前钩子（例如同步 Account Config）；任一失败则本次使用失败。
+    pub async fn before_use(
+        &self,
+        process: &Arc<AgentProcess>,
+        reason: UseReason,
+    ) -> Result<(), RpcError> {
+        for hook in self.inner.extensions.use_hooks() {
+            hook(process.clone(), reason).await?;
+        }
+        Ok(())
     }
 
     pub fn lifecycle(&self) -> EventHub<Value> {
@@ -474,6 +494,9 @@ impl AgentRuntime {
         env.insert("ZCODE_RUNTIME_ENV".into(), runtime_env);
         let settings = self.inner.settings.get().await;
         env.extend(network_env(&settings));
+        for contributor in self.inner.extensions.env_contributors() {
+            env.extend(contributor(target.clone()).await);
+        }
         if let Some(builtin) = self.inner.providers.builtin_file() {
             env.insert(
                 "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE".into(),
@@ -535,6 +558,8 @@ impl AgentRuntime {
         let tail = process::drain_stderr(spawned.stderr, label.clone());
         let handler = Arc::new(Handler {
             key: key.clone(),
+            target: target.clone(),
+            extensions: self.inner.extensions.clone(),
             generation,
             settings: self.inner.settings.clone(),
             frames: self.inner.frames.clone(),
@@ -776,6 +801,8 @@ async fn monitor(
 
 struct Handler {
     key: String,
+    target: WorkspaceTarget,
+    extensions: Arc<Extensions>,
     generation: u64,
     settings: SettingStore,
     frames: EventHub<Arc<Frame>>,
@@ -807,6 +834,25 @@ impl ClientHandler for Handler {
             .as_deref()
             .and_then(|raw| serde_json::from_str(raw.get()).ok())
             .unwrap_or(Value::Null);
+        if let Some(handler) = self.extensions.reverse(&request.method) {
+            let context = ReverseContext {
+                target: self.target.clone(),
+                workspace_key: self.key.clone(),
+                generation: self.generation,
+                method: request.method.clone(),
+                params,
+            };
+            tokio::spawn(async move {
+                match handler(context).await {
+                    ReverseReply::Result(result) => client.respond(&request.id, &result).await,
+                    ReverseReply::Error { code, message } => {
+                        client.respond_error(&request.id, code, &message).await
+                    }
+                    ReverseReply::Hold => {}
+                }
+            });
+            return;
+        }
         let reply = match request.method.as_str() {
             "session/requestRuntimePreferences" => {
                 let settings = self.settings.clone();

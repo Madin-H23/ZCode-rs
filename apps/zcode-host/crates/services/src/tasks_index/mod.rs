@@ -155,7 +155,8 @@ impl TasksIndex {
         &self.inner.path
     }
 
-    async fn call<T, F>(&self, operation: F) -> anyhow::Result<T>
+    /// 在 tasks-index 线程上执行一次操作（第二个参数是当前时间 ms）；同目录的其他仓库模块共用它。
+    pub(crate) async fn call<T, F>(&self, operation: F) -> anyhow::Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection, i64) -> anyhow::Result<T> + Send + 'static,

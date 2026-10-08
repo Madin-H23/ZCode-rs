@@ -9,6 +9,7 @@
 use serde_json::{Map, Value, json};
 use zcode_host_kit::{Reply, RpcError, ServiceBuilder, log};
 
+use super::extensions::UseReason;
 use super::runtime::{AgentRuntime, RuntimePolicy, WorkspaceTarget};
 
 pub const CHANNEL: &str = "zcode-session";
@@ -26,6 +27,9 @@ pub async fn read_workspace_presentation(
         attempt += 1;
         let process = runtime
             .get_client(target, RuntimePolicy::StartIfNeeded)
+            .await?;
+        runtime
+            .before_use(&process, UseReason::ReadPresentation)
             .await?;
         let mut params = Map::new();
         params.insert("workspace".into(), target.workspace_ref());

@@ -1,44 +1,63 @@
-// e2e-desktop.mjs 的界面流程：发送一条消息，等 mock 模型的回复流式出现在对话里。
+// 核心场景：聊天、侧栏与 tasks-index、权限、文件改动、Stop、切换模型、终端、Git，最后冷启动。
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 
-async function composer(page) {
-  const candidates = [
-    page.locator('textarea[placeholder*="Ask ZCode"]'),
-    page.locator('[contenteditable="true"]'),
-  ];
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    for (const candidate of candidates) {
-      const first = candidate.first();
-      if (await first.isVisible().catch(() => false)) return first;
-    }
-    await page.waitForTimeout(500);
-  }
-  throw new Error("composer not found");
+import {
+  composer,
+  readTaskRows,
+  sendMessage,
+  sseChunk,
+  sseText,
+  sseToolCall,
+} from "../helpers.mjs";
+
+export const MOCK_REPLY = "Hello from the Rust Host mock model";
+export const WRITTEN_REPLY = "The mock model wrote the file";
+
+/** 按最后一条用户消息选择 mock 回答；带 tools 的主对话请求才会走工具场景。 */
+export const mockRules = [
+  {
+    name: "tool-result",
+    match: ({ hasTools, messages }) => hasTools && messages.at(-1)?.role === "tool",
+    respond: ({ response }) => response.end(sseText(WRITTEN_REPLY)),
+  },
+  {
+    name: "write-file",
+    match: ({ hasTools, text }) => hasTools && text.includes("write file"),
+    respond: ({ response, workspace }) =>
+      response.end(
+        sseToolCall("Write", { file_path: join(workspace, "hello.txt"), content: "hi from e2e\n" }),
+      ),
+  },
+  {
+    name: "long-task",
+    match: ({ hasTools, text }) => hasTools && text.includes("long task"),
+    respond: async ({ response, sleep }) => {
+      response.write(sseChunk({ role: "assistant", content: "Working" }, null));
+      for (let index = 0; index < 300 && !response.destroyed; index += 1) {
+        await sleep(200);
+        response.write(sseChunk({ content: "." }, null));
+      }
+      response.end(sseChunk({}, "stop") + "data: [DONE]\n\n");
+    },
+  },
+  {
+    name: "default",
+    match: () => true,
+    respond: ({ response }) => response.end(sseText(MOCK_REPLY)),
+  },
+];
+
+export async function run(context) {
+  await chatFlow(context);
+  // 冷启动：同一份隔离 profile 重启，任务列表必须从已存在的 tasks-index 读出。
+  const page = await context.relaunch();
+  await verifyColdRestart({ page, shots: context.shots });
 }
 
-/** 只读打开隔离 HOME 里的 tasks-index.sqlite（WAL 下读者不阻塞 Host 的写入）。 */
-function readTaskRows(home) {
-  const database = new DatabaseSync(join(home, ".zcode", "v2", "tasks-index.sqlite"), {
-    readOnly: true,
-  });
-  try {
-    return database.prepare("SELECT task_id, title, workspace_path, deleted FROM tasks").all();
-  } finally {
-    database.close();
-  }
-}
-
-export async function runCoreFlow({
-  page,
-  shots,
-  model,
-  workspace,
-  home,
-  mockReply,
-  writtenReply,
-}) {
+async function chatFlow({ page, shots, model, workspace, home }) {
+  const mockReply = MOCK_REPLY;
+  const writtenReply = WRITTEN_REPLY;
   const input = await composer(page);
   await page.screenshot({ path: join(shots, "01-ready.png") });
   await input.click();
@@ -70,7 +89,7 @@ export async function runCoreFlow({
   console.info("[e2e] new task listed in the sidebar and persisted in tasks-index");
 
   // 权限：Write 需要批准；默认选中 Allow，确认后工具执行，模型收到工具结果再回复。
-  await sendFollowUp(page, "please write file hello.txt");
+  await sendMessage(page, "please write file hello.txt");
   await page.getByText("Permission required").first().waitFor({ timeout: 60_000 });
   await page.screenshot({ path: join(shots, "03-permission.png") });
   await page.getByRole("button", { name: "Confirm" }).click();
@@ -91,7 +110,7 @@ export async function runCoreFlow({
   await page.keyboard.press("Escape");
 
   // Stop：慢速流进行中点停止，发送按钮恢复。
-  await sendFollowUp(page, "run a long task");
+  await sendMessage(page, "run a long task");
   const stop = page.locator('button[aria-label="Stop"]').first();
   await stop.waitFor({ state: "visible", timeout: 30_000 });
   await page.waitForTimeout(1500);
@@ -115,7 +134,7 @@ export async function runCoreFlow({
   await page.getByText("mock-model-2", { exact: true }).last().click();
   await page.keyboard.press("Escape");
   const before = model.requests.length;
-  await sendFollowUp(page, "say hello again");
+  await sendMessage(page, "say hello again");
   await page.getByText(mockReply).nth(1).waitFor({ state: "visible", timeout: 60_000 });
   const used = model.requests
     .slice(before)
@@ -158,15 +177,8 @@ export async function runCoreFlow({
   console.info("[e2e] git review lists workspace changes");
 }
 
-async function sendFollowUp(page, text) {
-  const input = await composer(page);
-  await input.click();
-  await page.keyboard.type(text);
-  await page.keyboard.press("Enter");
-}
-
 /** 冷启动后：侧栏仍列出上一轮创建的任务（来自 tasks-index，而非内存）。 */
-export async function verifyColdRestart({ page, shots }) {
+async function verifyColdRestart({ page, shots }) {
   try {
     // trial click 会做命中测试：启动遮罩还盖着时不算通过（仅 visible 会被遮罩下的 DOM 骗过）。
     await page

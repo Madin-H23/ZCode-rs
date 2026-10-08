@@ -1,14 +1,21 @@
 #!/usr/bin/env node
-// Rust Host 的桌面端到端验证（docs/specs/rust-host-r2.md 第 5 节）。
+// Rust Host 的桌面端到端验证（docs/specs/rust-host-r2.md 第 6 节）。
 //
-// 启动一个与开发者环境完全隔离的 Electron 实例：Main 起 Rust Host，Agent 用 Rust CLI，
-// 模型是本地 mock 的 OpenAI 兼容端点；经 CDP（私有端口）驱动界面走一遍核心聊天流程。
-// 不使用固定的 Vite 5174 / CDP 9229 端口，不读写 ~/.zcode。
+// 每个场景启动一个与开发者环境完全隔离的 Electron 实例：Main 起 Rust Host，Agent 用 Rust CLI，
+// 模型是本地 mock 的 OpenAI 兼容端点；经 CDP（私有端口）驱动界面。
+// 不使用固定的 Vite 5174 / CDP 9229 端口，不读写 ~/.zcode，遥测端点置空。
 //
-// 用法：node scripts/rust-host/e2e-desktop.mjs [--skip-build] [--keep] [--explore]
+// 用法：node scripts/rust-host/e2e-desktop.mjs [--scenario <name>]... [--skip-build] [--keep] [--explore]
+//   --scenario    要运行的场景（scripts/rust-host/e2e/scenarios/<name>.mjs），可重复；默认 core
 //   --skip-build  复用已有的 out/ 与 Rust 构建
 //   --keep        结束后保留临时目录（截图、日志都在里面）
 //   --explore     只启动并每隔几秒截图，便于查看界面
+// 环境变量 ZCODE_E2E_CLI_RUST_BINARY 可指定 Rust CLI 可执行文件（默认用本仓库的 release 构建）。
+//
+// 场景模块导出：
+//   run(context)           必需；context = { page, shots, model, workspace, home, temp, relaunch }
+//   mockRules              可选；按顺序匹配的 mock 模型规则 { name, match(request), respond(request) }
+//   seed(context)          可选；在启动 App 之前补充隔离 profile（context = { home, workspace, temp }）
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
@@ -21,18 +28,19 @@ import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 
+import { lastUserText } from "./e2e/helpers.mjs";
+
 const root = resolve(import.meta.dirname, "../..");
 const desktop = join(root, "packages/desktop");
 const require = createRequire(join(desktop, "package.json"));
 const { values: options } = parseArgs({
   options: {
+    scenario: { type: "string", multiple: true },
     "skip-build": { type: "boolean" },
     keep: { type: "boolean" },
     explore: { type: "boolean" },
   },
 });
-
-export const MOCK_REPLY = "Hello from the Rust Host mock model";
 
 function run(command, args, cwd, env = process.env) {
   return new Promise((done, fail) => {
@@ -53,31 +61,8 @@ async function freePort() {
   return port;
 }
 
-export const WRITTEN_REPLY = "The mock model wrote the file";
-
-function sseChunk(delta, finish) {
-  return `data: ${JSON.stringify({
-    id: "mock",
-    object: "chat.completion.chunk",
-    created: 0,
-    model: "mock-model",
-    choices: [{ index: 0, delta, finish_reason: finish }],
-    ...(finish ? { usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } } : {}),
-  })}\n\n`;
-}
-
-function lastUserText(messages) {
-  const user = [...messages].reverse().find((message) => message.role === "user");
-  return typeof user?.content === "string" ? user.content : JSON.stringify(user?.content ?? "");
-}
-
-/**
- * 按最后一条用户消息选择场景（带 tools 的主对话请求才会走工具场景）：
- * - 含 "write file"：先回一个 Write 工具调用（需要用户批准），工具结果回来后回 WRITTEN_REPLY；
- * - 含 "long task"：慢速流，用来测 Stop；
- * - 其他：一次性回 MOCK_REPLY。
- */
-async function startMockModel(workspace) {
+/** mock 模型：每个请求按场景规则顺序匹配，第一条命中的规则负责应答。 */
+async function startMockModel(workspace, rules) {
   const requests = [];
   const server = createServer((request, response) => {
     let body = "";
@@ -88,54 +73,26 @@ async function startMockModel(workspace) {
       try {
         parsed = JSON.parse(body);
       } catch {
-        // 非 JSON 请求按默认场景回答
+        // 非 JSON 请求交给兜底规则
       }
       const messages = parsed.messages ?? [];
-      const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0;
-      const text = lastUserText(messages);
+      const context = {
+        request,
+        response,
+        parsed,
+        messages,
+        text: lastUserText(messages),
+        hasTools: Array.isArray(parsed.tools) && parsed.tools.length > 0,
+        workspace,
+        sleep,
+      };
+      const rule = rules.find((candidate) => candidate.match(context));
       response.writeHead(200, { "content-type": "text/event-stream" });
-      if (hasTools && messages.at(-1)?.role === "tool") {
-        response.end(
-          sseChunk({ role: "assistant", content: WRITTEN_REPLY }, null) +
-            sseChunk({}, "stop") +
-            "data: [DONE]\n\n",
-        );
+      if (!rule) {
+        response.end("data: [DONE]\n\n");
         return;
       }
-      if (hasTools && text.includes("write file")) {
-        const call = {
-          index: 0,
-          id: "call_write_1",
-          type: "function",
-          function: {
-            name: "Write",
-            arguments: JSON.stringify({
-              file_path: join(workspace, "hello.txt"),
-              content: "hi from e2e\n",
-            }),
-          },
-        };
-        response.end(
-          sseChunk({ role: "assistant", tool_calls: [call] }, null) +
-            sseChunk({}, "tool_calls") +
-            "data: [DONE]\n\n",
-        );
-        return;
-      }
-      if (hasTools && text.includes("long task")) {
-        response.write(sseChunk({ role: "assistant", content: "Working" }, null));
-        for (let index = 0; index < 300 && !response.destroyed; index += 1) {
-          await sleep(200);
-          response.write(sseChunk({ content: "." }, null));
-        }
-        response.end(sseChunk({}, "stop") + "data: [DONE]\n\n");
-        return;
-      }
-      response.end(
-        sseChunk({ role: "assistant", content: MOCK_REPLY }, null) +
-          sseChunk({}, "stop") +
-          "data: [DONE]\n\n",
-      );
+      await rule.respond(context);
     });
   });
   server.listen(0, "127.0.0.1");
@@ -229,28 +186,17 @@ async function appPage(browser) {
   throw new Error("renderer page not found");
 }
 
-async function main() {
-  const temp = await mkdtemp(join(tmpdir(), "zcode-rust-host-e2e-"));
+async function runScenario(name, cli) {
+  const scenario = await import(`./e2e/scenarios/${name}.mjs`);
+  const temp = await mkdtemp(join(tmpdir(), `zcode-rust-host-e2e-${name}-`));
   const home = join(temp, "home");
   const workspace = join(temp, "workspace");
   const shots = join(temp, "shots");
   await mkdir(shots, { recursive: true });
-  console.info(`[e2e] temp dir: ${temp}`);
-  const cli = join(root, "apps/zcode-cli-rust/target/release/zcode-cli-rust");
-  if (!existsSync(cli)) throw new Error(`Rust CLI release build missing: ${cli}`);
-
-  if (!options["skip-build"]) {
-    await run("cargo", ["build"], join(root, "apps/zcode-host"));
-    await run("node", ["scripts/ensure-local-runtime-assets.mjs"], desktop);
-    await run("pnpm", ["exec", "tsup"], desktop, { ...process.env, NODE_ENV: "production" });
-    await run("pnpm", ["exec", "vite", "build"], desktop, {
-      ...process.env,
-      NODE_ENV: "production",
-    });
-  }
-
-  const model = await startMockModel(workspace);
+  console.info(`[e2e:${name}] temp dir: ${temp}`);
+  const model = await startMockModel(workspace, scenario.mockRules ?? []);
   await seedProfile(home, workspace, model.baseUrl);
+  await scenario.seed?.({ home, workspace, temp });
   let app;
   let failed = false;
   try {
@@ -260,34 +206,60 @@ async function main() {
         await sleep(4000);
         await app.page.screenshot({ path: join(shots, `explore-${index}.png`) });
       }
-      console.info(`[e2e] screenshots in ${shots}`);
-      return;
+      console.info(`[e2e:${name}] screenshots in ${shots}`);
+      return true;
     }
-    const { runCoreFlow, verifyColdRestart } = await import("./e2e-desktop-flow.mjs");
-    await runCoreFlow({
+    await scenario.run({
       page: app.page,
       shots,
       model,
       workspace,
       home,
-      mockReply: MOCK_REPLY,
-      writtenReply: WRITTEN_REPLY,
+      temp,
+      relaunch: async () => {
+        await app.stop();
+        app = await launchApp({ temp, home, cli });
+        return app.page;
+      },
     });
-    // 冷启动：同一份隔离 profile 重启，任务列表必须从已存在的 tasks-index 读出。
-    await app.stop();
-    app = await launchApp({ temp, home, cli });
-    await verifyColdRestart({ page: app.page, shots });
-    console.info("[e2e] core flow passed");
+    console.info(`[e2e:${name}] passed`);
   } catch (error) {
     failed = true;
-    console.error("[e2e] failed:", error);
+    console.error(`[e2e:${name}] failed:`, error);
   } finally {
     await app?.stop();
     model.server.close();
     if (!options.keep && !failed) await rm(temp, { recursive: true, force: true });
-    else console.info(`[e2e] kept ${temp}`);
+    else console.info(`[e2e:${name}] kept ${temp}`);
   }
-  if (failed) process.exitCode = 1;
+  return !failed;
+}
+
+async function main() {
+  const cli =
+    process.env.ZCODE_E2E_CLI_RUST_BINARY?.trim() ||
+    join(root, "apps/zcode-cli-rust/target/release/zcode-cli-rust");
+  if (!existsSync(cli)) throw new Error(`Rust CLI release build missing: ${cli}`);
+  if (!options["skip-build"]) {
+    await run("cargo", ["build"], join(root, "apps/zcode-host"));
+    await run("node", ["scripts/ensure-local-runtime-assets.mjs"], desktop);
+    await run("pnpm", ["exec", "tsup"], desktop, { ...process.env, NODE_ENV: "production" });
+    await run("pnpm", ["exec", "vite", "build"], desktop, {
+      ...process.env,
+      NODE_ENV: "production",
+    });
+  }
+  const scenarios = options.scenario?.length ? options.scenario : ["core"];
+  const failed = [];
+  for (const name of scenarios) {
+    if (!(await runScenario(name, cli))) failed.push(name);
+  }
+  if (failed.length > 0) {
+    console.error(`[e2e] failed scenarios: ${failed.join(", ")}`);
+    process.exitCode = 1;
+  } else {
+    console.info(`[e2e] all scenarios passed: ${scenarios.join(", ")}`);
+  }
 }
 
 /** 启动一个隔离的 Electron 实例并连上它的 renderer 页面。 */
