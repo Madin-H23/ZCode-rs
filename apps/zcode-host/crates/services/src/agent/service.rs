@@ -1181,6 +1181,9 @@ impl ServiceChannel for AgentChannel {
         if let Some(scope) = scope {
             tokio::spawn(async move { scope.dispose().await });
         }
+        if let Some(fallback) = &self.fallback {
+            fallback.connection_closed(context);
+        }
     }
 }
 
