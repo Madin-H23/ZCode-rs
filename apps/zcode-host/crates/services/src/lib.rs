@@ -9,8 +9,10 @@ use std::sync::Arc;
 use zcode_host_control::{ControlRouter, ControlSink, InitLocal};
 use zcode_host_kit::ChannelRegistry;
 
+pub mod account;
 pub mod broadcast;
 pub mod main_bridge;
+pub mod providers;
 pub mod settings;
 pub mod store;
 
@@ -67,6 +69,27 @@ pub fn install(
     let settings = settings::SettingStore::new(&context.environment.home_dir);
     registry.implement(broadcast::service(bridge.clone(), router));
     registry.implement(settings::service(settings.clone()));
+
+    let providers = providers::ProviderRuntime::new(
+        context
+            .init
+            .zcode_builtin_provider_config_file_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+            .map(PathBuf::from),
+        context
+            .environment
+            .app_config_dir()
+            .join("provider_config.json"),
+    );
+    providers.start_polling();
+    registry.implement(providers::provider_settings_service(providers.clone()));
+    registry.implement(providers::model_selection_service(providers.clone()));
+
+    registry.implement(account::oauth_service(&context.environment.vars));
+    registry.implement(account::onboarding_record_service());
+    registry.implement(account::usage_stats_service());
+    registry.implement(account::coding_plan_service(providers.clone()));
 }
 
 #[cfg(test)]
