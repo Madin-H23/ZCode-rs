@@ -17,6 +17,9 @@
 //   mockRules              可选；按顺序匹配的 mock 模型规则 { name, match(request), respond(request) }
 //   seed(context)          可选；在启动 App 之前补充隔离 profile（context = { home, workspace, temp }）
 //   env(context)           可选；返回追加给 App 进程树的环境变量（不能覆盖隔离用的 HOME 等键）
+//   args(context)          可选；返回追加给 Electron 的命令行参数
+// run(context) 另可用 context.secondInstance(args)：以同一隔离环境再启动一次 App，
+// 由单实例锁把 argv（例如 zcode:// deep link）转交给已运行的实例后退出。
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
@@ -199,10 +202,11 @@ async function runScenario(name, cli) {
   await seedProfile(home, workspace, model.baseUrl);
   await scenario.seed?.({ home, workspace, temp });
   const env = (await scenario.env?.({ home, workspace, temp })) ?? {};
+  const args = (await scenario.args?.({ home, workspace, temp })) ?? [];
   let app;
   let failed = false;
   try {
-    app = await launchApp({ temp, home, cli, env });
+    app = await launchApp({ temp, home, cli, env, args });
     if (options.explore) {
       for (let index = 0; index < 8; index += 1) {
         await sleep(4000);
@@ -218,9 +222,10 @@ async function runScenario(name, cli) {
       workspace,
       home,
       temp,
+      secondInstance: (extraArgs) => app.secondInstance(extraArgs),
       relaunch: async () => {
         await app.stop();
-        app = await launchApp({ temp, home, cli, env });
+        app = await launchApp({ temp, home, cli, env, args });
         return app.page;
       },
     });
@@ -265,39 +270,50 @@ async function main() {
 }
 
 /** 启动一个隔离的 Electron 实例并连上它的 renderer 页面。 */
-async function launchApp({ temp, home, cli, env = {} }) {
+async function launchApp({ temp, home, cli, env = {}, args = [] }) {
   const cdpPort = await freePort();
   const electronBinary = require("electron");
-  const electron = spawn(electronBinary, [".", `--remote-debugging-port=${cdpPort}`], {
+  const appEnv = {
+    ...process.env,
+    ...env,
+    ZCODE_ENV: "production",
+    ZCODE_DESKTOP_HOST: "rust",
+    ZCODE_AGENT_SERVER_COMMAND: cli,
+    ZCODE_AGENT_SERVER_RUNTIME: "zcode-cli-rust",
+    // Main 直接用 os.homedir() 读 setting.json 并据此下发预热 workspace；不覆盖 HOME 就会
+    // 读到开发者真实的最近项目，并在那些目录里启动 CLI。所以整个进程树都换成临时 HOME。
+    HOME: home,
+    USERPROFILE: home,
+    ZCODE_DATA_BASE_DIR: home,
+    ZCODE_DESKTOP_HOME_DIR: home,
+    ZCODE_CLI_RUST_DATA_DIR: join(home, ".zcode", "rust"),
+    ZCODE_DESKTOP_USER_DATA_DIR: join(temp, "electron"),
+    ZCODE_DESKTOP_SESSION_DATA_DIR: join(temp, "electron-session"),
+    ZCODE_DESKTOP_APPLICATION_NAME: "ZCode Rust Host E2E",
+    ZCODE_DISABLE_FIXED_REMOTE_DEBUGGING_PORT: "1",
+    // 测试实例不对外上报：遥测、ARMS 与 OTLP 端点一律置空（显式空值覆盖 dotenv）。
+    ZCODE_TELEMETRY_REPORT_ENDPOINT: "",
+    ZCODE_ARMS_RUM_ENDPOINT: "",
+    OTEL_EXPORTER_OTLP_ENDPOINT: "",
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "",
+    ELECTRON_RENDERER_URL: "",
+  };
+  const electron = spawn(electronBinary, [".", `--remote-debugging-port=${cdpPort}`, ...args], {
     cwd: desktop,
-    env: {
-      ...process.env,
-      ...env,
-      ZCODE_ENV: "production",
-      ZCODE_DESKTOP_HOST: "rust",
-      ZCODE_AGENT_SERVER_COMMAND: cli,
-      ZCODE_AGENT_SERVER_RUNTIME: "zcode-cli-rust",
-      // Main 直接用 os.homedir() 读 setting.json 并据此下发预热 workspace；不覆盖 HOME 就会
-      // 读到开发者真实的最近项目，并在那些目录里启动 CLI。所以整个进程树都换成临时 HOME。
-      HOME: home,
-      USERPROFILE: home,
-      ZCODE_DATA_BASE_DIR: home,
-      ZCODE_DESKTOP_HOME_DIR: home,
-      ZCODE_CLI_RUST_DATA_DIR: join(home, ".zcode", "rust"),
-      ZCODE_DESKTOP_USER_DATA_DIR: join(temp, "electron"),
-      ZCODE_DESKTOP_SESSION_DATA_DIR: join(temp, "electron-session"),
-      ZCODE_DESKTOP_APPLICATION_NAME: "ZCode Rust Host E2E",
-      ZCODE_DISABLE_FIXED_REMOTE_DEBUGGING_PORT: "1",
-      // 测试实例不对外上报：遥测、ARMS 与 OTLP 端点一律置空（显式空值覆盖 dotenv）。
-      ZCODE_TELEMETRY_REPORT_ENDPOINT: "",
-      ZCODE_ARMS_RUM_ENDPOINT: "",
-      OTEL_EXPORTER_OTLP_ENDPOINT: "",
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "",
-      ELECTRON_RENDERER_URL: "",
-    },
+    env: appEnv,
     stdio: ["ignore", "inherit", "inherit"],
     detached: process.platform !== "win32",
   });
+  const secondInstance = async (extraArgs) => {
+    const child = spawn(electronBinary, [".", ...extraArgs], {
+      cwd: desktop,
+      env: appEnv,
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    const done = once(child, "exit");
+    const timedOut = await Promise.race([done.then(() => false), sleep(20_000).then(() => true)]);
+    if (timedOut) child.kill("SIGKILL");
+  };
   const exited = once(electron, "exit");
   const signal = (name) => {
     if (electron.exitCode !== null || electron.signalCode !== null || !electron.pid) return;
@@ -319,7 +335,7 @@ async function launchApp({ temp, home, cli, env = {} }) {
     await waitForCdp(cdpPort, electron);
     const { chromium } = require("playwright-core");
     const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
-    return { page: await appPage(browser), stop };
+    return { page: await appPage(browser), stop, secondInstance };
   } catch (error) {
     await stop();
     throw error;

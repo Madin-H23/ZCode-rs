@@ -213,6 +213,8 @@ type InFlight = tokio::sync::watch::Receiver<Option<Result<Value, ShareError>>>;
 
 pub struct Importer {
     agent: AgentRuntime,
+    /// 会话创建后同步 tasks-index 并广播（zcodeSessionService.createSession 的 immediate 分支）。
+    tasks: Option<Arc<crate::tasks::service::TaskService>>,
     client: Arc<ShareClient>,
     conversation_root: PathBuf,
     share_web_url: String,
@@ -227,6 +229,7 @@ pub struct Importer {
 impl Importer {
     pub fn new(
         agent: AgentRuntime,
+        tasks: Option<Arc<crate::tasks::service::TaskService>>,
         client: Arc<ShareClient>,
         conversation_root: PathBuf,
         share_web_url: String,
@@ -234,6 +237,7 @@ impl Importer {
         let index_path = conversation_root.join(".zcode-share-imports.json");
         Arc::new(Self {
             agent,
+            tasks,
             client,
             conversation_root,
             share_web_url: share_web_url.trim_end_matches('/').to_owned(),
@@ -875,20 +879,45 @@ impl Importer {
                 },
             }),
         );
-        if crate::off_peak::dispatch::tool_supported(&target) {
-            params.insert("offPeakToolEnabled".into(), json!(true));
-        }
+        // 不带 offPeakToolEnabled：Rust CLI 拒绝导入会话携带工具面参数（"Unsupported imported
+        // tool profile"）；工作区级 Off-Peak 策略推送已覆盖这类会话。
         let snapshot = process
             .request_value("session/create", &Value::Object(params))
             .await?;
         // 会话已提交且引用了已安装的 artifacts：此后任何失败都不能再删 importRoot。
         *cleanup_armed = false;
+        self.index_session(&target, &snapshot).await;
         let _ = tokio::fs::remove_file(marker_path).await;
         self.report(operation_id, "complete", installed.len(), total);
         Ok(snapshot["session"]["sessionId"]
             .as_str()
             .unwrap_or(&ids.session_id)
             .to_owned())
+    }
+
+    /// 立即持久化的会话：写入 tasks-index 的 grouped 顶部并广播，侧栏第一时间看到导入的会话。
+    async fn index_session(&self, target: &WorkspaceTarget, snapshot: &Value) {
+        let Some(tasks) = &self.tasks else {
+            return;
+        };
+        let meta = crate::tasks::meta::meta_from_snapshot(snapshot);
+        let searchable = Some(crate::tasks::meta::searchable_text(snapshot));
+        match tasks.repo().sync_at_grouped_top(meta, searchable).await {
+            Ok(outcome) => {
+                let task_id = outcome.meta["taskId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                tasks.emit_list_changed(
+                    target,
+                    &task_id,
+                    "task_meta_changed",
+                    Some(&outcome.meta),
+                    None,
+                );
+            }
+            Err(error) => log::warn(format!("index imported share session failed: {error:#}")),
+        }
     }
 
     /// `getImportedConversation`：扫描 `.zcode-share/*/shared-conversation.json` 找 contextId。

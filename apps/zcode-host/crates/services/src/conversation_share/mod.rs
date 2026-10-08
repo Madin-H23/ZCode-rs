@@ -238,6 +238,7 @@ pub fn install(
         .join("default");
     let importer = Importer::new(
         area.agent.clone(),
+        Some(area.tasks.clone()),
         client.clone(),
         conversation_root,
         share_web_url,
