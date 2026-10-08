@@ -121,11 +121,15 @@ impl Host {
     }
 
     async fn issue(&mut self) -> (String, String) {
+        self.issue_mode("desktop-continuous").await
+    }
+
+    async fn issue_mode(&mut self, client_mode: &str) -> (String, String) {
         self.send(json!({
             "type": "issue-attachment-endpoint",
             "requestId": "r1",
             "attachmentId": "attachment-1",
-            "clientMode": "desktop-continuous",
+            "clientMode": client_mode,
             "scope": {"kind": "local"},
         }))
         .await;
@@ -359,18 +363,34 @@ async fn invalid_and_unsupported_issue_requests_fail_explicitly() {
     let failed = host.recv().await;
     assert_eq!(failed["requestId"], "r-remote");
     assert_eq!(failed["ok"], false);
+}
 
-    host.send(json!({
-        "type": "issue-attachment-endpoint",
-        "requestId": "r-replayable",
-        "attachmentId": "a",
-        "clientMode": "web-remote-replayable",
-        "scope": {"kind": "local"},
-    }))
+/// web-remote-replayable 的本地 attachment：可签发，握手 hello 报告 replayable 投递与受限能力。
+#[tokio::test]
+async fn replayable_attachment_reports_replayable_delivery() {
+    let mut host = Host::spawn().await;
+    host.init().await;
+    let (url, capability) = host.issue_mode("web-remote-replayable").await;
+    let socket = connect(request(&url, &protocols(&capability), None))
+        .await
+        .expect("non-browser client without Origin is accepted");
+    let mut rpc = Rpc {
+        socket,
+        frames: FrameReader::default(),
+    };
+    assert_eq!(rpc.next().await.0, json!([200]));
+    rpc.send(
+        json!([100, 1, "zcode-agent", "helloConversationV4"]),
+        Some(json!([{"workspacePath": "/w"}])),
+    )
     .await;
-    let failed = host.recv().await;
-    assert_eq!(failed["requestId"], "r-replayable");
-    assert_eq!(failed["ok"], false);
+    let (header, body) = rpc.next().await;
+    assert_eq!(header, json!([201, 1]));
+    let hello = body.into_json();
+    assert_eq!(hello["clientMode"], "web-remote-replayable");
+    assert_eq!(hello["deliveryProfile"], "replayable");
+    assert_eq!(hello["capabilities"]["nativeDialogs"], false);
+    assert_eq!(hello["capabilities"]["localTerminal"], false);
 }
 
 async fn wait_exit(child: &mut Child) -> std::process::ExitStatus {

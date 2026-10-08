@@ -16,9 +16,12 @@ import {
   HostResponseTypes,
   InternalChannels,
   type ServiceEndpointPayload,
+  hostAttachServicePortMessageSchema,
   hostAttachmentEndpointIssuedResponseSchema,
+  hostDetachServicePortMessageSchema,
   hostEndpointReadyResponseSchema,
 } from "@zcode/shared";
+import { bridgeMessagePortToRustHost, type RustHostPortBridge } from "./rustHostPortBridge.js";
 
 export const RUST_DESKTOP_HOST_ENV = "ZCODE_DESKTOP_HOST";
 export const RUST_HOST_BINARY_ENV = "ZCODE_RUST_HOST_BINARY";
@@ -67,6 +70,8 @@ export class RustHostProcess extends EventEmitter {
     { resolve: (endpoint: ServiceEndpoint) => void; reject: (error: Error) => void }
   >();
   private exited = false;
+  /** Main 发起的 MessagePort attachment（按 attachmentId）经 WebSocket 桥接到 Rust Host。 */
+  private readonly portBridges = new Map<string, RustHostPortBridge>();
 
   constructor(
     binary: string,
@@ -104,28 +109,66 @@ export class RustHostProcess extends EventEmitter {
 
   postMessage(message: unknown, transfer?: MessagePortMain[]): void {
     if (transfer && transfer.length > 0) {
-      // R0 只有 Renderer 经 WebSocket 接入；Bot 远程运行时、远端 workspace 的 MessagePort
-      // attachment 在 R2 / R6 接入。关闭端口让对端立即感知，而不是一直等待。
+      const attach = hostAttachServicePortMessageSchema.safeParse(message);
+      if (attach.success && attach.data.scope.kind === "local" && transfer.length === 1) {
+        // Main 发起的本地 attachment（如 web-remote-replayable）：签发同 clientMode 的 endpoint 后桥接。
+        void this.attachServicePort(attach.data.attachmentId, attach.data.clientMode, transfer[0]!);
+        return;
+      }
+      // 远端 scope 的 attachment 随远端 workspace 接入。关闭端口让对端立即感知，而不是一直等待。
       for (const port of transfer) port.close();
       const type = (message as { type?: unknown } | null)?.type;
       this.logger.warn(`[rustHost] MessagePort attachment is not supported yet: ${String(type)}`);
+      return;
+    }
+    const detach = hostDetachServicePortMessageSchema.safeParse(message);
+    if (detach.success && this.portBridges.has(detach.data.attachmentId)) {
+      this.portBridges.get(detach.data.attachmentId)?.close();
+      this.portBridges.delete(detach.data.attachmentId);
       return;
     }
     if (this.exited || !this.child.stdin.writable) return;
     this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
+  private async attachServicePort(
+    attachmentId: string,
+    clientMode: HostIssueAttachmentEndpointMessage["clientMode"],
+    port: MessagePortMain,
+  ): Promise<void> {
+    // 同一 attachmentId 重新 attach 时替换旧桥（与 Node Host 的 attachment registry 一致）。
+    this.portBridges.get(attachmentId)?.close();
+    this.portBridges.delete(attachmentId);
+    try {
+      const endpoint = await this.requestServiceEndpoint({ attachmentId, clientMode });
+      const bridge = await bridgeMessagePortToRustHost(port, endpoint);
+      this.portBridges.set(attachmentId, bridge);
+      this.logger.info(
+        `[rustHost] attached service port, attachmentId=${attachmentId}, clientMode=${clientMode}`,
+      );
+    } catch (error) {
+      port.close();
+      this.logger.warn(
+        `[rustHost] failed to attach service port, attachmentId=${attachmentId}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
   kill(): boolean {
     return this.child.kill();
   }
 
-  async requestServiceEndpoint(): Promise<ServiceEndpoint> {
+  async requestServiceEndpoint(options?: {
+    attachmentId?: string;
+    clientMode?: HostIssueAttachmentEndpointMessage["clientMode"];
+  }): Promise<ServiceEndpoint> {
     await this.endpointReady;
     const request: HostIssueAttachmentEndpointMessage = {
       type: HostMessageTypes.IssueAttachmentEndpoint,
       requestId: randomUUID(),
-      attachmentId: randomUUID(),
-      clientMode: "desktop-continuous",
+      attachmentId: options?.attachmentId ?? randomUUID(),
+      clientMode: options?.clientMode ?? "desktop-continuous",
       scope: { kind: "local" },
     };
     return new Promise<ServiceEndpoint>((resolveEndpoint, rejectEndpoint) => {
@@ -176,6 +219,8 @@ export class RustHostProcess extends EventEmitter {
     this.rejectEndpointReady(error);
     for (const pending of this.pendingEndpoints.values()) pending.reject(error);
     this.pendingEndpoints.clear();
+    for (const bridge of this.portBridges.values()) bridge.close();
+    this.portBridges.clear();
     this.emit("exit", code);
   }
 }

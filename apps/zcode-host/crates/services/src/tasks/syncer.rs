@@ -132,6 +132,14 @@ impl Syncer {
     ) {
         let unread_signal = meta::terminal_unread_signal(summary);
         let failed = summary["phase"] == "error";
+        // 顺序同 Node emitTerminalAndReady：先发终态信号（收口当前 input、放行下一条），再写库。
+        self.tasks
+            .signals()
+            .emit(std::sync::Arc::new(super::SessionSignal {
+                target: target.clone(),
+                session_id: session_id.to_owned(),
+                failed,
+            }));
         // error 的详情不在摘要里，留给随后回源写权威值；完成时清空旧错误。
         let patch = if failed {
             json!({"status": "error", "updatedAt": now_ms()})

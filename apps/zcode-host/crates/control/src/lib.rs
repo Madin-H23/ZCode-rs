@@ -37,6 +37,8 @@ pub enum MainToHost {
 pub struct InitLocal {
     pub database_startup_id: Option<String>,
     pub host_id: Option<String>,
+    /// task realtime bridge 的投递方式（`TaskRealtimeHostDeliveryKind`），缺省 desktop_window。
+    pub delivery_kind: Option<String>,
     pub device_mid: Option<String>,
     pub workspace_path: Option<String>,
     pub workspace_identity: Option<String>,

@@ -188,7 +188,7 @@ pub(crate) fn sql_to_json(value: ValueRef<'_>) -> Value {
     }
 }
 
-fn read_task_row(row: &Row<'_>) -> rusqlite::Result<TaskRow> {
+pub(crate) fn read_task_row(row: &Row<'_>) -> rusqlite::Result<TaskRow> {
     let flag = |name: &str| int_column(row, name).map(|v| v == Some(1));
     // listTaskMetas 的 SELECT 不含 last_unread_at（rowToMeta 用不到）。
     let has_last_unread = row.as_ref().column_index("last_unread_at").is_ok();
@@ -434,7 +434,7 @@ pub(crate) fn ensure_off_peak_group_membership(
 }
 
 /// 首次公开时把 task 放到 grouped 顶层最前；已有成员关系或顶层顺序时不动（不能让慢回源越过新任务）。
-fn initialize_grouped_task_at_top(
+pub(crate) fn initialize_grouped_task_at_top(
     conn: &Connection,
     workspace_key: &str,
     task_id: &str,

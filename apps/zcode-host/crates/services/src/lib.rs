@@ -204,6 +204,7 @@ pub fn install(
     );
     let observer = agent::sessions_index::SessionsIndexObserver::start(agent.clone());
 
+    // ── tasks ──
     // 侧栏：syncer 与 controller 必须先挂上观察者，再预热拉起 CLI，否则会错过首份快照。
     let workspace_events = tasks::WorkspaceEvents::new();
     let task_service = tasks::service::TaskService::new(
@@ -212,9 +213,40 @@ pub fn install(
         agent.clone(),
     );
     registry.implement(tasks::service::service(task_service.clone()));
+    let task_context = tasks::context::TaskContext::new(
+        tasks::context::TaskPaths {
+            user_home: context.environment.user_home.clone(),
+            data_base_dir: context.environment.data_base_dir.clone(),
+            log_dir: context
+                .environment
+                .vars
+                .get("ZCODE_LOG_DIR")
+                .map(|dir| dir.trim())
+                .filter(|dir| !dir.is_empty())
+                .map(PathBuf::from),
+        },
+        storage.tasks_index.clone(),
+        task_service.clone(),
+        agent.clone(),
+        settings.clone(),
+    );
+    registry.implement(tasks::index_members::service(task_context.clone()));
+    // 生命周期、查询与事件成员；automation / off-peak / bots 也可直接用 TaskLifecycle 的 API。
+    let task_lifecycle = tasks::lifecycle::TaskLifecycle::start(task_context.clone());
+    registry.implement(tasks::lifecycle_service::service(task_lifecycle));
+    // task realtime bridge：与 Main taskRealtimeBus 的 lease / owner 命令；会话消息总是应答。
+    tasks::realtime::register_session_messages(router, MainBridge::new(context.control.clone()));
+    if let Some(realtime) = tasks::realtime::TaskRealtimeBridge::for_host_init(
+        context.init.host_id.as_deref(),
+        context.init.delivery_kind.as_deref(),
+        MainBridge::new(context.control.clone()),
+    ) {
+        realtime.register(router);
+        task_context.set_realtime(realtime);
+    }
     let syncer = tasks::syncer::start(&observer, agent.clone(), task_service.clone());
     let controller = tasks::controller::Controller::start(
-        Arc::new(task_service.clone()),
+        Arc::new(task_context.clone()),
         observer.clone(),
         workspace_events,
     );

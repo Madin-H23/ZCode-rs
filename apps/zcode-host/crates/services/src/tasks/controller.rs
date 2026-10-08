@@ -7,8 +7,8 @@
 //! - 帧按连接分发：每条连接只收到自己订阅的 subscriptionId。
 //! - 列表读取有缓存：source 第一次被查询时读取分区，之后只有 workspace 事件或修改才强制重读。
 //!
-//! 与 Node 的差异：只有本地 source；搜索（`search`）退化为标题包含匹配，全文检索随 zcode-task 的
-//! `listTaskList` 实现。
+//! 与 Node 的差异：只有本地 source。搜索（`search`）逐个 source 调用 zcode-task 的全文检索
+//! `listTaskList`，再叠加投影行的实时状态（rust-host-tasks.md §2.3）。
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
@@ -20,6 +20,7 @@ use super::{Partitions, TaskSource, WorkspaceEvents};
 use crate::agent::WorkspaceTarget;
 use crate::agent::service::uuid_v4;
 use crate::agent::sessions_index::{IndexEvent, SessionsIndexObserver};
+use crate::support::collate::locale_compare;
 
 pub const CHANNEL: &str = "window-controller";
 const TASKS_TOPIC: &str = "controller/tasks-index";
@@ -537,25 +538,127 @@ impl Controller {
                 ));
             }
         }
-        let search = query["search"]
+        let searching = query["search"]
             .as_str()
-            .map(|search| search.trim().to_lowercase())
-            .filter(|search| !search.is_empty());
+            .is_some_and(|search| !search.trim().is_empty());
+        let mut items = if searching {
+            self.search(query, &targets).await
+        } else {
+            self.projected_items(&targets, kind)
+        };
+        let sort_key = if query["sortBy"] == "created" {
+            "createdAt"
+        } else {
+            "updatedAt"
+        };
+        items.sort_by(|left, right| {
+            let at = |item: &Value| item[sort_key].as_f64().unwrap_or(0.0);
+            at(right).total_cmp(&at(left)).then_with(|| {
+                locale_compare(
+                    left["taskId"].as_str().unwrap_or_default(),
+                    right["taskId"].as_str().unwrap_or_default(),
+                )
+            })
+        });
+        let total = items.len();
+        if let Some(limit) = query["limit"].as_u64() {
+            items.truncate(limit as usize);
+        }
+        let has_more = total > items.len();
+        Ok(json!({"items": items, "total": total, "hasMore": has_more}))
+    }
+
+    /// 全文搜索：逐个 source 调用 zcode-task `listTaskList`（只含该 source、不带 limit），
+    /// 再与投影行对齐取实时状态；某个 source 失败只记日志，不影响其他 source。
+    async fn search(&self, query: &Value, targets: &[WorkspaceTarget]) -> Vec<Value> {
+        let mut items = Vec::new();
+        for target in targets {
+            let mut scoped = query.clone();
+            if let Some(object) = scoped.as_object_mut() {
+                object.remove("limit");
+                let mut scope = Map::new();
+                scope.insert("workspacePath".into(), json!(target.workspace_path));
+                if let Some(identity) = target
+                    .workspace_identity
+                    .as_deref()
+                    .filter(|id| !id.is_empty())
+                {
+                    scope.insert("workspaceIdentity".into(), json!(identity));
+                }
+                object.insert("workspaceScopes".into(), json!([scope]));
+            }
+            let result = match self.tasks.search(scoped).await {
+                Ok(result) => result,
+                Err(error) => {
+                    log::warn(format!(
+                        "controller source search failed for {}: {}",
+                        target.key(),
+                        error.message
+                    ));
+                    continue;
+                }
+            };
+            let state = self.lock();
+            let source = state.sources.get(&target.key());
+            for item in result["items"].as_array().into_iter().flatten() {
+                let Some(mut normalized) = item.as_object().cloned() else {
+                    continue;
+                };
+                // normalizeTaskMeta：身份字段以 source 为准。
+                normalized.insert("workspacePath".into(), json!(target.workspace_path));
+                match target
+                    .workspace_identity
+                    .as_deref()
+                    .filter(|id| !id.is_empty())
+                {
+                    Some(identity) => {
+                        normalized.insert("workspaceIdentity".into(), json!(identity));
+                    }
+                    None => {
+                        normalized.shift_remove("workspaceIdentity");
+                    }
+                }
+                let task_id = normalized["taskId"].as_str().unwrap_or_default().to_owned();
+                let projected =
+                    source.and_then(|source| source.rows.get(&task_key(target, &task_id)));
+                let mut entry = match projected.and_then(|row| row["meta"].as_object()) {
+                    Some(meta) => meta.clone(),
+                    None => normalized.clone(),
+                };
+                entry.insert("sourceAvailability".into(), json!("online"));
+                let live_status = match projected {
+                    Some(row) => row["liveStatus"].clone(),
+                    None => json!(match normalized.get("status").and_then(Value::as_str) {
+                        Some("completed") => "completed",
+                        Some("error") => "error",
+                        _ => "idle",
+                    }),
+                };
+                entry.insert("liveStatus".into(), live_status);
+                if let Some(activity) = projected
+                    .map(|row| &row["activity"])
+                    .filter(|a| a.is_object())
+                {
+                    entry.insert("activity".into(), activity.clone());
+                }
+                if let Some(snippets) = item.get("searchSnippets") {
+                    entry.insert("searchSnippets".into(), snippets.clone());
+                }
+                items.push(Value::Object(entry));
+            }
+        }
+        items
+    }
+
+    fn projected_items(&self, targets: &[WorkspaceTarget], kind: &str) -> Vec<Value> {
         let selected: Vec<String> = targets.iter().map(WorkspaceTarget::key).collect();
-        let mut items: Vec<Value> = {
+        {
             let state = self.lock();
             selected
                 .iter()
                 .filter_map(|key| state.sources.get(key))
                 .flat_map(|source| source.rows.values())
                 .filter(|row| matches_kind(&row["membership"], kind))
-                .filter(|row| {
-                    search.as_ref().is_none_or(|search| {
-                        row["meta"]["title"]
-                            .as_str()
-                            .is_some_and(|title| title.to_lowercase().contains(search))
-                    })
-                })
                 .map(|row| {
                     let mut item = row["meta"].as_object().cloned().unwrap_or_default();
                     item.insert(
@@ -569,27 +672,45 @@ impl Controller {
                     Value::Object(item)
                 })
                 .collect()
-        };
-        let sort_key = if query["sortBy"] == "created" {
-            "createdAt"
-        } else {
-            "updatedAt"
-        };
-        items.sort_by(|left, right| {
-            let at = |item: &Value| item[sort_key].as_f64().unwrap_or(0.0);
-            at(right).total_cmp(&at(left)).then_with(|| {
-                left["taskId"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .cmp(right["taskId"].as_str().unwrap_or_default())
-            })
-        });
-        let total = items.len();
-        if let Some(limit) = query["limit"].as_u64() {
-            items.truncate(limit as usize);
         }
-        let has_more = total > items.len();
-        Ok(json!({"items": items, "total": total, "hasMore": has_more}))
+    }
+
+    /// `deleteArchivedTask({address})`：删除已持久成功后再强制刷新；刷新失败不改写删除结果。
+    pub async fn delete_archived_task(&self, address: &Value) -> Result<bool, RpcError> {
+        let target =
+            target_of(address).ok_or_else(|| fault("列表 mutation 无法解析唯一 source"))?;
+        let task_id = address["taskId"].as_str().unwrap_or_default().to_owned();
+        let deleted = self.tasks.delete_archived(target.clone(), task_id).await?;
+        if let Err(error) = self.refresh(&target, true).await {
+            log::warn(format!("controller refresh failed: {}", error.message));
+        }
+        Ok(deleted)
+    }
+
+    /// `deleteArchivedTasks({address, taskIds})`：整批结束后只刷新一次。
+    pub async fn delete_archived_tasks(&self, params: &Value) -> Result<Value, RpcError> {
+        let task_ids: Vec<String> = params["taskIds"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|id| id.as_str().map(str::to_owned))
+            .collect();
+        if task_ids.is_empty() {
+            return Ok(json!({"deletedTaskIds": [], "skippedTaskIds": [], "failedTaskIds": []}));
+        }
+        let target = target_of(&params["address"])
+            .ok_or_else(|| fault("列表 mutation 无法解析唯一 source"))?;
+        let result = self
+            .tasks
+            .delete_archived_batch(target.clone(), task_ids)
+            .await?;
+        if !result.is_object() {
+            return Err(fault("归档删除批次未返回逐项目标结果"));
+        }
+        if let Err(error) = self.refresh(&target, true).await {
+            log::warn(format!("controller refresh failed: {}", error.message));
+        }
+        Ok(result)
     }
 
     pub async fn mutate_task(&self, address: &Value, mutation: &Value) -> Result<Value, RpcError> {
@@ -691,6 +812,7 @@ fn first(args: &Args) -> Value {
 }
 
 pub fn service(controller: Arc<Controller>) -> ServiceBuilder {
+    let (delete_one, delete_batch) = (controller.clone(), controller.clone());
     let (list, mutate, subscribe, resync, unsubscribe, frames, closed) = (
         controller.clone(),
         controller.clone(),
@@ -706,6 +828,24 @@ pub fn service(controller: Arc<Controller>) -> ServiceBuilder {
             async move {
                 controller
                     .list_task_list(&first(&args))
+                    .await
+                    .map(Reply::Value)
+            }
+        })
+        .method("deleteArchivedTask", move |_, args| {
+            let controller = delete_one.clone();
+            async move {
+                let deleted = controller
+                    .delete_archived_task(&first(&args)["address"])
+                    .await?;
+                Ok(Reply::Value(json!(deleted)))
+            }
+        })
+        .method("deleteArchivedTasks", move |_, args| {
+            let controller = delete_batch.clone();
+            async move {
+                controller
+                    .delete_archived_tasks(&first(&args))
                     .await
                     .map(Reply::Value)
             }
