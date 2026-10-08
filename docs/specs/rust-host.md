@@ -1,6 +1,6 @@
 # Rust Host：原生 Host 重写规划
 
-日期：2026-10-08（第三版）。基线：`main` / `06ba978`。状态：规划草案。Renderer 接入方式（D7）等 `perf/rust-host-abc` 分支上的性能对比（`docs/specs/rust-host-transport-bench.md`）出结论后再定；其余决策见第 10 节。
+日期：2026-10-08（第三版）。基线：`main` / `06ba978`。状态：实施中，S0 已完成，R0 进行中。Renderer 接入方式（D7）已按性能对比选定 C（本机 WebSocket）。性能报告是 `perf/rust-host-abc` 分支（`357e589`）上的 `docs/reports/rust-host-transport-perf-2026-10-08.md`。其余决策见第 10 节。
 
 版本沿革：
 
@@ -18,7 +18,13 @@
 2. **按 service 逐个写。** 契约以 Renderer 实际调用的 `@zcode/rpc` 成员为准（4.1）。
 3. **CLI 保持独立进程。** Host ↔ CLI 仍走 stdio NDJSON，CLI 和协议都不改。lane 与今天相同：每个 workspace 一个 chat lane，另有 plugin-management 和 mcp-status 两个 lane。
 4. **每个窗口一个 Host。** App 目前只有一个主窗口（`packages/desktop/src/main/primaryWindowCoordinator.ts`），所以实际上只有一个 Host。
-5. **Renderer 接入方式只做一种，不做兜底。** A、B、C 三选一，等性能对比结论（D7）。接入层以下的 rpc、services、agent-client 三种方案完全相同（3.1）。
+5. **Renderer 走本机 WebSocket（方案 C），不做兜底**（D3、D7）。
+   - 小消息流式：四种拓扑测不出差别。
+   - 大消息：C 快 4–5 倍。128 KiB 读取，C 为 0.8 ms，其余为 3.4–4.6 ms。
+   - Renderer 主线程：MessagePort 路径在 8 个 workspace 同时大输出时，让 Renderer 事件循环 p99 达到 25–64 ms；C 保持在 2 ms。
+
+   接入层以下的 rpc、services、agent-client 与方案无关（3.1）。
+
 6. **修复 `setting.json` 的跨进程丢更新。** 先在 Node 侧修（S0），Rust 实现沿用修复后的锁语义（D5）。
 
 **非目标**
@@ -251,7 +257,9 @@ pub trait ControlSink: Send + Sync {
 
 选定方案后，只需实现对应的接入层，再改 Main 和 Renderer 的建连代码。`host-core` 及以下不随方案变化。
 
-### 3.2 三种接入方案（D7，等性能对比）
+### 3.2 三种接入方案（D7 已选 C）
+
+下表保留选型时的对比。实施只做 C 这一列。
 
 |                      | A：Main 转发                                                                                            | B：utilityProcess 薄壳 + napi                                                                                                                                                  | C：本机 WebSocket                                                                                                                                       |
 | -------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -396,7 +404,7 @@ sequenceDiagram
 
 ### 4.4 开发开关
 
-Main 读取 `ZCODE_DESKTOP_HOST=rust` 来选择启动哪个 Host。这个开关只在开发构建中生效，默认仍是 Node Host。如果选 C，Renderer 需要同时支持 MessagePort 和 WebSocket 两种建连，直到切换完成；选 A 或 B 时 Renderer 不用改。
+Main 读取 `ZCODE_DESKTOP_HOST=rust` 来选择启动哪个 Host。这个开关只在开发构建中生效，默认仍是 Node Host。切换完成之前，Renderer 要同时支持两种建连：MessagePort 连 Node Host，WebSocket 连 Rust Host。
 
 ## 5. 里程碑与 service 顺序
 
@@ -404,7 +412,7 @@ Main 读取 `ZCODE_DESKTOP_HOST=rust` 来选择启动哪个 Host。这个开关�
 
 | 里程碑 | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | 验收                                                                                                                                                                                                                                                                                                                                                                          |
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| S0     | **修复 `setting.json` 跨进程丢更新**（Node 侧，与 D7 无关，现在就能做）：<br>• `settingService.ts` 的 `update`、迁移写入改为整个读改写都持跨进程锁，做法同 `credentialService.ts:112`；<br>• 锁内用 `atomicWriteText(..., {useFileLock:false})`，避免重复加锁；<br>• Main 与 Host 都用 `createSettingService()`（`packages/desktop/src/main/index.ts:671`），改这一处两边都生效                                                                                                           | • 先补测试：两个进程并发更新不同字段，修复前丢更新，修复后两个字段都在；<br>• 现有 setting 测试通过                                                                                                                                                                                                                                                                           |
+| S0     | **修复 `setting.json` 跨进程丢更新**（Node 侧，已完成；测试 `packages/services/test/settingServiceCrossProcess.test.ts`）：<br>• `settingService.ts` 的 `update`、迁移写入改为整个读改写都持跨进程锁，做法同 `credentialService.ts:112`；<br>• 锁内用 `atomicWriteText(..., {useFileLock:false})`，避免重复加锁；<br>• Main 与 Host 都用 `createSettingService()`（`packages/desktop/src/main/index.ts:671`），改这一处两边都生效                                                         | • 先补测试：两个进程并发更新不同字段，修复前丢更新，修复后两个字段都在；<br>• 现有 setting 测试通过                                                                                                                                                                                                                                                                           |
 | R0     | **骨架，不含业务服务**：<br>• `rpc` 及其夹具；<br>• `control` 的生成类型，先实现 `HostReady`、`InitLocal`、`Dispose`、`Log`、`DatabaseStartupState`、`Attach`；<br>• D7 选定方案的接入层，以及 Main、Renderer 的建连改动；<br>• 测试入口；<br>• 契约清单和 40 个 channel 的 stub；<br>• Main 的开发开关                                                                                                                                                                                   | • wire 夹具双向通过；<br>• 打开开关后 Renderer 能完成 Initialize，所有调用都在 100 ms 内得到应答，没有挂起；<br>• reload 后能重新 attach；<br>• 选 C 时，重放的 capability、错误的 Origin、非 loopback 的 Host 头都被拒绝                                                                                                                                                     |
 | R1     | **首屏可用**（约 20k）：<br>• `store`：路径、锁、原子写、凭据加解密、settings，读改写整体持锁，与 S0 一致；<br>• setting、credential、broadcast（经控制通道连 BroadcastHub）、system；<br>• file 的 `ensureConversationWorkspace` 和基础读取；<br>• `net` ApiClient；oauth 与账号栈；<br>• provider runtime（`provider-settings`、`model-selection`）：内置 provider 的 CDN 刷新、personal 配置轮询、Registry；<br>• onboarding-record、settings-sync、client-config、client-scenes       | • 新 profile 进入登录页；已登录的 profile 恢复 tab 并进入主窗口，过程中没有错误 toast，也没有空白；<br>• 这些服务的差分测试通过；<br>• Node 与 Rust 交叉读写 `setting.json`、`credentials.json`、`provider_config.json`                                                                                                                                                       |
 | R2     | **核心聊天：agent 子系统整体迁移**（约 25k）：<br>• `agent-client`：3 个 lane、generation、惰性重启；用 `RuntimeEnv` 生成 spawn env；移植 CLI 命令解析（Electron Node 跑 TS CLI、Rust CLI 两种）；存储准备与 `DatabaseStartupState`；14 个反向请求，其中 browser 经控制通道走 Main 的 CDP；<br>• zcode-agent、connection scope、sessions index；<br>• zcode-task、index syncer、tasks-index repo；<br>• zcode-session、window-controller；<br>• task realtime bridge（lease、owner 命令） | • 在 Rust Host 上 E2E 跑通：打开 workspace、列出任务、新建会话、发送、流式、权限与提问、Stop、切换模型、查看文件改动；<br>• `desktop-continuous`、`web-remote-replayable`（Bot 远程运行时）两种语义都通过；<br>• CLI 崩溃后能惰性重启；reload 后能重新 attach；<br>• 与 Main `taskRealtimeBus` 的 lease 交互与今天一致；<br>• N 个 workspace 同时流式时，控制 RPC p95 ≤ 20 ms |
@@ -472,10 +480,10 @@ Main 读取 `ZCODE_DESKTOP_HOST=rust` 来选择启动哪个 Host。这个开关�
 | D4   | 开发期已迁移 service 的 TS 改动 | 不考虑                                                                                                    |
 | D5   | `setting.json` 跨进程丢更新     | 修，先在 Node 侧做（S0）；Rust 实现沿用同一锁语义                                                         |
 | D6   | 代码放在哪里                    | 在新分支上开发；代码放在独立的 Cargo workspace `apps/zcode-host`，只通过路径依赖引用 `zcode-cli-protocol` |
+| D7   | Renderer 接入方式               | C：本机 WebSocket，依据性能报告 `rust-host-transport-perf-2026-10-08.md`                                  |
 
 **待定**
 
-| 编号 | 问题                                                                         | 建议                                                                              |
-| ---- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| D2   | Host 异常退出后，是保持现状（3.4），还是由 Main 自动重启并让 Renderer 重连？ | 自动重启。今天 Host 一旦崩溃，用户只能看到界面卡住，又没有任何提示                |
-| D7   | Renderer 接入方式：A、B 还是 C？                                             | 等性能对比结论。如果三者差距都在 UI 时间预算之内，就按 3.2 表中的改动量和风险来选 |
+| 编号 | 问题                                                                         | 建议                                                               |
+| ---- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| D2   | Host 异常退出后，是保持现状（3.4），还是由 Main 自动重启并让 Renderer 重连？ | 自动重启。今天 Host 一旦崩溃，用户只能看到界面卡住，又没有任何提示 |

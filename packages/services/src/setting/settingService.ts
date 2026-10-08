@@ -17,6 +17,7 @@ import { normalizeSettingsPatch } from "#src/setting/normalizeSettingsPatch.js";
 import { copyDataDirectory, getDataBaseDir, validateDataBaseDirTarget } from "../paths.js";
 import { isEffectiveDevelopmentNodeEnv } from "../runtime-tools/nodeEnv.js";
 import { maybeThrowInjectedFsFault } from "../fs/fsFaultInjection.js";
+import { withFileLock } from "@zcode/shared/node";
 import { atomicWriteText } from "../fs/atomicFileUtils.js";
 import { withSettingsWriteQueueTimeout } from "./settingsWriteQueue.js";
 import {
@@ -212,6 +213,8 @@ async function writeSettings(
     delete persisted.providerFamilyConnectionSelections;
   }
   await atomicWriteText(settingsFile, JSON.stringify(persisted, null, 2), {
+    // 调用方 enqueueSettingsWrite 已经持有 setting.json 的跨进程锁，这里再加锁会自我等待到超时。
+    useFileLock: false,
     beforeRename: () => {
       if (!shouldCommit()) {
         // 提交前超时的旧写只能清理临时文件，不能晚到 rename 覆盖新语言偏好。
@@ -256,7 +259,11 @@ export function createSettingServiceWithMigrations(): {
       const currentGeneration = ++writeQueueGeneration;
       const shouldCommit = () => currentGeneration === writeQueueGeneration;
       return withSettingsWriteQueueTimeout(
-        (enterCommitPhase) => runUpdate(shouldCommit, enterCommitPhase),
+        // Bug 原因：Main 与各窗口 Host 各有一个 setting service，原先的文件锁只覆盖临时文件写入和
+        // rename，两个进程会各自读到旧快照再整文件写回，后写的一方抹掉前者刚保存的字段。
+        // 修复依据：与 credentialService 相同，让跨进程锁覆盖读取、合并和原子替换的全过程。
+        (enterCommitPhase) =>
+          withFileLock(getSettingsFile(), () => runUpdate(shouldCommit, enterCommitPhase)),
         () => {
           if (writeQueueGeneration === currentGeneration) {
             writeQueueGeneration += 1;
