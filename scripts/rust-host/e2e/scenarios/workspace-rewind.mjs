@@ -79,14 +79,6 @@ export async function run({ page, shots, workspace }) {
       { timeout: 30_000 },
     );
     await rewind.click();
-    await page.waitForTimeout(3000);
-    await dumpControls(page, "after rewind click");
-    const dialogText = await page.evaluate(() =>
-      [...document.querySelectorAll('[role="dialog"],[role="alertdialog"]')]
-        .map((element) => element.textContent?.trim().slice(0, 400))
-        .join("\n---\n"),
-    );
-    console.info(`[e2e] dialogs after rewind click: ${dialogText || "(none)"}`);
     // 有可回退的文件时会先弹出“Undo file changes”预览，确认后才执行。
     const confirm = page.getByRole("button", { name: "Undo files" }).first();
     if (await confirm.isVisible({ timeout: 5_000 }).catch(() => false)) await confirm.click();
@@ -101,7 +93,15 @@ export async function run({ page, shots, workspace }) {
     await page.waitForTimeout(500);
   }
   await page.screenshot({ path: join(shots, "03-after-rewind.png") });
-  if (await exists(target)) throw new Error("rewind did not undo the written file");
+  if (await exists(target)) {
+    // 例如 CLI 判定文件不可安全撤销时会弹出冲突说明，把它带进失败信息。
+    const dialogs = await page.evaluate(() =>
+      [...document.querySelectorAll('[role="dialog"],[role="alertdialog"]')]
+        .map((element) => element.textContent?.trim().slice(0, 400))
+        .join(" | "),
+    );
+    throw new Error(`rewind did not undo the written file; dialogs: ${dialogs || "(none)"}`);
+  }
   await page.getByText("Rewound and answered").first().waitFor({ timeout: 60_000 });
   console.info("[e2e] rewind undid the agent's file change and resent the edited message");
 }

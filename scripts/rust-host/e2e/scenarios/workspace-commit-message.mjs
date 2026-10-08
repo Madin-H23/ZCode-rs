@@ -61,10 +61,15 @@ async function revealGitTrigger(page) {
   await page.getByText("ok", { exact: true }).first().waitFor({ timeout: 60_000 });
   const trigger = page.getByTestId("git-action-trigger").first();
   const expand = page.getByRole("button", { name: "Expand status" }).first();
-  if (!(await trigger.isVisible().catch(() => false)) && (await expand.isVisible().catch(() => false))) {
+  if (
+    !(await trigger.isVisible().catch(() => false)) &&
+    (await expand.isVisible().catch(() => false))
+  ) {
     await expand.click();
   }
-  const section = page.locator('[data-status-section-trigger="environment"][aria-expanded="false"]');
+  const section = page.locator(
+    '[data-status-section-trigger="environment"][aria-expanded="false"]',
+  );
   if (!(await trigger.isVisible().catch(() => false)) && (await section.count()) > 0) {
     await section.first().click();
   }

@@ -6,15 +6,15 @@
 
 把 R3 剩余部分补齐，让 Desktop 在 Rust Host 上的工作区能力与 Node Host 一致：
 
-| channel                      | 成员                                                                                     | 本阶段                                             |
-| ---------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `git`                        | `generateCommitMessage`                                                                  | 经 AgentRuntime 调 CLI `workspace/generateText`    |
-| `git-checkpoint`             | `createCheckpoint`、`diffCheckpoints`、`restoreBetweenCheckpoints`、`deleteCheckpoint`   | 全部实现                                           |
-| `media-preview`              | `prepare`、`refreshPlaybackUrl`、`release`                                               | 本地实现；后两者只服务远端，本地按 Node 行为应答   |
-| `prompt-attachment-transfer` | `stage`、`adopt`、`cancel`、`cleanup`、`onDynamicProgress`                               | 本地零拷贝实现                                     |
-| `system`                     | `probeIntranet`                                                                          | TCP 与 HTTP(S) 探测                                |
-| `zcode-agent`                | `attachmentPreviewSourceV4`                                                              | `local_path` 经 Main 授权                          |
-| `file`、`file-watcher`、`terminal`、`git` | 已有成员                                                                    | 逐成员对照 Node 审计并修正                         |
+| channel                                   | 成员                                                                                   | 本阶段                                           |
+| ----------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `git`                                     | `generateCommitMessage`                                                                | 经 AgentRuntime 调 CLI `workspace/generateText`  |
+| `git-checkpoint`                          | `createCheckpoint`、`diffCheckpoints`、`restoreBetweenCheckpoints`、`deleteCheckpoint` | 全部实现                                         |
+| `media-preview`                           | `prepare`、`refreshPlaybackUrl`、`release`                                             | 本地实现；后两者只服务远端，本地按 Node 行为应答 |
+| `prompt-attachment-transfer`              | `stage`、`adopt`、`cancel`、`cleanup`、`onDynamicProgress`                             | 本地零拷贝实现                                   |
+| `system`                                  | `probeIntranet`                                                                        | TCP 与 HTTP(S) 探测                              |
+| `zcode-agent`                             | `attachmentPreviewSourceV4`                                                            | `local_path` 经 Main 授权                        |
+| `file`、`file-watcher`、`terminal`、`git` | 已有成员                                                                               | 逐成员对照 Node 审计并修正                       |
 
 不在本阶段：远端 workspace（SSH/WSL/Docker）的媒体代理与附件暂存（R6）。
 
@@ -51,33 +51,33 @@
 ### 2.5 内网探测（`system.probeIntranet`）
 
 - 逐条移植 `systemService.ts`：目标归一化（端口缺省 22、超时夹到 [100, 10000] ms、缺省 800 ms、重试次数 [1, 3]、缺省 2）、`requiredSuccessCount` 夹取、策略 `tcp-connect` / `service-http` / `mixed`、错误文案（`timeout(<n>ms)`、`HTTP <status>`、`service returned ok=false`、`marker mismatch(expected=…, actual=…)`）。
-- HTTP 探测用 reqwest（rustls + ring，不读系统代理，与 Node `fetch` 一致不走 HTTP(S)_PROXY）；token 放 `x-zcode-intranet-token`。
+- HTTP 探测用 reqwest（rustls + ring，不读系统代理，与 Node `fetch` 一致不走 HTTP(S)\_PROXY）；token 放 `x-zcode-intranet-token`。
 
 ### 2.6 已有成员的审计结论（file / file-watcher / terminal / git）
 
 逐成员对照 Node 后修正的差异：
 
-| 成员                                            | 问题                                                                                      | 修正                                                                         |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `file.resolvePath`                              | Windows 上 `canonicalize` 返回 `\\?\C:\…`                                              | 去掉 verbatim 前缀，与 Node `realpath` 一致                                  |
-| `file.createDefaultWorkspace` / `createScratchWorkspace` | 路径被文件占用时报 `Workspace path is not a directory`                             | 与 Node `mkdir({ recursive: true })` 相同：本身被占用 `EEXIST`，父路径被占用 `ENOTDIR` |
-| `file.checkFilesExist`                          | 没有结果缓存、串行检查                                                                    | 正负结果缓存 60 s、最多 100 条（LRU），并发检查、按输入顺序返回              |
-| fs 错误（file、file-watcher、git checkpoint）  | Windows 上按 `ErrorKind` 映射，拒绝访问成了 `EACCES`、文件被占用没有 `EBUSY`              | 按 Windows 原始错误码走 libuv 的映射（`ERROR_ACCESS_DENIED`→`EPERM`，共享 / 锁冲突→`EBUSY` 等） |
-| `terminal`（Host 退出）                         | Host 退出只回收 CLI，不回收终端                                                           | 与 Node `disposeAll` 一样逐个结束 shell（POSIX SIGHUP；Windows 结束进程并关闭伪控制台） |
+| 成员                                                     | 问题                                                                         | 修正                                                                                            |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `file.resolvePath`                                       | Windows 上 `canonicalize` 返回 `\\?\C:\…`                                    | 去掉 verbatim 前缀，与 Node `realpath` 一致                                                     |
+| `file.createDefaultWorkspace` / `createScratchWorkspace` | 路径被文件占用时报 `Workspace path is not a directory`                       | 与 Node `mkdir({ recursive: true })` 相同：本身被占用 `EEXIST`，父路径被占用 `ENOTDIR`          |
+| `file.checkFilesExist`                                   | 没有结果缓存、串行检查                                                       | 正负结果缓存 60 s、最多 100 条（LRU），并发检查、按输入顺序返回                                 |
+| fs 错误（file、file-watcher、git checkpoint）            | Windows 上按 `ErrorKind` 映射，拒绝访问成了 `EACCES`、文件被占用没有 `EBUSY` | 按 Windows 原始错误码走 libuv 的映射（`ERROR_ACCESS_DENIED`→`EPERM`，共享 / 锁冲突→`EBUSY` 等） |
+| `terminal`（Host 退出）                                  | Host 退出只回收 CLI，不回收终端                                              | 与 Node `disposeAll` 一样逐个结束 shell（POSIX SIGHUP；Windows 结束进程并关闭伪控制台）         |
 
 核对后无需修改：`file` 其余成员的读取上限（文本 128/256 KiB、分块 256 KiB/1 MiB、媒体 4/8 MiB、二进制 25 MiB）、二进制判定、`File is too large to preview` / `Path is not a file` 文案、UTF-16 计长的分块文件列表；`file-watcher` 的 150 ms 防抖、`changedPath` 规则、错误即清理与 `无法监视目录` 文案；`terminal` 的 shell / cwd 回退、`Terminal not found`、退出码与 200 ms 输出排空；`git` 全部错误文案（逐条比对 `gitCliRepo.ts` / `gitCliHelpers.ts`）。
 
 ## 3. 状态所有者
 
-| 状态                         | 所有者                                                                 | 说明                                                                    |
-| ---------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| checkpoint manifest          | `CheckpointStore`（`<appConfig>/checkpoints/<hash12>/<id>.json`）     | 与 Node Host 共享格式；hidden ref 由 git 仓库持有                       |
-| 临时 checkpoint index        | 单次 `createCheckpoint` 调用                                           | 结束即删                                                                |
-| 本地媒体路径授权表           | Main（`localMediaPreviewPathRegistry`，30 min TTL）                    | Host 只发请求、拿规范路径，不缓存授权                                   |
-| 进行中的 Host → Main 授权请求 | `MainBridge`（按 `requestId` 关联）                                    | 超时后迟到的结果被丢弃                                                  |
-| 提交信息生成的 operationId   | 本次调用的 future（`CancelOnDrop` 守卫）                               | 调用完成即解除；被丢弃时向 CLI 发取消                                   |
-| `checkFilesExist` 缓存       | `file` service 实例                                                    | 只是性能缓存，与 Node 同样的 60 s 陈旧窗口                              |
-| 终端实例                     | `Terminals`（整个 Host）                                               | Host 退出时 `Workspace::shutdown` 回收                                  |
+| 状态                          | 所有者                                                            | 说明                                              |
+| ----------------------------- | ----------------------------------------------------------------- | ------------------------------------------------- |
+| checkpoint manifest           | `CheckpointStore`（`<appConfig>/checkpoints/<hash12>/<id>.json`） | 与 Node Host 共享格式；hidden ref 由 git 仓库持有 |
+| 临时 checkpoint index         | 单次 `createCheckpoint` 调用                                      | 结束即删                                          |
+| 本地媒体路径授权表            | Main（`localMediaPreviewPathRegistry`，30 min TTL）               | Host 只发请求、拿规范路径，不缓存授权             |
+| 进行中的 Host → Main 授权请求 | `MainBridge`（按 `requestId` 关联）                               | 超时后迟到的结果被丢弃                            |
+| 提交信息生成的 operationId    | 本次调用的 future（`CancelOnDrop` 守卫）                          | 调用完成即解除；被丢弃时向 CLI 发取消             |
+| `checkFilesExist` 缓存        | `file` service 实例                                               | 只是性能缓存，与 Node 同样的 60 s 陈旧窗口        |
+| 终端实例                      | `Terminals`（整个 Host）                                          | Host 退出时 `Workspace::shutdown` 回收            |
 
 ## 4. 事件顺序
 
@@ -122,17 +122,17 @@ sequenceDiagram
 
 ## 5. 有意与 Node 不同之处
 
-| 差异                                                                 | 原因                                                                                                               |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 提交信息生成总带 `operationId`，调用被丢弃时发 `workspace/cancelGenerateText` | Node git service 不传 signal，取消只停在 Renderer；Rust 的 RPC 取消会丢弃 future，顺带让 CLI 停止生成，避免空耗模型 |
-| 缺省 locale 读 `LC_ALL` / `LC_MESSAGES` / `LANG`                      | Rust 没有 `Intl`；UI 总会传 locale，只影响无 locale 的调用                                                       |
-| 媒体路径授权 30 s 超时                                               | `MainBridge` 必须有超时；Main 总会回复，超时只防止异常时调用永远挂起                                               |
-| checkpoint manifest 的写入用一把锁串行（Node 按文件串行）            | checkpoint 是低频操作，语义相同（读取等待写入完成）                                                                |
-| Windows 上 checkpoint 恢复去 repoRoot 前缀时统一分隔符、忽略大小写    | Node 用 `${repoRoot}${sep}` 字符串替换，git 报告的 `C:/repo` 与 resolve 出的 `C:\repo\…` 对不上（Node 的 Windows 缺陷） |
-| `probeIntranet` 的 TCP 错误文案只覆盖常见 errno                       | `connect ECONNREFUSED host:port`、`getaddrinfo ENOTFOUND host`、`timeout(Nms)` 与 Node 相同；其余用系统错误文本    |
-| `probeIntranet` 的 HTTP 网络错误统一为 `fetch failed`，JSON 解析错误为 `invalid JSON: …` | Node 的 fetch 网络错误就是 `fetch failed`；JSON 错误文案来自 V8，无法逐字复刻                       |
-| 单文件 `file-watcher` 的事件不带 `changedPath`                        | Node 对文件路径会拼出 `<file>/<file>` 这种不存在的路径；UI 只监听目录                                               |
-| git-checkpoint 没有本地 UI 调用方                                    | Node 也只在远端 workspace 集合里注册给 Renderer；本地实现保持完整，供远端与后续使用                                 |
+| 差异                                                                                     | 原因                                                                                                                    |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 提交信息生成总带 `operationId`，调用被丢弃时发 `workspace/cancelGenerateText`            | Node git service 不传 signal，取消只停在 Renderer；Rust 的 RPC 取消会丢弃 future，顺带让 CLI 停止生成，避免空耗模型     |
+| 缺省 locale 读 `LC_ALL` / `LC_MESSAGES` / `LANG`                                         | Rust 没有 `Intl`；UI 总会传 locale，只影响无 locale 的调用                                                              |
+| 媒体路径授权 30 s 超时                                                                   | `MainBridge` 必须有超时；Main 总会回复，超时只防止异常时调用永远挂起                                                    |
+| checkpoint manifest 的写入用一把锁串行（Node 按文件串行）                                | checkpoint 是低频操作，语义相同（读取等待写入完成）                                                                     |
+| Windows 上 checkpoint 恢复去 repoRoot 前缀时统一分隔符、忽略大小写                       | Node 用 `${repoRoot}${sep}` 字符串替换，git 报告的 `C:/repo` 与 resolve 出的 `C:\repo\…` 对不上（Node 的 Windows 缺陷） |
+| `probeIntranet` 的 TCP 错误文案只覆盖常见 errno                                          | `connect ECONNREFUSED host:port`、`getaddrinfo ENOTFOUND host`、`timeout(Nms)` 与 Node 相同；其余用系统错误文本         |
+| `probeIntranet` 的 HTTP 网络错误统一为 `fetch failed`，JSON 解析错误为 `invalid JSON: …` | Node 的 fetch 网络错误就是 `fetch failed`；JSON 错误文案来自 V8，无法逐字复刻                                           |
+| 单文件 `file-watcher` 的事件不带 `changedPath`                                           | Node 对文件路径会拼出 `<file>/<file>` 这种不存在的路径；UI 只监听目录                                                   |
+| git-checkpoint 没有本地 UI 调用方                                                        | Node 也只在远端 workspace 集合里注册给 Renderer；本地实现保持完整，供远端与后续使用                                     |
 
 ## 6. 验收
 

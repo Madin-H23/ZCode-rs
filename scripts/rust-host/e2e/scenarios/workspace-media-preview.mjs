@@ -37,7 +37,10 @@ export async function run({ page, shots }) {
   await composer(page);
   try {
     // 打开文件的入口是命令中心（侧栏 Search ⌘K）的 Files 范围，结果来自 file.searchWorkspaceFiles。
-    await page.getByRole("button", { name: /^Search/ }).first().click({ timeout: 60_000 });
+    await page
+      .getByRole("button", { name: /^Search/ })
+      .first()
+      .click({ timeout: 60_000 });
     const search = page.getByPlaceholder("Search actions, tasks, or files").first();
     await search.waitFor({ state: "visible", timeout: 10_000 });
     await page.getByText("Files", { exact: true }).last().click({ timeout: 10_000 });
