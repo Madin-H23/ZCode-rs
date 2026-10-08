@@ -10,6 +10,7 @@ pub mod fsx;
 pub mod json;
 pub mod memory;
 pub mod plugin_roots;
+pub mod plugin_sync;
 pub mod plugins;
 pub mod skill_sync;
 pub mod skills;
