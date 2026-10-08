@@ -19,6 +19,8 @@ const DEV_ORIGIN: &str = "http://localhost:5173";
 const STEP_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct Host {
+    /// 测试 Host 的 home 与数据根：绝不能读写开发机真实的 ~/.zcode。
+    _home: tempfile::TempDir,
     child: Child,
     stdin: ChildStdin,
     stdout: Lines<BufReader<ChildStdout>>,
@@ -27,6 +29,7 @@ struct Host {
 
 impl Host {
     async fn spawn() -> Self {
+        let home = tempfile::tempdir().expect("temp home");
         let mut child = Command::new(env!("CARGO_BIN_EXE_zcode-host"))
             .args([
                 "--allowed-origin",
@@ -34,6 +37,10 @@ impl Host {
                 "--allowed-origin",
                 "file://",
             ])
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
+            .env("ZCODE_DESKTOP_HOME_DIR", home.path())
+            .env("ZCODE_DATA_BASE_DIR", home.path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -43,6 +50,7 @@ impl Host {
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap()).lines();
         let mut host = Self {
+            _home: home,
             child,
             stdin,
             stdout,
@@ -205,7 +213,7 @@ async fn renderer_attachment_gets_initialize_and_immediate_stub_replies() {
     assert_eq!(rpc.next().await.0, json!([200]));
 
     let started = Instant::now();
-    rpc.send(json!([100, 1, "setting", "get"]), Some(json!([])))
+    rpc.send(json!([100, 1, "feedback", "list"]), Some(json!([])))
         .await;
     let (header, body) = rpc.next().await;
     assert!(
@@ -226,6 +234,13 @@ async fn renderer_attachment_gets_initialize_and_immediate_stub_replies() {
     let (header, body) = rpc.next().await;
     assert_eq!(header, json!([201, 2]));
     assert_eq!(body.into_json(), json!({"handled": true}));
+
+    // 已实现的 service：临时 home 下没有设置文件，返回默认值。
+    rpc.send(json!([100, 9, "setting", "get"]), Some(json!([])))
+        .await;
+    let (header, body) = rpc.next().await;
+    assert_eq!(header, json!([201, 9]));
+    assert_eq!(body.into_json()["locale"], "zh-CN");
 
     rpc.send(json!([100, 3, "no-such-channel", "x"]), Some(json!([])))
         .await;
@@ -353,7 +368,10 @@ async fn dispose_and_closed_stdin_exit_cleanly() {
 
     let host = Host::spawn().await;
     let Host {
-        mut child, stdin, ..
+        mut child,
+        stdin,
+        _home,
+        ..
     } = host;
     drop(stdin);
     assert!(wait_exit(&mut child).await.success());

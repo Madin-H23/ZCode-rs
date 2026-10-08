@@ -2,6 +2,9 @@
 // zcode-host，并用 @zcode/shared 的 zod schema 校验 Rust 发出的控制消息，防止两侧定义漂移。
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import test from "node:test";
 import { createWebSocketServiceConnection } from "../src/index.js";
@@ -25,9 +28,19 @@ interface Host {
 }
 
 function startHost(): Host {
+  // 测试 Host 使用临时 home 与数据根，绝不读写开发机真实的 ~/.zcode。
+  const home = mkdtempSync(join(tmpdir(), "zcode-rust-host-"));
   const child = spawn(binary!, ["--control", "stdio", "--allowed-origin", "file://"], {
     stdio: ["pipe", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+      ZCODE_DESKTOP_HOME_DIR: home,
+      ZCODE_DATA_BASE_DIR: home,
+    },
   });
+  child.on("exit", () => rmSync(home, { recursive: true, force: true }));
   const queued: Record<string, unknown>[] = [];
   const waiters: ((message: Record<string, unknown>) => void)[] = [];
   createInterface({ input: child.stdout }).on("line", (line) => {
@@ -99,12 +112,15 @@ test("renderer client gets immediate stub replies from the Rust Host", async () 
     });
 
     const started = performance.now();
-    await assert.rejects(connection.services.settingService.get(), (error: Error) => {
+    await assert.rejects(connection.services.feedbackService.list(), (error: Error) => {
       assert.equal(error.name, "NotImplemented");
       assert.equal((error as Error & { code?: string }).code, "fault.host.notImplemented");
       return true;
     });
     assert.ok(performance.now() - started < 100, "stub reply within 100 ms");
+
+    // 已实现的 service：临时 home 下返回默认设置。
+    assert.equal((await connection.services.settingService.get()).locale, "zh-CN");
 
     assert.deepEqual(await connection.services.settingsSyncService.getFirstRunPromptState(), {
       handled: true,

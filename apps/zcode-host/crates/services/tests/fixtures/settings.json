@@ -1,0 +1,2691 @@
+{
+  "reads": [
+    {
+      "name": "empty",
+      "raw": {},
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "flags-only",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "not-object-null",
+      "raw": null,
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "not-object-array",
+      "raw": [],
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "string",
+      "raw": "x",
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "legacy-mixed",
+      "raw": {
+        "locale": "en-US",
+        "closeToTrayOnWindows": false,
+        "messageStreamShowReasoning": false,
+        "unknownField": 1,
+        "lastOpenTabs": ["/a", "/b"],
+        "desktopWindowSize": {
+          "width": 1,
+          "height": 1,
+          "maximized": false
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "en-US",
+        "localePreference": "en-US",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [
+          {
+            "kind": "local",
+            "workspacePath": "/a",
+            "workspacePurpose": "project"
+          },
+          {
+            "kind": "local",
+            "workspacePath": "/b",
+            "workspacePurpose": "project"
+          }
+        ],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "respects-flags",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "closeToTrayOnWindows": false,
+        "messageStreamShowReasoning": false
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": false,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": false,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "blank-proxy",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "httpProxy": "   "
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "trimmed-strings",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "httpProxy": "  http://a:1  ",
+        "terminalFontFamily": " Menlo ",
+        "dataBaseDir": " /d "
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "terminalFontFamily": "Menlo",
+        "httpProxy": "http://a:1",
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "dataBaseDir": "/d",
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "zoom-out-of-range",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "desktopZoomLevel": 9
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "zoom-ok",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "desktopZoomLevel": -3
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopZoomLevel": -3,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "archive-days-bad",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "taskAutoArchiveOlderThanDays": 400
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "archive-days-float",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "taskAutoArchiveOlderThanDays": 7.5
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "occupation-bad",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "onboardingOccupation": "pilot"
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "occupation-null",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "onboardingOccupation": null
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "onboardingOccupation": null,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "occupation-ok",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "onboardingOccupation": "developer"
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "onboardingOccupation": "developer",
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "null-optional",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "proactiveSuggestionsEnabled": null
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "null-defaulted",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "memoryEnabled": null
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "skipped-beta",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "skippedElectronUpdateVersions": {
+          "beta": "1"
+        }
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "skipped-ok",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "skippedElectronUpdateVersions": {
+          "stable": " 1.2.3 "
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {
+          "stable": "1.2.3"
+        }
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "endpoint-normalized",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "zcodeEndpointOrigin": " https://x.example.com/path?q=1 "
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {},
+        "zcodeEndpointOrigin": "https://x.example.com"
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "endpoint-dropped",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "zcodeEndpointOrigin": "ftp://x"
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "endpoint-port",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "zcodeEndpointOrigin": "http://LOCALHOST:8080/a"
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {},
+        "zcodeEndpointOrigin": "http://localhost:8080"
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "window-size-ok",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "desktopWindowSize": {
+          "width": 800,
+          "height": 900,
+          "maximized": true,
+          "z": 1
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopWindowSize": {
+          "width": 800,
+          "height": 900,
+          "maximized": true
+        },
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "viewport-bad",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "embeddedBrowserViewportPreference": {
+          "mode": "x"
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "viewport-ok",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "embeddedBrowserViewportPreference": {
+          "mode": "responsive",
+          "viewport": {
+            "width": 400,
+            "height": 900
+          },
+          "zoom": "75"
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "responsive",
+          "viewport": {
+            "width": 400,
+            "height": 900
+          },
+          "zoom": "75"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "viewport-extra-key",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 400,
+            "height": 900
+          },
+          "zoom": "75",
+          "x": 1
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "shell-auto",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "integratedTerminalShell": {
+          "mode": "auto",
+          "extra": 1
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "integratedTerminalShell": {
+          "mode": "auto"
+        },
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "shell-ok",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "integratedTerminalShell": {
+          "mode": "shell",
+          "dialect": "cmd",
+          "id": " a ",
+          "label": "b",
+          "path": "c"
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "integratedTerminalShell": {
+          "mode": "shell",
+          "dialect": "cmd",
+          "id": "a",
+          "label": "b",
+          "path": "c"
+        },
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "shell-bad",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "integratedTerminalShell": {
+          "mode": "shell",
+          "dialect": "pwsh",
+          "id": "a",
+          "label": "b",
+          "path": "c"
+        }
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "selections-ok",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "providerFamilyConnectionSelections": {
+          "zai": {
+            "kind": "start-plan"
+          },
+          "other": {
+            "kind": "x"
+          }
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {
+          "zai": {
+            "kind": "start-plan"
+          }
+        },
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "selections-team",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "providerFamilyConnectionSelections": {
+          "bigmodel": {
+            "kind": "team-coding-plan",
+            "productId": " p ",
+            "organizationId": "o",
+            "projectId": "j"
+          }
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {
+          "bigmodel": {
+            "kind": "team-coding-plan",
+            "productId": "p",
+            "organizationId": "o",
+            "projectId": "j"
+          }
+        },
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "selections-extra",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "providerFamilyConnectionSelections": {
+          "zai": {
+            "kind": "start-plan",
+            "x": 1
+          }
+        }
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "domain",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "providerFamilyDomain": "zai",
+        "providerFamilyDomainUpdatedAt": 5,
+        "providerFamilyDomainMigrated": true
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomain": "zai",
+        "providerFamilyDomainUpdatedAt": 5,
+        "providerFamilyDomainMigrated": true,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "domain-bad",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "providerFamilyDomain": "other"
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "sessions",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "lastWorkspaceSession": [
+          {
+            "kind": "local",
+            "workspacePath": "/a",
+            "extra": 1
+          },
+          {
+            "kind": "local",
+            "workspacePath": "/c",
+            "workspacePurpose": "conversation"
+          },
+          {
+            "kind": "remote",
+            "workspacePath": "/r",
+            "target": {
+              "kind": "ssh",
+              "host": " h ",
+              "username": "u",
+              "port": 22,
+              "extra": 1,
+              "resourcePackages": {
+                "selectedPackageIds": ["x"]
+              }
+            },
+            "lastOpenedAt": 3,
+            "lastConnectionStatus": "connected",
+            "y": 2
+          },
+          {
+            "kind": "remote",
+            "workspacePath": "/w",
+            "target": {
+              "kind": "wsl",
+              "distro": "Ubuntu",
+              "user": " me "
+            },
+            "lastOpenedAt": 0,
+            "lastConnectionStatus": "failed",
+            "lastConnectionError": "e"
+          },
+          {
+            "kind": "remote",
+            "workspacePath": "/d",
+            "target": {
+              "kind": "docker",
+              "container": "c1"
+            },
+            "lastOpenedAt": 1,
+            "lastConnectionStatus": "connected",
+            "workspaceIdentity": "id"
+          }
+        ]
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [
+          {
+            "kind": "local",
+            "workspacePath": "/a",
+            "workspacePurpose": "project"
+          },
+          {
+            "kind": "local",
+            "workspacePath": "/c",
+            "workspacePurpose": "conversation"
+          },
+          {
+            "kind": "remote",
+            "workspacePath": "/r",
+            "target": {
+              "kind": "ssh",
+              "host": "h",
+              "port": 22,
+              "username": "u"
+            },
+            "lastOpenedAt": 3,
+            "lastConnectionStatus": "connected"
+          },
+          {
+            "kind": "remote",
+            "workspacePath": "/w",
+            "target": {
+              "kind": "wsl",
+              "distro": "Ubuntu",
+              "user": "me"
+            },
+            "lastOpenedAt": 0,
+            "lastConnectionStatus": "failed",
+            "lastConnectionError": "e"
+          },
+          {
+            "kind": "remote",
+            "workspacePath": "/d",
+            "workspaceIdentity": "id",
+            "target": {
+              "kind": "docker",
+              "container": "c1"
+            },
+            "lastOpenedAt": 1,
+            "lastConnectionStatus": "connected"
+          }
+        ],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "session-empty-path",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "lastWorkspaceSession": [
+          {
+            "kind": "local",
+            "workspacePath": ""
+          }
+        ]
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "session-unknown-kind",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "lastWorkspaceSession": [
+          {
+            "kind": "cloud",
+            "workspacePath": "/x"
+          }
+        ]
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "legacy-history",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "lastWorkspaceSession": [
+          {
+            "kind": "remote",
+            "historyId": "h1"
+          },
+          {
+            "kind": "remote",
+            "historyId": "missing"
+          }
+        ],
+        "remoteWorkspaceHistory": [
+          {
+            "id": "h1",
+            "workspacePath": "/h",
+            "target": {
+              "kind": "docker",
+              "container": "c"
+            },
+            "lastOpenedAt": 2,
+            "lastConnectionStatus": "failed",
+            "localWorkspacePath": ""
+          }
+        ],
+        "lastOpenTabs": ["/h", "/x"]
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [
+          {
+            "kind": "local",
+            "workspacePath": "/h",
+            "workspacePurpose": "project"
+          },
+          {
+            "kind": "local",
+            "workspacePath": "/x",
+            "workspacePurpose": "project"
+          }
+        ],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "records",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "shortcutBindings": {
+          "a": ["x", "y"]
+        },
+        "lastActiveTaskByWorkspace": {
+          "/a": "t1"
+        },
+        "recentProjects": ["/p"]
+      },
+      "expected": {
+        "recentProjects": ["/p"],
+        "locale": "zh-CN",
+        "shortcutBindings": {
+          "a": ["x", "y"]
+        },
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "lastActiveTaskByWorkspace": {
+          "/a": "t1"
+        },
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "records-bad",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "shortcutBindings": {
+          "a": "x"
+        }
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "release-notes",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "pendingPostUpdateReleaseNotes": {
+          "version": "1",
+          "title": " t ",
+          "markdown": "m",
+          "releaseNotesByLocale": {
+            "en-US": {
+              "title": "T",
+              "markdown": "M"
+            }
+          }
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "pendingPostUpdateReleaseNotes": {
+          "version": "1",
+          "title": "t",
+          "markdown": "m",
+          "releaseNotesByLocale": {
+            "en-US": {
+              "title": "T",
+              "markdown": "M"
+            }
+          }
+        },
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "release-notes-bad-locale",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "pendingPostUpdateReleaseNotes": {
+          "version": "1",
+          "title": "t",
+          "markdown": "m",
+          "releaseNotesByLocale": {
+            "fr": {
+              "title": "T",
+              "markdown": "M"
+            }
+          }
+        }
+      },
+      "expected": null,
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "locale-preference-kept",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "locale": "en-US",
+        "localePreference": "system"
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "en-US",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "legacy-account",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "modelProviderFamilySelectedKeys": {
+          "zai": "coding-plan:builtin:zai-coding-plan",
+          "bigmodel": "team-plan:builtin:bigmodel-coding-plan:p%201:o:j"
+        },
+        "modelProviderFamilyModes": {
+          "zai": "oauth"
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {
+          "zai": {
+            "kind": "individual-coding-plan"
+          },
+          "bigmodel": {
+            "kind": "team-coding-plan",
+            "productId": "p 1",
+            "organizationId": "o",
+            "projectId": "j"
+          }
+        },
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "legacy-account-apikey",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "modelProviderFamilySelectedKeys": {
+          "zai": "coding-plan:builtin:zai-coding-plan"
+        },
+        "modelProviderFamilyModes": {
+          "zai": "apiKey"
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": false
+    },
+    {
+      "name": "legacy-account-incomplete",
+      "raw": {
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "modelProviderFamilySelectedKeys": {
+          "zai": "team-plan:builtin:zai-coding-plan:p:j"
+        }
+      },
+      "expected": {
+        "recentProjects": [],
+        "locale": "zh-CN",
+        "localePreference": "system",
+        "terminalInheritSystemProfile": true,
+        "embeddedBrowserAllowInsecureCertificates": false,
+        "embeddedBrowserViewportPreference": {
+          "mode": "normal",
+          "viewport": {
+            "width": 393,
+            "height": 852
+          },
+          "zoom": "fit"
+        },
+        "computerUseComposerEntryHidden": true,
+        "taskAutoArchiveEnabled": false,
+        "taskAutoArchiveOlderThanDays": 7,
+        "closeToTrayOnWindows": true,
+        "closeToTrayOnWindowsMigrationInitialized": true,
+        "keepAwakeWhileRunning": false,
+        "desktopChromiumHardwareAccelerationEnabled": true,
+        "messageStreamShowReasoning": true,
+        "messageStreamShowReasoningMigrationInitialized": true,
+        "messageStreamShowTodos": false,
+        "toolGroupingExploreEnabled": true,
+        "toolGroupingTerminalEnabled": true,
+        "toolGroupingChangesEnabled": false,
+        "zcodeInteractionBehavior": "queue",
+        "askUserQuestionAutoResolutionEnabled": true,
+        "modelIoFullRetentionEnabled": false,
+        "startPlanRecommendationDismissed": false,
+        "providerFamilyConnectionSelections": {},
+        "providerFamilyDomainMigrated": false,
+        "nativeSearchEnhancementsEnabled": true,
+        "memoryEnabled": false,
+        "lastWorkspaceSession": [],
+        "lastActiveTabIndex": 0,
+        "receivePreviewUpdates": false,
+        "autoDownloadAndInstallUpdates": false,
+        "skippedElectronUpdateVersions": {}
+      },
+      "incompleteLegacyTeam": true
+    }
+  ],
+  "current": {
+    "recentProjects": ["/a"],
+    "locale": "zh-CN",
+    "localePreference": "zh-CN",
+    "terminalInheritSystemProfile": true,
+    "httpProxy": "http://p",
+    "embeddedBrowserAllowInsecureCertificates": false,
+    "embeddedBrowserViewportPreference": {
+      "mode": "normal",
+      "viewport": {
+        "width": 393,
+        "height": 852
+      },
+      "zoom": "fit"
+    },
+    "computerUseComposerEntryHidden": true,
+    "taskAutoArchiveEnabled": false,
+    "taskAutoArchiveOlderThanDays": 7,
+    "closeToTrayOnWindows": true,
+    "closeToTrayOnWindowsMigrationInitialized": true,
+    "keepAwakeWhileRunning": false,
+    "desktopChromiumHardwareAccelerationEnabled": true,
+    "messageStreamShowReasoning": true,
+    "messageStreamShowReasoningMigrationInitialized": true,
+    "messageStreamShowTodos": false,
+    "toolGroupingExploreEnabled": true,
+    "toolGroupingTerminalEnabled": true,
+    "toolGroupingChangesEnabled": false,
+    "zcodeInteractionBehavior": "queue",
+    "askUserQuestionAutoResolutionEnabled": true,
+    "modelIoFullRetentionEnabled": false,
+    "startPlanRecommendationDismissed": false,
+    "providerFamilyConnectionSelections": {},
+    "providerFamilyDomain": "zai",
+    "providerFamilyDomainMigrated": false,
+    "nativeSearchEnhancementsEnabled": true,
+    "memoryEnabled": false,
+    "lastWorkspaceSession": [],
+    "lastActiveTabIndex": 0,
+    "receivePreviewUpdates": false,
+    "autoDownloadAndInstallUpdates": false,
+    "skippedElectronUpdateVersions": {}
+  },
+  "patches": [
+    {
+      "name": "locale",
+      "patch": {
+        "locale": "en-US"
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "en-US",
+          "localePreference": "en-US",
+          "terminalInheritSystemProfile": true,
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomain": "zai",
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "locale-with-preference",
+      "patch": {
+        "locale": "en-US",
+        "localePreference": "system"
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "en-US",
+          "localePreference": "system",
+          "terminalInheritSystemProfile": true,
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomain": "zai",
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "clear-proxy",
+      "patch": {
+        "httpProxy": "   "
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "zh-CN",
+          "localePreference": "zh-CN",
+          "terminalInheritSystemProfile": true,
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomain": "zai",
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "trim-font",
+      "patch": {
+        "terminalFontFamily": " Menlo "
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "zh-CN",
+          "localePreference": "zh-CN",
+          "terminalInheritSystemProfile": true,
+          "terminalFontFamily": "Menlo",
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomain": "zai",
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "shell-auto-clears",
+      "patch": {
+        "integratedTerminalShell": {
+          "mode": "auto"
+        }
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "zh-CN",
+          "localePreference": "zh-CN",
+          "terminalInheritSystemProfile": true,
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomain": "zai",
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "shell-trim",
+      "patch": {
+        "integratedTerminalShell": {
+          "mode": "shell",
+          "dialect": "git-bash",
+          "id": " i ",
+          "label": " l ",
+          "path": " p "
+        }
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "zh-CN",
+          "localePreference": "zh-CN",
+          "terminalInheritSystemProfile": true,
+          "integratedTerminalShell": {
+            "mode": "shell",
+            "dialect": "git-bash",
+            "id": "i",
+            "label": "l",
+            "path": "p"
+          },
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomain": "zai",
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "domain-empty",
+      "patch": {
+        "providerFamilyDomain": ""
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "zh-CN",
+          "localePreference": "zh-CN",
+          "terminalInheritSystemProfile": true,
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "domain-blank",
+      "patch": {
+        "providerFamilyDomain": "  "
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "zh-CN",
+          "localePreference": "zh-CN",
+          "terminalInheritSystemProfile": true,
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "unknown-key",
+      "patch": {
+        "bogus": 1,
+        "memoryEnabled": true
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "zh-CN",
+          "localePreference": "zh-CN",
+          "terminalInheritSystemProfile": true,
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomain": "zai",
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": true,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "null-rejected",
+      "patch": {
+        "desktopZoomLevel": null
+      },
+      "expected": {
+        "error": true
+      }
+    },
+    {
+      "name": "occupation-null",
+      "patch": {
+        "onboardingOccupation": null
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "zh-CN",
+          "localePreference": "zh-CN",
+          "terminalInheritSystemProfile": true,
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomain": "zai",
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "onboardingOccupation": null,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "endpoint-bad",
+      "patch": {
+        "zcodeEndpointOrigin": "nope"
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "zh-CN",
+          "localePreference": "zh-CN",
+          "terminalInheritSystemProfile": true,
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomain": "zai",
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "endpoint-good",
+      "patch": {
+        "zcodeEndpointOrigin": "https://a.example/x"
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/a"],
+          "locale": "zh-CN",
+          "localePreference": "zh-CN",
+          "terminalInheritSystemProfile": true,
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomain": "zai",
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {},
+          "zcodeEndpointOrigin": "https://a.example"
+        }
+      }
+    },
+    {
+      "name": "recent",
+      "patch": {
+        "recentProjects": ["/x", "/y"]
+      },
+      "expected": {
+        "merged": {
+          "recentProjects": ["/x", "/y"],
+          "locale": "zh-CN",
+          "localePreference": "zh-CN",
+          "terminalInheritSystemProfile": true,
+          "httpProxy": "http://p",
+          "embeddedBrowserAllowInsecureCertificates": false,
+          "embeddedBrowserViewportPreference": {
+            "mode": "normal",
+            "viewport": {
+              "width": 393,
+              "height": 852
+            },
+            "zoom": "fit"
+          },
+          "computerUseComposerEntryHidden": true,
+          "taskAutoArchiveEnabled": false,
+          "taskAutoArchiveOlderThanDays": 7,
+          "closeToTrayOnWindows": true,
+          "closeToTrayOnWindowsMigrationInitialized": true,
+          "keepAwakeWhileRunning": false,
+          "desktopChromiumHardwareAccelerationEnabled": true,
+          "messageStreamShowReasoning": true,
+          "messageStreamShowReasoningMigrationInitialized": true,
+          "messageStreamShowTodos": false,
+          "toolGroupingExploreEnabled": true,
+          "toolGroupingTerminalEnabled": true,
+          "toolGroupingChangesEnabled": false,
+          "zcodeInteractionBehavior": "queue",
+          "askUserQuestionAutoResolutionEnabled": true,
+          "modelIoFullRetentionEnabled": false,
+          "startPlanRecommendationDismissed": false,
+          "providerFamilyConnectionSelections": {},
+          "providerFamilyDomain": "zai",
+          "providerFamilyDomainMigrated": false,
+          "nativeSearchEnhancementsEnabled": true,
+          "memoryEnabled": false,
+          "lastWorkspaceSession": [],
+          "lastActiveTabIndex": 0,
+          "receivePreviewUpdates": false,
+          "autoDownloadAndInstallUpdates": false,
+          "skippedElectronUpdateVersions": {}
+        }
+      }
+    },
+    {
+      "name": "invalid-type",
+      "patch": {
+        "memoryEnabled": "yes"
+      },
+      "expected": {
+        "error": true
+      }
+    }
+  ]
+}

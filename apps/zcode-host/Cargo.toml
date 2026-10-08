@@ -19,7 +19,7 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 print_stdout = "deny"
@@ -28,10 +28,13 @@ print_stdout = "deny"
 anyhow = "1"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 getrandom = "0.3"
+libc = "0.2"
+url = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.28"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 zcode-host-control = { path = "crates/control" }
 zcode-host-core = { path = "crates/host-core" }
 zcode-host-kit = { path = "crates/kit" }

@@ -24,3 +24,6 @@ zcode-host-core.workspace = true
 zcode-host-kit.workspace = true
 zcode-host-services.workspace = true
 zcode-host-rpc.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

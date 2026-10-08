@@ -15,5 +15,5 @@ pub use channel::{
     CallContext, CallFuture, ChannelRegistry, EventStream, NOT_IMPLEMENTED_CODE, Reply,
     ServiceChannel, StubChannel,
 };
-pub use events::EventHub;
+pub use events::{EventHub, replies};
 pub use zcode_host_rpc::{RpcError, RpcValue};

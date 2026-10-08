@@ -9,6 +9,13 @@ use std::sync::Arc;
 use zcode_host_control::{ControlRouter, ControlSink, InitLocal};
 use zcode_host_kit::ChannelRegistry;
 
+pub mod broadcast;
+pub mod main_bridge;
+pub mod settings;
+pub mod store;
+
+use main_bridge::MainBridge;
+
 /// 进程环境快照，由 composition root 读取后传入；service 不直接读 `std::env`。
 #[derive(Debug, Clone, Default)]
 pub struct HostEnvironment {
@@ -56,7 +63,10 @@ pub fn install(
     registry: &mut ChannelRegistry,
     router: &mut ControlRouter,
 ) {
-    let _ = (context, registry, router);
+    let bridge = MainBridge::new(context.control.clone());
+    let settings = settings::SettingStore::new(&context.environment.home_dir);
+    registry.implement(broadcast::service(bridge.clone(), router));
+    registry.implement(settings::service(settings.clone()));
 }
 
 #[cfg(test)]

@@ -2,9 +2,17 @@
 //! 落后时静默丢消息（V4 帧丢失只能靠 resync 补，不能在这里制造缺口）。订阅者断开后自动清理。
 use std::sync::{Arc, Mutex};
 
-use futures_util::Stream;
 use futures_util::stream;
+use futures_util::{Stream, StreamExt};
+use serde_json::Value;
 use tokio::sync::mpsc;
+
+use crate::channel::{EventStream, Reply};
+
+/// 把 JSON 值事件流包装成 channel 的事件流。
+pub fn replies(events: impl Stream<Item = Value> + Send + 'static) -> EventStream {
+    Box::pin(events.map(Reply::Value))
+}
 
 type Filter<T> = Box<dyn Fn(&T) -> bool + Send + Sync>;
 
