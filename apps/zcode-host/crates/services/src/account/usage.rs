@@ -528,6 +528,114 @@ impl UsageStats {
         })
     }
 
+    /// monitor 接口 URL：把 quota/limit 路径换成目标接口并带上查询参数（`build*MonitorUrl`）。
+    fn monitor_url(resolved: &QuotaAuthorization, from: &str, to: &str, pairs: &[(&str, &str)]) -> String {
+        let Ok(mut url) = url::Url::parse(&resolved.quota_url) else {
+            return resolved.quota_url.clone();
+        };
+        let path = url.path().to_owned();
+        if let Some(prefix) = path.strip_suffix(from) {
+            url.set_path(&format!("{prefix}{to}"));
+        }
+        with_query(url.as_str(), pairs)
+    }
+
+    async fn fetch_monitor(&self, resolved: &QuotaAuthorization, url: String) -> Result<Value, ApiError> {
+        self.api
+            .read_json(Self::usage_headers(ApiRequest::get(url).timeout_ms(REQUEST_TIMEOUT_MS), resolved))
+            .await
+    }
+
+    /// `getUsageStatsSnapshot`：设置页的 monitor 用量（model-usage / tool-usage）。
+    pub async fn usage_snapshot(&self, request: &Value) -> Result<Value, RpcError> {
+        let resolved = self
+            .resolve_authorization(
+                request["preferredProviderId"].as_str().unwrap_or(""),
+                &request["accountAccess"],
+                request["requirePreferredProvider"] == true,
+                request["allowEnvApiKey"].as_bool(),
+            )
+            .await?
+            .ok_or_else(|| error("no_bigmodel_api_key"))?;
+        let (start, end) = super::usage_monitor::usage_time_range(request["range"].as_str().unwrap_or(""));
+        let team = if resolved.team.is_some() { vec![("type", "2")] } else { Vec::new() };
+        let query = |extra: &[(&'static str, &str)]| -> Vec<(&'static str, String)> {
+            team.iter().map(|(k, v)| (*k, (*v).to_owned())).chain(extra.iter().map(|(k, v)| (*k, (*v).to_owned()))).collect()
+        };
+        let pairs = query(&[("startTime", &start), ("endTime", &end)]);
+        let pairs: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let (model, tool) = tokio::join!(
+            self.fetch_monitor(&resolved, Self::monitor_url(&resolved, "/quota/limit", "/model-usage", &pairs)),
+            self.fetch_monitor(&resolved, Self::monitor_url(&resolved, "/quota/limit", "/tool-usage", &pairs)),
+        );
+        let model = monitor_data(&model.map_err(api_error)?, "BigModel model usage failed", false)?;
+        let tool = monitor_data(&tool.map_err(api_error)?, "BigModel tool usage failed", true)?;
+        let mut snapshot = super::usage_monitor::usage_stats_snapshot(request, &model, &tool, now_ms());
+        snapshot["sourceProvider"] = resolved.provider.clone();
+        Ok(snapshot)
+    }
+
+    /// `getCodingPlanUsageSnapshot`：quota 必须成功；activity / detail / health 传输失败只清空该区域。
+    pub async fn coding_plan_usage(&self, request: &Value) -> Result<Value, RpcError> {
+        let preferred = request["preferredProviderId"].as_str().unwrap_or("");
+        let resolved = self
+            .resolve_authorization(preferred, &request["accountAccess"], true, Some(false))
+            .await?
+            .ok_or_else(|| {
+                error(if is_zai_coding_plan_provider(preferred) {
+                    "zai_coding_plan_api_key_required"
+                } else {
+                    "bigmodel_coding_plan_api_key_required"
+                })
+            })?;
+        let range = super::usage_monitor::coding_plan_range(request)?;
+        let time_zone = request["timeZone"].as_str();
+        let (activity_start, activity_end) = super::usage_monitor::trailing_range(time_zone, 365)?;
+        let (health_start, health_end) = super::usage_monitor::trailing_range(time_zone, 6)?;
+        let credit_type = if resolved.team.is_some() { "3" } else { "1" };
+        let credit_url = |endpoint: &str, start: &str, end: &str, usage_type: Option<&str>| {
+            let mut pairs = vec![("type", credit_type), ("startTime", start), ("endTime", end)];
+            if let Some(usage_type) = usage_type {
+                pairs.push(("usageType", usage_type));
+            }
+            Self::monitor_url(&resolved, "/usage/quota/limit", &format!("/credit-usage/{endpoint}"), &pairs)
+        };
+        let (quota, activity, model_detail, tool_detail, health) = tokio::join!(
+            self.fetch_quota(&resolved),
+            self.fetch_monitor(&resolved, credit_url("activity", &activity_start, &activity_end, None)),
+            self.fetch_monitor(&resolved, credit_url("usage-detail", &range.start_time, &range.end_time, Some("MODEL"))),
+            self.fetch_monitor(&resolved, credit_url("usage-detail", &range.start_time, &range.end_time, Some("MCP"))),
+            self.fetch_monitor(
+                &resolved,
+                Self::monitor_url(&resolved, "/quota/limit", "/model-performance-day", &[("startTime", &health_start), ("endTime", &health_end)]),
+            ),
+        );
+        let quota = quota.map_err(api_error)?;
+        let activity = best_effort(activity, "BigModel activity usage failed")?;
+        let model_detail = best_effort(model_detail, "BigModel model usage detail failed")?;
+        let tool_detail = best_effort(tool_detail, "BigModel tool usage detail failed")?;
+        let health = best_effort(health, "BigModel model performance failed")?;
+        let quota = if bigmodel_envelope_ok(&quota) && quota["data"].is_object() {
+            json!({
+                "level": quota["data"]["level"].as_str().map(str::trim).filter(|l| !l.is_empty()),
+                "limits": normalize_limits(&quota["data"]["limits"]),
+            })
+        } else {
+            Value::Null
+        };
+        Ok(super::usage_monitor::coding_plan_snapshot(super::usage_monitor::CodingPlanInputs {
+            request,
+            provider: &resolved.provider,
+            quota,
+            range: &range,
+            activity: &activity,
+            model_detail: &model_detail,
+            tool_detail: &tool_detail,
+            health: &health,
+            now_ms: now_ms(),
+        }))
+    }
+
     /// `getSnapshotForRequest`。
     pub async fn entitlement_snapshot(&self, request: &Value) -> Result<Value, RpcError> {
         let access = self.resolve_request_access(&request["accountAccess"]).await;
@@ -1093,6 +1201,42 @@ fn start_plan_subscription(plans: &Value) -> Value {
     json!({"identityType": "unknown", "identityMasked": null, "details": details})
 }
 
+/// `readSuccessfulBigModelMonitorData`。
+fn monitor_data(payload: &Value, fallback: &str, allow_missing: bool) -> Result<Value, RpcError> {
+    let message = || {
+        let message = non_empty(&payload["msg"]).or_else(|| non_empty(&payload["message"]));
+        error(message.unwrap_or_else(|| fallback.to_owned()))
+    };
+    if !bigmodel_envelope_ok(payload) {
+        return Err(message());
+    }
+    let data = &payload["data"];
+    // JS 真值：对象 / 数组即有数据。
+    if data.is_object() || data.is_array() {
+        return Ok(data.clone());
+    }
+    let explicit = payload["success"] == true || payload["code"].as_f64().is_some_and(|c| c == 0.0 || c == 200.0);
+    if allow_missing && explicit {
+        // 团队项目无工具调用时 monitor 返回 code=200 但省略 data：空统计，不中断页面。
+        return Ok(json!({}));
+    }
+    Err(message())
+}
+
+/// `readBestEffortBigModelMonitorData`：传输失败降级为空，业务信封失败仍抛出。
+fn best_effort(result: Result<Value, ApiError>, fallback: &str) -> Result<Value, RpcError> {
+    match result {
+        Ok(payload) => monitor_data(&payload, fallback, true),
+        Err(failure) => {
+            log::warn(format!(
+                "[usage-stats] {fallback}，该区域降级为空统计 error={} status={:?}",
+                failure.message, failure.status
+            ));
+            Ok(json!({}))
+        }
+    }
+}
+
 fn require_coding_plan(request: &Value) -> Result<(), RpcError> {
     let preferred = request["preferredProviderId"].as_str().unwrap_or("");
     if is_coding_plan_provider(preferred) {
@@ -1126,6 +1270,18 @@ pub fn service(usage: UsageStats) -> ServiceBuilder {
                 (u.app_usage)(json!({"range": request["range"], "timeZone": request["timeZone"]}))
                     .await
                     .map(Reply::Value)
+            }),
+        )
+        .method(
+            "getSnapshot",
+            handler!(|u, request| u.usage_snapshot(&request).await.map(Reply::Value)),
+        )
+        .method(
+            "getCodingPlanUsageSnapshot",
+            handler!(|u, request| {
+                // Coding Plan 页面只允许预置的 Coding Plan 账号，普通 provider 不进入 monitor 链路。
+                require_coding_plan(&request)?;
+                u.coding_plan_usage(&request).await.map(Reply::Value)
             }),
         )
         .method(

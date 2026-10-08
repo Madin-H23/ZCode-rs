@@ -105,6 +105,15 @@ async fn serve_backend(listener: TcpListener, log: Arc<Mutex<Vec<(String, String
                 "/api/monitor/usage/quota/limit" => json!({"code": 200, "data": {"level": "pro", "limits": [
                     {"type": "TIME_LIMIT", "remaining": 7, "percentage": 30, "nextResetTime": 123},
                 ]}}),
+                "/api/monitor/credit-usage/activity" => json!({"code": 200, "data": {
+                    "summary": {"totalTokens": 5}, "series": [{"date": "2026-01-01", "totalTokens": 5}],
+                }}),
+                "/api/monitor/credit-usage/usage-detail" => json!({"code": 200, "data": {
+                    "modelUsage": {"xTime": [], "modelDataList": [{"modelName": "GLM-5", "totalTokens": 5}]},
+                }}),
+                "/api/monitor/usage/model-performance-day" => {
+                    json!({"code": 0, "data": {"x_time": ["d1"], "liteDecodeSpeed": [42]}})
+                }
                 _ => json!({"code": 404}),
             };
             let body = body.to_string();
@@ -305,6 +314,30 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
     assert_eq!(start["provider"]["name"], "Z.ai - Coding Plan");
     assert_eq!(start["quota"]["level"], "Start");
     assert_eq!(start["subscription"]["details"][0]["productId"], "zcode-v3-start-plan");
+
+    // Coding Plan 用量面板：quota + credit-usage + 模型性能，按个人套餐 key 鉴权。
+    let panel = usage
+        .coding_plan_usage(&json!({
+            "range": "7d", "timeZone": "UTC",
+            "preferredProviderId": "account:zai-individual-coding-plan",
+            "accountAccess": {"type": "zhipu-account", "accountType": "zai", "mode": "individual-coding-plan", "entitled": true},
+        }))
+        .await
+        .unwrap();
+    assert_eq!(panel["quota"]["level"], "pro");
+    assert_eq!(panel["modelUsage"]["totalTokensUsage"], 5);
+    assert_eq!(panel["modelUsage"]["xTime"].as_array().unwrap().len(), 7);
+    assert_eq!(panel["activity"]["summary"]["favoriteModelName"], "GLM-5");
+    assert_eq!(panel["health"]["liteDecodeSpeed"], json!([42]));
+    assert_eq!(panel["sourceProvider"]["id"], "account:zai-individual-coding-plan");
+    {
+        let log = requests.lock().unwrap();
+        let detail = log
+            .iter()
+            .find(|(_, path, _)| path == "/api/monitor/credit-usage/usage-detail")
+            .unwrap();
+        assert_eq!(detail.2, "key-abc.secret-xyz");
+    }
 
     // 反向请求：按模型固定的 Account Access 应答，不需要 UI。
     let handler = runtime

@@ -22,6 +22,7 @@ pub mod official_mcp;
 pub mod onboarding;
 pub mod privacy;
 pub mod usage;
+pub mod usage_monitor;
 #[cfg(test)]
 pub(crate) mod oauth_tests;
 
