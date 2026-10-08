@@ -24,6 +24,8 @@ export const RUST_DESKTOP_HOST_ENV = "ZCODE_DESKTOP_HOST";
 export const RUST_HOST_BINARY_ENV = "ZCODE_RUST_HOST_BINARY";
 /** 给 Rust Host 的 Electron 可执行文件路径，用来以 Node 模式运行开发态 CLI bundle。 */
 const RUST_HOST_NODE_EXEC_PATH_ENV = "ZCODE_HOST_NODE_EXEC_PATH";
+/** 远端 workspace 的连接器脚本（docs/specs/rust-host-remote.md §2.1）。 */
+const RUST_HOST_REMOTE_CONNECTOR_PATH_ENV = "ZCODE_REMOTE_CONNECTOR_PATH";
 
 interface RustHostLogger {
   info: (...args: unknown[]) => void;
@@ -119,14 +121,18 @@ export class RustHostProcess extends EventEmitter {
     return this.child.kill();
   }
 
-  async requestServiceEndpoint(): Promise<ServiceEndpoint> {
+  async requestServiceEndpoint(
+    options?: Partial<
+      Pick<HostIssueAttachmentEndpointMessage, "attachmentId" | "clientMode" | "scope">
+    >,
+  ): Promise<ServiceEndpoint> {
     await this.endpointReady;
     const request: HostIssueAttachmentEndpointMessage = {
       type: HostMessageTypes.IssueAttachmentEndpoint,
       requestId: randomUUID(),
-      attachmentId: randomUUID(),
-      clientMode: "desktop-continuous",
-      scope: { kind: "local" },
+      attachmentId: options?.attachmentId ?? randomUUID(),
+      clientMode: options?.clientMode ?? "desktop-continuous",
+      scope: options?.scope ?? { kind: "local" },
     };
     return new Promise<ServiceEndpoint>((resolveEndpoint, rejectEndpoint) => {
       this.pendingEndpoints.set(request.requestId, {
@@ -198,6 +204,11 @@ export function spawnRustHostProcess(
       ...env,
       // Rust Host 不是 Node：开发态 CLI bundle（zcode.cjs）要借 Electron 以 ELECTRON_RUN_AS_NODE 运行。
       [RUST_HOST_NODE_EXEC_PATH_ENV]: process.execPath,
+      // 远端 workspace 的探测、部署与启动仍用 TS 实现，由连接器进程承担（与 host/index.js 同一产物目录）。
+      [RUST_HOST_REMOTE_CONNECTOR_PATH_ENV]: resolve(
+        import.meta.dirname,
+        "../host/remoteConnector.js",
+      ),
     },
     logger,
   );

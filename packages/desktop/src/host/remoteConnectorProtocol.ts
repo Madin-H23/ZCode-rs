@@ -17,7 +17,10 @@ const FRAME_HEADER_BYTES = 5;
 /** 与 Rust 侧相同的单帧上限，防止损坏的长度字段申请超大缓冲。 */
 const MAX_FRAME_BYTES = 64 * 1024 * 1024;
 
-export function encodeRemoteConnectorFrame(stream: RemoteConnectorStream, payload: Uint8Array): Buffer {
+export function encodeRemoteConnectorFrame(
+  stream: RemoteConnectorStream,
+  payload: Uint8Array,
+): Buffer {
   const frame = Buffer.allocUnsafe(FRAME_HEADER_BYTES + payload.byteLength);
   frame.writeUInt8(stream, 0);
   frame.writeUInt32BE(payload.byteLength, 1);
@@ -37,7 +40,8 @@ export class RemoteConnectorFrameReader {
   private buffer: Buffer = Buffer.alloc(0);
 
   push(chunk: Uint8Array): Array<{ stream: number; payload: Buffer }> {
-    this.buffer = this.buffer.length === 0 ? Buffer.from(chunk) : Buffer.concat([this.buffer, chunk]);
+    this.buffer =
+      this.buffer.length === 0 ? Buffer.from(chunk) : Buffer.concat([this.buffer, chunk]);
     const frames: Array<{ stream: number; payload: Buffer }> = [];
     let offset = 0;
     while (this.buffer.length - offset >= FRAME_HEADER_BYTES) {

@@ -495,6 +495,8 @@ export const InternalChannels = {
   ScopedServicePort: "zcode:scoped-service-port",
   /** renderer → main：scoped MessagePort 已注册，可安全切换 attachment */
   ScopedServicePortReady: "zcode:scoped-service-port-ready",
+  /** main → renderer：Rust Host 远端 scope 的 WebSocket endpoint（docs/specs/rust-host-remote.md §4.2） */
+  ScopedServiceEndpoint: "zcode:scoped-service-endpoint",
   /** preload → renderer：主进程已确认系统通知展示，renderer 可播放提示音 */
   TaskNotificationSound: "zcode:task-notification-sound",
 } as const;

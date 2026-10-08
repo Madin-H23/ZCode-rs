@@ -474,13 +474,25 @@ export const hostIssueAttachmentEndpointMessageSchema = z
     type: z.literal("issue-attachment-endpoint"),
     requestId: nonEmptyStringSchema,
     attachmentId: nonEmptyStringSchema,
-    clientMode: z.literal("desktop-continuous"),
-    scope: z.object({ kind: z.literal("local") }).strict(),
+    clientMode: z.enum(["desktop-continuous", "web-remote-replayable"]),
+    // 远端 scope 的签发规则见 docs/specs/rust-host-remote.md §2.4。
+    scope: windowHostAttachmentScopeSchema,
   })
   .strict();
 export type HostIssueAttachmentEndpointMessage = z.infer<
   typeof hostIssueAttachmentEndpointMessageSchema
 >;
+/** Rust Host 远端 scope 的 Renderer endpoint（docs/specs/rust-host-remote.md §4.2）。 */
+export const scopedServiceEndpointPayloadSchema = z
+  .object({
+    attachmentId: nonEmptyStringSchema,
+    sessionId: nonEmptyStringSchema,
+    target: remoteTargetSchema,
+    url: z.string().regex(/^ws:\/\/127\.0\.0\.1:\d{1,5}\/rpc$/),
+    capability: rustHostCapabilitySchema,
+  })
+  .strict();
+export type ScopedServiceEndpointPayload = z.infer<typeof scopedServiceEndpointPayloadSchema>;
 export const hostEndpointReadyResponseSchema = z
   .object({
     type: z.literal("host-endpoint-ready"),

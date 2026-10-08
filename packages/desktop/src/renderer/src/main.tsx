@@ -42,7 +42,9 @@ import { initializeDesktopUserActionTrace } from "./userActionTraceBootstrap.js"
 import { buildRemoteWorkspaceSessionServices } from "./remoteWorkspaceSessionServices.js";
 import {
   notifyRemoteWorkspaceServicePortReady,
+  parseRemoteWorkspaceServiceEndpointMessage,
   parseRemoteWorkspaceServicePortMessage,
+  type RemoteWorkspaceServiceEndpointRegistration,
   type RemoteWorkspaceServicePortRegistration,
 } from "./remoteWorkspaceServicePortBridge.js";
 
@@ -144,7 +146,9 @@ const initialLocale: Locale =
     ? initialLocaleFlag
     : DEFAULT_LOCALE;
 let baseServicesForRemoteSessions: IServiceAccessor | null = null;
-const pendingRemoteWorkspaceServicePorts: RemoteWorkspaceServicePortRegistration[] = [];
+const pendingRemoteWorkspaceServicePorts: Array<
+  RemoteWorkspaceServicePortRegistration | RemoteWorkspaceServiceEndpointRegistration
+> = [];
 
 const desktopPlatform = createDesktopPlatform({ isLocalDevelopmentRuntime });
 initializeDesktopLocalTtft(desktopPlatform);
@@ -240,6 +244,47 @@ function registerRemoteWorkspaceServicePort(params: RemoteWorkspaceServicePortRe
   notifyRemoteWorkspaceServicePortReady(params);
 }
 
+/**
+ * Rust Host：远端 scope 经 WebSocket 直连（docs/specs/rust-host-remote.md §4.2）。注册与 ready ACK
+ * 与 MessagePort 路径相同；握手失败时不回 ACK，由 Main 的 ready 超时收口。
+ */
+function registerRemoteWorkspaceServiceEndpoint(
+  params: RemoteWorkspaceServiceEndpointRegistration,
+) {
+  const base = baseServicesForRemoteSessions;
+  if (!base) {
+    return;
+  }
+  void createWebSocketServiceConnection(params.url, {
+    protocols: [
+      RUST_HOST_RPC_SUBPROTOCOL,
+      `${RUST_HOST_CAPABILITY_SUBPROTOCOL_PREFIX}${params.capability}`,
+    ],
+  }).then(
+    (remoteConnection) => {
+      registerRemoteWorkspaceSession({
+        sessionId: params.sessionId,
+        target: params.target,
+        services: buildRemoteWorkspaceSessionServices(base, remoteConnection.services),
+        dispose: (reason) =>
+          remoteConnection.dispose(reason ?? createRemoteWorkspaceDisconnectedError()),
+      });
+      notifyRemoteWorkspaceServicePortReady(params);
+    },
+    () => undefined,
+  );
+}
+
+function registerRemoteWorkspaceServiceConnection(
+  params: RemoteWorkspaceServicePortRegistration | RemoteWorkspaceServiceEndpointRegistration,
+): void {
+  if ("port" in params) {
+    registerRemoteWorkspaceServicePort(params);
+  } else {
+    registerRemoteWorkspaceServiceEndpoint(params);
+  }
+}
+
 function flushPendingRemoteWorkspaceServicePorts(): void {
   if (!baseServicesForRemoteSessions || pendingRemoteWorkspaceServicePorts.length === 0) {
     return;
@@ -247,7 +292,7 @@ function flushPendingRemoteWorkspaceServicePorts(): void {
 
   const pending = pendingRemoteWorkspaceServicePorts.splice(0);
   for (const entry of pending) {
-    registerRemoteWorkspaceServicePort(entry);
+    registerRemoteWorkspaceServiceConnection(entry);
   }
 }
 
@@ -281,7 +326,9 @@ function handleServicePortMessage(event: MessageEvent): void {
     return;
   }
 
-  const remoteWorkspacePort = parseRemoteWorkspaceServicePortMessage(event);
+  const remoteWorkspacePort =
+    parseRemoteWorkspaceServicePortMessage(event) ??
+    parseRemoteWorkspaceServiceEndpointMessage(event);
   if (remoteWorkspacePort) {
     if (!baseServicesForRemoteSessions) {
       // renderer reload 时 main 可能先补投 remote port，再投本地 ServicePort。
@@ -290,7 +337,7 @@ function handleServicePortMessage(event: MessageEvent): void {
       return;
     }
 
-    registerRemoteWorkspaceServicePort(remoteWorkspacePort);
+    registerRemoteWorkspaceServiceConnection(remoteWorkspacePort);
     return;
   }
 

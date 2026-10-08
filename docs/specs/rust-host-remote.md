@@ -6,18 +6,18 @@
 
 窗口可以打开远端 workspace：Host 连到远端的 Node `zcode-server.cjs`（由 App 部署，部署资产不变），把远端服务经 scoped attachment 暴露给 Renderer。行为与 Node Host 一致：
 
-| 部分                              | Node 来源                                                                      | Rust / TS 模块                                                    |
-| --------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `@zcode/rpc` 客户端               | `packages/rpc/src/channelClient.ts`                                            | `crates/rpc/src/client.rs`                                        |
-| 远端传输：探测、部署、启动、握手  | `packages/server/src/remote/*`（ssh2、docker/wsl CLI、deploy）                 | 远端连接器 `packages/desktop/src/host/remoteConnector.ts`（见 §2.1） |
-| 窗口级连接注册表                  | `host/windowRemoteConnectionRegistry.ts`                                       | `services/src/remote/registry.rs`                                 |
-| Main ↔ Host 远端控制消息          | `host/index.ts`（Connect/Cancel/Bind/Dispose、ProviderProvisioningExecute）    | `services/src/remote/control.rs`                                  |
-| scoped 服务集合                   | `host/remoteWorkspaceServiceCollection.ts`、`exposeServicesOnMessagePort`      | `services/src/remote/scope.rs`、`agent_scope.rs`、`tasks.rs`      |
-| attachment 的远端 scope           | `host/windowHostAttachmentRegistry.ts`                                         | `host-core`（签发、attach、detach）                               |
-| window-controller 远端 source     | `host/windowHostControllerService.ts`、`windowHostControllerProjection.ts`     | `tasks/controller.rs`（增量）+ `remote/sources.rs`                |
-| 远端媒体预览代理                  | `host/remoteMediaPreviewProxy.ts`                                              | `services/src/remote/media.rs`                                    |
-| Provider Provisioning 首次同步    | `host/remoteProviderProvisioningService.ts`、`providerProvisioningSource.ts`   | `services/src/remote/provisioning.rs`                             |
-| Renderer 的远端 endpoint          | `main/desktopRemoteSessions.ts`、`preload`、`renderer/main.tsx`                | 同文件增量：`ScopedServiceEndpoint`                               |
+| 部分                             | Node 来源                                                                    | Rust / TS 模块                                                       |
+| -------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `@zcode/rpc` 客户端              | `packages/rpc/src/channelClient.ts`                                          | `crates/rpc/src/client.rs`                                           |
+| 远端传输：探测、部署、启动、握手 | `packages/server/src/remote/*`（ssh2、docker/wsl CLI、deploy）               | 远端连接器 `packages/desktop/src/host/remoteConnector.ts`（见 §2.1） |
+| 窗口级连接注册表                 | `host/windowRemoteConnectionRegistry.ts`                                     | `services/src/remote/registry.rs`                                    |
+| Main ↔ Host 远端控制消息         | `host/index.ts`（Connect/Cancel/Bind/Dispose、ProviderProvisioningExecute）  | `services/src/remote/control.rs`                                     |
+| scoped 服务集合                  | `host/remoteWorkspaceServiceCollection.ts`、`exposeServicesOnMessagePort`    | `services/src/remote/scope.rs`、`agent_scope.rs`、`tasks.rs`         |
+| attachment 的远端 scope          | `host/windowHostAttachmentRegistry.ts`                                       | `host-core`（签发、attach、detach）                                  |
+| window-controller 远端 source    | `host/windowHostControllerService.ts`、`windowHostControllerProjection.ts`   | `tasks/controller.rs`（增量）+ `remote/sources.rs`                   |
+| 远端媒体预览代理                 | `host/remoteMediaPreviewProxy.ts`                                            | `services/src/remote/media.rs`                                       |
+| Provider Provisioning 首次同步   | `host/remoteProviderProvisioningService.ts`、`providerProvisioningSource.ts` | `services/src/remote/provisioning.rs`                                |
+| Renderer 的远端 endpoint         | `main/desktopRemoteSessions.ts`、`preload`、`renderer/main.tsx`              | 同文件增量：`ScopedServiceEndpoint`                                  |
 
 不在本规格：远端 server 本身（仍是 Node）、Bot 远程运行时与手机 relay 的 MessagePort 桥（由 tasks 部分的 `rustHostPortBridge.ts` 承担，见 §6）、cua。
 
@@ -70,22 +70,22 @@
    - Main 的 `detach-service-port{attachmentId}`：关闭该 attachmentId 的所有连接（本地 scope 同样适用）。
    - session 断线或释放：关闭该 remoteSessionId 的全部 attachment（所有 clientMode）。
    - bind 换代：关闭 generation 小于新值的 attachment。
-   关闭时先停止接收请求，再走正常的连接关闭清理（connection scope 发 `closed`、反向退订）。
+     关闭时先停止接收请求，再走正常的连接关闭清理（connection scope 发 `closed`、反向退订）。
 
 ### 2.5 scoped channel 表
 
 与 `remoteWorkspaceServiceCollection.ts` + `exposeServicesOnMessagePort` 的组合相同：
 
-| channel                                                                                                                                                                                                      | 来源                                                                                                         |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `file`、`git`、`git-checkpoint`、`system`、`terminal`、`file-watcher`、`model-selection`、`provider-settings`、`skills`、`skill-sync`、`mcp-sync`、`plugin-sync`、`plugins`、`plugin-management`、`commands`、`hooks` | 原样转发到远端                                                                                               |
-| `zcode-agent`                                                                                                                                                                                                | 每条连接一个 connection scope（terminal-client 角色），base 是远端 channel（下条）                            |
-| `zcode-task`                                                                                                                                                                                                 | 远端转发 + 附件物化（`sendPrompt`、`enqueueTaskCommand`）+ 运行中任务跟踪 + 列表写操作经 window-controller 路由 |
-| `zcode-session`                                                                                                                                                                                              | 远端转发 + 附件物化（`sendPrompt`，taskId = sessionId，traceId = inputId ?? sessionId）                        |
-| `prompt-attachment-transfer`                                                                                                                                                                                 | 连接器（stream 2），远端 backend 上传                                                                         |
-| `media-preview`                                                                                                                                                                                              | 只给 `desktop-continuous`：远端媒体预览代理（§2.7）；replayable 不注册                                       |
-| `window-controller`、`setting`、`credential`、`broadcast`、`bots`、`oauth`、`usage-stats`、`coding-plan`、`client-config`、`client-scenes`、`subagents`、`memory`、`settings-sync`、`conversation-share`   | 本地 Host 的同名 channel（本机设置、账号与窗口级 controller）                                                 |
-| 其他                                                                                                                                                                                                         | 不注册，立即回 `Unknown channel`                                                                             |
+| channel                                                                                                                                                                                                               | 来源                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `file`、`git`、`git-checkpoint`、`system`、`terminal`、`file-watcher`、`model-selection`、`provider-settings`、`skills`、`skill-sync`、`mcp-sync`、`plugin-sync`、`plugins`、`plugin-management`、`commands`、`hooks` | 原样转发到远端                                                                                                  |
+| `zcode-agent`                                                                                                                                                                                                         | 每条连接一个 connection scope（terminal-client 角色），base 是远端 channel（下条）                              |
+| `zcode-task`                                                                                                                                                                                                          | 远端转发 + 附件物化（`sendPrompt`、`enqueueTaskCommand`）+ 运行中任务跟踪 + 列表写操作经 window-controller 路由 |
+| `zcode-session`                                                                                                                                                                                                       | 远端转发 + 附件物化（`sendPrompt`，taskId = sessionId，traceId = inputId ?? sessionId）                         |
+| `prompt-attachment-transfer`                                                                                                                                                                                          | 连接器（stream 2），远端 backend 上传                                                                           |
+| `media-preview`                                                                                                                                                                                                       | 只给 `desktop-continuous`：远端媒体预览代理（§2.7）；replayable 不注册                                          |
+| `window-controller`、`setting`、`credential`、`broadcast`、`bots`、`oauth`、`usage-stats`、`coding-plan`、`client-config`、`client-scenes`、`subagents`、`memory`、`settings-sync`、`conversation-share`              | 本地 Host 的同名 channel（本机设置、账号与窗口级 controller）                                                   |
+| 其他                                                                                                                                                                                                                  | 不注册，立即回 `Unknown channel`                                                                                |
 
 **zcode-agent connection scope**（`zcodeAgentConnectionScope.ts`，terminal-client）：
 
@@ -149,16 +149,16 @@ dispose-remote-workspace-session ─► 关闭 attachment → disposeSession →
 
 ## 3. 状态所有者
 
-| 状态                                                       | 唯一所有者                                                        |
-| ---------------------------------------------------------- | ----------------------------------------------------------------- |
-| 远端连接 entry、logical session、复用表、WSL 空闲与释放屏障 | `RemoteRegistry`（`remote/registry.rs`）                          |
-| SSH 会话、部署、远端进程                                   | 连接器进程（每个 entry 一个），Host 只持有它的进程句柄与 rpc 客户端 |
-| rpc 请求 id、挂起调用、事件订阅                            | 每个远端连接的 `RpcClient`                                        |
-| 握手、订阅所有权、暂存帧                                   | 每条 attachment 连接的 `RemoteAgentScope`                         |
-| attachment 连接表（attachmentId → 连接、scope、generation） | `host-core`                                                       |
-| 列表投影（含远端行、offline 标记、待替换链）               | window-controller（`tasks/controller.rs`）                        |
-| Main 侧端口路由、渲染端 ready ACK                          | Main（`desktopRemoteSessions.ts`），不保存业务状态                |
-| 会话、任务、帧内容                                         | 远端 server / 远端 CLI                                            |
+| 状态                                                        | 唯一所有者                                                          |
+| ----------------------------------------------------------- | ------------------------------------------------------------------- |
+| 远端连接 entry、logical session、复用表、WSL 空闲与释放屏障 | `RemoteRegistry`（`remote/registry.rs`）                            |
+| SSH 会话、部署、远端进程                                    | 连接器进程（每个 entry 一个），Host 只持有它的进程句柄与 rpc 客户端 |
+| rpc 请求 id、挂起调用、事件订阅                             | 每个远端连接的 `RpcClient`                                          |
+| 握手、订阅所有权、暂存帧                                    | 每条 attachment 连接的 `RemoteAgentScope`                           |
+| attachment 连接表（attachmentId → 连接、scope、generation） | `host-core`                                                         |
+| 列表投影（含远端行、offline 标记、待替换链）                | window-controller（`tasks/controller.rs`）                          |
+| Main 侧端口路由、渲染端 ready ACK                           | Main（`desktopRemoteSessions.ts`），不保存业务状态                  |
+| 会话、任务、帧内容                                          | 远端 server / 远端 CLI                                              |
 
 ## 4. 接口
 
@@ -172,17 +172,17 @@ Main → Host：`connect-remote-workspace`、`cancel-remote-workspace-connect`�
 
 ## 5. 有意与 Node 不同之处
 
-| Node 行为                                                         | Rust Host                                                                  | 理由                                                                                                         |
-| ----------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Host 进程内用 ssh2 / docker / wsl 与 deploy 模块                  | 每个连接一个 TS 连接器进程（Electron 以 Node 模式运行）                    | 部署链与 ssh2 认证语义逐字节不变，并与其它 App 版本共享远端安装与锁；无法在本地验证的重写风险过高。已有先例：Host 以同样方式运行 TS CLI |
-| 附件上传、`prompt-attachment-transfer` 在 Host 进程内             | 由连接器执行（stream 2）                                                   | 需要 backend 的 upload / exec                                                                                |
-| Renderer 远端 scoped 端口是 MessagePort                           | Rust Host 下是 WebSocket endpoint（`ScopedServiceEndpoint`）              | D7：Renderer 走本机 WebSocket                                                                                |
-| `[203]`（非 Error 拒绝）原样转给 Renderer                          | 转成 `[202]`，原载荷放在 `data`                                            | Rust 服务端只产出 Error 载荷；Renderer 只读 message / code                                                   |
-| 转发结果按 TS 值原样序列化                                         | 数组内的 `undefined` 变为 `null`；`VSBuffer` 参数按 `Uint8Array` 转发      | Rust 结果模型是 JSON；契约内没有依赖这两点的成员                                                             |
-| Bot 远程运行时的 realtime lease 与 stream mirror（reporting wrapper） | 不做；只跟踪运行中任务与 session route announce                         | 依赖 task realtime bridge（tasks 部分）；合并后在 `remote/tasks.rs` 接入                                     |
-| 远端 workspace 的本地 `usage-stats`、`conversation-share`、`bots` 绑定远端 agent / task | 使用本地 Host 的同名 channel                                     | 这三个服务的 Rust 实现在其它部分；绑定远端的版本随它们接入（§7）                                            |
-| 远端资源遥测转发给 Main                                           | 不做                                                                       | 资源采样在 R7                                                                                                |
-| SSH 失败时 Host 自己归一化错误文案                                | 文案来自连接器（同一 TS 归一化函数）                                       | 同源                                                                                                         |
+| Node 行为                                                                               | Rust Host                                                             | 理由                                                                                                                                    |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Host 进程内用 ssh2 / docker / wsl 与 deploy 模块                                        | 每个连接一个 TS 连接器进程（Electron 以 Node 模式运行）               | 部署链与 ssh2 认证语义逐字节不变，并与其它 App 版本共享远端安装与锁；无法在本地验证的重写风险过高。已有先例：Host 以同样方式运行 TS CLI |
+| 附件上传、`prompt-attachment-transfer` 在 Host 进程内                                   | 由连接器执行（stream 2）                                              | 需要 backend 的 upload / exec                                                                                                           |
+| Renderer 远端 scoped 端口是 MessagePort                                                 | Rust Host 下是 WebSocket endpoint（`ScopedServiceEndpoint`）          | D7：Renderer 走本机 WebSocket                                                                                                           |
+| `[203]`（非 Error 拒绝）原样转给 Renderer                                               | 转成 `[202]`，原载荷放在 `data`                                       | Rust 服务端只产出 Error 载荷；Renderer 只读 message / code                                                                              |
+| 转发结果按 TS 值原样序列化                                                              | 数组内的 `undefined` 变为 `null`；`VSBuffer` 参数按 `Uint8Array` 转发 | Rust 结果模型是 JSON；契约内没有依赖这两点的成员                                                                                        |
+| Bot 远程运行时的 realtime lease 与 stream mirror（reporting wrapper）                   | 不做；只跟踪运行中任务与 session route announce                       | 依赖 task realtime bridge（tasks 部分）；合并后在 `remote/tasks.rs` 接入                                                                |
+| 远端 workspace 的本地 `usage-stats`、`conversation-share`、`bots` 绑定远端 agent / task | 使用本地 Host 的同名 channel                                          | 这三个服务的 Rust 实现在其它部分；绑定远端的版本随它们接入（§7）                                                                        |
+| 远端资源遥测转发给 Main                                                                 | 不做                                                                  | 资源采样在 R7                                                                                                                           |
+| SSH 失败时 Host 自己归一化错误文案                                                      | 文案来自连接器（同一 TS 归一化函数）                                  | 同源                                                                                                                                    |
 
 ## 6. 与其它部分的接口
 

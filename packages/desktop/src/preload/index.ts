@@ -2,6 +2,7 @@ import {
   databaseStartupControlSchema,
   databaseStartupStateSchema,
   databaseStartupPortPayloadSchema,
+  scopedServiceEndpointPayloadSchema,
   serviceEndpointPayloadSchema,
 } from "@zcode/shared";
 /* eslint-disable max-lines -- preload bridge 集中暴露桌面平台 IPC，拆散会让 contextBridge 权限边界更难审计。 */
@@ -843,6 +844,13 @@ ipcRenderer.on(InternalChannels.ServiceEndpoint, (_event, payload: unknown) => {
   const parsed = serviceEndpointPayloadSchema.safeParse(payload);
   if (parsed.success)
     window.postMessage({ type: InternalChannels.ServiceEndpoint, ...parsed.data }, "*");
+});
+
+// Rust Host 远端 scope 的 endpoint（docs/specs/rust-host-remote.md §4.2）：校验后只转发给本窗口页面。
+ipcRenderer.on(InternalChannels.ScopedServiceEndpoint, (_event, payload: unknown) => {
+  const parsed = scopedServiceEndpointPayloadSchema.safeParse(payload);
+  if (parsed.success)
+    window.postMessage({ type: InternalChannels.ScopedServiceEndpoint, ...parsed.data }, "*");
 });
 
 ipcRenderer.on(

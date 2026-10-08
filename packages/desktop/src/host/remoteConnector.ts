@@ -34,9 +34,9 @@ export interface OpenedRemoteServer {
   /** hello 行之后、同一块数据里的剩余字节（属于 rpc 字节流）。 */
   remaining: Buffer | null;
   backend: Pick<IRemoteBackend, "exec" | "upload">;
-  onDidDisconnect?: (
-    listener: (event: { reason: string; error?: Error }) => void,
-  ) => { dispose(): void };
+  onDidDisconnect?: (listener: (event: { reason: string; error?: Error }) => void) => {
+    dispose(): void;
+  };
   dispose(): void;
   disposeAndWait(): Promise<void>;
 }
@@ -98,17 +98,16 @@ export const openDeployedRemoteServer: OpenRemoteServer = async (request, signal
     if (aborted()) throw new Error("Remote connection canceled");
     console.log("deploy complete");
     console.log("launching remote server...");
-    const stream = await backend.exec(connect.buildRemoteServerCommand(options, remoteRuntimeNetwork));
+    const stream = await backend.exec(
+      connect.buildRemoteServerCommand(options, remoteRuntimeNetwork),
+    );
     if (aborted()) throw new Error("Remote connection canceled");
     stream.stderr.on("data", (chunk: Buffer) => {
       // 远端 zcode-server 的服务日志走 stderr：转成连接日志，便于排查 sqlite 初始化与锁冲突。
       console.log(`[remote] ${chunk.toString().trimEnd()}`);
     });
     console.log("performing handshake...");
-    const { hello, remaining } = await remote.performHandshake(
-      stream,
-      `desktop-${Date.now()}`,
-    );
+    const { hello, remaining } = await remote.performHandshake(stream, `desktop-${Date.now()}`);
     console.log("handshake done, server version:", hello.version);
     return {
       hello,
@@ -146,11 +145,14 @@ export function runRemoteConnector(io: ConnectorIo, open: OpenRemoteServer): voi
   const write = (frame: Buffer) => {
     io.stdout.write(frame);
   };
-  const control = (message: Record<string, unknown>) => write(encodeRemoteConnectorControl(message));
-  const forwardConsole = (level: "info" | "warn" | "error") => (...args: unknown[]) => {
-    const message = args.map((arg) => stringifyHostLogArg(arg)).join(" ");
-    if (message.trim()) control({ type: "log", level, message });
-  };
+  const control = (message: Record<string, unknown>) =>
+    write(encodeRemoteConnectorControl(message));
+  const forwardConsole =
+    (level: "info" | "warn" | "error") =>
+    (...args: unknown[]) => {
+      const message = args.map((arg) => stringifyHostLogArg(arg)).join(" ");
+      if (message.trim()) control({ type: "log", level, message });
+    };
   // stdout 只承载帧：远端模块的 console 输出改为 log 帧。
   console.log = forwardConsole("info");
   console.info = forwardConsole("info");
