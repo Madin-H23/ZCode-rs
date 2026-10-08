@@ -40,7 +40,16 @@ pub fn target_of(value: &Value) -> WorkspaceTarget {
     }
 }
 
+/// 读文件类成员用到的路径（Node `os.homedir()`、`getDataBaseDir()`、`ZCODE_LOG_DIR`）。
+#[derive(Debug, Clone, Default)]
+pub struct TaskPaths {
+    pub user_home: std::path::PathBuf,
+    pub data_base_dir: std::path::PathBuf,
+    pub log_dir: Option<std::path::PathBuf>,
+}
+
 pub struct TaskContext {
+    pub paths: TaskPaths,
     pub index: TasksIndex,
     pub tasks: Arc<TaskService>,
     pub runtime: AgentRuntime,
@@ -50,12 +59,14 @@ pub struct TaskContext {
 
 impl TaskContext {
     pub fn new(
+        paths: TaskPaths,
         index: TasksIndex,
         tasks: Arc<TaskService>,
         runtime: AgentRuntime,
         settings: SettingStore,
     ) -> Arc<Self> {
         Arc::new(Self {
+            paths,
             index,
             tasks,
             runtime,
@@ -225,7 +236,17 @@ pub(crate) mod testing {
         let tasks = TaskService::new(Arc::new(index.clone()), events.clone(), runtime.clone());
         let observer = SessionsIndexObserver::start(runtime.clone());
         Fixture {
-            context: TaskContext::new(index, tasks, runtime, settings),
+            context: TaskContext::new(
+                TaskPaths {
+                    user_home: home.clone(),
+                    data_base_dir: home.clone(),
+                    log_dir: Some(dir.join("log")),
+                },
+                index,
+                tasks,
+                runtime,
+                settings,
+            ),
             observer,
             events,
             home,

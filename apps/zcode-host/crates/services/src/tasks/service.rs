@@ -11,7 +11,7 @@ use serde_json::{Map, Value, json};
 use zcode_host_kit::{Args, Reply, RpcError, ServiceBuilder};
 
 use super::repo::{RepoFilter, TaskRepo};
-use super::{Partitions, TaskSource, WorkspaceEvent, WorkspaceEvents};
+use super::{Partitions, SessionSignals, TaskSource, WorkspaceEvent, WorkspaceEvents};
 use crate::agent::{AgentRuntime, WorkspaceTarget};
 
 pub const CHANNEL: &str = "zcode-task";
@@ -32,6 +32,7 @@ fn invalid(name: &str) -> RpcError {
 pub struct TaskService {
     repo: Arc<dyn TaskRepo>,
     events: WorkspaceEvents,
+    signals: SessionSignals,
     runtime: AgentRuntime,
 }
 
@@ -55,6 +56,7 @@ impl TaskService {
         Arc::new(Self {
             repo,
             events,
+            signals: SessionSignals::new(),
             runtime,
         })
     }
@@ -65,6 +67,11 @@ impl TaskService {
 
     pub fn events(&self) -> &WorkspaceEvents {
         &self.events
+    }
+
+    /// 会话终态迁移（syncer 发出，lifecycle 消费）。
+    pub fn signals(&self) -> &SessionSignals {
+        &self.signals
     }
 
     /// `workspace_task_list_changed`（zcodeTaskIndexSyncer.ts emitWorkspaceTaskListChanged）。

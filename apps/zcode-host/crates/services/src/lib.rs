@@ -220,12 +220,26 @@ pub fn install(
     );
     registry.implement(tasks::service::service(task_service.clone()));
     let task_context = tasks::context::TaskContext::new(
+        tasks::context::TaskPaths {
+            user_home: context.environment.user_home.clone(),
+            data_base_dir: context.environment.data_base_dir.clone(),
+            log_dir: context
+                .environment
+                .vars
+                .get("ZCODE_LOG_DIR")
+                .map(|dir| dir.trim())
+                .filter(|dir| !dir.is_empty())
+                .map(PathBuf::from),
+        },
         storage.tasks_index.clone(),
         task_service.clone(),
         agent.clone(),
         settings.clone(),
     );
     registry.implement(tasks::index_members::service(task_context.clone()));
+    // 生命周期、查询与事件成员；automation / off-peak / bots 也可直接用 TaskLifecycle 的 API。
+    let task_lifecycle = tasks::lifecycle::TaskLifecycle::start(task_context.clone());
+    registry.implement(tasks::lifecycle_service::service(task_lifecycle));
     let syncer = tasks::syncer::start(&observer, agent.clone(), task_service.clone());
     let controller = tasks::controller::Controller::start(
         Arc::new(task_context.clone()),
