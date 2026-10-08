@@ -8,7 +8,7 @@
 //! - 普通 app-server 进程先发 `startup/storageState`：请求在存储就绪前不发出；首帧 30 s 未到、
 //!   或进入 failed，则所有请求以 `SQLite startup failed: <code>` 失败。
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -81,6 +81,15 @@ pub struct ProtocolClient {
     closed: watch::Sender<Option<String>>,
     gate: watch::Sender<Gate>,
     storage_state: watch::Sender<Option<Value>>,
+    /// 最近一次请求发出或结束的时间（毫秒）；空闲回收据此判断。
+    last_activity_ms: AtomicU64,
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
 }
 
 #[derive(serde::Deserialize)]
@@ -124,6 +133,7 @@ impl ProtocolClient {
             closed,
             gate,
             storage_state,
+            last_activity_ms: AtomicU64::new(now_ms()),
         });
         if requires_storage_startup {
             let weak = Arc::downgrade(&client);
@@ -360,6 +370,7 @@ impl ProtocolClient {
             return Err(ClientError::Closed(reason));
         }
         self.wait_storage().await?;
+        self.touch_activity();
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
         self.lock_pending().insert(id, (method.to_owned(), sender));
@@ -372,14 +383,44 @@ impl ProtocolClient {
             self.close(&error.to_string());
             return Err(error);
         }
-        match tokio::time::timeout(timeout, receiver).await {
+        let outcome = match tokio::time::timeout(timeout, receiver).await {
             Ok(Ok(outcome)) => outcome,
             Ok(Err(_)) => Err(ClientError::Closed("dropped".into())),
             Err(_) => {
                 self.lock_pending().remove(&id);
                 Err(ClientError::Timeout(method.to_owned()))
             }
-        }
+        };
+        self.touch_activity();
+        outcome
+    }
+
+    fn touch_activity(&self) {
+        self.last_activity_ms.store(now_ms(), Ordering::Relaxed);
+    }
+
+    /// 在途请求数（空闲回收只在归零后计时）。
+    pub fn in_flight(&self) -> usize {
+        self.lock_pending().len()
+    }
+
+    pub fn last_activity_ms(&self) -> u64 {
+        self.last_activity_ms.load(Ordering::Relaxed)
+    }
+
+    /// 存储门禁仍在等待（迁移中）：空闲回收不能打断。
+    pub fn storage_waiting(&self) -> bool {
+        matches!(*self.gate.borrow(), Gate::Waiting { .. })
+    }
+
+    /// 存储帧的变化（最近一帧被接受的 `startup/storageState` params）。
+    pub fn watch_storage(&self) -> watch::Receiver<Option<Value>> {
+        self.storage_state.subscribe()
+    }
+
+    /// 等存储就绪；failed 时返回 `SQLite startup failed: <code>`。
+    pub async fn wait_storage_ready(&self) -> Result<(), ClientError> {
+        self.wait_storage().await
     }
 
     pub async fn request(

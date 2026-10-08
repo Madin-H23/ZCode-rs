@@ -21,6 +21,7 @@ use super::command::AgentCommand;
 const GRACEFUL_EXIT_WAIT: Duration = Duration::from_millis(1800);
 const TERMINATE_WAIT: Duration = Duration::from_secs(2);
 const STDERR_TAIL_LINES: usize = 20;
+const STDERR_LINE_MAX_CHARS: usize = 1_000;
 
 pub struct Spawned {
     pub child: Child,
@@ -64,69 +65,260 @@ pub fn spawn(
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// stderr 的最后若干行（已脱敏）。
-#[derive(Clone, Default)]
-pub struct StderrTail(Arc<Mutex<VecDeque<String>>>);
+/// Node `errno.code` 的常见取值（spawn 失败上报 `agent-process-error.errorCode`）。
+pub fn errno_code(error: &std::io::Error) -> Option<&'static str> {
+    use std::io::ErrorKind;
+    Some(match error.kind() {
+        ErrorKind::NotFound => "ENOENT",
+        ErrorKind::PermissionDenied => "EACCES",
+        ErrorKind::AlreadyExists => "EEXIST",
+        ErrorKind::InvalidInput => "EINVAL",
+        ErrorKind::OutOfMemory => "ENOMEM",
+        ErrorKind::NotADirectory => "ENOTDIR",
+        _ => return None,
+    })
+}
 
-impl StderrTail {
-    pub fn lines(&self) -> Vec<String> {
-        self.0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .iter()
-            .cloned()
-            .collect()
+/// 进程被信号结束时的信号名（Node `exit` 事件的 signal）。
+pub fn exit_signal_name(status: std::process::ExitStatus) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        let signal = status.signal()?;
+        let name = match signal {
+            libc::SIGHUP => "SIGHUP",
+            libc::SIGINT => "SIGINT",
+            libc::SIGQUIT => "SIGQUIT",
+            libc::SIGILL => "SIGILL",
+            libc::SIGABRT => "SIGABRT",
+            libc::SIGBUS => "SIGBUS",
+            libc::SIGFPE => "SIGFPE",
+            libc::SIGKILL => "SIGKILL",
+            libc::SIGSEGV => "SIGSEGV",
+            libc::SIGPIPE => "SIGPIPE",
+            libc::SIGTERM => "SIGTERM",
+            other => return Some(format!("SIG{other}")),
+        };
+        Some(name.to_owned())
     }
-
-    fn push(&self, line: String) {
-        let mut lines = self
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if lines.len() == STDERR_TAIL_LINES {
-            lines.pop_front();
-        }
-        lines.push_back(line);
+    #[cfg(not(unix))]
+    {
+        let _ = status;
+        None
     }
 }
 
-fn secret_patterns() -> &'static [Regex; 2] {
-    static PATTERNS: std::sync::OnceLock<[Regex; 2]> = std::sync::OnceLock::new();
+/// stderr 的最后若干行（已脱敏、截断）与总行数（agentStderrCollector / createAgentStderrTail）。
+#[derive(Clone, Default)]
+pub struct StderrTail(Arc<Mutex<TailState>>);
+
+#[derive(Default)]
+struct TailState {
+    lines: VecDeque<String>,
+    count: u64,
+}
+
+impl StderrTail {
+    pub fn lines(&self) -> Vec<String> {
+        self.lock().lines.iter().cloned().collect()
+    }
+
+    /// 进入 tail 的总行数（进程诊断行不计入）。
+    pub fn line_count(&self) -> u64 {
+        self.lock().count
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, TailState> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn push(&self, line: String) {
+        let mut state = self.lock();
+        state.count += 1;
+        if state.lines.len() == STDERR_TAIL_LINES {
+            state.lines.pop_front();
+        }
+        let line = if line.chars().count() > STDERR_LINE_MAX_CHARS {
+            let mut bounded: String = line.chars().take(STDERR_LINE_MAX_CHARS).collect();
+            bounded.push_str("…[truncated]");
+            bounded
+        } else {
+            line
+        };
+        state.lines.push_back(line);
+    }
+}
+
+fn secret_patterns() -> &'static [Regex; 3] {
+    static PATTERNS: std::sync::OnceLock<[Regex; 3]> = std::sync::OnceLock::new();
     PATTERNS.get_or_init(|| {
         let compile = |pattern: &str| {
             Regex::new(pattern).unwrap_or_else(|_| unreachable!("static pattern"))
         };
         [
+            // Node AGENT_STDERR_SENSITIVE_ASSIGNMENT_PATTERN；另外吞掉值前的 Bearer/Basic，
+            // 否则 `Authorization: Bearer x` 只遮住 scheme 名，令牌本身仍会进日志。
             compile(
-                r#"(?i)((?:api[_-]?key|token|secret|password|authorization)["']?\s*[:=]\s*["']?)(?:bearer\s+)?[^\s"',]+"#,
+                r#"(?i)(["']?(?:api[-_]?key|authorization|cookie|credential|password|secret|token)["']?\s*[:=]\s*)(?:(?:bearer|basic)\s+)?(?:"[^"]*"|'[^']*'|[^\s,;}]+)"#,
             ),
-            compile(r#"(?i)(bearer\s+)[^\s"',]+"#),
+            compile(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+"),
+            compile(r"(?i)\b(sk-)[A-Za-z0-9_-]{16,}\b"),
         ]
     })
 }
 
+/// redactAgentDiagnostic：stderr tail 与进程诊断上报 Main 前的脱敏。
 pub fn redact(line: &str) -> String {
-    let [assignment, bearer] = secret_patterns();
-    let line = assignment.replace_all(line, "${1}[REDACTED]");
-    bearer.replace_all(&line, "${1}[REDACTED]").into_owned()
+    let [assignment, scheme, api_key] = secret_patterns();
+    let line = assignment.replace_all(line, "${1}<redacted>");
+    let line = scheme.replace_all(&line, "${1} <redacted>");
+    api_key.replace_all(&line, "${1}<redacted>").into_owned()
 }
 
-/// 一直读到 EOF，避免管道写满后子进程阻塞。
-pub fn drain_stderr(stderr: ChildStderr, label: String) -> StderrTail {
+pub const DIAGNOSTIC_PREFIX: &str = "[zcode-process-exception] ";
+const DIAGNOSTIC_MAX_LINE_CHARS: usize = 128 * 1024;
+const DIAGNOSTIC_NAME_MAX_CHARS: usize = 128;
+const DIAGNOSTIC_MESSAGE_MAX_CHARS: usize = 4_000;
+const DIAGNOSTIC_STACK_MAX_CHARS: usize = 16_000;
+
+/// JS 字符串长度按 UTF-16 码元计。
+fn utf16_len(value: &str) -> usize {
+    value.encode_utf16().count()
+}
+
+fn truncate_utf16(value: &str, max: usize) -> String {
+    let mut units = 0;
+    let mut out = String::new();
+    for ch in value.chars() {
+        units += ch.len_utf16();
+        if units > max {
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn is_uuid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
+        && matches!(bytes[14], b'1'..=b'8')
+        && matches!(bytes[19], b'8' | b'9' | b'a' | b'b' | b'A' | b'B')
+}
+
+/// parseZCodeProcessDiagnostic + 上报前的脱敏与截断；不是诊断行时返回 None。
+pub fn parse_diagnostic(line: &str) -> Option<serde_json::Value> {
+    use serde_json::Value;
+    let body = line.strip_prefix(DIAGNOSTIC_PREFIX)?;
+    if utf16_len(line) > DIAGNOSTIC_MAX_LINE_CHARS {
+        return None;
+    }
+    let Value::Object(mut object) = serde_json::from_str::<Value>(body).ok()? else {
+        return None;
+    };
+    const KEYS: &[&str] = &[
+        "version",
+        "errorId",
+        "kind",
+        "origin",
+        "name",
+        "message",
+        "stack",
+        "occurredAt",
+    ];
+    if object.keys().any(|key| !KEYS.contains(&key.as_str())) {
+        return None;
+    }
+    let kind_ok =
+        |value: Option<&Value>| matches!(value.and_then(Value::as_str), Some("uncaughtException" | "unhandledRejection"));
+    let version_ok = object.get("version").and_then(Value::as_f64) == Some(1.0);
+    let error_id_ok = object
+        .get("errorId")
+        .and_then(Value::as_str)
+        .is_some_and(is_uuid);
+    let name_ok = object
+        .get("name")
+        .and_then(Value::as_str)
+        .is_some_and(|name| (1..=DIAGNOSTIC_NAME_MAX_CHARS).contains(&utf16_len(name)));
+    let message_ok = object
+        .get("message")
+        .and_then(Value::as_str)
+        .is_some_and(|message| utf16_len(message) <= DIAGNOSTIC_MESSAGE_MAX_CHARS);
+    let stack_ok = match object.get("stack") {
+        None => true,
+        Some(stack) => stack
+            .as_str()
+            .is_some_and(|stack| utf16_len(stack) <= DIAGNOSTIC_STACK_MAX_CHARS),
+    };
+    let occurred_ok = object
+        .get("occurredAt")
+        .and_then(Value::as_f64)
+        .is_some_and(|at| at >= 0.0 && at.fract() == 0.0 && at <= 9_007_199_254_740_991.0);
+    if !(version_ok
+        && error_id_ok
+        && kind_ok(object.get("kind"))
+        && kind_ok(object.get("origin"))
+        && name_ok
+        && message_ok
+        && stack_ok
+        && occurred_ok)
+    {
+        return None;
+    }
+    // 脱敏占位符可能比原文长，必须再次限长，否则 Main 的 schema 会拒绝合法异常。
+    for (key, max) in [
+        ("name", DIAGNOSTIC_NAME_MAX_CHARS),
+        ("message", DIAGNOSTIC_MESSAGE_MAX_CHARS),
+        ("stack", DIAGNOSTIC_STACK_MAX_CHARS),
+    ] {
+        if let Some(Value::String(text)) = object.get(key) {
+            let bounded = truncate_utf16(&redact(text), max);
+            object.insert(key.to_owned(), Value::String(bounded));
+        }
+    }
+    Some(Value::Object(object))
+}
+
+pub type DiagnosticSink = Box<dyn Fn(serde_json::Value) + Send + Sync>;
+
+/// stderr 排空完成的信号：退出事件要等最后几行诊断收齐。
+pub type StderrDone = tokio::sync::oneshot::Receiver<()>;
+
+/// 一直读到 EOF，避免管道写满后子进程阻塞。进程诊断行交给 `on_diagnostic`，不进 tail。
+pub fn drain_stderr(
+    stderr: ChildStderr,
+    label: String,
+    on_diagnostic: Option<DiagnosticSink>,
+) -> (StderrTail, StderrDone) {
     let tail = StderrTail::default();
     let collected = tail.clone();
+    let (done, done_rx) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             if line.trim().is_empty() {
                 continue;
             }
+            if let Some(diagnostic) = parse_diagnostic(&line) {
+                match &on_diagnostic {
+                    Some(sink) => sink(diagnostic),
+                    None => log::debug(format!("{label} process diagnostic dropped")),
+                }
+                continue;
+            }
             let line = redact(&line);
             log::debug(format!("{label} stderr: {line}"));
             collected.push(line);
         }
+        let _ = done.send(());
     });
-    tail
+    (tail, done_rx)
 }
 
 /// 等子进程自行退出，超时后逐级升级；调用前应已关闭它的 stdin。
@@ -208,11 +400,15 @@ mod tests {
     fn redacts_secret_values() {
         assert_eq!(
             redact("request failed: Authorization: Bearer abc.def"),
-            "request failed: Authorization: [REDACTED]"
+            "request failed: Authorization: <redacted>"
         );
-        assert_eq!(redact("apiKey=sk-123 ok"), "apiKey=[REDACTED] ok");
-        assert_eq!(redact(r#"{"token": "xyz"}"#), r#"{"token": "[REDACTED]"}"#);
-        assert_eq!(redact("got Bearer abc"), "got Bearer [REDACTED]");
+        assert_eq!(redact("apiKey=sk-123 ok"), "apiKey=<redacted> ok");
+        assert_eq!(redact(r#"{"token": "xyz"}"#), r#"{"token": <redacted>}"#);
+        assert_eq!(redact("got Bearer abc"), "got Bearer <redacted>");
+        assert_eq!(
+            redact("key sk-abcdefghijklmnop1234 end"),
+            "key sk-<redacted> end"
+        );
         assert_eq!(redact("plain line"), "plain line");
     }
 

@@ -807,7 +807,7 @@ impl AgentChannel {
                 Err(fault("fault.connection.flowControlForbidden"))
             }),
             "syncAppRuntimePreferences" => Box::pin(async move {
-                runtime.sync_app_preferences(params);
+                runtime.sync_app_preferences(params).await?;
                 Ok(Reply::Undefined)
             }),
             "initialize" => Box::pin(async move {
