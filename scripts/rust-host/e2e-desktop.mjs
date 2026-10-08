@@ -233,7 +233,7 @@ async function runScenario(name, cli) {
   const controlPlane = await startOfflineControlPlane();
   const env = {
     ZCODE_BASE_URL: controlPlane.origin,
-    ...((await scenario.env?.({ home, workspace, temp })) ?? {}),
+    ...(await scenario.env?.({ home, workspace, temp })),
   };
   let app;
   let failed = false;

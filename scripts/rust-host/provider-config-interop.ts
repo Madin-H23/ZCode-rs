@@ -16,7 +16,9 @@ try {
   result = {
     decoded: true,
     canonical: JSON.stringify(encoded, null, 2) === text,
-    ...(JSON.stringify(encoded, null, 2) === text ? {} : { expected: JSON.stringify(encoded, null, 2) }),
+    ...(JSON.stringify(encoded, null, 2) === text
+      ? {}
+      : { expected: JSON.stringify(encoded, null, 2) }),
   };
 } catch (error) {
   result = { decoded: false, error: error instanceof Error ? error.message : String(error) };

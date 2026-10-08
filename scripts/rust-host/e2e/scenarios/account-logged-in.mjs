@@ -64,7 +64,10 @@ function respond(path) {
         code: 200,
         data: {
           organizations: [
-            { organizationId: "org-1", projects: [{ projectId: "proj-1", projectName: "默认项目" }] },
+            {
+              organizationId: "org-1",
+              projects: [{ projectId: "proj-1", projectName: "默认项目" }],
+            },
           ],
         },
       };
@@ -128,11 +131,9 @@ export async function seed({ home }) {
     zcodejwttoken: encrypt(JWT),
     "oauth:zai:user_info": encrypt(JSON.stringify({ user_id: "user-1", name: "E2E Alice" })),
   };
-  await writeFile(
-    join(config, "credentials.json"),
-    `${JSON.stringify(credentials, null, 2)}\n`,
-    { mode: 0o600 },
-  );
+  await writeFile(join(config, "credentials.json"), `${JSON.stringify(credentials, null, 2)}\n`, {
+    mode: 0o600,
+  });
   const settingsPath = join(config, "setting.json");
   const settings = JSON.parse(await readFile(settingsPath, "utf8"));
   settings.providerFamilyConnectionSelections = { zai: { kind: "individual-coding-plan" } };
@@ -179,13 +180,17 @@ export async function run({ page, shots, home }) {
     (request) => request.path === "/api/v1/zcode-plan/billing/balance",
   );
   if (balance?.authorization !== `Bearer ${JWT}`) {
-    throw new Error(`start plan balance not queried with the ZCode JWT: ${JSON.stringify(balance)}`);
+    throw new Error(
+      `start plan balance not queried with the ZCode JWT: ${JSON.stringify(balance)}`,
+    );
   }
   const subscription = backend.requests.find(
     (request) => request.path === "/api/biz/subscription/list",
   );
   if (subscription?.authorization !== "key-abc.secret-xyz") {
-    throw new Error(`subscription not queried with the coding plan key: ${JSON.stringify(subscription)}`);
+    throw new Error(
+      `subscription not queried with the coding plan key: ${JSON.stringify(subscription)}`,
+    );
   }
   // Host 把个人 Coding Plan key 按账号身份写回同一份（Node 格式的）凭据库。
   const stored = JSON.parse(await readFile(join(home, ".zcode", "v2", "credentials.json"), "utf8"));

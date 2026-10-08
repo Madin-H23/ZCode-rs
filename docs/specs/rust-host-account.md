@@ -98,18 +98,18 @@
 
 ## 3. 状态所有者
 
-| 状态                                         | 唯一所有者                                                 |
-| -------------------------------------------- | ---------------------------------------------------------- |
-| `credentials.json` 内容                      | 文件本身；进程内无缓存，每次读写都经目录锁                 |
-| pending OAuth flow、会话代际、会话变更队列   | `OAuthService`（每个 Host 一个）                           |
-| 账号 provider 快照（providers + states）     | `AccountProviderSource`；provider runtime 只消费它         |
-| 内置 / 个人配置、合并结果、revision          | `ProviderRuntime`                                          |
-| 每个 CLI 进程已同步的 Account Config 版本    | `AccountConfigSync`（按 workspace key + 进程代）           |
-| 设置（端点覆盖、代理、账号连接选择）         | `setting.json`（`SettingStore`）                           |
-| 内置配置 Active 文件与刷新控制文件           | 文件本身（与 Node 共用，锁内读写）；`BuiltinSource` 只做单飞 |
-| 匿名反馈工单索引                             | `<dataRoot>/feedback/tickets.json`                         |
-| 进行中的建单 / 上传取消句柄、上传进度订阅    | `Feedback`（按 operationId / progressId）                  |
-| 等待 Main 的完整日志归档请求                 | `MainBridge`（按 requestId）                               |
+| 状态                                       | 唯一所有者                                                   |
+| ------------------------------------------ | ------------------------------------------------------------ |
+| `credentials.json` 内容                    | 文件本身；进程内无缓存，每次读写都经目录锁                   |
+| pending OAuth flow、会话代际、会话变更队列 | `OAuthService`（每个 Host 一个）                             |
+| 账号 provider 快照（providers + states）   | `AccountProviderSource`；provider runtime 只消费它           |
+| 内置 / 个人配置、合并结果、revision        | `ProviderRuntime`                                            |
+| 每个 CLI 进程已同步的 Account Config 版本  | `AccountConfigSync`（按 workspace key + 进程代）             |
+| 设置（端点覆盖、代理、账号连接选择）       | `setting.json`（`SettingStore`）                             |
+| 内置配置 Active 文件与刷新控制文件         | 文件本身（与 Node 共用，锁内读写）；`BuiltinSource` 只做单飞 |
+| 匿名反馈工单索引                           | `<dataRoot>/feedback/tickets.json`                           |
+| 进行中的建单 / 上传取消句柄、上传进度订阅  | `Feedback`（按 operationId / progressId）                    |
+| 等待 Main 的完整日志归档请求               | `MainBridge`（按 requestId）                                 |
 
 ## 4. 事件顺序
 
@@ -159,20 +159,20 @@ Feedback ──► UI {path, size}；上传后 cleanupPreparedLogArchive 删除�
 
 ## 5. 有意与 Node 不同之处
 
-| 项 | Node Host | Rust Host | 原因 |
-| -- | --------- | --------- | ---- |
-| `provider-provisioning-target.apply` | 只在 desktop-attached remote / server 目标注册 | 不注册（保留 contract 桩） | Rust Host 只承担 desktop-local 角色，与 Node desktop-local 一致 |
-| `settings-sync` 手动导入（带 categories 的 `detect`、`importSelected`） | 扫描并导入 Claude / Codex 等的 skills、commands、plugins、MCP | 报 `fault.host.notImplemented` | 写入的是扩展域（R5）的存储，需与扩展域合并后接入；首启路径与 AGENTS.md 迁移已实现 |
-| 内置 Release 校验 | `decodeZCodeBuiltinRelease` 深度解析规则 | 只做结构校验（严格的顶层与 `config` 键、revision 范围、拒绝 `builtin:zapi`），规则内部按解析层的容错处理 | 规则解析在 resolver 内；校验失败的 Release 同样不会被采用 |
-| Active 文件的写入格式 | `encodeZCodeBuiltinRelease` 规范化后 2 空格缩进 | 选中 Release 的原 JSON 2 空格缩进 | 两边按语义内容比较（键序无关、数值按值），不会互相反复改写 |
-| 端点不可解析时读取内置配置 | `read()` 抛错 | 退回随包配置并记 warn | 模型列表不因设置里的非法端点而整体不可用 |
-| 反馈基址 | `HostInitMessage.feedbackApiBase` → env → 端点 | env → 端点 | Main 从不下发 `feedbackApiBase` |
-| 反馈设备信息 | 含 `nodeVersion`、编译期 commit 与构建时间 | 无 `nodeVersion`；commit 取 `ZCODE_BUILD_COMMIT_ID`，构建时间 `unknown`；`about.txt` 的 `node:` 为 `(rust host)` | Rust Host 没有 Node 运行时与 TS 编译期常量 |
-| 完整日志归档等待 | 无超时 | 30 分钟上限后报 `Feedback log archive timed out` | 避免 Main 丢消息时请求永久挂起 |
-| Host 资源样本 | `heapUsedKb` 为 V8 堆；同一读数写 `[memory] role=utility_host` 日志 | `heapUsedKb` 固定 0，不写该日志行；Windows 不发样本 | Rust Host 没有 JS 堆；Windows 的常驻内存读取未实现 |
-| RPC 网络遥测（`network-telemetry-batch`）、会话创建遥测（`session-create-telemetry`） | Host 的 RPC 中间件与自动化派发上报 | 未实现 | 需要 host-core 分发层的调用钩子与会话域的派发点，由协调者在合并时接入 |
-| 网络错误消息 | undici 的 `fetch failed`（cause 带原因） | reqwest 的错误描述 | 运行时不同；状态码、超时与 401 语义一致 |
-| 无效时区 | `Intl.DateTimeFormat` 抛 `RangeError: Invalid time zone specified: X` | 同名同消息的 RPC 错误；IANA 名称大小写不敏感 | 与 Intl 行为对齐 |
+| 项                                                                                    | Node Host                                                             | Rust Host                                                                                                        | 原因                                                                              |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `provider-provisioning-target.apply`                                                  | 只在 desktop-attached remote / server 目标注册                        | 不注册（保留 contract 桩）                                                                                       | Rust Host 只承担 desktop-local 角色，与 Node desktop-local 一致                   |
+| `settings-sync` 手动导入（带 categories 的 `detect`、`importSelected`）               | 扫描并导入 Claude / Codex 等的 skills、commands、plugins、MCP         | 报 `fault.host.notImplemented`                                                                                   | 写入的是扩展域（R5）的存储，需与扩展域合并后接入；首启路径与 AGENTS.md 迁移已实现 |
+| 内置 Release 校验                                                                     | `decodeZCodeBuiltinRelease` 深度解析规则                              | 只做结构校验（严格的顶层与 `config` 键、revision 范围、拒绝 `builtin:zapi`），规则内部按解析层的容错处理         | 规则解析在 resolver 内；校验失败的 Release 同样不会被采用                         |
+| Active 文件的写入格式                                                                 | `encodeZCodeBuiltinRelease` 规范化后 2 空格缩进                       | 选中 Release 的原 JSON 2 空格缩进                                                                                | 两边按语义内容比较（键序无关、数值按值），不会互相反复改写                        |
+| 端点不可解析时读取内置配置                                                            | `read()` 抛错                                                         | 退回随包配置并记 warn                                                                                            | 模型列表不因设置里的非法端点而整体不可用                                          |
+| 反馈基址                                                                              | `HostInitMessage.feedbackApiBase` → env → 端点                        | env → 端点                                                                                                       | Main 从不下发 `feedbackApiBase`                                                   |
+| 反馈设备信息                                                                          | 含 `nodeVersion`、编译期 commit 与构建时间                            | 无 `nodeVersion`；commit 取 `ZCODE_BUILD_COMMIT_ID`，构建时间 `unknown`；`about.txt` 的 `node:` 为 `(rust host)` | Rust Host 没有 Node 运行时与 TS 编译期常量                                        |
+| 完整日志归档等待                                                                      | 无超时                                                                | 30 分钟上限后报 `Feedback log archive timed out`                                                                 | 避免 Main 丢消息时请求永久挂起                                                    |
+| Host 资源样本                                                                         | `heapUsedKb` 为 V8 堆；同一读数写 `[memory] role=utility_host` 日志   | `heapUsedKb` 固定 0，不写该日志行；Windows 不发样本                                                              | Rust Host 没有 JS 堆；Windows 的常驻内存读取未实现                                |
+| RPC 网络遥测（`network-telemetry-batch`）、会话创建遥测（`session-create-telemetry`） | Host 的 RPC 中间件与自动化派发上报                                    | 未实现                                                                                                           | 需要 host-core 分发层的调用钩子与会话域的派发点，由协调者在合并时接入             |
+| 网络错误消息                                                                          | undici 的 `fetch failed`（cause 带原因）                              | reqwest 的错误描述                                                                                               | 运行时不同；状态码、超时与 401 语义一致                                           |
+| 无效时区                                                                              | `Intl.DateTimeFormat` 抛 `RangeError: Invalid time zone specified: X` | 同名同消息的 RPC 错误；IANA 名称大小写不敏感                                                                     | 与 Intl 行为对齐                                                                  |
 
 ## 6. 验收
 
