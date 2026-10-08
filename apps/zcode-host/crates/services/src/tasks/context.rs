@@ -55,6 +55,7 @@ pub struct TaskContext {
     pub runtime: AgentRuntime,
     pub settings: SettingStore,
     targets: Mutex<HashMap<String, WorkspaceTarget>>,
+    realtime: std::sync::OnceLock<Arc<super::realtime::TaskRealtimeBridge>>,
 }
 
 impl TaskContext {
@@ -72,7 +73,17 @@ impl TaskContext {
             runtime,
             settings,
             targets: Mutex::new(HashMap::new()),
+            realtime: std::sync::OnceLock::new(),
         })
+    }
+
+    /// InitLocal 带 hostId 时建立的 task realtime bridge（远端 workspace 的 lease 与镜像使用）。
+    pub fn realtime(&self) -> Option<&Arc<super::realtime::TaskRealtimeBridge>> {
+        self.realtime.get()
+    }
+
+    pub fn set_realtime(&self, bridge: Arc<super::realtime::TaskRealtimeBridge>) {
+        let _ = self.realtime.set(bridge);
     }
 
     fn lock_targets(&self) -> std::sync::MutexGuard<'_, HashMap<String, WorkspaceTarget>> {

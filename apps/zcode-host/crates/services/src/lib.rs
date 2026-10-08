@@ -240,6 +240,16 @@ pub fn install(
     // 生命周期、查询与事件成员；automation / off-peak / bots 也可直接用 TaskLifecycle 的 API。
     let task_lifecycle = tasks::lifecycle::TaskLifecycle::start(task_context.clone());
     registry.implement(tasks::lifecycle_service::service(task_lifecycle));
+    // task realtime bridge：与 Main taskRealtimeBus 的 lease / owner 命令；会话消息总是应答。
+    tasks::realtime::register_session_messages(router, MainBridge::new(context.control.clone()));
+    if let Some(realtime) = tasks::realtime::TaskRealtimeBridge::for_host_init(
+        context.init.host_id.as_deref(),
+        context.init.delivery_kind.as_deref(),
+        MainBridge::new(context.control.clone()),
+    ) {
+        realtime.register(router);
+        task_context.set_realtime(realtime);
+    }
     let syncer = tasks::syncer::start(&observer, agent.clone(), task_service.clone());
     let controller = tasks::controller::Controller::start(
         Arc::new(task_context.clone()),

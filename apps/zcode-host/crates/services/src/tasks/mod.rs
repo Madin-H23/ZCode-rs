@@ -15,6 +15,7 @@ mod lifecycle_members;
 pub mod lifecycle_service;
 pub mod meta;
 mod queries;
+pub mod realtime;
 pub mod repo;
 pub mod service;
 mod sqlite;
