@@ -7,9 +7,12 @@ use std::time::{Duration, Instant};
 const TTL: Duration = Duration::from_secs(60);
 const MAX_ENTRIES: usize = 100;
 
+/// 路径 → (是否存在, 过期时刻)，以及 LRU 顺序。
+type Entries = (HashMap<String, (bool, Instant)>, VecDeque<String>);
+
 #[derive(Default)]
 pub struct ExistsCache {
-    entries: Mutex<(HashMap<String, (bool, Instant)>, VecDeque<String>)>,
+    entries: Mutex<Entries>,
 }
 
 impl ExistsCache {
