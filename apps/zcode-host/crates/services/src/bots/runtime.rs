@@ -135,7 +135,8 @@ impl Bots {
     fn start_websocket(self: &Arc<Self>, bot: Value, print: String) {
         let id = text(&bot, "id").unwrap_or_default().to_owned();
         let mut entries = guard(&self.runtimes.entries);
-        if entries.contains_key(&id) {
+        // 持表锁判断关闭标记：shutdown 先置标记再抽空表，两者不会漏掉一条刚登记的长连接。
+        if self.is_closed() || entries.contains_key(&id) {
             return;
         }
         self.set_runtime_status(

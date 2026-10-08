@@ -1,7 +1,9 @@
 //! `IBotsService` 的管理面（botsService.ts 的公开方法）与 `bots` channel（22 个成员）。
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
@@ -23,6 +25,10 @@ use crate::settings::SettingStore;
 
 /// 第一次读取应用名称可能因飞书同步延迟失败：扫码创建后按 0 / 800 / 1800 ms 重试。
 const FEISHU_NAME_RETRY_MS: [u64; 3] = [0, 800, 1_800];
+/// Host 退出时等通道运行时收尾的上限。Main 发 dispose 3.5 s 后强杀 Host，其中大部分要留给 agent
+/// 回收 CLI 进程树；正常情况下停轮询、关长连接、删锁只要几毫秒，只有正在处理入站消息时才会等。
+/// 超时后 Host 很快退出，持有者进程不在了，其他进程拿锁时按进程存活检查立即接管。
+const SHUTDOWN_WAIT: Duration = Duration::from_secs(1);
 /// 只能被一个启用 Bot 使用的凭据通道（同一 token 不能被两条长连接 / 轮询共用）。
 const EXCLUSIVE_CREDENTIAL_PROVIDERS: [&str; 3] = ["telegram", "feishu", "lark"];
 
@@ -107,6 +113,8 @@ pub struct Bots {
     pub(crate) card_interval_ms: Mutex<u64>,
     /// 流式卡片失败退避的基数（测试可缩短）。
     pub(crate) card_backoff_ms: Mutex<i64>,
+    /// Host 已退出（[`Bots::shutdown`]）：之后不再启动通道运行时。
+    closed: AtomicBool,
 }
 
 pub(crate) fn guard<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -210,7 +218,13 @@ impl Bots {
             transient_cards: Mutex::new(HashMap::new()),
             card_interval_ms: Mutex::new(super::watch::CARD_MIN_UPDATE_INTERVAL_MS),
             card_backoff_ms: Mutex::new(super::watch::CARD_BACKOFF_BASE_MS),
+            closed: AtomicBool::new(false),
         })
+    }
+
+    /// 已进入 Host 退出：通道运行时的启动入口据此不再登记新运行时。
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
     }
 
     pub(crate) async fn locale(&self) -> Option<String> {
@@ -657,20 +671,33 @@ impl Bots {
         self.schedule_polling_refresh();
     }
 
-    /// 停止全部长连接与轮询（Host 退出）。
-    pub async fn dispose(&self) {
+    /// Host 退出（Node `disposeAllAndWait`，由 `Installed::shutdown` 在回收 CLI 之前调用）：先置
+    /// 关闭标记，再停会话订阅与 typing、清内存状态，最后等 Telegram / 微信长轮询与飞书长连接退出并
+    /// 释放跨进程运行锁，新 Host 不必等 30 s 租约过期。等待有上限，不阻塞后续 CLI 回收；重复调用
+    /// 直接返回。
+    pub async fn shutdown(self: &Arc<Self>) {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
         for (_, watch) in guard(&self.watches).drain() {
             if let Some(watch) = watch {
                 watch.abort();
             }
         }
-        for (_, typing) in guard(&self.typing).drain() {
-            if let Some(repeat) = typing.repeat {
-                repeat.abort();
-            }
+        let typing: Vec<String> = guard(&self.typing).keys().cloned().collect();
+        for task in typing {
+            self.stop_typing(&task);
         }
-        self.dispose_feishu().await;
-        self.dispose_polling().await;
+        guard(&self.transient_cards).clear();
+        guard(&self.running).clear();
+        guard(&self.live_progress).clear();
+        guard(&self.recent_inbound).clear();
+        guard(&self.delivery_warnings).clear();
+        guard(&self.inbound_queues).clear();
+        let runtimes = futures_util::future::join(self.dispose_feishu(), self.dispose_polling());
+        if tokio::time::timeout(SHUTDOWN_WAIT, runtimes).await.is_err() {
+            log::warn("bots shutdown timed out waiting for channel runtimes");
+        }
     }
 }
 

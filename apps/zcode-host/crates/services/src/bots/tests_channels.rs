@@ -190,7 +190,7 @@ async fn telegram_polls_commits_offsets_and_streams_replies() {
             .map(|_| ())
     })
     .await;
-    bots.dispose().await;
+    bots.shutdown().await;
 }
 
 #[tokio::test]
@@ -226,7 +226,87 @@ async fn telegram_business_failures_keep_the_offset_for_redelivery() {
     )
     .unwrap();
     assert!(state["bots"]["tg-1"]["telegramOffset"].is_null(), "{state}");
-    bots.dispose().await;
+    bots.shutdown().await;
+}
+
+/// Host 退出（`Bots::shutdown`，Node `disposeAllAndWait`）：打断进行中的长轮询，立即释放
+/// Telegram 与微信的跨进程运行锁，新 Host 不必等 30 s 租约；之后的对齐不再启动运行时。
+#[tokio::test]
+async fn shutdown_releases_runtime_locks_without_waiting_for_the_lease() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    // 两个通道的长轮询都挂 30 s 不回：shutdown 必须主动打断，而不是等请求结束。
+    server.on(|request| {
+        let hold = request.path.ends_with("/getUpdates") || request.path == "/ilink/bot/getupdates";
+        let body = if request.path.starts_with("/ilink/") {
+            json!({"ret": 0, "msgs": []})
+        } else {
+            json!({"ok": true, "result": []})
+        };
+        let mut answer = Answer::json(200, body);
+        if hold {
+            answer.delay = Duration::from_secs(30);
+        }
+        Some(answer)
+    });
+    let bots = bots_with(dir.path(), &server.origin, FakeTasks::new());
+    bots.save_bot(&json!({"bot": bound_bot("tg-1", "telegram", "42", json!({})), "credentialValue": "tg-token"}))
+        .await
+        .unwrap();
+    bots.save_bot(&json!({"bot": {"id": "wx-1", "name": "WX", "provider": "weixin", "enabled": true,
+        "providerUserId": "bot@im.bot", "allowedWorkspaces": ["*"], "allowedCommands": {}, "currentOptions": {}},
+        "credentialValue": "wx-token"}))
+        .await
+        .unwrap();
+    bots.refresh_polling(Polling::Telegram).await.unwrap();
+    bots.refresh_polling(Polling::Weixin).await.unwrap();
+    eventually("both long polls in flight", || {
+        (!server.to("/getUpdates").is_empty() && !server.to("/ilink/bot/getupdates").is_empty())
+            .then_some(())
+    })
+    .await;
+    let config_dir = dir.path().join(".zcode/v2");
+    let locks = [
+        ("telegram-polling", "tg-token"),
+        ("weixin-polling", "wx-token"),
+    ];
+    for (namespace, token) in locks {
+        assert!(super::runtime_lock::lock_path(&config_dir, namespace, token).is_dir());
+        // 持有者存活且租约新鲜：别的 Host 拿不到锁，只能等租约。
+        let other = super::runtime_lock::acquire(&config_dir, namespace, token, "other")
+            .await
+            .unwrap();
+        assert!(other.is_none(), "{namespace} lock should still be held");
+    }
+
+    let started = std::time::Instant::now();
+    bots.shutdown().await;
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "shutdown took {:?}",
+        started.elapsed()
+    );
+    for (namespace, token) in locks {
+        assert!(!super::runtime_lock::lock_path(&config_dir, namespace, token).exists());
+        let other = super::runtime_lock::acquire(&config_dir, namespace, token, "other")
+            .await
+            .unwrap()
+            .expect("lock is free right after shutdown");
+        other.release().await;
+    }
+
+    // 关闭后的配置对齐不再起运行时（不会重新拿锁、不会再发长轮询）。
+    let polls = server.to("/getUpdates").len() + server.to("/ilink/bot/getupdates").len();
+    bots.refresh_polling(Polling::Telegram).await.unwrap();
+    bots.refresh_polling(Polling::Weixin).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        server.to("/getUpdates").len() + server.to("/ilink/bot/getupdates").len(),
+        polls
+    );
+    for (namespace, token) in locks {
+        assert!(!super::runtime_lock::lock_path(&config_dir, namespace, token).exists());
+    }
 }
 
 #[tokio::test]
@@ -624,5 +704,5 @@ async fn weixin_registration_activation_and_numeric_selection() {
             .map(str::to_owned)
     })
     .await;
-    bots.dispose().await;
+    bots.shutdown().await;
 }

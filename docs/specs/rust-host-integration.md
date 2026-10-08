@@ -64,7 +64,7 @@
 
 1. **唯一写入方**：`coding-plan-subscription` 的 `CodingPlanSubscription::dynamic_workflow_config(false)`（Node：`codingPlanSubscriptionService.getDynamicWorkflowClientConfig()`）。install 时由 integration 段把它登记为 `Extensions::set_dynamic_workflow_gate`，`enabled === true` 即开启；之后 runtime 在 Host 进程内只判定一次（失败按关闭、不重试，扩展点已有语义）。
 2. **本地覆盖**：`ZCODE_DYNAMIC_WORKFLOW_MODE`（Main 按打包类型决定后写进 Host 环境）优先于远端配置；不进入 CLI spawn 环境（CLI 不读它，Node 也只在 Host 判定）。
-3. **请求面**：门禁开启时，所有 Host 发出的会话创建 / 恢复都带 `dynamicWorkflowEnabled: true`（与 Node 经 `zcodeAgentService.createSession/resumeSession` 的统一注入相同）：agent 区域的 legacy create/resume、V4 `createSession` 信封、tasks 区域的 `createTask`（legacy 与 V4）/ `resumeTask`、automation 驱动的 create/resume；进程就绪前推送 `workspace/updateDynamicWorkflowPolicy`。导入会话（Claude 导入、对话分享导入）不带工具面参数（Rust CLI 拒绝）。Host 自己发起的 create / resume（tasks、automation）从 `Extensions::session_tool_flags(target)` 取这组参数；agent 区域的 `gates` 读同一组扩展点。
+3. **请求面**：门禁开启时，所有 Host 发出的会话创建 / 恢复都带 `dynamicWorkflowEnabled: true`（与 Node 经 `zcodeAgentService.createSession/resumeSession` 的统一注入相同）：agent 区域的 legacy create/resume、V4 `createSession` 信封、tasks 区域的 `createTask`（legacy 与 V4）/ `resumeTask`、automation 驱动的 create/resume（Bot 建会话与普通恢复也走这条路径）、Bot 直接发出的 `session/resume`（`/new` 继承配置、任务态 `/model` / `/think`，见 [rust-host-bots.md](rust-host-bots.md) §2.9）；进程就绪前推送 `workspace/updateDynamicWorkflowPolicy`。导入会话（Claude 导入、对话分享导入）不带工具面参数（Rust CLI 拒绝）。Host 自己发起的 create / resume（tasks、automation、bots）从 `Extensions::session_tool_flags(target)` 取这组参数；agent 区域的 `gates` 读同一组扩展点。
 
 ### 2.5 反向请求错误带 `data`
 

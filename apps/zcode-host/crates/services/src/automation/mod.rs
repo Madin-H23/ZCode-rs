@@ -116,6 +116,18 @@ impl Area {
 
 pub struct AreaHandle {
     _parts: Vec<Keepalive>,
+    /// Host 退出时需要异步收尾的子模块（目前只有 bots）。
+    bots: Option<Arc<crate::bots::service::Bots>>,
+}
+
+impl AreaHandle {
+    /// Host 退出（`Installed::shutdown`，CLI 回收之前）：bots 停通道运行时并释放跨进程运行锁
+    /// （Node `disposeServiceResourcesAndWait` 里的 `IBotsService.disposeAllAndWait`）；有上限。
+    pub async fn shutdown(&self) {
+        if let Some(bots) = &self.bots {
+            bots.shutdown().await;
+        }
+    }
 }
 
 pub fn install(
@@ -128,9 +140,12 @@ pub fn install(
     parts.push(install_automation(&area, router));
     parts.extend(crate::cua_permission::install(&area, registry, router));
     parts.extend(crate::conversation_share::install(&area, registry, router));
-    parts.extend(crate::bots::install(&area, registry, router));
+    let bots = crate::bots::install(&area, registry, router);
     parts.extend(crate::off_peak::install(&area, registry, router));
-    AreaHandle { _parts: parts }
+    AreaHandle {
+        _parts: parts,
+        bots,
+    }
 }
 
 /// automation 本体：服务、`zcode-agent` 成员、CLI 反向请求与 `cron-run` 派发。
