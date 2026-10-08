@@ -112,7 +112,44 @@ UI runAutomationNow ─► runNow（BEGIN IMMEDIATE 抢锁 + 插 manual run）
 
 ## 6. 闲时任务
 
-见 [rust-host-automation-offpeak.md](rust-host-automation-offpeak.md)（实现时补充）。
+模块：`off_peak/`（`client.rs` 服务端客户端、`gateway.rs` mock 网关、`service.rs` 编排、`dispatch.rs` 派发、`reverse.rs` 反向请求、`models.rs` 凭据与模型）、`tasks_index/off_peak_repo.rs`。
+
+### 6.1 规则
+
+1. **仓库**（`offPeakTaskRepo.ts`）：与 Node Host、Main 的 scheduler 共用 `off_peak_tasks`，SQL 原样移植。行映射同 `rowToTask`（新列 `model_selection` 损坏或缺失时给 `modelSelectionIssue:{code:"repair-required"}`；`list` 联查 tasks 表的绑定会话标题）。终态（completed / failed / cancelled）不可逆出；绑定会话的唯一索引冲突识别为 `session_bound`。只移植 Host 用到的方法，`claimDue`、`markRunning`、`releaseClaim`、`recoverInterrupted` 由 scheduler 调用。
+2. **`off-peak-task` channel 的 11 个成员**：语义同 `OffPeakTaskService`。`createTask` 先校验（标题、prompt、workspace 非空，权限是六档之一）→ 用当前 Registry 解析固定的 Off-Peak Provider 与模型 → 绑定会话预检 → `POST /ticket` → 成功才落库；失败只回稳定分类 `{ok:false, failureStage, errorCategory, errorCode, providerName}`（3101 / 3103 / network / invalid_response / local_persist / client_validation）。`cancelTask` 先落终态再停 loop（V4 `stop`），再后台核销；`continueTask` 票活着只恢复，票已废才重取号；`updateTask` 只允许 queued / paused；`list` / `get` 只派生模型诊断，不写库。
+3. **轮询同步**：tokio 定时器驱动。每个周期先补报未核销终态（4xx 当作幂等 ack），无票的 queued 补取号，再 `POST /ticket/status` 写回快照（ready → schedulable、位次、废票重取号）；翻为可派发时发 `off-peak-scheduler-wake-request`。间隔取服务端 `next_poll_after`，钳制在 5 s – 5 min，失败按 10 s 起指数退避。没有任务时也按 5 min 重排（TS 的 `finally` 如此，注释所说“不重排”与代码不符，以代码为准）。
+4. **凭据与灰度**：`ZCODE_OFFPEAK_MOCK=1` 时与 Node 相同，用确定性的 mock 凭据（bigmodel-personal），服务端 origin 是进程内 mock 网关；`coding-plan-subscription.getOffPeakClientConfig` 由本区域包一层，在 mock 模式下按 `resolveOffPeakClientConfig` 的 mock 分支返回（有隐藏的 Off-Peak Provider 模型即 enabled），其余情况原样交给 coding-plan 的实现。非 mock 时 origin 是 `ZCODE_BASE_URL` / `ZCODE_ENDPOINT_ORIGIN`（缺省 `https://zcode.z.ai`）。
+5. **mock 网关**：`127.0.0.1`，端口 `ZCODE_OFFPEAK_MOCK_PORT` 或固定 45197，被占用时复用已有实例；`ZCODE_OFFPEAK_MOCK_*` 的延迟、额度、429 注入、`capture` / `invalid-ticket` 场景与 Node 相同；状态机同 1.4 节的描述（take → queued → ready → active → expired / settled，轮询时懒惰推进）。
+6. **`off-peak-run` 派发**：无票 → transient；模型不可解析或凭据不可用 → `failureKind:"permanent"`。三个分支：resume（续跑同一会话，发固定续跑提示词）、bound-first-run（恢复绑定会话，先检查已删除（permanent）/ 正忙（transient），再设权限模式）、init（新建会话，`persistence:"deferred"`，盖 `offPeakTaskId`）。V4 sendText 携带闲时 Selection、`modelExecution`（`memoryExtraction:"skip"`、`selectionScope:"execution"`、逐请求鉴权头、`subagents`）、`offPeakTaskId`、`offPeakRunType`，denylist 含 `CronCreate`、`OffPeakCreate`。终态：succeeded → completed，其余 → failed；回写失败（已终态）只记日志；会话置未读。
+7. **反向请求** `offPeak/create|list`：参数按 strict schema 校验（-32602 + 固定文案）；灰度关闭或模型不在白名单时回 `{ok:false, …, errorCode:"offpeak_disabled" | "model_not_allowed"}`；省略模型取白名单末位，档位取模型最高档；兜底异常只回 `-32603 Internal off-peak service error`。`list` 只给本 workspace 最近 20 条的协议最小面。
+8. **工具面**：本地 workspace（非远端 identity、无 remoteSessionId）在会话工作前推送一次 `workspace/updateOffPeakToolPolicy {enabled:true}`（每代进程一次，经 `add_use_hook`；-32601 静默），Host 自己发的 `session/create`、`session/resume` 带 `offPeakToolEnabled:true`。
+
+### 6.2 事件顺序
+
+```text
+UI createTask ─► OffPeakService：校验 / 模型 / 绑定预检 ─► POST /ticket（mock 网关或服务端）
+                 └─► 落库 queued（ready 则 schedulable）─► 唤醒 scheduler
+sync 周期 ─► 补报核销 ─► POST /ticket/status ─► 写回快照 ─► ready 翻转时唤醒 scheduler
+scheduler(Node) ─claimDue─► Main ─off-peak-run─► OffPeakDispatcher
+   ├─ resume / bound-first-run：session/resume + 权限模式（V4）
+   └─ init：session/create（deferred，盖 offPeakTaskId）
+   ─► 登记终态订阅 ─► sendText（闲时 Selection + requestAuth）─► off-peak-run-result
+sessions-index：会话 running → 终态 ─► markTerminal ─► 会话置未读；下个 sync 周期核销
+```
+
+### 6.3 有意与 Node 不同之处
+
+| Node 行为                                                        | Rust Host                                              | 理由                                                                         |
+| ---------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| 账号凭据链（zhipu-account Provider、zcode JWT、Coding Plan key） | 非 mock 时一律 `connection_unavailable`                | Rust Host 还没有账号与 OAuth（R4）；接入后替换 `models::resolve_credentials` |
+| mock 网关准入后代理到用户 Coding Plan 的真实上游                 | 回固定的 Anthropic 响应（Node 拿不到上游时的同一路径） | 没有账号凭据；也不能连真实服务                                               |
+| mock 网关的 `foreground-subagents` 脚本场景                      | 未移植                                                 | 只服务 Node 的一个 E2E 脚本                                                  |
+| 服务端请求带 ZCode 来源头（版本、平台、语言等）                  | 只带 `x-request-id` 与鉴权头                           | 来源头只用于服务端统计；鉴权与语义不受影响                                   |
+| 终态回填 `files_changed`（task diff 汇总）                       | 不回填                                                 | Rust Host 的 zcode-task 还没有 `getTaskSnapshot`                             |
+| 反向请求的错误带 `data`（zod flatten / `errorCode`）             | 只有 code 与 message                                   | `ReverseReply::Error` 没有 data 字段（agent 区域的扩展点）                   |
+| Renderer 的 V4 `createSession` 信封注入 `offPeakToolEnabled`     | 未注入                                                 | 信封处理属于 agent 区域的 `zcode-agent` 命令路径；工作区策略推送已覆盖冷恢复 |
+| bound-first-run 的“正忙”取 `listTasks` 活跃分区的 status         | 取 tasks-index 行的 status（含置顶 / 归档行）          | 结果只在置顶或归档的绑定会话上不同                                           |
 
 ## 7. bots
 
@@ -124,7 +161,7 @@ UI runAutomationNow ─► runNow（BEGIN IMMEDIATE 抢锁 + 插 manual run）
 
 ## 9. cua-permission
 
-（实现时补充。）
+本构建里 Computer Use（`@zcode/zcode-cua`）是占位包，Helper 无法安装或启动。`getStatus` / `restartHelper` fail closed，返回 Node Host 在同样条件下的结果：非 macOS 为 `CUA permissions are only available on macOS.`，macOS 为 `ZCode Computer Use is not enabled (plugin off or not product mode).`（`{available:false, reason}` / `{ok:false, reason}`），从不拉起 Helper。`cua-pip-session` 不在 Renderer 契约里，保持不实现。
 
 ## 10. 验收
 
