@@ -561,7 +561,7 @@ mod tests {
     fn node_errors_keep_code_and_prefix() {
         let error = std::io::Error::from(std::io::ErrorKind::NotFound);
         let rpc = node_error(&error, "stat", Path::new("/missing"));
-        assert_eq!(rpc.code.as_deref(), Some("ENOENT"));
+        assert_eq!(rpc.code_str(), Some("ENOENT"));
         assert!(
             rpc.message
                 .starts_with("ENOENT: no such file or directory, stat '/missing'")

@@ -195,6 +195,7 @@ mod tests {
         let (to_server, inbound) = mpsc::unbounded_channel();
         let (outbound, from_server) = mpsc::unbounded_channel();
         let context = CallContext {
+            connection: 1,
             attachment_id: "a1".into(),
             client_mode: ClientMode::DesktopContinuous,
         };

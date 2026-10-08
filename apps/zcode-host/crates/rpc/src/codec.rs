@@ -365,7 +365,8 @@ pub fn raw_response(kind: i32, id: i32, raw: &str) -> Result<Vec<u8>> {
 pub struct RpcError {
     pub name: String,
     pub message: String,
-    pub code: Option<String>,
+    /// 透传键 `code`：Host 自身的错误是字符串，CLI 业务错误是 JSON-RPC 数字码。
+    pub code: Option<Box<Value>>,
     pub data: Option<Box<Value>>,
 }
 
@@ -379,9 +380,22 @@ impl RpcError {
         }
     }
 
-    pub fn with_code(mut self, code: impl Into<String>) -> Self {
-        self.code = Some(code.into());
+    pub fn with_code(mut self, code: impl Into<Value>) -> Self {
+        self.code = Some(Box::new(code.into()));
         self
+    }
+
+    pub fn with_data(mut self, data: Value) -> Self {
+        self.data = Some(Box::new(data));
+        self
+    }
+
+    pub fn code_str(&self) -> Option<&str> {
+        self.code.as_deref().and_then(Value::as_str)
+    }
+
+    pub fn code_i64(&self) -> Option<i64> {
+        self.code.as_deref().and_then(Value::as_i64)
     }
 
     pub fn to_json(&self) -> Value {
@@ -389,7 +403,7 @@ impl RpcError {
         object.insert("message".into(), Value::String(self.message.clone()));
         object.insert("name".into(), Value::String(self.name.clone()));
         if let Some(code) = &self.code {
-            object.insert("code".into(), Value::String(code.clone()));
+            object.insert("code".into(), Value::clone(code));
         }
         if let Some(data) = &self.data {
             object.insert("data".into(), Value::clone(data));

@@ -6,6 +6,7 @@
 pub mod attachments;
 mod server;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -16,7 +17,7 @@ use zcode_host_control::{
     False, HostToMain, MainToHost, True,
 };
 use zcode_host_kit::{CallContext, ChannelRegistry, contract, log};
-use zcode_host_services::{HostEnvironment, ServiceContext};
+use zcode_host_services::{HostEnvironment, Installed, ServiceContext};
 
 pub use attachments::{AttachmentMeta, AttachmentRegistry};
 pub use zcode_host_control::ControlSink;
@@ -48,6 +49,7 @@ struct Inner {
     /// InitLocal 之后构建好的 channel 注册表；None 表示尚未就绪。
     registry: watch::Sender<Option<Arc<ChannelRegistry>>>,
     router: Mutex<ControlRouter>,
+    installed: Mutex<Option<Arc<Installed>>>,
 }
 
 impl HostCore {
@@ -60,6 +62,7 @@ impl HostCore {
                 attachments: AttachmentRegistry::new(CAPABILITY_TTL),
                 registry,
                 router: Mutex::new(ControlRouter::default()),
+                installed: Mutex::new(None),
             }),
         }
     }
@@ -83,8 +86,13 @@ impl HostCore {
                 });
                 let mut registry = ChannelRegistry::from_contract(contract::embedded());
                 let mut router = ControlRouter::default();
-                zcode_host_services::install(context, &mut registry, &mut router);
+                let installed = zcode_host_services::install(context, &mut registry, &mut router);
                 *self.lock_router() = router;
+                *self
+                    .inner
+                    .installed
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(installed));
                 // tasks-index 等数据库的准备随对应 repo 实现；目前没有阻塞启动的迁移。
                 let state = DatabaseStartupState::ready(startup_id, random_hex(16), now_ms());
                 self.inner
@@ -130,6 +138,19 @@ impl HostCore {
         ControlOutcome::Continue
     }
 
+    /// Host 退出前回收子进程（CLI 进程树）；未初始化时为空操作。
+    pub async fn shutdown(&self) {
+        let installed = self
+            .inner
+            .installed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let Some(installed) = installed {
+            installed.shutdown().await;
+        }
+    }
+
     fn lock_router(&self) -> std::sync::MutexGuard<'_, ControlRouter> {
         self.inner
             .router
@@ -166,7 +187,9 @@ impl HostCore {
         inbound: mpsc::UnboundedReceiver<Vec<u8>>,
         outbound: mpsc::UnboundedSender<Vec<u8>>,
     ) -> JoinHandle<()> {
+        static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
         let context = CallContext {
+            connection: NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed),
             attachment_id: meta.attachment_id,
             client_mode: meta.client_mode,
         };

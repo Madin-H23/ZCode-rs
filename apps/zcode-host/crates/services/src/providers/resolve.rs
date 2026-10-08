@@ -722,6 +722,11 @@ impl Resolved {
     pub fn has_selectable_model(&self) -> bool {
         self.visible_registry().next().is_some()
     }
+
+    /// 可见且进入 Registry 的 provider 数（provider-not-ready 错误的 `providerCount`）。
+    pub fn registry_provider_count(&self) -> usize {
+        self.visible_registry().count()
+    }
 }
 
 fn model_candidate_view(model: &ModelEntry) -> Value {

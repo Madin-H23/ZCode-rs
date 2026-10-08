@@ -51,6 +51,8 @@ pub type EventStream = Pin<Box<dyn Stream<Item = Reply> + Send>>;
 /// 连接级可信上下文：由签发 capability 时登记的元数据决定，客户端不能自报。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallContext {
+    /// 每条连接唯一（同一 attachmentId 重连也会换新值），按连接持有状态的 channel 以它为键。
+    pub connection: u64,
     pub attachment_id: String,
     pub client_mode: ClientMode,
 }

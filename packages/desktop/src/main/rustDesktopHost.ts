@@ -22,6 +22,8 @@ import {
 
 export const RUST_DESKTOP_HOST_ENV = "ZCODE_DESKTOP_HOST";
 export const RUST_HOST_BINARY_ENV = "ZCODE_RUST_HOST_BINARY";
+/** 给 Rust Host 的 Electron 可执行文件路径，用来以 Node 模式运行开发态 CLI bundle。 */
+const RUST_HOST_NODE_EXEC_PATH_ENV = "ZCODE_HOST_NODE_EXEC_PATH";
 
 interface RustHostLogger {
   info: (...args: unknown[]) => void;
@@ -192,7 +194,11 @@ export function spawnRustHostProcess(
   return new RustHostProcess(
     binary,
     ["--control", "stdio", "--allowed-origin", resolveAllowedRendererOrigin()],
-    env,
+    {
+      ...env,
+      // Rust Host 不是 Node：开发态 CLI bundle（zcode.cjs）要借 Electron 以 ELECTRON_RUN_AS_NODE 运行。
+      [RUST_HOST_NODE_EXEC_PATH_ENV]: process.execPath,
+    },
     logger,
   );
 }

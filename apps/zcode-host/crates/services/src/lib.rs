@@ -10,10 +10,12 @@ use zcode_host_control::{ControlRouter, ControlSink, InitLocal};
 use zcode_host_kit::ChannelRegistry;
 
 pub mod account;
+pub mod agent;
 pub mod broadcast;
 pub mod file;
 pub mod main_bridge;
 pub mod providers;
+pub mod runtime_env;
 pub mod settings;
 pub mod store;
 pub mod system;
@@ -31,6 +33,8 @@ pub struct HostEnvironment {
     pub user_home: PathBuf,
     /// Host 自身的环境变量（Main 启动 Host 时给的），子进程环境以它为底。
     pub vars: BTreeMap<String, String>,
+    /// 向上查找开发态 CLI bundle 的起点：进程 cwd 与 Host 可执行文件所在目录。
+    pub search_roots: Vec<PathBuf>,
 }
 
 impl HostEnvironment {
@@ -50,6 +54,7 @@ impl HostEnvironment {
             data_base_dir: non_empty("ZCODE_DATA_BASE_DIR").unwrap_or_else(|| user_home.clone()),
             user_home,
             vars,
+            search_roots: Vec::new(),
         }
     }
 
@@ -65,11 +70,23 @@ pub struct ServiceContext {
     pub control: Arc<dyn ControlSink>,
 }
 
+/// 需要在 Host 退出时清理的资源。
+pub struct Installed {
+    agent: agent::AgentRuntime,
+}
+
+impl Installed {
+    /// Host 退出：回收全部 CLI 进程树（有上限，不会无限等待）。
+    pub async fn shutdown(&self) {
+        self.agent.dispose_all().await;
+    }
+}
+
 pub fn install(
     context: Arc<ServiceContext>,
     registry: &mut ChannelRegistry,
     router: &mut ControlRouter,
-) {
+) -> Installed {
     let bridge = MainBridge::new(context.control.clone());
     let settings = settings::SettingStore::new(&context.environment.home_dir);
     registry.implement(broadcast::service(bridge.clone(), router));
@@ -109,6 +126,32 @@ pub fn install(
         context.environment.user_home.clone(),
         context.environment.vars.clone(),
     ));
+
+    let environment = &context.environment;
+    let agent = agent::AgentRuntime::new(
+        agent::AgentRuntimeConfig {
+            base_env: runtime_env::effective_base_env(
+                &environment.vars,
+                &context.init.runtime_process_env_patch,
+            ),
+            command_vars: environment.vars.clone(),
+            search_roots: environment.search_roots.clone(),
+            fallback_cwd: context
+                .init
+                .agent_spawn_fallback_cwd
+                .as_deref()
+                .filter(|path| !path.trim().is_empty())
+                .map(PathBuf::from),
+        },
+        settings.clone(),
+        providers.clone(),
+    );
+    let fallback = registry.get(agent::service::CHANNEL);
+    registry.register(
+        agent::service::CHANNEL,
+        agent::service::AgentChannel::new(agent.clone(), fallback),
+    );
+    Installed { agent }
 }
 
 #[cfg(test)]

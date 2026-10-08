@@ -73,6 +73,20 @@ async fn write_control(mut messages: mpsc::UnboundedReceiver<HostToMain>) {
     }
 }
 
+fn capture_environment() -> HostEnvironment {
+    let mut environment = HostEnvironment::capture(std::env::vars());
+    environment.search_roots = [
+        std::env::current_dir().ok(),
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(Into::into)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    environment
+}
+
 async fn run(args: Args) -> Result<()> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await
@@ -84,7 +98,7 @@ async fn run(args: Args) -> Result<()> {
     let core = HostCore::new(
         HostConfig {
             ws_port: port,
-            environment: HostEnvironment::capture(std::env::vars()),
+            environment: capture_environment(),
         },
         Arc::new(StdoutControl(control_tx.clone())),
     );
@@ -103,6 +117,7 @@ async fn run(args: Args) -> Result<()> {
                 Ok(message) => {
                     if core.on_control(message) == ControlOutcome::Shutdown {
                         log::info("dispose received; exiting");
+                        core.shutdown().await;
                         return Ok(());
                     }
                 }
@@ -111,6 +126,7 @@ async fn run(args: Args) -> Result<()> {
             // Main 退出或关闭控制通道时 Host 随之退出，与 CLI 对 stdin EOF 的处理一致。
             Ok(None) => {
                 log::info("control stdin closed; exiting");
+                core.shutdown().await;
                 return Ok(());
             }
             Err(error) => bail!("control stdin failed: {error}"),
