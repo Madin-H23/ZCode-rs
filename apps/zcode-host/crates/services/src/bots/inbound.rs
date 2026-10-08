@@ -69,7 +69,9 @@ pub fn inbound_from_value(value: &Value) -> Option<Inbound> {
 
 fn context_target(context: &Value) -> WorkspaceTarget {
     WorkspaceTarget {
-        workspace_path: text(context, "workspacePath").unwrap_or_default().to_owned(),
+        workspace_path: text(context, "workspacePath")
+            .unwrap_or_default()
+            .to_owned(),
         workspace_identity: text(context, "workspaceIdentity").map(str::to_owned),
         remote_session_id: None,
     }
@@ -158,11 +160,18 @@ impl Bots {
                 None => refs.push(workspace),
             }
         };
-        if let Some(current) = params.get("currentWorkspace").filter(|value| value.is_object()) {
+        if let Some(current) = params
+            .get("currentWorkspace")
+            .filter(|value| value.is_object())
+        {
             push(current.clone());
         }
         let settings = self.settings.get().await;
-        for entry in settings["lastWorkspaceSession"].as_array().into_iter().flatten() {
+        for entry in settings["lastWorkspaceSession"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
             let Some(path) = text(entry, "workspacePath") else {
                 continue;
             };
@@ -186,7 +195,9 @@ impl Bots {
             return Some(exact.clone());
         }
         if let Some(id) = text(context, "workspaceId")
-            && let Some(found) = workspaces.iter().find(|workspace| text(workspace, "id") == Some(id))
+            && let Some(found) = workspaces
+                .iter()
+                .find(|workspace| text(workspace, "id") == Some(id))
         {
             return Some(found.clone());
         }
@@ -227,9 +238,12 @@ impl Bots {
             let mut next = existing.clone();
             next["workspacePath"] = canonical["workspacePath"].clone();
             match canonical.get("workspaceIdentity") {
-                Some(identity) if !identity.is_null() => next["workspaceIdentity"] = identity.clone(),
+                Some(identity) if !identity.is_null() => {
+                    next["workspaceIdentity"] = identity.clone()
+                }
                 _ => {
-                    next.as_object_mut().map(|object| object.shift_remove("workspaceIdentity"));
+                    next.as_object_mut()
+                        .map(|object| object.shift_remove("workspaceIdentity"));
                 }
             }
             next["workspaceId"] = next_id;
@@ -240,7 +254,10 @@ impl Bots {
             return Ok(Some(next));
         }
         let allowed = string_list(&bot["allowedWorkspaces"]);
-        let Some(workspace) = filter_allowed_workspaces(&workspaces, &allowed).into_iter().next() else {
+        let Some(workspace) = filter_allowed_workspaces(&workspaces, &allowed)
+            .into_iter()
+            .next()
+        else {
             return Ok(None);
         };
         let mut context = json!({
@@ -271,11 +288,19 @@ impl Bots {
     }
 
     /// `writeDraftContext`：进入新任务草稿，清掉旧任务与待处理交互。
-    async fn write_draft_context(&self, context: &Value, draft: Option<Value>) -> anyhow::Result<Value> {
+    async fn write_draft_context(
+        &self,
+        context: &Value,
+        draft: Option<Value>,
+    ) -> anyhow::Result<Value> {
         let mut next = context.as_object().cloned().unwrap_or_default();
         next.insert("mode".into(), json!("draft"));
         next.insert("activeTaskId".into(), Value::Null);
-        for key in ["draftOptions", "pendingPermissionOptions", "pendingElicitation"] {
+        for key in [
+            "draftOptions",
+            "pendingPermissionOptions",
+            "pendingElicitation",
+        ] {
             next.shift_remove(key);
         }
         if let Some(draft) = draft {
@@ -293,7 +318,9 @@ impl Bots {
         bot: &Value,
         current: Value,
     ) -> anyhow::Result<Value> {
-        let workspaces = self.workspace_refs(&json!({"currentWorkspace": current})).await;
+        let workspaces = self
+            .workspace_refs(&json!({"currentWorkspace": current}))
+            .await;
         let allowed = string_list(&bot["allowedWorkspaces"]);
         let next_allowed = normalize_configured_allowed_workspaces(&allowed, &workspaces);
         let mut next_bot = bot.clone();
@@ -313,11 +340,19 @@ impl Bots {
     }
 
     /// `withAuthorizedContext`。
-    async fn authorize(&self, inbound: &Inbound, command: &str) -> anyhow::Result<Result<Auth, Vec<Value>>> {
+    async fn authorize(
+        &self,
+        inbound: &Inbound,
+        command: &str,
+    ) -> anyhow::Result<Result<Auth, Vec<Value>>> {
         let locale = self.locale().await;
         let locale_ref = locale.as_deref();
         let reply = |id: &str, values: &[(&str, &str)]| {
-            Err(vec![outbound(&inbound.actor, msg(locale_ref, id, values), None)])
+            Err(vec![outbound(
+                &inbound.actor,
+                msg(locale_ref, id, values),
+                None,
+            )])
         };
         let config = self.repo.read_config().await?;
         let actor = &inbound.actor;
@@ -327,7 +362,10 @@ impl Bots {
                 && text(bot, "provider") == Some(actor.provider.as_str())
                 && text(bot, "providerUserId") == Some(actor.provider_user_id.as_str())
         });
-        let Some(bot) = bot.filter(|bot| text(bot, "id") == Some(inbound.bot_id.as_str())).cloned() else {
+        let Some(bot) = bot
+            .filter(|bot| text(bot, "id") == Some(inbound.bot_id.as_str()))
+            .cloned()
+        else {
             return Ok(reply("botDisabled", &[]));
         };
         if actor.chat_type != "private" {
@@ -348,7 +386,11 @@ impl Bots {
         let mut current = Map::new();
         current.insert(
             "id".into(),
-            json!(text(&context, "workspaceId").map(str::to_owned).unwrap_or_else(|| context_key(&context))),
+            json!(
+                text(&context, "workspaceId")
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| context_key(&context))
+            ),
         );
         current.insert("label".into(), json!(workspace_label(path)));
         current.insert("workspacePath".into(), json!(path));
@@ -364,7 +406,10 @@ impl Bots {
             return Ok(reply("workspaceOutOfScope", &[]));
         }
         // Rust Host 还没有远端 workspace 连接：远端上下文视为未连接，只放行不需要运行时的命令。
-        let needs_runtime = !matches!(command, "help" | "status" | "workspace" | "reconnect" | "reply");
+        let needs_runtime = !matches!(
+            command,
+            "help" | "status" | "workspace" | "reconnect" | "reply"
+        );
         if text(&context, "workspaceIdentity").is_some() && needs_runtime {
             return Ok(reply("remoteDisconnected", &[("workspacePath", path)]));
         }
@@ -404,17 +449,23 @@ impl Bots {
         };
         let view = self.tasks.model_view(None).await;
         let label_of = |provider_id: &str| {
-            view["providers"].as_array().into_iter().flatten().find_map(|provider| {
-                (text(provider, "providerId") == Some(provider_id)
-                    && provider["models"].as_array().is_some_and(|models| !models.is_empty()))
-                .then(|| {
-                    text(provider, "providerName")
-                        .map(str::trim)
-                        .filter(|name| !name.is_empty())
-                        .unwrap_or(provider_id)
-                        .to_owned()
+            view["providers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find_map(|provider| {
+                    (text(provider, "providerId") == Some(provider_id)
+                        && provider["models"]
+                            .as_array()
+                            .is_some_and(|models| !models.is_empty()))
+                    .then(|| {
+                        text(provider, "providerName")
+                            .map(str::trim)
+                            .filter(|name| !name.is_empty())
+                            .unwrap_or(provider_id)
+                            .to_owned()
+                    })
                 })
-            })
         };
         if let Some(body) = value.strip_prefix("custom:") {
             let (provider, model) = match body.split_once(':') {
@@ -443,7 +494,11 @@ impl Bots {
             .iter()
             .find(|workspace| workspace_id.is_some() && text(workspace, "id") == workspace_id)
             .and_then(|workspace| text(workspace, "label").map(str::to_owned))
-            .unwrap_or_else(|| text(context, "workspacePath").unwrap_or_default().to_owned());
+            .unwrap_or_else(|| {
+                text(context, "workspacePath")
+                    .unwrap_or_default()
+                    .to_owned()
+            });
         let task_id = text(context, "activeTaskId");
         if text(context, "workspaceIdentity").is_some() {
             let draft_model = context["draftOptions"]
@@ -457,11 +512,18 @@ impl Bots {
                 line(locale, "statusModel", &self.model_label(draft_model).await),
                 "------".to_owned(),
                 line(locale, "statusTask", &task),
-                line(locale, "statusState", &state_label(locale, "remote disconnected")),
+                line(
+                    locale,
+                    "statusState",
+                    &state_label(locale, "remote disconnected"),
+                ),
                 msg(
                     locale,
                     "remoteDisconnectedStatus",
-                    &[("workspacePath", text(context, "workspacePath").unwrap_or_default())],
+                    &[(
+                        "workspacePath",
+                        text(context, "workspacePath").unwrap_or_default(),
+                    )],
                 ),
             ]
             .join("\n");
@@ -481,7 +543,11 @@ impl Bots {
                 let selection = context["draftOptions"].get("modelSelection").cloned();
                 let view = self
                     .tasks
-                    .model_view(selection.clone().map(|selection| json!({"selection": selection})))
+                    .model_view(
+                        selection
+                            .clone()
+                            .map(|selection| json!({"selection": selection})),
+                    )
                     .await;
                 let effective = if selection.is_some() {
                     &view["effectiveSelection"]
@@ -542,20 +608,36 @@ impl Bots {
         let locale = locale.as_deref();
         let actor = &inbound.actor;
         if actor.chat_type != "private" {
-            return Ok(vec![outbound(actor, msg(locale, "bindPrivateOnly", &[]), None)]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "bindPrivateOnly", &[]),
+                None,
+            )]);
         }
         let key = code.trim().to_uppercase();
-        let record = guard(&self.bind_codes)
-            .get(&key)
-            .map(|record| (record.bot_id.clone(), record.allowed_workspaces.clone(), record.expires_at));
-        let Some((bot_id, allowed, _)) = record.filter(|(bot_id, _, expires_at)| {
-            *expires_at > now_ms() && *bot_id == inbound.bot_id
-        }) else {
-            return Ok(vec![outbound(actor, msg(locale, "bindCodeInvalid", &[]), None)]);
+        let record = guard(&self.bind_codes).get(&key).map(|record| {
+            (
+                record.bot_id.clone(),
+                record.allowed_workspaces.clone(),
+                record.expires_at,
+            )
+        });
+        let Some((bot_id, allowed, _)) = record
+            .filter(|(bot_id, _, expires_at)| *expires_at > now_ms() && *bot_id == inbound.bot_id)
+        else {
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "bindCodeInvalid", &[]),
+                None,
+            )]);
         };
         let config = self.repo.read_config().await?;
         let Some(bot) = find_bot(&config, &bot_id) else {
-            return Ok(vec![outbound(actor, msg(locale, "bindBotMissing", &[]), None)]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "bindBotMissing", &[]),
+                None,
+            )]);
         };
         // 重新绑定覆盖旧 providerUserId：一个 Bot 同一时间只有一个沟通对象。
         let mut next = bot.clone();
@@ -563,7 +645,8 @@ impl Bots {
         match &actor.display_name {
             Some(name) => next["displayName"] = json!(name),
             None => {
-                next.as_object_mut().map(|object| object.shift_remove("displayName"));
+                next.as_object_mut()
+                    .map(|object| object.shift_remove("displayName"));
             }
         }
         next["allowedWorkspaces"] = json!(normalize_allowed_workspaces(&allowed));
@@ -583,45 +666,80 @@ impl Bots {
         }
         self.repo.write_config(&updated).await?;
         guard(&self.bind_codes).remove(&key);
-        let text = [msg(locale, "bindSuccess", &[]), Self::help_text(locale, &next)].join("\n\n");
+        let text = [
+            msg(locale, "bindSuccess", &[]),
+            Self::help_text(locale, &next),
+        ]
+        .join("\n\n");
         Ok(vec![outbound(actor, text, None)])
     }
 
     /// 入站命令分发（`handleInboundMessage`）；同一聊天上下文串行处理。
-    pub async fn handle_inbound(self: &Arc<Self>, inbound: &Inbound) -> Result<Vec<Value>, RpcError> {
+    pub async fn handle_inbound(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+    ) -> Result<Vec<Value>, RpcError> {
         let actor = &inbound.actor;
         let queue_key = format!(
             "{}::{}::{}",
             actor.bot_id,
             actor.provider,
-            actor.chat_id.as_deref().map(str::trim).filter(|id| !id.is_empty()).unwrap_or(&actor.provider_user_id)
+            actor
+                .chat_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .unwrap_or(&actor.provider_user_id)
         );
-        let queue = guard(&self.inbound_queues).entry(queue_key).or_default().clone();
+        let queue = guard(&self.inbound_queues)
+            .entry(queue_key)
+            .or_default()
+            .clone();
         let _turn = queue.lock().await;
-        self.dispatch(inbound).await.map_err(|error| super::service::error(format!("{error:#}")))
+        self.dispatch(inbound)
+            .await
+            .map_err(|error| super::service::error(format!("{error:#}")))
     }
 
     async fn dispatch(self: &Arc<Self>, inbound: &Inbound) -> anyhow::Result<Vec<Value>> {
         let actor = &inbound.actor;
         let mut command = model::parse_command(&inbound.text);
         // 非微信通道里纯文本 "0" 不是取消，而是普通消息。
-        if command["type"] == "selection.cancel" && actor.provider != "weixin" && inbound.text.trim() == "0" {
+        if command["type"] == "selection.cancel"
+            && actor.provider != "weixin"
+            && inbound.text.trim() == "0"
+        {
             command = json!({"type": "message", "text": inbound.text});
         }
         let kind = text(&command, "type").unwrap_or_default().to_owned();
         let unknown = |name: &str, locale: Option<&str>| {
-            vec![outbound(actor, msg(locale, "unknownCommand", &[("command", name)]), None)]
+            vec![outbound(
+                actor,
+                msg(locale, "unknownCommand", &[("command", name)]),
+                None,
+            )]
         };
         match kind.as_str() {
-            "bind" => self.handle_bind(inbound, text(&command, "code").unwrap_or_default()).await,
+            "bind" => {
+                self.handle_bind(inbound, text(&command, "code").unwrap_or_default())
+                    .await
+            }
             "help" => Ok(match self.authorize(inbound, "help").await? {
-                Ok(auth) => vec![outbound(actor, Self::help_text(auth.locale.as_deref(), &auth.bot), None)],
+                Ok(auth) => vec![outbound(
+                    actor,
+                    Self::help_text(auth.locale.as_deref(), &auth.bot),
+                    None,
+                )],
                 Err(reply) => reply,
             }),
             "status" => Ok(match self.authorize(inbound, "status").await? {
                 Ok(auth) => {
                     let locale = auth.locale.as_deref();
-                    vec![outbound(actor, self.status_text(&auth.context, locale).await, locale)]
+                    vec![outbound(
+                        actor,
+                        self.status_text(&auth.context, locale).await,
+                        locale,
+                    )]
                 }
                 Err(reply) => reply,
             }),
@@ -636,7 +754,11 @@ impl Bots {
                 }
                 let draft = Self::initialized_draft(&auth.context);
                 let context = self.write_draft_context(&auth.context, Some(draft)).await?;
-                Ok(vec![outbound(actor, self.status_text(&context, locale).await, locale)])
+                Ok(vec![outbound(
+                    actor,
+                    self.status_text(&context, locale).await,
+                    locale,
+                )])
             }
             "stop" => {
                 let auth = match self.authorize(inbound, "stop").await? {
@@ -645,17 +767,36 @@ impl Bots {
                 };
                 let locale = auth.locale.as_deref();
                 let Some(task_id) = text(&auth.context, "activeTaskId").map(str::to_owned) else {
-                    return Ok(vec![outbound(actor, msg(locale, "noActiveTask", &[]), None)]);
+                    return Ok(vec![outbound(
+                        actor,
+                        msg(locale, "noActiveTask", &[]),
+                        None,
+                    )]);
                 };
-                if let Err(message) = self.tasks.stop(context_target(&auth.context), task_id.clone()).await {
-                    return Ok(vec![outbound(actor, msg(locale, "taskFailed", &[("message", &message)]), None)]);
+                if let Err(message) = self
+                    .tasks
+                    .stop(context_target(&auth.context), task_id.clone())
+                    .await
+                {
+                    return Ok(vec![outbound(
+                        actor,
+                        msg(locale, "taskFailed", &[("message", &message)]),
+                        None,
+                    )]);
                 }
                 guard(&self.running).remove(&task_id);
-                Ok(vec![outbound(actor, self.status_text(&auth.context, locale).await, locale)])
+                Ok(vec![outbound(
+                    actor,
+                    self.status_text(&auth.context, locale).await,
+                    locale,
+                )])
             }
             // 没有待处理的选择（Rust Host 不发选择卡）：同 Node 回未知命令 0。
             "selection.cancel" => Ok(unknown("0", self.locale().await.as_deref())),
-            "unknown" => Ok(unknown(text(&command, "name").unwrap_or_default(), self.locale().await.as_deref())),
+            "unknown" => Ok(unknown(
+                text(&command, "name").unwrap_or_default(),
+                self.locale().await.as_deref(),
+            )),
             "message" => self.handle_message(inbound).await,
             _ => {
                 let name = inbound
@@ -666,7 +807,9 @@ impl Bots {
                     .next()
                     .unwrap_or_default()
                     .to_lowercase();
-                log::info(format!("bots command not available in the Rust Host command={kind}"));
+                log::info(format!(
+                    "bots command not available in the Rust Host command={kind}"
+                ));
                 Ok(unknown(&name, self.locale().await.as_deref()))
             }
         }
@@ -684,7 +827,11 @@ impl Bots {
         let mut deleted_task: Option<String> = None;
         if auth.context["mode"] == "task"
             && let Some(task_id) = text(&auth.context, "activeTaskId").map(str::to_owned)
-            && self.tasks.deleted_ids(context_key(&auth.context)).await.contains(&task_id)
+            && self
+                .tasks
+                .deleted_ids(context_key(&auth.context))
+                .await
+                .contains(&task_id)
         {
             // 软删除的任务不能凭 activeTaskId 续跑：回到草稿，用当前草稿的选择新建。
             deleted_task = Some(task_id);
@@ -707,23 +854,34 @@ impl Bots {
         }
         let target = context_target(&auth.context);
         let bot_target = automation_target(actor);
-        let draft_task = auth.context["mode"] == "draft" || text(&auth.context, "activeTaskId").is_none();
+        let draft_task =
+            auth.context["mode"] == "draft" || text(&auth.context, "activeTaskId").is_none();
         let (task_id, selection, context) = if draft_task {
-            let draft = match auth.context.get("draftOptions").filter(|value| value.is_object()) {
+            let draft = match auth
+                .context
+                .get("draftOptions")
+                .filter(|value| value.is_object())
+            {
                 Some(draft) => draft.clone(),
                 None => Self::initialized_draft(&auth.context),
             };
             let original = draft.get("modelSelection").cloned();
             let view = self
                 .tasks
-                .model_view(original.clone().map(|selection| json!({"selection": selection})))
+                .model_view(
+                    original
+                        .clone()
+                        .map(|selection| json!({"selection": selection})),
+                )
                 .await;
             let submission = if original.is_some() {
                 view["effectiveSelection"].clone()
             } else {
                 view["preferredSelection"].clone()
             };
-            let issue = view.get("selectionIssue").is_some_and(|issue| !issue.is_null());
+            let issue = view
+                .get("selectionIssue")
+                .is_some_and(|issue| !issue.is_null());
             if !submission.is_object() || (original.is_some() && issue) {
                 anyhow::bail!("Bot 无法从目标 Host 解析 Submission 模型");
             }
@@ -746,26 +904,39 @@ impl Bots {
                     context_key(&context)
                 ));
                 if let Err(error) = self
-                    .send_outbound(&auth.bot, &outbound(actor, msg(locale, "deletedTaskReplaced", &[]), None))
+                    .send_outbound(
+                        &auth.bot,
+                        &outbound(actor, msg(locale, "deletedTaskReplaced", &[]), None),
+                    )
                     .await
                 {
-                    log::warn(format!("deleted task replacement notice failed task={task_id}: {error:#}"));
+                    log::warn(format!(
+                        "deleted task replacement notice failed task={task_id}: {error:#}"
+                    ));
                 }
             }
             (task_id, submission, context)
         } else {
-            let task_id = text(&auth.context, "activeTaskId").unwrap_or_default().to_owned();
+            let task_id = text(&auth.context, "activeTaskId")
+                .unwrap_or_default()
+                .to_owned();
             let original = self
                 .tasks
                 .resume(target.clone(), task_id.clone())
                 .await
                 .map_err(|message| anyhow::anyhow!(message))?;
             let view = match &original {
-                Some(selection) => self.tasks.model_view(Some(json!({"selection": selection}))).await,
+                Some(selection) => {
+                    self.tasks
+                        .model_view(Some(json!({"selection": selection})))
+                        .await
+                }
                 None => Value::Null,
             };
             let effective = view["effectiveSelection"].clone();
-            let issue = view.get("selectionIssue").is_some_and(|issue| !issue.is_null());
+            let issue = view
+                .get("selectionIssue")
+                .is_some_and(|issue| !issue.is_null());
             if !effective.is_object() || issue {
                 anyhow::bail!("{}", msg(locale, "sessionModelUnavailable", &[]));
             }
@@ -774,7 +945,13 @@ impl Bots {
         guard(&self.running).insert(task_id.clone());
         let input_id = uuid_v7();
         // 先订阅终态再发送，避免快速完成的轮次漏掉回推。
-        self.watch_task(auth.bot.clone(), actor.clone(), context_target(&context), task_id.clone(), Some(input_id.clone()));
+        self.watch_task(
+            auth.bot.clone(),
+            actor.clone(),
+            context_target(&context),
+            task_id.clone(),
+            Some(input_id.clone()),
+        );
         let bots = self.clone();
         let bot = auth.bot.clone();
         let actor = actor.clone();
@@ -791,14 +968,20 @@ impl Bots {
                 guard(&bots.running).remove(&task_id);
                 let locale = bots.locale().await;
                 let locale = locale.as_deref();
-                let expired = message.contains("Session not found:") || message.contains("Session is not active:");
+                let expired = message.contains("Session not found:")
+                    || message.contains("Session is not active:");
                 let text = if expired {
                     msg(locale, "sessionExpiredNewTaskHint", &[])
                 } else {
                     msg(locale, "taskFailed", &[("message", &message)])
                 };
-                if let Err(error) = bots.send_outbound(&bot, &outbound(&actor, text, None)).await {
-                    log::warn(format!("bots prompt failure notice failed task={task_id}: {error:#}"));
+                if let Err(error) = bots
+                    .send_outbound(&bot, &outbound(&actor, text, None))
+                    .await
+                {
+                    log::warn(format!(
+                        "bots prompt failure notice failed task={task_id}: {error:#}"
+                    ));
                 }
             }
         });
@@ -807,16 +990,25 @@ impl Bots {
 
     /// `processProviderCallback`（飞书 / Lark）：解析、去重、处理并投递回复。`synchronous_card` 为卡片
     /// 按钮回调：回复由长连接同步回包承载，不另发消息。
-    pub async fn process_callback(self: &Arc<Self>, provider: &str, payload: Value, synchronous_card: bool) -> Value {
+    pub async fn process_callback(
+        self: &Arc<Self>,
+        provider: &str,
+        payload: Value,
+        synchronous_card: bool,
+    ) -> Value {
         let locale = self.locale().await;
         let Some(inbound) = parse_callback(&payload) else {
-            log::debug(format!("provider callback parsed provider={provider} count=0"));
+            log::debug(format!(
+                "provider callback parsed provider={provider} count=0"
+            ));
             return json!({"ok": true, "replies": []});
         };
         let config = match self.repo.read_config().await {
             Ok(config) => config,
             Err(error) => {
-                log::warn(format!("provider callback failed provider={provider}: {error:#}"));
+                log::warn(format!(
+                    "provider callback failed provider={provider}: {error:#}"
+                ));
                 return json!({"ok": false, "replies": [], "status": 503});
             }
         };
@@ -834,7 +1026,11 @@ impl Bots {
             log::info(format!(
                 "provider callback duplicated provider={provider} bot={} messageId={}",
                 inbound.bot_id,
-                inbound.actor.provider_message_id.as_deref().unwrap_or_default()
+                inbound
+                    .actor
+                    .provider_message_id
+                    .as_deref()
+                    .unwrap_or_default()
             ));
             return json!({"ok": true, "replies": []});
         }
@@ -855,24 +1051,32 @@ impl Bots {
                 let text = if expired {
                     msg(locale.as_deref(), "sessionExpiredNewTaskHint", &[])
                 } else {
-                    msg(locale.as_deref(), "callbackFailed", &[("message", &failure.message)])
+                    msg(
+                        locale.as_deref(),
+                        "callbackFailed",
+                        &[("message", &failure.message)],
+                    )
                 };
                 let reply = outbound(&inbound.actor, text, None);
                 if let Some(bot) = &bot
                     && let Err(error) = self.send_outbound(bot, &reply).await
                 {
-                    log::warn(format!("provider callback failure notice failed provider={provider}: {error:#}"));
+                    log::warn(format!(
+                        "provider callback failure notice failed provider={provider}: {error:#}"
+                    ));
                 }
                 return json!({"ok": false, "replies": [reply], "status": 503});
             }
         };
         if let Some(bot) = &bot
-            && !(synchronous_card && !replies.is_empty())
+            && (!synchronous_card || replies.is_empty())
         {
             for reply in &replies {
                 if let Err(error) = self.send_outbound(bot, reply).await {
                     self.release_inbound(&inbound);
-                    log::warn(format!("provider callback reply failed provider={provider}: {error:#}"));
+                    log::warn(format!(
+                        "provider callback reply failed provider={provider}: {error:#}"
+                    ));
                     return json!({"ok": false, "replies": replies, "status": 503});
                 }
             }
@@ -914,7 +1118,11 @@ impl Bots {
     }
 
     /// `handleProviderCallback(Response)`：只有飞书 / Lark 通道。
-    pub async fn provider_callback(self: &Arc<Self>, provider: &str, payload: Value) -> Result<Value, RpcError> {
+    pub async fn provider_callback(
+        self: &Arc<Self>,
+        provider: &str,
+        payload: Value,
+    ) -> Result<Value, RpcError> {
         if !is_feishu(provider) {
             return Err(super::service::not_implemented(provider));
         }
@@ -927,12 +1135,21 @@ impl Bots {
         }
         if text(&payload, "botId").is_none() {
             // `findCallbackBot`：没带 botId 时取该通道第一个启用的 Bot。
-            let config = self.repo.read_config().await.map_err(|error| error_text(&error))?;
-            if let Some(id) = config["bots"].as_array().into_iter().flatten().find_map(|bot| {
-                (text(bot, "provider") == Some(provider) && bot["enabled"] == true)
-                    .then(|| text(bot, "id").map(str::to_owned))
-                    .flatten()
-            }) {
+            let config = self
+                .repo
+                .read_config()
+                .await
+                .map_err(|error| error_text(&error))?;
+            if let Some(id) = config["bots"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find_map(|bot| {
+                    (text(bot, "provider") == Some(provider) && bot["enabled"] == true)
+                        .then(|| text(bot, "id").map(str::to_owned))
+                        .flatten()
+                })
+            {
                 payload["botId"] = json!(id);
             }
         }

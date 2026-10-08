@@ -66,8 +66,11 @@ pub trait TaskPort: Send + Sync {
         task_id: String,
         input: SendText,
     ) -> BoxFuture<'static, Result<(), String>>;
-    fn stop(&self, target: WorkspaceTarget, task_id: String)
-    -> BoxFuture<'static, Result<(), String>>;
+    fn stop(
+        &self,
+        target: WorkspaceTarget,
+        task_id: String,
+    ) -> BoxFuture<'static, Result<(), String>>;
     /// 该 workspace 的任务元数据（tasks-index）。
     fn list(&self, workspace_key: String) -> BoxFuture<'static, Vec<Value>>;
     fn deleted_ids(&self, workspace_key: String) -> BoxFuture<'static, Vec<String>>;
@@ -212,13 +215,17 @@ impl TaskPort for AreaPort {
             let Ok(process) = agent.get_ready_client(&target).await else {
                 return FinalReply::default();
             };
-            let params = json!({"sessionId": task_id, "limit": 200, "clientMode": "desktop-continuous"});
+            let params =
+                json!({"sessionId": task_id, "limit": 200, "clientMode": "desktop-continuous"});
             match process
                 .request_value("v4/conversation/rowsRange", &params)
                 .await
             {
                 Ok(page) => delivery::final_reply_from_rows(
-                    page["rows"].as_array().map(Vec::as_slice).unwrap_or_default(),
+                    page["rows"]
+                        .as_array()
+                        .map(Vec::as_slice)
+                        .unwrap_or_default(),
                 ),
                 Err(error) => {
                     log::warn(format!(
@@ -283,15 +290,14 @@ pub fn install(
             .map(String::as_str),
         &environment.user_home,
     );
-    let api = match feishu::api::FeishuApi::new(feishu::api::Endpoints::from_vars(
-        &environment.vars,
-    )) {
-        Ok(api) => Arc::new(api),
-        Err(error) => {
-            log::error(format!("bots http client unavailable: {error:#}"));
-            return None;
-        }
-    };
+    let api =
+        match feishu::api::FeishuApi::new(feishu::api::Endpoints::from_vars(&environment.vars)) {
+            Ok(api) => Arc::new(api),
+            Err(error) => {
+                log::error(format!("bots http client unavailable: {error:#}"));
+                return None;
+            }
+        };
     let bots = service::Bots::new(service::BotsDeps {
         repo: store::BotsRepo::new(dir.clone()),
         credentials: credentials::CredentialStore::new(&dir, cipher),
@@ -301,7 +307,9 @@ pub fn install(
         // desktop-attached 远端 Host 不抢跑 Bot 长连接（同 Node runStartupBackgroundTasks）。
         background: true,
     });
-    let _ = area.bot_delivery.set(Arc::new(Delivery { bots: bots.clone() }));
+    let _ = area
+        .bot_delivery
+        .set(Arc::new(Delivery { bots: bots.clone() }));
     registry.implement(service::channel(bots.clone()));
     bots.schedule_refresh();
     Some(Box::new(bots))

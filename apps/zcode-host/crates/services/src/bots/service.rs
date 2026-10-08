@@ -103,21 +103,28 @@ pub(crate) fn validate(config: &Value, candidate: &Value) -> Result<(), RpcError
             .into_iter()
             .flatten()
             .filter(move |bot| {
-                text(bot, "id") != Some(id) && bot["enabled"] == true && text(bot, "provider") == Some(provider)
+                text(bot, "id") != Some(id)
+                    && bot["enabled"] == true
+                    && text(bot, "provider") == Some(provider)
             })
     };
     if enabled
         && let Some(user) = text(candidate, "providerUserId").filter(|user| !user.trim().is_empty())
         && others().any(|bot| text(bot, "providerUserId") == Some(user))
     {
-        return Err(error("An enabled bot with this provider user already exists."));
+        return Err(error(
+            "An enabled bot with this provider user already exists.",
+        ));
     }
     if enabled
         && EXCLUSIVE_CREDENTIAL_PROVIDERS.contains(&provider)
-        && let Some(reference) = text(candidate, "credentialRef").filter(|value| !value.trim().is_empty())
+        && let Some(reference) =
+            text(candidate, "credentialRef").filter(|value| !value.trim().is_empty())
         && others().any(|bot| text(bot, "credentialRef") == Some(reference))
     {
-        return Err(error("Enabled polling bots cannot share the same credential."));
+        return Err(error(
+            "Enabled polling bots cannot share the same credential.",
+        ));
     }
     Ok(())
 }
@@ -177,7 +184,13 @@ impl Bots {
         let status = self
             .runtime_status(id)
             .and_then(|current| current.get("status").cloned())
-            .unwrap_or_else(|| json!(if bot["enabled"] == true { "idle" } else { "disabled" }));
+            .unwrap_or_else(|| {
+                json!(if bot["enabled"] == true {
+                    "idle"
+                } else {
+                    "disabled"
+                })
+            });
         self.set_runtime_status(
             id,
             json!({
@@ -285,9 +298,7 @@ impl Bots {
                 // 飞书 / Lark 扫码创建应用后，应用信息接口可能短暂不可读；重试后再回填名称。
                 tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
             }
-            let Some(secret) = self.feishu_secret(bot).await else {
-                return None;
-            };
+            let secret = self.feishu_secret(bot).await?;
             let app = AppCredentials {
                 provider,
                 app_id: text(bot, "feishuAppId").unwrap_or_default(),
@@ -314,20 +325,40 @@ impl Bots {
         let input = &params["bot"];
         let provider = text(input, "provider").unwrap_or_default().to_owned();
         let mut bot = input.as_object().cloned().unwrap_or_default();
-        bot.insert("id".into(), json!(text(input, "id").unwrap_or_default().trim()));
-        bot.insert("name".into(), json!(text(input, "name").unwrap_or_default().trim()));
+        bot.insert(
+            "id".into(),
+            json!(text(input, "id").unwrap_or_default().trim()),
+        );
+        bot.insert(
+            "name".into(),
+            json!(text(input, "name").unwrap_or_default().trim()),
+        );
         let mut bot = normalize_bot(&Value::Object(bot));
-        bot["replyMode"] = json!(model::normalize_reply_mode(&provider, text(input, "replyMode")));
+        bot["replyMode"] = json!(model::normalize_reply_mode(
+            &provider,
+            text(input, "replyMode")
+        ));
         let id = text(&bot, "id").unwrap_or_default().to_owned();
-        let credential = text(params, "credentialValue").map(str::trim).filter(|value| !value.is_empty());
+        let credential = text(params, "credentialValue")
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
         if let Some(value) = credential {
             let key = format!("bot:{id}:credential");
-            self.credentials.save(&key, value).await.map_err(anyhow_error)?;
+            self.credentials
+                .save(&key, value)
+                .await
+                .map_err(anyhow_error)?;
             bot["credentialRef"] = json!(key);
         }
-        if let Some(value) = text(params, "webhookSecretValue").map(str::trim).filter(|value| !value.is_empty()) {
+        if let Some(value) = text(params, "webhookSecretValue")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
             let key = format!("bot:{id}:webhook-secret");
-            self.credentials.save(&key, value).await.map_err(anyhow_error)?;
+            self.credentials
+                .save(&key, value)
+                .await
+                .map_err(anyhow_error)?;
             bot["webhookSecretRef"] = json!(key);
         }
         if (credential.is_some() || text(&bot, "name").unwrap_or_default().trim().is_empty())
@@ -354,7 +385,8 @@ impl Bots {
 
     pub async fn remove_bot_secret(self: &Arc<Self>, bot_id: &str) -> Result<Value, RpcError> {
         let config = self.read_config().await?;
-        let bot = find_bot(&config, bot_id).ok_or_else(|| error(format!("Bot not found: {bot_id}")))?;
+        let bot =
+            find_bot(&config, bot_id).ok_or_else(|| error(format!("Bot not found: {bot_id}")))?;
         let provider = text(&bot, "provider").unwrap_or_default().to_owned();
         if is_feishu(&provider) {
             self.stop_websocket(bot_id).await;
@@ -362,7 +394,12 @@ impl Bots {
         // 只移除密钥时如果保留旧绑定身份，UI 会显示“已连通”但运行时已经没有 token 可用；
         // 同步清理绑定状态，让 Bot 回到可重新添加的状态。
         let mut next_bot = bot.as_object().cloned().unwrap_or_default();
-        for key in ["credentialRef", "webhookSecretRef", "providerUserId", "displayName"] {
+        for key in [
+            "credentialRef",
+            "webhookSecretRef",
+            "providerUserId",
+            "displayName",
+        ] {
             next_bot.shift_remove(key);
         }
         if is_feishu(&provider) {
@@ -375,7 +412,13 @@ impl Bots {
                 .as_array()
                 .into_iter()
                 .flatten()
-                .map(|item| if text(item, "id") == Some(bot_id) { next_bot.clone() } else { item.clone() })
+                .map(|item| {
+                    if text(item, "id") == Some(bot_id) {
+                        next_bot.clone()
+                    } else {
+                        item.clone()
+                    }
+                })
                 .collect(),
         );
         self.write_config(&next).await?;
@@ -383,7 +426,10 @@ impl Bots {
         self.schedule_refresh();
         for key in ["credentialRef", "webhookSecretRef"] {
             if let Some(reference) = text(&bot, key) {
-                self.credentials.delete(reference).await.map_err(anyhow_error)?;
+                self.credentials
+                    .delete(reference)
+                    .await
+                    .map_err(anyhow_error)?;
             }
         }
         Ok(next_bot)
@@ -421,7 +467,10 @@ impl Bots {
         self.delete_state(bot_id).await?;
         for key in ["credentialRef", "webhookSecretRef"] {
             if let Some(reference) = bot.as_ref().and_then(|bot| text(bot, key)) {
-                self.credentials.delete(reference).await.map_err(anyhow_error)?;
+                self.credentials
+                    .delete(reference)
+                    .await
+                    .map_err(anyhow_error)?;
             }
         }
         Ok(())
@@ -437,12 +486,18 @@ impl Bots {
             "feishu" | "lark" => {
                 if bot["enabled"] != true {
                     json!({"ok": false, "message": "Feishu bot is disabled."})
-                } else if text(&bot, "feishuAppId").is_none() || text(&bot, "credentialRef").is_none() {
+                } else if text(&bot, "feishuAppId").is_none()
+                    || text(&bot, "credentialRef").is_none()
+                {
                     json!({"ok": false, "message": "Feishu App ID and App Secret are required."})
                 } else {
                     match self.tenant_token(&bot).await.map_err(anyhow_error)? {
-                        Some(_) => json!({"ok": true, "message": "Feishu app credentials are valid."}),
-                        None => json!({"ok": false, "message": "Feishu app credentials are missing."}),
+                        Some(_) => {
+                            json!({"ok": true, "message": "Feishu app credentials are valid."})
+                        }
+                        None => {
+                            json!({"ok": false, "message": "Feishu app credentials are missing."})
+                        }
                     }
                 }
             }
@@ -471,7 +526,10 @@ impl Bots {
         let code = random_code();
         let ttl = params["ttlMs"].as_i64().unwrap_or(BOT_BIND_CODE_TTL_MS);
         let expires_at = now_ms() + ttl;
-        let allowed = match params.get("allowedWorkspaces").filter(|value| !value.is_null()) {
+        let allowed = match params
+            .get("allowedWorkspaces")
+            .filter(|value| !value.is_null())
+        {
             Some(value) => string_list(value),
             None => vec![ALL_BOT_WORKSPACES.to_owned()],
         };
@@ -494,7 +552,10 @@ impl Bots {
         let config = match self.read_config().await {
             Ok(config) => config,
             Err(error) => {
-                log::warn(format!("automation Bot delivery skipped: {}", error.message));
+                log::warn(format!(
+                    "automation Bot delivery skipped: {}",
+                    error.message
+                ));
                 return;
             }
         };
@@ -506,7 +567,9 @@ impl Bots {
                 let actor = super::feishu::Actor {
                     provider: provider.to_owned(),
                     bot_id: bot_id.to_owned(),
-                    provider_user_id: text(target, "providerUserId").unwrap_or_default().to_owned(),
+                    provider_user_id: text(target, "providerUserId")
+                        .unwrap_or_default()
+                        .to_owned(),
                     chat_type: text(target, "chatType").unwrap_or("private").to_owned(),
                     ..super::feishu::Actor::default()
                 };
@@ -551,13 +614,25 @@ type Handler = fn(Arc<Bots>, Args) -> BoxFuture<'static, Result<Reply, RpcError>
 
 pub fn channel(bots: Arc<Bots>) -> ServiceBuilder {
     let members: [(&str, Handler); 20] = [
-        ("syncAppRuntimePreferences", |_, _| Box::pin(async { Ok(Reply::Undefined) })),
-        ("getStatus", |bots, _| Box::pin(async move { bots.get_status().await.map(Reply::Value) })),
-        ("getConfig", |bots, _| Box::pin(async move { bots.read_config().await.map(Reply::Value) })),
-        ("listWorkspaceRefs", |bots, args| {
-            Box::pin(async move { Ok(Reply::Value(json!(bots.workspace_refs(&arg(&args, 0)).await))) })
+        ("syncAppRuntimePreferences", |_, _| {
+            Box::pin(async { Ok(Reply::Undefined) })
         }),
-        ("getUserConfigOptions", |_, _| Box::pin(async { Ok(Reply::Value(json!([]))) })),
+        ("getStatus", |bots, _| {
+            Box::pin(async move { bots.get_status().await.map(Reply::Value) })
+        }),
+        ("getConfig", |bots, _| {
+            Box::pin(async move { bots.read_config().await.map(Reply::Value) })
+        }),
+        ("listWorkspaceRefs", |bots, args| {
+            Box::pin(async move {
+                Ok(Reply::Value(json!(
+                    bots.workspace_refs(&arg(&args, 0)).await
+                )))
+            })
+        }),
+        ("getUserConfigOptions", |_, _| {
+            Box::pin(async { Ok(Reply::Value(json!([]))) })
+        }),
         ("beginFeishuRegistration", |bots, args| {
             Box::pin(async move {
                 let params = arg(&args, 0);
@@ -605,12 +680,19 @@ pub fn channel(bots: Arc<Bots>) -> ServiceBuilder {
             })
         }),
         ("createBindCode", |bots, args| {
-            Box::pin(async move { bots.create_bind_code(&arg(&args, 0)).await.map(Reply::Value) })
+            Box::pin(async move {
+                bots.create_bind_code(&arg(&args, 0))
+                    .await
+                    .map(Reply::Value)
+            })
         }),
         ("getBotStates", |bots, _| {
             Box::pin(async move {
                 let state = bots.repo.read_state().await.map_err(anyhow_error)?;
-                let values: Vec<Value> = state["bots"].as_object().map(|bots| bots.values().cloned().collect()).unwrap_or_default();
+                let values: Vec<Value> = state["bots"]
+                    .as_object()
+                    .map(|bots| bots.values().cloned().collect())
+                    .unwrap_or_default();
                 Ok(Reply::Value(Value::Array(values)))
             })
         }),
@@ -631,7 +713,9 @@ pub fn channel(bots: Arc<Bots>) -> ServiceBuilder {
                 let message = arg(&args, 0);
                 let inbound = super::inbound::inbound_from_value(&message)
                     .ok_or_else(|| error("Invalid bot inbound message"))?;
-                bots.handle_inbound(&inbound).await.map(|replies| Reply::Value(json!(replies)))
+                bots.handle_inbound(&inbound)
+                    .await
+                    .map(|replies| Reply::Value(json!(replies)))
             })
         }),
         ("handleProviderCallback", |bots, args| {
@@ -644,7 +728,9 @@ pub fn channel(bots: Arc<Bots>) -> ServiceBuilder {
         ("handleProviderCallbackResponse", |bots, args| {
             Box::pin(async move {
                 let provider = args.get::<String>(0, "provider")?;
-                bots.provider_callback(&provider, arg(&args, 1)).await.map(Reply::Value)
+                bots.provider_callback(&provider, arg(&args, 1))
+                    .await
+                    .map(Reply::Value)
             })
         }),
     ];

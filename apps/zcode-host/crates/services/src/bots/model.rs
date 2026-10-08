@@ -51,8 +51,7 @@ pub fn workspace_key(path: &str, identity: Option<&str>) -> String {
 /// `getWorkspaceLabel`。
 pub fn workspace_label(path: &str) -> String {
     path.split(['/', '\\'])
-        .filter(|part| !part.is_empty())
-        .next_back()
+        .rfind(|part| !part.is_empty())
         .unwrap_or(path)
         .to_owned()
 }
@@ -220,7 +219,10 @@ fn truthy_string(value: Option<&Value>) -> Option<Value> {
 /// `normalizeBotCurrentOptions`。
 pub fn normalize_current_options(options: &Value) -> Value {
     let mut out = Map::new();
-    if let Some(selection) = options.get("modelSelection").and_then(parse_model_selection) {
+    if let Some(selection) = options
+        .get("modelSelection")
+        .and_then(parse_model_selection)
+    {
         out.insert("modelSelection".into(), selection);
     }
     for key in ["mode", "sandboxMode", "approvalPolicy"] {
@@ -235,7 +237,10 @@ pub fn normalize_current_options(options: &Value) -> Value {
 pub fn normalize_draft_options(provider: &str, options: &Value) -> Value {
     let mut out = Map::new();
     out.insert("provider".into(), json!(provider));
-    if let Some(selection) = options.get("modelSelection").and_then(parse_model_selection) {
+    if let Some(selection) = options
+        .get("modelSelection")
+        .and_then(parse_model_selection)
+    {
         out.insert("modelSelection".into(), selection);
     }
     if let Some(mode) = truthy_string(options.get("mode")) {
@@ -406,9 +411,9 @@ fn allowed_commands(value: &Value, path: &str) -> Parsed {
     strict_object(value, path, &keys, |key, field| {
         let field_path = format!("{path}.{key}");
         match key {
-            "mode" | "sandboxMode" | "approvalPolicy" | "cli" => field
-                .map(|value| boolean(value, &field_path))
-                .transpose(),
+            "mode" | "sandboxMode" | "approvalPolicy" | "cli" => {
+                field.map(|value| boolean(value, &field_path)).transpose()
+            }
             _ => boolean(req(field, path, key)?, &field_path).map(Some),
         }
     })
@@ -525,8 +530,9 @@ fn draft_options(value: &Value, path: &str) -> Parsed {
         |key, field| {
             let field_path = format!("{path}.{key}");
             match key {
-                "provider" => one_of(req(field, path, key)?, &field_path, &[ZCODE_AGENT_PROVIDER])
-                    .map(Some),
+                "provider" => {
+                    one_of(req(field, path, key)?, &field_path, &[ZCODE_AGENT_PROVIDER]).map(Some)
+                }
                 "modelSelection" => field
                     .map(|value| model_selection(value, &field_path))
                     .transpose(),
@@ -663,7 +669,10 @@ fn pending_elicitation(value: &Value, path: &str) -> Parsed {
                     .ok_or_else(|| issue(&field_path, "expected array"))?;
                 let mut out = Vec::new();
                 for (index, item) in items.iter().enumerate() {
-                    out.push(elicitation_question(item, &format!("{field_path}.{index}"))?);
+                    out.push(elicitation_question(
+                        item,
+                        &format!("{field_path}.{index}"),
+                    )?);
                 }
                 Some(Value::Array(out))
             }

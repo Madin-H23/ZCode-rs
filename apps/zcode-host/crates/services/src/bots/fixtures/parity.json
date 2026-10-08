@@ -1,5 +1,10 @@
 {
   "source": "scripts/rust-host/bots-fixtures.ts",
+  "credential": {
+    "secret": "fixture-secret",
+    "plain": "cli-secret-值",
+    "encrypted": "enc:v1:BwcHBwcHBwcHBwcH.5B8Li5f6zpnic9ybflGG6Q.tyrxG3RgrrmN7A89UHc"
+  },
   "commands": [
     {
       "text": "hello",

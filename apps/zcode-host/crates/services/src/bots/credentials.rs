@@ -214,7 +214,11 @@ impl CredentialStore {
 }
 
 async fn write_all(file: &Path, all: &Map<String, Value>) -> Result<()> {
-    atomic_write_private_text(file, &super::store::pretty_json(&Value::Object(all.clone()))).await
+    atomic_write_private_text(
+        file,
+        &super::store::pretty_json(&Value::Object(all.clone())),
+    )
+    .await
 }
 
 /// `backupCorruptFile`：按内容命名的 0600 备份，已存在则复用。

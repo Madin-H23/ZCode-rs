@@ -2,6 +2,7 @@
 // 用真实 TS 实现生成：Bot 文案表（messages.ts 两种 locale 的原始模板）、命令解析、配置归一化与旧版
 // 配置/状态导入后的 schema 输出；Rust 侧 include_str! 嵌入并逐项复现。
 // 用法：pnpm exec tsx scripts/rust-host/bots-fixtures.ts [--check]
+import { createCipheriv, createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { format } from "oxfmt";
@@ -14,6 +15,7 @@ import {
   importLegacyBotState,
 } from "../../packages/services/src/bots/storageMigration.js";
 import { normalizeAllowedWorkspaces } from "../../packages/services/src/bots/workspaceHelpers.js";
+import { createCredentialCipherProvider } from "../../packages/services/src/credential/providers/credentialCipherProvider.js";
 
 const root = resolve(import.meta.dirname, "../..");
 const fixtureDir = resolve(root, "apps/zcode-host/crates/services/src/bots/fixtures");
@@ -182,8 +184,22 @@ const LEGACY_STATES = [
   },
 ];
 
+// 凭据密文：固定 IV 生成，再用真实 TS 解密器校验，Rust 侧必须能解出同一明文。
+function credentialVector() {
+  const secret = "fixture-secret";
+  const plain = "cli-secret-值";
+  const iv = Buffer.alloc(12, 7);
+  const cipher = createCipheriv("aes-256-gcm", createHash("sha256").update(secret).digest(), iv);
+  const body = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  const encrypted = `enc:v1:${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${body.toString("base64url")}`;
+  const provider = createCredentialCipherProvider({ env: { ZCODE_CREDENTIAL_SECRET: secret } });
+  if (provider.decrypt(encrypted) !== plain) throw new Error("credential vector mismatch");
+  return { secret, plain, encrypted };
+}
+
 function run() {
   return {
+    credential: credentialVector(),
     commands: COMMANDS.map((text) => ({ text, command: parseBotCommand(text) })),
     normalize: NORMALIZE_CASES.map((bot) => ({
       input: bot,

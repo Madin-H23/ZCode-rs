@@ -363,9 +363,7 @@ pub fn card_markdown(text: &str) -> String {
         .iter()
         .enumerate()
         .map(|(index, line)| {
-            let next_empty = lines
-                .get(index + 1)
-                .is_none_or(|next| next.text.is_empty());
+            let next_empty = lines.get(index + 1).is_none_or(|next| next.text.is_empty());
             if line.text.is_empty() || !line.hard_break || index + 1 >= count || next_empty {
                 line.text.clone()
             } else {
@@ -392,10 +390,7 @@ pub fn split_text(text: &str) -> Vec<String> {
     if units.is_empty() {
         return vec![text.to_owned()];
     }
-    units
-        .chunks(LIMIT)
-        .map(String::from_utf16_lossy)
-        .collect()
+    units.chunks(LIMIT).map(String::from_utf16_lossy).collect()
 }
 
 /// 长连接处理器给事件补上的字段（`createFeishuWebSocketEventHandlers`）。

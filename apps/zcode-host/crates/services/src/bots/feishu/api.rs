@@ -36,7 +36,10 @@ impl Endpoints {
         Self {
             feishu_open: pick("ZCODE_FEISHU_OPEN_BASE_URL", "https://open.feishu.cn"),
             lark_open: pick("ZCODE_LARK_OPEN_BASE_URL", "https://open.larksuite.com"),
-            feishu_accounts: pick("ZCODE_FEISHU_ACCOUNTS_BASE_URL", "https://accounts.feishu.cn"),
+            feishu_accounts: pick(
+                "ZCODE_FEISHU_ACCOUNTS_BASE_URL",
+                "https://accounts.feishu.cn",
+            ),
             lark_accounts: pick(
                 "ZCODE_LARK_ACCOUNTS_BASE_URL",
                 "https://accounts.larksuite.com",
@@ -290,15 +293,20 @@ impl FeishuApi {
             let message = if code == 1 {
                 "system busy".to_owned()
             } else {
-                response.payload["msg"].as_str().unwrap_or_default().to_owned()
+                response.payload["msg"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned()
             };
-            return Err(if code == 1_000_040_343 || !response.ok && response.payload.is_null() {
-                EndpointError::Retryable(format!("code={code}, msg={message}"))
-            } else {
-                EndpointError::Fatal(format!(
-                    "pullConnectConfig failed: code={code}, msg={message}"
-                ))
-            });
+            return Err(
+                if code == 1_000_040_343 || !response.ok && response.payload.is_null() {
+                    EndpointError::Retryable(format!("code={code}, msg={message}"))
+                } else {
+                    EndpointError::Fatal(format!(
+                        "pullConnectConfig failed: code={code}, msg={message}"
+                    ))
+                },
+            );
         }
         let data = &response.payload["data"];
         let url = data["URL"]
@@ -333,7 +341,9 @@ impl FeishuApi {
             "feishu"
         };
         let poll_domain = "feishu";
-        let init = self.registration(poll_domain, &[("action", "init")]).await?;
+        let init = self
+            .registration(poll_domain, &[("action", "init")])
+            .await?;
         let supported = init["supported_auth_methods"]
             .as_array()
             .is_some_and(|methods| methods.iter().any(|method| method == "client_secret"));
@@ -352,7 +362,9 @@ impl FeishuApi {
             )
             .await?;
         let (Some(device_code), Some(uri)) = (
-            begin["device_code"].as_str().filter(|text| !text.is_empty()),
+            begin["device_code"]
+                .as_str()
+                .filter(|text| !text.is_empty()),
             begin["verification_uri_complete"]
                 .as_str()
                 .filter(|text| !text.is_empty()),
@@ -397,7 +409,9 @@ impl FeishuApi {
         }
         if let (Some(id), Some(secret)) = (
             poll["client_id"].as_str().filter(|text| !text.is_empty()),
-            poll["client_secret"].as_str().filter(|text| !text.is_empty()),
+            poll["client_secret"]
+                .as_str()
+                .filter(|text| !text.is_empty()),
         ) {
             let mut out = json!({
                 "status": "success", "appId": id, "appSecret": secret, "domain": result_domain,

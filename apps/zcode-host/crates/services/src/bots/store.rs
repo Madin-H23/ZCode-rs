@@ -8,7 +8,9 @@ use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
 use tokio::fs;
 
-use super::model::{import_legacy_config, import_legacy_state, parse_config_file, parse_state_file};
+use super::model::{
+    import_legacy_config, import_legacy_state, parse_config_file, parse_state_file,
+};
 use crate::store::{LockOptions, atomic_write_private_text, with_file_lock};
 
 pub const CONFIG_FILE: &str = "bot-config.v3.json";
@@ -19,9 +21,11 @@ pub const STATE_FILE: &str = "bot-state.v3.json";
 
 async fn read_optional_json(path: &Path) -> Result<Option<Value>> {
     match fs::read_to_string(path).await {
-        Ok(text) => Ok(Some(
-            serde_json::from_str(&text).with_context(|| format!("invalid JSON: {}", path.display()))?,
-        )),
+        Ok(text) => {
+            Ok(Some(serde_json::from_str(&text).with_context(|| {
+                format!("invalid JSON: {}", path.display())
+            })?))
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),
     }

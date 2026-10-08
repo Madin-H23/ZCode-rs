@@ -98,7 +98,10 @@ pub fn flatten_event(data: &Value) -> (String, Value) {
         }
         return (event_type, Value::Object(out));
     }
-    let event_type = data["event"]["type"].as_str().unwrap_or_default().to_owned();
+    let event_type = data["event"]["type"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
     if let Some(map) = data["event"].as_object() {
         for (key, value) in map {
             out.insert(key.clone(), value.clone());
@@ -150,9 +153,8 @@ impl Merger {
     }
 }
 
-type Socket = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type Socket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 pub struct Connection {
     pub provider: String,
@@ -278,7 +280,11 @@ impl Connection {
                         headers: vec![("type".into(), "ping".into())],
                         ..Frame::default()
                     };
-                    if socket.send(Message::Binary(ping.encode().into())).await.is_err() {
+                    if socket
+                        .send(Message::Binary(ping.encode().into()))
+                        .await
+                        .is_err()
+                    {
                         return Ended::Disconnected;
                     }
                     next_ping = tokio::time::Instant::now() + config.ping_interval;
@@ -333,9 +339,8 @@ impl Connection {
             let mut response = json!({"code": 200});
             match handler(event_type, event).await {
                 Ok(Some(result)) => {
-                    response["data"] = json!(
-                        base64::engine::general_purpose::STANDARD.encode(result.to_string())
-                    );
+                    response["data"] =
+                        json!(base64::engine::general_purpose::STANDARD.encode(result.to_string()));
                 }
                 Ok(None) => {}
                 Err(error) => {

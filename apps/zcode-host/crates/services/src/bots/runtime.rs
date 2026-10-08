@@ -14,7 +14,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use zcode_host_kit::log;
 
-use super::feishu::ws::{ConnectionState, Connection, EventHandler};
+use super::feishu::ws::{Connection, ConnectionState, EventHandler};
 use super::feishu::{callback_payload, interactive_card};
 use super::model::is_feishu;
 use super::runtime_lock;
@@ -223,7 +223,9 @@ impl Bots {
                             let label = if provider == "lark" { "Lark" } else { "Feishu" };
                             anyhow::bail!(
                                 "{label} callback failed: status={}",
-                                result["status"].as_i64().map_or("unknown".to_owned(), |s| s.to_string())
+                                result["status"]
+                                    .as_i64()
+                                    .map_or("unknown".to_owned(), |s| s.to_string())
                             );
                         }
                         Ok(None)
@@ -237,9 +239,9 @@ impl Bots {
                         if result["ok"] != true {
                             anyhow::bail!("Feishu callback failed");
                         }
-                        Ok(result["replies"][0]["text"].as_str().map(|text| {
-                            json!({"card": {"type": "raw", "data": interactive_card(text)}})
-                        }))
+                        Ok(result["replies"][0]["text"].as_str().map(
+                            |text| json!({"card": {"type": "raw", "data": interactive_card(text)}}),
+                        ))
                     }
                     other => Ok(Some(json!(format!("no {other} event handle")))),
                 }
@@ -255,7 +257,8 @@ impl Bots {
         let app_id = text(&bot, "feishuAppId").unwrap_or_default().to_owned();
         while !*stop.borrow() {
             let namespace = format!("{provider}-websocket");
-            let lock = match runtime_lock::acquire(self.repo.dir(), &namespace, &app_id, &id).await {
+            let lock = match runtime_lock::acquire(self.repo.dir(), &namespace, &app_id, &id).await
+            {
                 Ok(Some(lock)) => lock,
                 Ok(None) => {
                     self.set_runtime_status(
@@ -269,7 +272,9 @@ impl Bots {
                     continue;
                 }
                 Err(error) => {
-                    log::warn(format!("acquire Feishu WebSocket lock failed bot={id}: {error:#}"));
+                    log::warn(format!(
+                        "acquire Feishu WebSocket lock failed bot={id}: {error:#}"
+                    ));
                     self.set_runtime_status(
                         &id,
                         json!({"provider": provider, "status": "error",
@@ -333,9 +338,10 @@ impl Bots {
         connection
             .run(&self.api, handler, stop.clone(), move |state| {
                 let (message, message_id) = match state {
-                    ConnectionState::Connected => {
-                        ("Feishu WebSocket is running.", "bots.runtime.feishuWebSocketRunning")
-                    }
+                    ConnectionState::Connected => (
+                        "Feishu WebSocket is running.",
+                        "bots.runtime.feishuWebSocketRunning",
+                    ),
                     ConnectionState::Reconnecting => (
                         "Feishu WebSocket is reconnecting.",
                         "bots.runtime.feishuWebSocketConnecting",
