@@ -21,4 +21,6 @@ tokio.workspace = true
 tokio-tungstenite.workspace = true
 zcode-host-control.workspace = true
 zcode-host-core.workspace = true
+zcode-host-kit.workspace = true
+zcode-host-services.workspace = true
 zcode-host-rpc.workspace = true

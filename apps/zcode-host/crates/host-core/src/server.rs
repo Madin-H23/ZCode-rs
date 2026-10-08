@@ -11,21 +11,23 @@ use tokio::task::AbortHandle;
 use zcode_host_rpc::codec::{self, RESPONSE_EVENT_FIRE, RESPONSE_PROMISE_SUCCESS};
 use zcode_host_rpc::{RequestKind, RpcError, RpcValue, read_request};
 
-use crate::channel::{CallContext, ChannelRegistry, Reply};
-use crate::log;
+use zcode_host_kit::{CallContext, ChannelRegistry, Reply, log};
 
 type Active = Arc<Mutex<HashMap<i32, AbortHandle>>>;
 
 pub(crate) async fn serve(
-    registry: Arc<ChannelRegistry>,
     context: CallContext,
-    mut ready: watch::Receiver<bool>,
+    mut ready: watch::Receiver<Option<Arc<ChannelRegistry>>>,
     mut inbound: mpsc::UnboundedReceiver<Vec<u8>>,
     outbound: mpsc::UnboundedSender<Vec<u8>>,
 ) {
-    if ready.wait_for(|ready| *ready).await.is_err() {
+    let registry = match ready.wait_for(Option::is_some).await {
+        Ok(registry) => registry.clone(),
+        Err(_) => return,
+    };
+    let Some(registry) = registry else {
         return;
-    }
+    };
     let _ = outbound.send(codec::initialize());
     log::debug(format!("attachment {} initialized", context.attachment_id));
 
@@ -98,10 +100,11 @@ pub(crate) async fn serve(
         }
     }
 
-    // 连接关闭：取消这条连接上所有进行中的调用和订阅。
+    // 连接关闭：取消这条连接上所有进行中的调用和订阅，再让按连接持有状态的 channel 清理。
     for (_, handle) in lock(&active).drain() {
         handle.abort();
     }
+    registry.connection_closed(&context);
     log::debug(format!("attachment {} closed", context.attachment_id));
 }
 
@@ -136,10 +139,10 @@ fn lock(active: &Active) -> std::sync::MutexGuard<'_, HashMap<i32, AbortHandle>>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract::{ChannelContract, Contract, Member, MemberKind};
     use serde_json::{Value, json};
     use std::time::Duration;
     use zcode_host_control::ClientMode;
+    use zcode_host_kit::contract::{ChannelContract, Contract, Member, MemberKind};
     use zcode_host_rpc::Reader;
 
     fn contract() -> Contract {
@@ -181,26 +184,20 @@ mod tests {
     }
 
     struct Harness {
-        ready: watch::Sender<bool>,
+        ready: watch::Sender<Option<Arc<ChannelRegistry>>>,
         to_server: mpsc::UnboundedSender<Vec<u8>>,
         from_server: mpsc::UnboundedReceiver<Vec<u8>>,
     }
 
     fn start() -> Harness {
-        let (ready, ready_rx) = watch::channel(false);
+        let (ready, ready_rx) = watch::channel(None);
         let (to_server, inbound) = mpsc::unbounded_channel();
         let (outbound, from_server) = mpsc::unbounded_channel();
         let context = CallContext {
             attachment_id: "a1".into(),
             client_mode: ClientMode::DesktopContinuous,
         };
-        tokio::spawn(serve(
-            Arc::new(ChannelRegistry::from_contract(contract())),
-            context,
-            ready_rx,
-            inbound,
-            outbound,
-        ));
+        tokio::spawn(serve(context, ready_rx, inbound, outbound));
         Harness {
             ready,
             to_server,
@@ -224,14 +221,18 @@ mod tests {
                 .await
                 .is_err()
         );
-        harness.ready.send_replace(true);
+        harness
+            .ready
+            .send_replace(Some(Arc::new(ChannelRegistry::from_contract(contract()))));
         assert_eq!(next(&mut harness).await.0, json!([200]));
     }
 
     #[tokio::test]
     async fn stub_methods_answer_immediately() {
         let mut harness = start();
-        harness.ready.send_replace(true);
+        harness
+            .ready
+            .send_replace(Some(Arc::new(ChannelRegistry::from_contract(contract()))));
         next(&mut harness).await;
 
         harness
@@ -278,7 +279,9 @@ mod tests {
     #[tokio::test]
     async fn listen_is_accepted_without_reply() {
         let mut harness = start();
-        harness.ready.send_replace(true);
+        harness
+            .ready
+            .send_replace(Some(Arc::new(ChannelRegistry::from_contract(contract()))));
         next(&mut harness).await;
         harness
             .to_server

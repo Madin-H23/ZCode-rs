@@ -11,7 +11,8 @@ use tokio::sync::{Semaphore, mpsc};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode, header};
-use zcode_host_core::{AttachmentMeta, HostCore, log};
+use zcode_host_core::{AttachmentMeta, HostCore};
+use zcode_host_kit::log;
 use zcode_host_rpc::{FrameReader, frame};
 
 pub const RPC_SUBPROTOCOL: &str = "zcode-rpc.v1";

@@ -1,7 +1,14 @@
 # Rust Host（docs/specs/rust-host.md）。独立 workspace：只通过路径依赖引用 CLI 的协议 crate，
 # 不链接 CLI runtime，保证“CLI 是独立进程”在编译期成立。
 [workspace]
-members = ["crates/rpc", "crates/control", "crates/host-core", "crates/zcode-host"]
+members = [
+  "crates/rpc",
+  "crates/control",
+  "crates/kit",
+  "crates/services",
+  "crates/host-core",
+  "crates/zcode-host",
+]
 resolver = "3"
 
 [workspace.package]
@@ -27,6 +34,8 @@ tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.28"
 zcode-host-control = { path = "crates/control" }
 zcode-host-core = { path = "crates/host-core" }
+zcode-host-kit = { path = "crates/kit" }
+zcode-host-services = { path = "crates/services" }
 zcode-host-rpc = { path = "crates/rpc" }
 
 [profile.release]

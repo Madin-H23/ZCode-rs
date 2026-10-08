@@ -3,6 +3,9 @@
 //! 传输是 Rust Host 的 stdin/stdout，每行一个 JSON 对象；消息对象与今天 `parentPort` 上的相同，
 //! TS 侧 schema 在 `packages/shared/src/validation.ts`。R0 只解析用到的字段，其余消息原样识别为
 //! [`MainToHost::Other`]，由调用方记 debug 日志后忽略。
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -21,16 +24,37 @@ pub enum MainToHost {
         error: String,
     },
     Dispose,
+    /// 本 crate 不解析的消息原样保留，由 [`ControlRouter`] 交给登记了该 `type` 的 service。
     Other {
         kind: String,
+        message: Value,
     },
 }
 
-/// `HostInitMessage` 的子集；其余字段在实现对应服务的里程碑再读取。
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+/// `HostInitMessage`（packages/desktop/src/main/desktopHostProcess.ts）。
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InitLocal {
     pub database_startup_id: Option<String>,
+    pub host_id: Option<String>,
+    pub device_mid: Option<String>,
+    pub workspace_path: Option<String>,
+    pub workspace_identity: Option<String>,
+    #[serde(default)]
+    pub agent_warmup_targets: Vec<WarmupTarget>,
+    pub agent_spawn_fallback_cwd: Option<String>,
+    /// Main 解析好的内置 Provider 配置路径；Host 不感知 Electron 安装布局。
+    pub zcode_builtin_provider_config_file_path: Option<String>,
+    /// Main 采集的登录 shell 环境补丁（PATH 等）；Host 显式传给子进程，不改写自身环境。
+    #[serde(default)]
+    pub runtime_process_env_patch: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WarmupTarget {
+    pub workspace_path: String,
+    pub workspace_identity: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,8 +107,41 @@ pub fn parse_main_to_host(line: &str) -> Result<MainToHost> {
             }
         }
         DISPOSE => MainToHost::Dispose,
-        _ => MainToHost::Other { kind },
+        _ => MainToHost::Other {
+            kind,
+            message: value,
+        },
     })
+}
+
+/// Host → Main 控制消息的出口；实现只做入队，不能阻塞调用方。
+pub trait ControlSink: Send + Sync {
+    fn send(&self, message: HostToMain);
+}
+
+type ControlHandler = Arc<dyn Fn(Value) + Send + Sync>;
+
+/// Main → Host 消息按 `type` 分发给 service；同一 `type` 只能有一个处理者。
+#[derive(Default, Clone)]
+pub struct ControlRouter {
+    handlers: HashMap<String, ControlHandler>,
+}
+
+impl ControlRouter {
+    pub fn on(&mut self, kind: &str, handler: impl Fn(Value) + Send + Sync + 'static) {
+        self.handlers.insert(kind.to_owned(), Arc::new(handler));
+    }
+
+    /// 返回是否有处理者。
+    pub fn dispatch(&self, kind: &str, message: Value) -> bool {
+        match self.handlers.get(kind) {
+            Some(handler) => {
+                handler(message);
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -107,6 +164,9 @@ pub enum HostToMain {
         source: &'static str,
         message: String,
     },
+    /// service 自行构造、已符合 `hostResponseMessageSchema` 的消息，原样写出。
+    #[serde(untagged)]
+    Raw(Value),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -198,7 +258,9 @@ mod tests {
         assert_eq!(
             message,
             MainToHost::InitLocal(InitLocal {
-                database_startup_id: Some("s1".into())
+                database_startup_id: Some("s1".into()),
+                runtime_process_env_patch: [("PATH".to_owned(), "/bin".to_owned())].into(),
+                ..InitLocal::default()
             })
         );
     }
@@ -220,7 +282,8 @@ mod tests {
         assert_eq!(
             parse_main_to_host(r#"{"type":"broadcast","payload":1}"#).unwrap(),
             MainToHost::Other {
-                kind: "broadcast".into()
+                kind: "broadcast".into(),
+                message: json!({"type":"broadcast","payload":1}),
             }
         );
     }

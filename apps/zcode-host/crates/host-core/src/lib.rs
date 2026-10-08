@@ -1,38 +1,33 @@
-//! Rust Host 的 composition root（docs/specs/rust-host.md §3.1、rust-host-r0.md）。
+//! Rust Host 的组装层（docs/specs/rust-host.md §3.1、rust-host-r0.md）。
 //!
 //! 接入层只向这里交付两样东西：Main 的控制消息（[`HostCore::on_control`]），以及每个 attachment
-//! 一条已鉴权的 `@zcode/rpc` 连接（[`HostCore::attach`]）。整个 Host 只有 composition root 读取
-//! 进程环境；本 crate 内其余模块都通过参数拿配置。
+//! 一条已鉴权的 `@zcode/rpc` 连接（[`HostCore::attach`]）。services 在收到 `InitLocal` 时按
+//! Main 给的路径与环境构建；构建完成前建立的 attachment 先挂起，之后才发 `[200]`。
 pub mod attachments;
-pub mod channel;
-pub mod contract;
-pub mod log;
 mod server;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use zcode_host_control::{
-    AttachmentEndpointResult, AttachmentScope, ClientMode, DatabaseStartupState, False, HostToMain,
-    MainToHost, True,
+    AttachmentEndpointResult, AttachmentScope, ClientMode, ControlRouter, DatabaseStartupState,
+    False, HostToMain, MainToHost, True,
 };
+use zcode_host_kit::{CallContext, ChannelRegistry, contract, log};
+use zcode_host_services::{HostEnvironment, ServiceContext};
 
 pub use attachments::{AttachmentMeta, AttachmentRegistry};
-pub use channel::{CallContext, ChannelRegistry, Reply, ServiceChannel};
+pub use zcode_host_control::ControlSink;
 
 /// capability 有效期（rust-host-r0.md §3）。
 pub const CAPABILITY_TTL: Duration = Duration::from_secs(30);
 
-/// Host → Main 控制消息的出口；实现只做入队，不能阻塞调用方。
-pub trait ControlSink: Send + Sync {
-    fn send(&self, message: HostToMain);
-}
-
 #[derive(Debug, Clone)]
 pub struct HostConfig {
     pub ws_port: u16,
+    pub environment: HostEnvironment,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,34 +44,22 @@ pub struct HostCore {
 struct Inner {
     config: HostConfig,
     control: Arc<dyn ControlSink>,
-    registry: Arc<ChannelRegistry>,
     attachments: AttachmentRegistry,
-    /// 收到 InitLocal 之前建立的 attachment 先挂起，之后才发 `[200]`（与 Node Host 就绪前挂起相同）。
-    ready: watch::Sender<bool>,
+    /// InitLocal 之后构建好的 channel 注册表；None 表示尚未就绪。
+    registry: watch::Sender<Option<Arc<ChannelRegistry>>>,
+    router: Mutex<ControlRouter>,
 }
 
 impl HostCore {
     pub fn new(config: HostConfig, control: Arc<dyn ControlSink>) -> Self {
-        Self::with_registry(
-            config,
-            control,
-            ChannelRegistry::from_contract(contract::embedded()),
-        )
-    }
-
-    pub fn with_registry(
-        config: HostConfig,
-        control: Arc<dyn ControlSink>,
-        registry: ChannelRegistry,
-    ) -> Self {
-        let (ready, _) = watch::channel(false);
+        let (registry, _) = watch::channel(None);
         Self {
             inner: Arc::new(Inner {
                 config,
                 control,
-                registry: Arc::new(registry),
                 attachments: AttachmentRegistry::new(CAPABILITY_TTL),
-                ready,
+                registry,
+                router: Mutex::new(ControlRouter::default()),
             }),
         }
     }
@@ -84,21 +67,31 @@ impl HostCore {
     pub fn on_control(&self, message: MainToHost) -> ControlOutcome {
         match message {
             MainToHost::InitLocal(init) => {
-                if *self.inner.ready.borrow() {
+                if self.inner.registry.borrow().is_some() {
                     log::warn("duplicate init-local ignored");
                     return ControlOutcome::Continue;
                 }
                 let startup_id = init
                     .database_startup_id
+                    .clone()
                     .filter(|id| !id.trim().is_empty())
                     .unwrap_or_else(|| "rust-host".to_owned());
-                // R0 没有需要准备的数据库；tasks-index 迁移随 R2 的 repo 实现。
+                let context = Arc::new(ServiceContext {
+                    environment: self.inner.config.environment.clone(),
+                    init,
+                    control: self.inner.control.clone(),
+                });
+                let mut registry = ChannelRegistry::from_contract(contract::embedded());
+                let mut router = ControlRouter::default();
+                zcode_host_services::install(context, &mut registry, &mut router);
+                *self.lock_router() = router;
+                // tasks-index 等数据库的准备随对应 repo 实现；目前没有阻塞启动的迁移。
                 let state = DatabaseStartupState::ready(startup_id, random_hex(16), now_ms());
                 self.inner
                     .control
                     .send(HostToMain::DatabaseStartupState { state });
-                self.inner.ready.send_replace(true);
-                log::info("init-local received; attachments released");
+                self.inner.registry.send_replace(Some(Arc::new(registry)));
+                log::info("init-local received; services installed");
             }
             MainToHost::IssueAttachmentEndpoint(request) => {
                 let result = self.issue_endpoint(AttachmentMeta {
@@ -126,17 +119,26 @@ impl HostCore {
                     });
             }
             MainToHost::Dispose => return ControlOutcome::Shutdown,
-            MainToHost::Other { kind } => {
-                log::debug(format!(
-                    "control message not handled by the Rust Host yet: {kind}"
-                ));
+            MainToHost::Other { kind, message } => {
+                if !self.lock_router().dispatch(&kind, message) {
+                    log::debug(format!(
+                        "control message not handled by the Rust Host yet: {kind}"
+                    ));
+                }
             }
         }
         ControlOutcome::Continue
     }
 
+    fn lock_router(&self) -> std::sync::MutexGuard<'_, ControlRouter> {
+        self.inner
+            .router
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn issue_endpoint(&self, meta: AttachmentMeta) -> AttachmentEndpointResult {
-        // R0 只接 Renderer 的本地 attachment；Bot 远程运行时与远端 workspace 在 R2 / R6 接入。
+        // 只接 Renderer 的本地 attachment；Bot 远程运行时与远端 workspace 后续接入。
         if meta.client_mode != ClientMode::DesktopContinuous || meta.scope != AttachmentScope::Local
         {
             return AttachmentEndpointResult::Failed {
@@ -169,9 +171,8 @@ impl HostCore {
             client_mode: meta.client_mode,
         };
         tokio::spawn(server::serve(
-            self.inner.registry.clone(),
             context,
-            self.inner.ready.subscribe(),
+            self.inner.registry.subscribe(),
             inbound,
             outbound,
         ))

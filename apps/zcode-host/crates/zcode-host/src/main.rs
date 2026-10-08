@@ -16,7 +16,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use zcode_host_control::{HostToMain, LogLevel, encode_line, parse_main_to_host};
-use zcode_host_core::{ControlOutcome, ControlSink, HostConfig, HostCore, log};
+use zcode_host_core::{ControlOutcome, ControlSink, HostConfig, HostCore};
+use zcode_host_kit::log;
+use zcode_host_services::HostEnvironment;
 
 struct Args {
     allowed_origins: Vec<String>,
@@ -80,7 +82,10 @@ async fn run(args: Args) -> Result<()> {
     let (control_tx, control_rx) = mpsc::unbounded_channel();
     tokio::spawn(write_control(control_rx));
     let core = HostCore::new(
-        HostConfig { ws_port: port },
+        HostConfig {
+            ws_port: port,
+            environment: HostEnvironment::capture(std::env::vars()),
+        },
         Arc::new(StdoutControl(control_tx.clone())),
     );
     let policy = Arc::new(ws::Policy::new(port, args.allowed_origins));

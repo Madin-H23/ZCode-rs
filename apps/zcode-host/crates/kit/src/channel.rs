@@ -8,10 +8,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures_util::stream::{self, Stream};
+use serde::Serialize;
 use serde_json::{Value, json};
 use zcode_host_control::ClientMode;
 use zcode_host_rpc::{RpcError, RpcValue};
 
+use crate::builder::ServiceBuilder;
 use crate::contract::{Contract, MemberKind};
 
 pub const NOT_IMPLEMENTED_CODE: &str = "fault.host.notImplemented";
@@ -22,6 +24,23 @@ pub enum Reply {
     Value(Value),
     /// 已是 JSON 文本（CLI result、V4 帧），原样写入 Object 标签。
     RawJson(String),
+}
+
+impl Reply {
+    /// 序列化任意值；序列化失败（不可能出现在纯数据类型上）退化为 null。
+    pub fn of<T: Serialize>(value: &T) -> Self {
+        Reply::Value(serde_json::to_value(value).unwrap_or(Value::Null))
+    }
+
+    pub fn null() -> Self {
+        Reply::Value(Value::Null)
+    }
+}
+
+impl From<Value> for Reply {
+    fn from(value: Value) -> Self {
+        Reply::Value(value)
+    }
 }
 
 pub type CallFuture = Pin<Box<dyn Future<Output = Result<Reply, RpcError>> + Send>>;
@@ -42,6 +61,8 @@ pub trait ServiceChannel: Send + Sync {
         event: &str,
         arg: RpcValue,
     ) -> Result<EventStream, RpcError>;
+    /// attachment 断开：按连接持有状态的 channel（如 V4 订阅归属）在这里清理。
+    fn connection_closed(&self, _context: &CallContext) {}
 }
 
 pub struct ChannelRegistry {
@@ -81,8 +102,21 @@ impl ChannelRegistry {
         self.channels.insert(name.into(), channel);
     }
 
+    /// 用 builder 覆盖同名 channel；builder 没注册的成员仍由原 channel（契约 stub）应答。
+    pub fn implement(&mut self, builder: ServiceBuilder) {
+        let fallback = self.channels.get(builder.channel()).cloned();
+        let name = builder.channel().to_owned();
+        self.channels.insert(name, builder.build(fallback));
+    }
+
     pub fn get(&self, name: &str) -> Option<Arc<dyn ServiceChannel>> {
         self.channels.get(name).cloned()
+    }
+
+    pub fn connection_closed(&self, context: &CallContext) {
+        for channel in self.channels.values() {
+            channel.connection_closed(context);
+        }
     }
 }
 
