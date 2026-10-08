@@ -120,18 +120,19 @@ AgentRuntime.start(target)
 
 ## 5. 有意与 Node 不同之处
 
-| Node 行为                                                                 | Rust Host                                                 | 理由                                                                                              |
-| ------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| skills、commands 在原文件上 `writeFile`，不持锁                           | 持锁原子写，0600                                          | 修复跨进程丢更新；0600 与 mcp-sync、hooks、CLI 一致（文件含 MCP 密钥）                            |
-| `mcp/list` 走独立的 mcp-status lane（插件管理 workspace，5 分钟空闲回收） | 发给该 workspace 自己的 CLI（`AgentRuntime::get_client`） | Rust CLI 校验请求 workspace 与进程 workspace 一致；Rust Host 尚无 mcp-status lane（agent 子系统） |
-| CLI 写插件启用状态（`plugins/setEnabled`）不持锁                          | 不变                                                      | 不改 CLI；与 Host 写入同时发生的窗口只在用户同时操作两个页面时出现                                |
-| settings-sync 写 `config.json` 不持锁                                     | 不在本文                                                  | settings-sync 属 R1，由其负责方接入同一 helper                                                    |
-| Subagent `mcpServers` 对象数组用 `yaml` 库 `stringify` 写回               | 自带的 YAML 块风格输出                                    | 常见结构（字符串、数字、布尔、嵌套对象/数组）输出相同；特殊字符串一律双引号                       |
-| YAML 解析用 `yaml` 包                                                     | `yaml-rust2`                                              | name/description 等标量结果相同；非法 YAML 都回退到相同的宽松读取                                 |
-| `localeCompare` 为 ICU                                                    | ASCII 范围一致的近似                                      | 只影响非 ASCII 名称的并列排序                                                                     |
-| `prepareRuntimeState` 的状态文件迁移遇到 IO 错误时 reject，CLI 不启动     | 记 warn 后照常启动                                        | env contributor 不能失败；迁移失败时 CLI 读到的是未迁移的旧字段，与迁移前行为相同                 |
-| gzip 用 Node zlib                                                         | flate2（默认压缩级别）                                    | tar 内容逐字节相同，gzip 字节可能不同；`archiveBytes` 随之不同，两边都能解对方的归档              |
-| JSON 解析失败的报错文案来自 V8                                            | 来自 serde_json                                           | 只出现在配置损坏时的错误消息里，前缀（`无法解析 MCP 配置文件 …`）相同                             |
+| Node 行为                                                                 | Rust Host                                                                        | 理由                                                                                              |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| skills、commands 在原文件上 `writeFile`，不持锁                           | 持锁原子写，0600                                                                 | 修复跨进程丢更新；0600 与 mcp-sync、hooks、CLI 一致（文件含 MCP 密钥）                            |
+| `mcp/list` 走独立的 mcp-status lane（插件管理 workspace，5 分钟空闲回收） | 发给该 workspace 自己的 CLI（`AgentRuntime::get_client`）                        | Rust CLI 校验请求 workspace 与进程 workspace 一致；Rust Host 尚无 mcp-status lane（agent 子系统） |
+| CLI 写插件启用状态（`plugins/setEnabled`）不持锁                          | 不变                                                                             | 不改 CLI；与 Host 写入同时发生的窗口只在用户同时操作两个页面时出现                                |
+| settings-sync 写 `config.json` 不持锁                                     | 不在本文                                                                         | settings-sync 属 R1，由其负责方接入同一 helper                                                    |
+| Subagent `mcpServers` 对象数组用 `yaml` 库 `stringify` 写回               | 自带的 YAML 块风格输出                                                           | 常见结构（字符串、数字、布尔、嵌套对象/数组）输出相同；特殊字符串一律双引号                       |
+| YAML 解析用 `yaml` 包                                                     | `yaml-rust2`                                                                     | name/description 等标量结果相同；非法 YAML 都回退到相同的宽松读取                                 |
+| `localeCompare` 为 ICU                                                    | ASCII 范围一致的近似                                                             | 只影响非 ASCII 名称的并列排序                                                                     |
+| `prepareRuntimeState` 的状态文件迁移遇到 IO 错误时 reject，CLI 不启动     | 记 warn 后照常启动                                                               | env contributor 不能失败；迁移失败时 CLI 读到的是未迁移的旧字段，与迁移前行为相同                 |
+| gzip 用 Node zlib                                                         | flate2（默认压缩级别）                                                           | tar 内容逐字节相同，gzip 字节可能不同；`archiveBytes` 随之不同，两边都能解对方的归档              |
+| skill 归档流式解包，读到结束块即停                                        | 整体解压，解压输出上限为内容上限 + 2 MiB 余量，超出按 `extracted-content` 报超限 | 防 gzip 炸弹；只有结束块后再跟超过 2 MiB 垃圾数据的归档会被拒，正常归档不受影响                   |
+| JSON 解析失败的报错文案来自 V8                                            | 来自 serde_json                                                                  | 只出现在配置损坏时的错误消息里，前缀（`无法解析 MCP 配置文件 …`）相同                             |
 
 ## 6. 验收
 

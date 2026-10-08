@@ -393,9 +393,29 @@ fn gunzip(flavor: Flavor, archive: &[u8], max: Option<u64>) -> Result<Vec<u8>, R
             })?;
         }
         Flavor::Skill => {
-            decoder
-                .read_to_end(&mut out)
-                .map_err(|error| fsx::error(error.to_string()))?;
+            // Node 流式解析、读到结束块即停，不会把整个解压结果放进内存。这里整体解压，
+            // 所以给解压输出设上限（内容上限 + 头与填充的余量），防止 gzip 炸弹撑爆内存。
+            let limit = max.map(|max| max + END_BLOCKS as u64 + (BLOCK * 4096) as u64);
+            match limit {
+                Some(limit) => {
+                    (&mut decoder)
+                        .take(limit + 1)
+                        .read_to_end(&mut out)
+                        .map_err(|error| fsx::error(error.to_string()))?;
+                    if out.len() as u64 > limit {
+                        return Err(skill_size_error(
+                            out.len() as u64,
+                            max.unwrap_or(limit),
+                            "extracted-content",
+                        ));
+                    }
+                }
+                None => {
+                    decoder
+                        .read_to_end(&mut out)
+                        .map_err(|error| fsx::error(error.to_string()))?;
+                }
+            }
         }
     }
     Ok(out)
