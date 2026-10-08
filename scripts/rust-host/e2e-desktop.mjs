@@ -16,6 +16,7 @@
 //   run(context)           必需；context = { page, shots, model, workspace, home, temp, relaunch }
 //   mockRules              可选；按顺序匹配的 mock 模型规则 { name, match(request), respond(request) }
 //   seed(context)          可选；在启动 App 之前补充隔离 profile（context = { home, workspace, temp }）
+//   env(context)           可选；返回追加给 Electron 进程树的环境变量（例如指向场景自己的 mock 后端）
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
@@ -197,10 +198,16 @@ async function runScenario(name, cli) {
   const model = await startMockModel(workspace, scenario.mockRules ?? []);
   await seedProfile(home, workspace, model.baseUrl);
   await scenario.seed?.({ home, workspace, temp });
+  // Host 启动即检查内置 Provider 配置的 CDN 更新（与 Node Host 相同）：ZCode 控制面默认指向本地
+  // mock，不访问真实服务；场景可以用 env() 换成自己的 mock 后端。
+  const env = {
+    ZCODE_BASE_URL: new URL(model.baseUrl).origin,
+    ...((await scenario.env?.({ home, workspace, temp })) ?? {}),
+  };
   let app;
   let failed = false;
   try {
-    app = await launchApp({ temp, home, cli });
+    app = await launchApp({ temp, home, cli, env });
     if (options.explore) {
       for (let index = 0; index < 8; index += 1) {
         await sleep(4000);
@@ -218,7 +225,7 @@ async function runScenario(name, cli) {
       temp,
       relaunch: async () => {
         await app.stop();
-        app = await launchApp({ temp, home, cli });
+        app = await launchApp({ temp, home, cli, env });
         return app.page;
       },
     });
@@ -263,7 +270,7 @@ async function main() {
 }
 
 /** 启动一个隔离的 Electron 实例并连上它的 renderer 页面。 */
-async function launchApp({ temp, home, cli }) {
+async function launchApp({ temp, home, cli, env = {} }) {
   const cdpPort = await freePort();
   const electronBinary = require("electron");
   const electron = spawn(electronBinary, [".", `--remote-debugging-port=${cdpPort}`], {
@@ -291,6 +298,7 @@ async function launchApp({ temp, home, cli }) {
       OTEL_EXPORTER_OTLP_ENDPOINT: "",
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "",
       ELECTRON_RENDERER_URL: "",
+      ...env,
     },
     stdio: ["ignore", "inherit", "inherit"],
     detached: process.platform !== "win32",
