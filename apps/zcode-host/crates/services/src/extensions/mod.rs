@@ -16,6 +16,7 @@ pub mod plugin_sync;
 pub mod plugins;
 pub mod skill_sync;
 pub mod skills;
+pub mod subagents;
 pub mod walk;
 pub mod yaml;
 
