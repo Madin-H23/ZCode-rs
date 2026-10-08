@@ -92,6 +92,32 @@ export async function runCoreFlow({ page, shots, model, workspace, mockReply, wr
   await page.screenshot({ path: join(shots, "08-switched-model.png") });
   if (!used.includes("mock-model-2")) throw new Error(`model switch not applied: ${used}`);
   console.info("[e2e] model switch applied");
+
+  // 终端：Rust Host 的 PTY 在 workspace 里执行命令。
+  await page.getByRole("button", { name: "Toggle terminal" }).first().click();
+  await page.waitForTimeout(2500);
+  await page.keyboard.type("echo rust-host-terminal > term-ok.txt");
+  await page.keyboard.press("Enter");
+  const termFile = join(workspace, "term-ok.txt");
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if ((await readFile(termFile, "utf8").catch(() => "")).trim() === "rust-host-terminal") break;
+    await page.waitForTimeout(500);
+  }
+  await page.screenshot({ path: join(shots, "09-terminal.png") });
+  if ((await readFile(termFile, "utf8")).trim() !== "rust-host-terminal") {
+    throw new Error("terminal command did not run");
+  }
+  console.info("[e2e] terminal ran a command in the workspace");
+
+  // Git：Review 面板经 git 服务列出工作区改动；term-ok.txt 只可能来自 git status。
+  await page.getByRole("button", { name: "Add tab" }).first().click();
+  await page.getByRole("menuitem", { name: "Review" }).first().click();
+  try {
+    await page.getByText("term-ok.txt").first().waitFor({ state: "visible", timeout: 30_000 });
+  } finally {
+    await page.screenshot({ path: join(shots, "10-review.png") });
+  }
+  console.info("[e2e] git review lists workspace changes");
 }
 
 async function sendFollowUp(page, text) {

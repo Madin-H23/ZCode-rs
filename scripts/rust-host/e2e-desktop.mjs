@@ -191,6 +191,16 @@ async function seedProfile(home, workspace, baseUrl) {
   );
   await mkdir(workspace, { recursive: true });
   await writeFile(join(workspace, "README.md"), "# e2e workspace\n");
+  // 一个已提交的 git 仓库，供 Git 状态与改动面板使用；配置只在临时 HOME 内生效。
+  const gitEnv = { ...process.env, HOME: home, GIT_CONFIG_NOSYSTEM: "1" };
+  await run("git", ["init", "-q", "-b", "main"], workspace, gitEnv);
+  await run("git", ["add", "."], workspace, gitEnv);
+  await run(
+    "git",
+    ["-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid", "commit", "-qm", "init"],
+    workspace,
+    gitEnv,
+  );
 }
 
 async function waitForCdp(port, child) {
