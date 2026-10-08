@@ -6,6 +6,13 @@ use std::path::Path;
 use zcode_host_kit::RpcError;
 
 fn errno_parts(error: &std::io::Error) -> (&'static str, &'static str) {
+    #[cfg(windows)]
+    if let Some(code) = error
+        .raw_os_error()
+        .and_then(crate::support::node_error::windows_code)
+    {
+        return code;
+    }
     #[cfg(unix)]
     if let Some(code) = error.raw_os_error() {
         match code {

@@ -244,6 +244,14 @@ impl Terminals {
         }
     }
 
+    /// Host 退出：逐个回收仍存活的终端（Node `disposeAll`），子 shell 不随 Host 残留。
+    pub fn dispose_all(&self) {
+        let ids: Vec<String> = lock(&self.inner.terminals).keys().cloned().collect();
+        for id in ids {
+            self.dispose(&id);
+        }
+    }
+
     fn events(&self, id: &str, exit: bool) -> Result<EventHub<Value>, RpcError> {
         let terminal = self.get(id)?;
         Ok(if exit {

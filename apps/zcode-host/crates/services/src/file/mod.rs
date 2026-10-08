@@ -4,6 +4,7 @@
 //! fs 错误保持 Node 的 `code` 与消息前缀，Renderer 依赖它们区分“文件不存在 / 过大”。
 mod collate;
 pub(crate) mod errors;
+mod exists_cache;
 pub mod ignore_rules;
 mod index;
 
@@ -171,6 +172,24 @@ async fn ensure_directory(path: &Path) -> Result<bool, RpcError> {
     Ok(existed.is_none())
 }
 
+/// `mkdir(path, { recursive: true })` 后确认是目录：路径被普通文件占用时与 Node 一样报
+/// `EEXIST … mkdir`（createDefaultWorkspace / createScratchWorkspace）。
+async fn make_directory(path: &Path) -> Result<(), RpcError> {
+    fs::create_dir_all(path)
+        .await
+        .map_err(|error| node_error(&error, "mkdir", path))?;
+    let meta = fs::metadata(path)
+        .await
+        .map_err(|error| node_error(&error, "stat", path))?;
+    if !meta.is_dir() {
+        return Err(plain_error(format!(
+            "Workspace path is not a directory: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PathParams {
@@ -231,12 +250,14 @@ macro_rules! handler {
 struct State {
     config: FileServiceConfig,
     index: IndexCache,
+    exists: exists_cache::ExistsCache,
 }
 
 pub fn service(config: FileServiceConfig) -> ServiceBuilder {
     let state = Arc::new(State {
         config,
         index: IndexCache::default(),
+        exists: exists_cache::ExistsCache::default(),
     });
     ServiceBuilder::new("file")
         .method(
@@ -255,7 +276,7 @@ pub fn service(config: FileServiceConfig) -> ServiceBuilder {
             "createDefaultWorkspace",
             handler!(state, |state, _args| {
                 let path = state.config.user_home.join("ZCodeProject");
-                ensure_directory(&path).await?;
+                make_directory(&path).await?;
                 Ok(Reply::Value(json!({"path": path.display().to_string()})))
             }),
         )
@@ -271,7 +292,7 @@ pub fn service(config: FileServiceConfig) -> ServiceBuilder {
                     return Err(plain_error("Workspace name cannot contain path separators."));
                 }
                 let path = state.config.user_home.join("ZCodeProject").join(name);
-                ensure_directory(&path).await?;
+                make_directory(&path).await?;
                 Ok(Reply::Value(json!({"path": path.display().to_string()})))
             }),
         )
@@ -332,7 +353,7 @@ pub fn service(config: FileServiceConfig) -> ServiceBuilder {
         )
         .method(
             "checkFilesExist",
-            handler!(state, |_state, args| {
+            handler!(state, |state, args| {
                 let params: Value = args.get(0, "params")?;
                 let paths: Vec<String> = params["paths"]
                     .as_array()
@@ -341,12 +362,15 @@ pub fn service(config: FileServiceConfig) -> ServiceBuilder {
                 if paths.len() > 15 {
                     return Err(plain_error("File existence check supports at most 15 paths."));
                 }
-                let mut result = Vec::with_capacity(paths.len());
-                for path in paths {
-                    let exists = fs::metadata(&path).await.is_ok_and(|meta| meta.is_file());
-                    result.push(json!({"path": path, "exists": exists}));
-                }
-                Ok(Reply::Value(Value::Array(result)))
+                // 与 Node 一样并发检查、按输入顺序返回，正负结果都缓存 60 s。
+                let checks = paths.into_iter().map(|path| {
+                    let state = state.clone();
+                    async move {
+                        let exists = state.exists.check(&path).await;
+                        json!({"path": path, "exists": exists})
+                    }
+                });
+                Ok(Reply::Value(Value::Array(futures_util::future::join_all(checks).await)))
             }),
         )
         .method(
@@ -354,10 +378,11 @@ pub fn service(config: FileServiceConfig) -> ServiceBuilder {
             handler!(state, |_state, args| {
                 let params: PathParams = args.get(0, "params")?;
                 let path = PathBuf::from(&params.path);
-                let resolved = fs::canonicalize(&path)
+                // Windows 上 canonicalize 返回 `\\?\C:\…`；Node realpath 不带 verbatim 前缀。
+                let resolved = crate::support::path::realpath(&params.path)
                     .await
                     .map_err(|error| node_error(&error, "realpath", &path))?;
-                Ok(Reply::Value(Value::String(resolved.display().to_string())))
+                Ok(Reply::Value(Value::String(resolved)))
             }),
         )
         .method(
@@ -566,5 +591,74 @@ mod tests {
             rpc.message
                 .starts_with("ENOENT: no such file or directory, stat '/missing'")
         );
+    }
+
+    fn file_channel(home: &Path) -> std::sync::Arc<dyn zcode_host_kit::ServiceChannel> {
+        crate::testing::channel(service(FileServiceConfig {
+            conversation_workspace: home.join("conversation"),
+            user_home: home.to_path_buf(),
+        }))
+    }
+
+    #[tokio::test]
+    async fn workspace_creation_and_previews_follow_node_edges() {
+        let home = tempfile::tempdir().unwrap();
+        let files = file_channel(home.path());
+        std::fs::write(home.path().join("ZCodeProject"), "occupied").unwrap();
+        let error =
+            crate::testing::call(&files, "createScratchWorkspace", json!({"name": " demo "}))
+                .await
+                .unwrap_err();
+        // 与 Node 的 mkdir recursive 相同：父路径被文件占用是 ENOTDIR，路径本身被占用是 EEXIST。
+        assert_eq!(error.code_str(), Some("ENOTDIR"));
+        assert!(
+            error
+                .message
+                .starts_with("ENOTDIR: not a directory, mkdir '")
+        );
+        let error = crate::testing::call(&files, "createDefaultWorkspace", json!({}))
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .message
+                .starts_with("EEXIST: file already exists, mkdir '")
+        );
+        std::fs::remove_file(home.path().join("ZCodeProject")).unwrap();
+        let created =
+            crate::testing::call(&files, "createScratchWorkspace", json!({"name": " demo "}))
+                .await
+                .unwrap();
+        assert!(created["path"].as_str().unwrap().ends_with("demo"));
+
+        // 二进制预览超过上限报 “too large”，文本读取遇到二进制内容只返回 isBinary。
+        let big = home.path().join("big.bin");
+        std::fs::write(&big, vec![0u8; 2048]).unwrap();
+        let big_path = big.to_str().unwrap();
+        let error = crate::testing::call(
+            &files,
+            "readBinaryPreview",
+            json!({"path": big_path, "maxBytes": 1024}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.message,
+            format!("File is too large to preview: {big_path}")
+        );
+        let text = crate::testing::call(
+            &files,
+            "readTextFile",
+            json!({"path": big_path, "length": 16}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(text["isBinary"], true);
+        assert_eq!(text["content"], "");
+        assert_eq!(text["truncated"], true);
+        let resolved = crate::testing::call(&files, "resolvePath", json!({"path": big_path}))
+            .await
+            .unwrap();
+        assert!(!resolved.as_str().unwrap().starts_with(r"\\?\"));
     }
 }

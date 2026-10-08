@@ -14,8 +14,11 @@ use crate::git::commit_message::{TextGenerator, runtime_locale};
 use crate::git::{self, CommitMessageSupport, checkpoint, repo::GitRepo};
 use crate::main_bridge::MainBridge;
 use crate::providers::ProviderRuntime;
+use crate::settings::SettingStore;
 use crate::support::env::ProcessEnv;
+use crate::terminal::Terminals;
 use crate::{HostEnvironment, media_preview, prompt_attachment_transfer};
+use crate::{file_watcher, terminal};
 
 const CANCEL_GENERATE_TEXT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -105,16 +108,32 @@ impl TextGenerator for AgentTextGenerator {
 pub struct WorkspaceDeps<'a> {
     pub environment: &'a HostEnvironment,
     pub child_env: &'a ProcessEnv,
+    pub settings: SettingStore,
     pub agent: AgentRuntime,
     pub providers: ProviderRuntime,
     pub bridge: MainBridge,
+}
+
+/// Host 退出时需要回收的工作区资源。
+pub struct Workspace {
+    terminals: Terminals,
+}
+
+impl Workspace {
+    pub fn shutdown(&self) {
+        self.terminals.dispose_all();
+    }
 }
 
 pub fn install(
     deps: WorkspaceDeps<'_>,
     registry: &mut ChannelRegistry,
     router: &mut ControlRouter,
-) {
+) -> Workspace {
+    registry.implement(file_watcher::service(file_watcher::FileWatchers::new()));
+    let terminals = Terminals::new(deps.child_env.clone(), deps.settings);
+    registry.implement(terminal::service(terminals.clone()));
+
     let repo = GitRepo::new(deps.child_env);
     let generator: Arc<dyn TextGenerator> = Arc::new(AgentTextGenerator {
         agent: deps.agent.clone(),
@@ -141,4 +160,5 @@ pub fn install(
         .set_media_path_authorizer(authorizer.clone());
     registry.implement(media_preview::service(Some(authorizer)));
     registry.implement(prompt_attachment_transfer::service());
+    Workspace { terminals }
 }
