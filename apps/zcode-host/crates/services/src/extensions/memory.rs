@@ -175,7 +175,8 @@ impl MemoryService {
             }
             let workspace_root = fsx::join(&root, &[&project.name]);
             let memory_root = fsx::join(&workspace_root, &["memory"]);
-            if !is_plain_directory(&workspace_root).await? || !is_plain_directory(&memory_root).await?
+            if !is_plain_directory(&workspace_root).await?
+                || !is_plain_directory(&memory_root).await?
             {
                 continue;
             }
@@ -291,7 +292,9 @@ impl MemoryService {
             .map_err(|error| fsx::fs_error(&error, "realpath", file_path))?;
         let relative = fsx::relative(&root_real, &target_real);
         let sep = std::path::MAIN_SEPARATOR;
-        if relative == ".." || relative.starts_with(&format!("..{sep}")) || fsx::is_absolute(&relative)
+        if relative == ".."
+            || relative.starts_with(&format!("..{sep}"))
+            || fsx::is_absolute(&relative)
         {
             return Err(fsx::error(format!(
                 "Project Memory path is outside the local profile: {file_path}"
@@ -305,7 +308,9 @@ impl MemoryService {
         workspace_id: &str,
         file_name: &str,
     ) -> Result<Value, RpcError> {
-        if !valid_segment(workspace_id) || !valid_segment(file_name) || !is_memory_file_name(file_name)
+        if !valid_segment(workspace_id)
+            || !valid_segment(file_name)
+            || !is_memory_file_name(file_name)
         {
             return Err(fsx::error("Invalid Project Memory path"));
         }
@@ -395,12 +400,17 @@ pub fn service(memory: MemoryService) -> ServiceBuilder {
     let builder = bind(builder, "listProjectMemories", &memory, |s, _| async move {
         s.list_project_memories().await.map(Reply::Value)
     });
-    bind(builder, "readProjectMemoryFile", &memory, |s, p| async move {
-        let params: ReadParams = super::parse_params(p)?;
-        s.read_project_memory_file(&params.workspace_id, &params.file_name)
-            .await
-            .map(Reply::Value)
-    })
+    bind(
+        builder,
+        "readProjectMemoryFile",
+        &memory,
+        |s, p| async move {
+            let params: ReadParams = super::parse_params(p)?;
+            s.read_project_memory_file(&params.workspace_id, &params.file_name)
+                .await
+                .map(Reply::Value)
+        },
+    )
 }
 
 #[cfg(all(test, unix))]

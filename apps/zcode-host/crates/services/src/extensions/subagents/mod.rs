@@ -27,7 +27,10 @@ const BUILT_IN_NAMES: [&str; 2] = ["general-purpose", "Explore"];
 fn built_in_agents(overrides: &Map<String, Value>) -> Vec<Map<String, Value>> {
     let make = |name: &str, description: &str, color: &str, inject: bool, tools: Vec<&str>| {
         let mut agent = Map::new();
-        agent.insert("id".into(), json!(markdown::agent_state_id(name, "built-in", "built-in")));
+        agent.insert(
+            "id".into(),
+            json!(markdown::agent_state_id(name, "built-in", "built-in")),
+        );
         agent.insert("name".into(), json!(name));
         agent.insert("description".into(), json!(description));
         agent.insert("color".into(), json!(color));
@@ -58,7 +61,15 @@ fn built_in_agents(overrides: &Map<String, Value>) -> Vec<Map<String, Value>> {
             "Read-only search agent for broad fan-out searches.",
             "cyan",
             false,
-            vec!["Bash", "Glob", "Grep", "Read", "WebFetch", "WebSearch", "TodoWrite"],
+            vec![
+                "Bash",
+                "Glob",
+                "Grep",
+                "Read",
+                "WebFetch",
+                "WebSearch",
+                "TodoWrite",
+            ],
         ),
     ]
 }
@@ -103,7 +114,9 @@ impl State {
             _ => Vec::new(),
         };
         Self {
-            plugin: selection::parse_plugin_overrides(raw.get("pluginAgentModelSelectionOverrides")),
+            plugin: selection::parse_plugin_overrides(
+                raw.get("pluginAgentModelSelectionOverrides"),
+            ),
             raw,
             built_in,
             disabled,
@@ -113,8 +126,14 @@ impl State {
     /// `{...parsed, builtIn…, plugin…, disabledAgentIds}` 或空状态的落盘形态（无结尾换行）。
     fn to_text(&self) -> String {
         let mut out = self.raw.clone();
-        out.insert("builtInModelSelectionOverrides".into(), Value::Object(self.built_in.clone()));
-        out.insert("pluginAgentModelSelectionOverrides".into(), Value::Object(self.plugin.clone()));
+        out.insert(
+            "builtInModelSelectionOverrides".into(),
+            Value::Object(self.built_in.clone()),
+        );
+        out.insert(
+            "pluginAgentModelSelectionOverrides".into(),
+            Value::Object(self.plugin.clone()),
+        );
         out.insert("disabledAgentIds".into(), json!(self.disabled));
         js::pretty(&Value::Object(out))
     }
@@ -176,7 +195,8 @@ impl SubagentsService {
                 return original.to_owned();
             };
             let next = selection::import_state_selections(&parsed);
-            if js::stringify(&Value::Object(next.clone())) == js::stringify(&Value::Object(parsed)) {
+            if js::stringify(&Value::Object(next.clone())) == js::stringify(&Value::Object(parsed))
+            {
                 original.to_owned()
             } else {
                 js::pretty(&Value::Object(next))
@@ -192,15 +212,25 @@ impl SubagentsService {
 
     async fn read_state(&self) -> State {
         if let Err(error) = self.migrate_state_file().await {
-            log::warn(format!("subagent state migration failed: {}", error.message));
+            log::warn(format!(
+                "subagent state migration failed: {}",
+                error.message
+            ));
         }
-        State::from_text(fsx::read_text_opt(&self.state_file().await).await.as_deref())
+        State::from_text(
+            fsx::read_text_opt(&self.state_file().await)
+                .await
+                .as_deref(),
+        )
     }
 
     /// 持锁读改写状态文件（Host 内经 `queue` 串行）。
     async fn update_state(&self, mutate: impl FnOnce(&mut State) + Send) -> Result<(), RpcError> {
         if let Err(error) = self.migrate_state_file().await {
-            log::warn(format!("subagent state migration failed: {}", error.message));
+            log::warn(format!(
+                "subagent state migration failed: {}",
+                error.message
+            ));
         }
         let path = self.state_file().await;
         let file = std::path::Path::new(&path);
@@ -229,7 +259,12 @@ impl SubagentsService {
         }
     }
 
-    async fn file_agents(&self, workspace: &str, include_workspace: bool, diagnostics: &mut Vec<Value>) -> Vec<Map<String, Value>> {
+    async fn file_agents(
+        &self,
+        workspace: &str,
+        include_workspace: bool,
+        diagnostics: &mut Vec<Value>,
+    ) -> Vec<Map<String, Value>> {
         let mut roots = vec![("user", self.user_root().await)];
         if include_workspace {
             roots.push(("workspace", fsx::join(workspace, &[".zcode", "agents"])));
@@ -261,11 +296,17 @@ impl SubagentsService {
 
     async fn plugin_records(&self) -> Vec<InstalledRecord> {
         let storage = self.storage_root().await;
-        let cli_root = if fsx::basename(&storage) == "cli" { storage } else { fsx::join(&storage, &["cli"]) };
+        let cli_root = if fsx::basename(&storage) == "cli" {
+            storage
+        } else {
+            fsx::join(&storage, &["cli"])
+        };
         let plugin_root = fsx::join(&cli_root, &["plugins"]);
         let config = read_cli_config_lenient(&self.roots).await;
         let plugins = js::record(config.get("plugins"));
-        let enabled: HashMap<String, bool> = js::boolean_record(plugins.get("enabledPlugins")).into_iter().collect();
+        let enabled: HashMap<String, bool> = js::boolean_record(plugins.get("enabledPlugins"))
+            .into_iter()
+            .collect();
         let suppressed = js::string_array(plugins.get("suppressedBuiltins"));
         let installed = read_installed_records(&plugin_root).await;
         let official_suffix = format!("@{OFFICIAL_MARKETPLACE}");
@@ -283,12 +324,21 @@ impl SubagentsService {
             if seen.contains(&id) || suppressed.contains(&id) {
                 continue;
             }
-            if !enabled.get(&id).copied().unwrap_or_else(|| default_enabled(&id)) {
+            if !enabled
+                .get(&id)
+                .copied()
+                .unwrap_or_else(|| default_enabled(&id))
+            {
                 continue;
             }
             for version in versions {
                 let manifest = read_manifest(&version).await;
-                if manifest.as_ref().and_then(|m| m.get("name")).and_then(Value::as_str) != Some(name.as_str()) {
+                if manifest
+                    .as_ref()
+                    .and_then(|m| m.get("name"))
+                    .and_then(Value::as_str)
+                    != Some(name.as_str())
+                {
                     continue;
                 }
                 records.push(InstalledRecord {
@@ -323,7 +373,11 @@ impl SubagentsService {
                     }));
                     continue;
                 };
-                match markdown::parse(&content, &path, if workspace_scope { "workspace" } else { "user" }) {
+                match markdown::parse(
+                    &content,
+                    &path,
+                    if workspace_scope { "workspace" } else { "user" },
+                ) {
                     Parsed::Diagnostic(diagnostic) => diagnostics.push(diagnostic),
                     Parsed::Agent(mut agent) => {
                         let bare = agent["name"].as_str().unwrap_or("").to_owned();
@@ -350,7 +404,11 @@ impl SubagentsService {
                 }
             }
         }
-        let reserved: HashSet<&str> = BUILT_IN_NAMES.iter().copied().chain(reserved.iter().map(String::as_str)).collect();
+        let reserved: HashSet<&str> = BUILT_IN_NAMES
+            .iter()
+            .copied()
+            .chain(reserved.iter().map(String::as_str))
+            .collect();
         let mut counts: HashMap<&str, usize> = HashMap::new();
         for (_, bare, _) in &parsed {
             *counts.entry(bare.as_str()).or_default() += 1;
@@ -363,7 +421,13 @@ impl SubagentsService {
             if counts.get(bare.as_str()) == Some(&1) && !reserved.contains(bare.as_str()) {
                 let mut alias = agent.clone();
                 let id = agent["id"].as_str().unwrap_or("");
-                alias.insert("id".into(), json!(markdown::plugin_agent_state_id(&format!("{id}:alias"), bare)));
+                alias.insert(
+                    "id".into(),
+                    json!(markdown::plugin_agent_state_id(
+                        &format!("{id}:alias"),
+                        bare
+                    )),
+                );
                 alias.insert("name".into(), json!(bare));
                 runtime.push(alias);
             } else if reserved.contains(bare.as_str()) {
@@ -381,7 +445,12 @@ impl SubagentsService {
             }
         }
         let by_name = |list: &mut Vec<Map<String, Value>>| {
-            list.sort_by(|left, right| locale_compare(left["name"].as_str().unwrap_or(""), right["name"].as_str().unwrap_or("")));
+            list.sort_by(|left, right| {
+                locale_compare(
+                    left["name"].as_str().unwrap_or(""),
+                    right["name"].as_str().unwrap_or(""),
+                )
+            });
         };
         by_name(&mut profiles);
         by_name(&mut runtime);
@@ -389,8 +458,16 @@ impl SubagentsService {
     }
 
     pub async fn list(&self, params: Value) -> Result<Value, RpcError> {
-        let workspace = params.get("workspacePath").and_then(Value::as_str).unwrap_or("").to_owned();
-        let mode = params.get("mode").and_then(Value::as_str).unwrap_or("allRuntimeScopes").to_owned();
+        let workspace = params
+            .get("workspacePath")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let mode = params
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("allRuntimeScopes")
+            .to_owned();
         let mut diagnostics = Vec::new();
         for (path, _) in migrate_user_markdown(&self.user_root().await).await {
             diagnostics.push(json!({
@@ -401,23 +478,46 @@ impl SubagentsService {
         }
         let state = self.read_state().await;
         let built_ins = built_in_agents(&state.built_in);
-        let files = self.file_agents(&workspace, mode == "allRuntimeScopes", &mut diagnostics).await;
+        let files = self
+            .file_agents(&workspace, mode == "allRuntimeScopes", &mut diagnostics)
+            .await;
         let sorted = |scope: &str| {
-            let mut list: Vec<Map<String, Value>> = files.iter().filter(|agent| agent["scope"] == scope).cloned().collect();
-            list.sort_by(|left, right| locale_compare(left["name"].as_str().unwrap_or(""), right["name"].as_str().unwrap_or("")));
+            let mut list: Vec<Map<String, Value>> = files
+                .iter()
+                .filter(|agent| agent["scope"] == scope)
+                .cloned()
+                .collect();
+            list.sort_by(|left, right| {
+                locale_compare(
+                    left["name"].as_str().unwrap_or(""),
+                    right["name"].as_str().unwrap_or(""),
+                )
+            });
             list
         };
         let user = sorted("user");
         let workspace_agents = sorted("workspace");
         let name_of = |agent: &Map<String, Value>| agent["name"].as_str().unwrap_or("").to_owned();
-        let reserved: Vec<String> = built_ins.iter().chain(&user).chain(&workspace_agents).map(name_of).collect();
-        let (profiles, runtime) = self.plugin_agents(&state, &reserved, &mut diagnostics).await;
+        let reserved: Vec<String> = built_ins
+            .iter()
+            .chain(&user)
+            .chain(&workspace_agents)
+            .map(name_of)
+            .collect();
+        let (profiles, runtime) = self
+            .plugin_agents(&state, &reserved, &mut diagnostics)
+            .await;
         let discovered: Vec<Map<String, Value>> = if mode == "settingsUserOnly" {
             built_ins.into_iter().chain(user).collect()
         } else {
             // 运行时同名后者覆盖前者，位置保持首次出现处（Map.set 语义）。
             let mut ordered: Vec<(String, Map<String, Value>)> = Vec::new();
-            for agent in built_ins.into_iter().chain(user).chain(workspace_agents).chain(runtime) {
+            for agent in built_ins
+                .into_iter()
+                .chain(user)
+                .chain(workspace_agents)
+                .chain(runtime)
+            {
                 let name = name_of(&agent);
                 match ordered.iter_mut().find(|(existing, _)| *existing == name) {
                     Some(slot) => slot.1 = agent,
@@ -431,14 +531,19 @@ impl SubagentsService {
             agents
                 .into_iter()
                 .map(|mut agent| {
-                    let enabled = agent["scope"] != "user" || !disabled.contains(agent["id"].as_str().unwrap_or(""));
+                    let enabled = agent["scope"] != "user"
+                        || !disabled.contains(agent["id"].as_str().unwrap_or(""));
                     agent.insert("enabled".into(), json!(enabled));
                     Value::Object(agent)
                 })
                 .collect()
         };
         let agents = attach(discovered);
-        let user_agents: Vec<Value> = agents.iter().filter(|agent| agent["source"] == "user").cloned().collect();
+        let user_agents: Vec<Value> = agents
+            .iter()
+            .filter(|agent| agent["source"] == "user")
+            .cloned()
+            .collect();
         Ok(json!({
             "agents": agents,
             "userAgents": user_agents,
@@ -449,8 +554,15 @@ impl SubagentsService {
     }
 
     pub async fn set_enabled(&self, params: Value) -> Result<(), RpcError> {
-        let id = params.get("agentId").and_then(Value::as_str).unwrap_or("").to_owned();
-        let enabled = params.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+        let id = params
+            .get("agentId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let enabled = params
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         let _queue = self.queue.lock().await;
         self.update_state(move |state| {
             let mut set: Vec<String> = state.disabled.clone();
@@ -473,8 +585,13 @@ impl SubagentsService {
     }
 
     pub async fn set_built_in_override(&self, params: Value) -> Result<(), RpcError> {
-        let name = params.get("agentName").and_then(Value::as_str).unwrap_or("").to_owned();
-        let selection = selection::normalize_selection(params.get("modelSelection")).map_err(fsx::error)?;
+        let name = params
+            .get("agentName")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let selection =
+            selection::normalize_selection(params.get("modelSelection")).map_err(fsx::error)?;
         let _queue = self.queue.lock().await;
         self.update_state(move |state| match selection {
             Some(selection) => {
@@ -488,11 +605,16 @@ impl SubagentsService {
     }
 
     pub async fn set_plugin_override(&self, params: Value) -> Result<(), RpcError> {
-        let id = params.get("agentId").and_then(Value::as_str).unwrap_or("").to_owned();
+        let id = params
+            .get("agentId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         if !id.starts_with("plugin:") || js_trim(&id) != id {
             return Err(fsx::error("无效插件 Subagent 身份"));
         }
-        let selection = selection::normalize_selection(params.get("modelSelection")).map_err(fsx::error)?;
+        let selection =
+            selection::normalize_selection(params.get("modelSelection")).map_err(fsx::error)?;
         let _queue = self.queue.lock().await;
         self.update_state(move |state| match selection {
             Some(selection) => {
@@ -511,13 +633,25 @@ impl SubagentsService {
         Ok(json!({ "path": path }))
     }
 
-    async fn agent_dir(&self, params: &Value) -> Result<(String, String, Option<String>), RpcError> {
-        let scope = params.get("scope").and_then(Value::as_str).unwrap_or("user").to_owned();
-        let workspace = params.get("workspacePath").and_then(Value::as_str).map(str::to_owned);
+    async fn agent_dir(
+        &self,
+        params: &Value,
+    ) -> Result<(String, String, Option<String>), RpcError> {
+        let scope = params
+            .get("scope")
+            .and_then(Value::as_str)
+            .unwrap_or("user")
+            .to_owned();
+        let workspace = params
+            .get("workspacePath")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         if scope == "workspace" {
             let trimmed = workspace.as_deref().map(js_trim).unwrap_or("");
             if trimmed.is_empty() {
-                return Err(fsx::error("Workspace path is required for workspace subagents"));
+                return Err(fsx::error(
+                    "Workspace path is required for workspace subagents",
+                ));
             }
             return Ok((fsx::join(trimmed, &[".zcode", "agents"]), scope, workspace));
         }
@@ -525,15 +659,30 @@ impl SubagentsService {
     }
 
     fn validated_config(params: &Value) -> Result<Map<String, Value>, RpcError> {
-        let config = params.get("config").and_then(Value::as_object).cloned().unwrap_or_default();
-        let field = |key: &str| config.get(key).and_then(Value::as_str).unwrap_or("").to_owned();
+        let config = params
+            .get("config")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let field = |key: &str| {
+            config
+                .get(key)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned()
+        };
         let name = js_trim(&field("name")).to_owned();
         let length = name.encode_utf16().count();
         if !(3..=50).contains(&length) {
             return Err(fsx::error("Name must be between 3 and 50 characters"));
         }
-        if !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-') {
-            return Err(fsx::error("Name can only contain letters, numbers, and hyphens"));
+        if !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return Err(fsx::error(
+                "Name can only contain letters, numbers, and hyphens",
+            ));
         }
         if js_trim(&field("description")).is_empty() {
             return Err(fsx::error("Description is required"));
@@ -542,12 +691,17 @@ impl SubagentsService {
             return Err(fsx::error("System prompt is required"));
         }
         if BUILT_IN_NAMES.contains(&name.as_str()) {
-            return Err(fsx::error(format!("Agent name \"{name}\" is reserved by a built-in agent")));
+            return Err(fsx::error(format!(
+                "Agent name \"{name}\" is reserved by a built-in agent"
+            )));
         }
         let mut normalized = config.clone();
         normalized.insert("name".into(), json!(name));
         normalized.insert("description".into(), json!(js_trim(&field("description"))));
-        normalized.insert("systemPrompt".into(), json!(js_trim(&field("systemPrompt"))));
+        normalized.insert(
+            "systemPrompt".into(),
+            json!(js_trim(&field("systemPrompt"))),
+        );
         match selection::normalize_selection(config.get("modelSelection")).map_err(fsx::error)? {
             Some(selection) => {
                 normalized.insert("modelSelection".into(), selection);
@@ -559,7 +713,12 @@ impl SubagentsService {
         Ok(normalized)
     }
 
-    fn saved_agent(content: &str, path: &str, scope: &str, workspace: Option<&str>) -> Result<Value, RpcError> {
+    fn saved_agent(
+        content: &str,
+        path: &str,
+        scope: &str,
+        workspace: Option<&str>,
+    ) -> Result<Value, RpcError> {
         match markdown::parse(content, path, scope) {
             Parsed::Agent(mut agent) => {
                 if scope == "workspace"
@@ -570,7 +729,10 @@ impl SubagentsService {
                 Ok(Value::Object(agent))
             }
             Parsed::Diagnostic(diagnostic) => Err(fsx::error(
-                diagnostic["message"].as_str().unwrap_or("Failed to parse saved agent").to_owned(),
+                diagnostic["message"]
+                    .as_str()
+                    .unwrap_or("Failed to parse saved agent")
+                    .to_owned(),
             )),
         }
     }
@@ -578,18 +740,26 @@ impl SubagentsService {
     pub async fn create_agent(&self, params: Value) -> Result<Value, RpcError> {
         let config = Self::validated_config(&params)?;
         let (dir, scope, workspace) = self.agent_dir(&params).await?;
-        let file_name = format!("{}.md", config["name"].as_str().unwrap_or("").to_lowercase());
+        let file_name = format!(
+            "{}.md",
+            config["name"].as_str().unwrap_or("").to_lowercase()
+        );
         let path = fsx::join(&dir, &[&file_name]);
         fsx::mkdirp(&dir).await?;
         if fsx::exists(&path).await {
-            return Err(fsx::error(format!("Agent file \"{file_name}\" already exists")));
+            return Err(fsx::error(format!(
+                "Agent file \"{file_name}\" already exists"
+            )));
         }
         let content = markdown::serialize(&config);
         // 先验证即将写入的 Markdown 可解析，避免 serializer 回归时把坏 profile 落盘。
         let agent = Self::saved_agent(&content, &path, &scope, workspace.as_deref())?;
         let mut options = tokio::fs::OpenOptions::new();
         options.write(true).create_new(true);
-        let mut file = options.open(&path).await.map_err(|error| fsx::fs_error(&error, "open", &path))?;
+        let mut file = options
+            .open(&path)
+            .await
+            .map_err(|error| fsx::fs_error(&error, "open", &path))?;
         tokio::io::AsyncWriteExt::write_all(&mut file, content.as_bytes())
             .await
             .map_err(|error| fsx::fs_error(&error, "write", &path))?;
@@ -599,23 +769,44 @@ impl SubagentsService {
     pub async fn update_agent(&self, params: Value) -> Result<Value, RpcError> {
         let config = Self::validated_config(&params)?;
         let (dir, scope, workspace) = self.agent_dir(&params).await?;
-        let file_name = format!("{}.md", config["name"].as_str().unwrap_or("").to_lowercase());
+        let file_name = format!(
+            "{}.md",
+            config["name"].as_str().unwrap_or("").to_lowercase()
+        );
         let path = fsx::join(&dir, &[&file_name]);
         fsx::mkdirp(&dir).await?;
-        let old = params.get("oldFilePath").and_then(Value::as_str).filter(|old| !old.is_empty()).map(str::to_owned);
+        let old = params
+            .get("oldFilePath")
+            .and_then(Value::as_str)
+            .filter(|old| !old.is_empty())
+            .map(str::to_owned);
         if old.as_deref().is_some_and(|old| old != path) && fsx::exists(&path).await {
-            return Err(fsx::error(format!("Agent file \"{file_name}\" already exists")));
+            return Err(fsx::error(format!(
+                "Agent file \"{file_name}\" already exists"
+            )));
         }
         let content = markdown::serialize(&config);
         let agent = Self::saved_agent(&content, &path, &scope, workspace.as_deref())?;
-        tokio::fs::write(&path, &content).await.map_err(|error| fsx::fs_error(&error, "open", &path))?;
+        tokio::fs::write(&path, &content)
+            .await
+            .map_err(|error| fsx::fs_error(&error, "open", &path))?;
         // 禁用状态按 agent id 存储；改名会生成新 id，必须迁移，否则禁用的 agent 改名后重新启用。
-        let previous = params.get("agentId").and_then(Value::as_str).unwrap_or("").to_owned();
+        let previous = params
+            .get("agentId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         let next = agent["id"].as_str().unwrap_or("").to_owned();
         if previous != next && self.read_state().await.disabled.contains(&previous) {
             self.update_state(move |state| {
                 let mut ids: Vec<String> = Vec::new();
-                for id in state.disabled.iter().filter(|id| **id != previous).cloned().chain(std::iter::once(next)) {
+                for id in state
+                    .disabled
+                    .iter()
+                    .filter(|id| **id != previous)
+                    .cloned()
+                    .chain(std::iter::once(next))
+                {
                     if !ids.contains(&id) {
                         ids.push(id);
                     }
@@ -632,8 +823,16 @@ impl SubagentsService {
     }
 
     pub async fn delete_agent(&self, params: Value) -> Result<(), RpcError> {
-        let path = params.get("filePath").and_then(Value::as_str).unwrap_or("").to_owned();
-        let id = params.get("agentId").and_then(Value::as_str).unwrap_or("").to_owned();
+        let path = params
+            .get("filePath")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let id = params
+            .get("agentId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         match tokio::fs::remove_file(&path).await {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -659,7 +858,10 @@ fn collect_markdown(root: &str) -> BoxFuture<'_, Vec<String>> {
         if !fsx::exists(root).await {
             return Vec::new();
         }
-        if !tokio::fs::symlink_metadata(root).await.is_ok_and(|meta| meta.is_dir()) {
+        if !tokio::fs::symlink_metadata(root)
+            .await
+            .is_ok_and(|meta| meta.is_dir())
+        {
             return Vec::new();
         }
         let Ok(entries) = fsx::read_dir(root).await else {
@@ -683,8 +885,15 @@ fn collect_markdown(root: &str) -> BoxFuture<'_, Vec<String>> {
 }
 
 async fn read_manifest(root: &str) -> Option<Map<String, Value>> {
-    for segments in [[".zcode-plugin", "plugin.json"], [".claude-plugin", "plugin.json"], [".codex-plugin", "plugin.json"]] {
-        if let Some(manifest) = fsx::read_text_opt(&fsx::join(root, &segments)).await.and_then(|raw| js::parse_record(&raw)) {
+    for segments in [
+        [".zcode-plugin", "plugin.json"],
+        [".claude-plugin", "plugin.json"],
+        [".codex-plugin", "plugin.json"],
+    ] {
+        if let Some(manifest) = fsx::read_text_opt(&fsx::join(root, &segments))
+            .await
+            .and_then(|raw| js::parse_record(&raw))
+        {
             return Some(manifest);
         }
     }
@@ -706,7 +915,10 @@ async fn plugin_agent_paths(root: &str) -> Vec<String> {
         }
     };
     add("agents");
-    match manifest.as_ref().and_then(|manifest| manifest.get("agents")) {
+    match manifest
+        .as_ref()
+        .and_then(|manifest| manifest.get("agents"))
+    {
         Some(Value::String(path)) => add(path),
         Some(Value::Array(items)) => {
             for item in items.iter().filter_map(Value::as_str) {
@@ -764,13 +976,19 @@ async fn scan_official_cache(plugin_root: &str) -> Vec<(String, Vec<String>)> {
         let mut names: Vec<String> = versions
             .into_iter()
             .filter(|entry| {
-                entry.is_dir && !entry.name.contains(".backup") && !entry.name.contains(".seed-lock") && !entry.name.contains(".tmp-")
+                entry.is_dir
+                    && !entry.name.contains(".backup")
+                    && !entry.name.contains(".seed-lock")
+                    && !entry.name.contains(".tmp-")
             })
             .map(|entry| entry.name)
             .collect();
         names.sort_by(|left, right| numeric_compare(right, left));
         if !names.is_empty() {
-            roots.push((plugin.name.clone(), names.iter().map(|name| fsx::join(&dir, &[name])).collect()));
+            roots.push((
+                plugin.name.clone(),
+                names.iter().map(|name| fsx::join(&dir, &[name])).collect(),
+            ));
         }
     }
     roots.sort_by(|left, right| locale_compare(&left.0, &right.0));
@@ -807,8 +1025,13 @@ fn numeric_compare(left: &str, right: &str) -> std::cmp::Ordering {
 }
 
 /// `migrateFile`：持锁、写前比较原文与文件身份（外部编辑器不持应用锁），不能覆盖并发修改。
-async fn migrate_file(path: &str, transform: impl FnOnce(&str) -> String + Send) -> Result<bool, RpcError> {
-    let meta = tokio::fs::symlink_metadata(path).await.map_err(|error| fsx::fs_error(&error, "lstat", path))?;
+async fn migrate_file(
+    path: &str,
+    transform: impl FnOnce(&str) -> String + Send,
+) -> Result<bool, RpcError> {
+    let meta = tokio::fs::symlink_metadata(path)
+        .await
+        .map_err(|error| fsx::fs_error(&error, "lstat", path))?;
     if !meta.is_file() {
         return Ok(false);
     }
@@ -823,26 +1046,45 @@ async fn migrate_file(path: &str, transform: impl FnOnce(&str) -> String + Send)
     }
 }
 
-async fn migrate_locked(path: &str, transform: impl FnOnce(&str) -> String) -> Result<bool, RpcError> {
-    let before = tokio::fs::symlink_metadata(path).await.map_err(|error| fsx::fs_error(&error, "lstat", path))?;
+async fn migrate_locked(
+    path: &str,
+    transform: impl FnOnce(&str) -> String,
+) -> Result<bool, RpcError> {
+    let before = tokio::fs::symlink_metadata(path)
+        .await
+        .map_err(|error| fsx::fs_error(&error, "lstat", path))?;
     let mode = file_mode(&before);
     if !before.is_file() || mode & 0o222 == 0 {
         return Ok(false);
     }
-    let original = tokio::fs::read_to_string(path).await.map_err(|error| fsx::fs_error(&error, "open", path))?;
+    let original = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|error| fsx::fs_error(&error, "open", path))?;
     let next = transform(&original);
     if next == original {
         return Ok(false);
     }
     let directory = fsx::dirname(path);
-    let physical = fsx::realpath(&directory).await.map_err(|error| fsx::fs_error(&error, "realpath", &directory))?;
-    let temp = fsx::join(&directory, &[&format!(".{}.{}.tmp", fsx::basename(path), fsx::random_uuid())]);
+    let physical = fsx::realpath(&directory)
+        .await
+        .map_err(|error| fsx::fs_error(&error, "realpath", &directory))?;
+    let temp = fsx::join(
+        &directory,
+        &[&format!(
+            ".{}.{}.tmp",
+            fsx::basename(path),
+            fsx::random_uuid()
+        )],
+    );
     let outcome: Result<bool, RpcError> = async {
         let mut options = tokio::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
         options.mode(mode & 0o777);
-        let mut handle = options.open(&temp).await.map_err(|error| fsx::fs_error(&error, "open", &temp))?;
+        let mut handle = options
+            .open(&temp)
+            .await
+            .map_err(|error| fsx::fs_error(&error, "open", &temp))?;
         tokio::io::AsyncWriteExt::write_all(&mut handle, next.as_bytes())
             .await
             .map_err(|error| fsx::fs_error(&error, "write", &temp))?;
@@ -854,7 +1096,9 @@ async fn migrate_locked(path: &str, transform: impl FnOnce(&str) -> String) -> R
                 .await
                 .map_err(|error| fsx::fs_error(&error, "chmod", &temp))?;
         }
-        let current = tokio::fs::symlink_metadata(path).await.map_err(|error| fsx::fs_error(&error, "lstat", path))?;
+        let current = tokio::fs::symlink_metadata(path)
+            .await
+            .map_err(|error| fsx::fs_error(&error, "lstat", path))?;
         let unchanged = current.is_file()
             && same_identity(&current, &before)
             && fsx::realpath(&directory).await.ok().as_deref() == Some(physical.as_str())
@@ -862,7 +1106,9 @@ async fn migrate_locked(path: &str, transform: impl FnOnce(&str) -> String) -> R
         if !unchanged {
             return Err(fsx::error("Subagent file changed during migration"));
         }
-        tokio::fs::rename(&temp, path).await.map_err(|error| fsx::fs_error(&error, "rename", &temp))?;
+        tokio::fs::rename(&temp, path)
+            .await
+            .map_err(|error| fsx::fs_error(&error, "rename", &temp))?;
         Ok(true)
     }
     .await;
@@ -878,7 +1124,11 @@ fn file_mode(meta: &std::fs::Metadata) -> u32 {
 
 #[cfg(not(unix))]
 fn file_mode(meta: &std::fs::Metadata) -> u32 {
-    if meta.permissions().readonly() { 0o444 } else { 0o666 }
+    if meta.permissions().readonly() {
+        0o444
+    } else {
+        0o666
+    }
 }
 
 #[cfg(unix)]
@@ -920,7 +1170,8 @@ fn migrate_user_markdown(root: &str) -> BoxFuture<'_, Vec<(String, String)>> {
                 continue;
             }
             let lower = entry.name.to_lowercase();
-            if entry.is_file && (lower.ends_with(".md") || lower.ends_with(".markdown"))
+            if entry.is_file
+                && (lower.ends_with(".md") || lower.ends_with(".markdown"))
                 && let Err(error) = migrate_file(&path, selection::migrate_markdown_provider).await
             {
                 failures.push((path, error.message));
@@ -932,19 +1183,30 @@ fn migrate_user_markdown(root: &str) -> BoxFuture<'_, Vec<(String, String)>> {
 
 pub fn service(subagents: SubagentsService) -> ServiceBuilder {
     let builder = ServiceBuilder::new(CHANNEL);
-    let builder = bind(builder, "list", &subagents, |s, p| async move { s.list(p).await.map(Reply::Value) });
+    let builder = bind(builder, "list", &subagents, |s, p| async move {
+        s.list(p).await.map(Reply::Value)
+    });
     let builder = bind(builder, "setEnabled", &subagents, |s, p| async move {
         s.set_enabled(p).await.map(|()| Reply::Undefined)
     });
-    let builder = bind(builder, "setBuiltInModelOverride", &subagents, |s, p| async move {
-        s.set_built_in_override(p).await.map(|()| Reply::Undefined)
-    });
-    let builder = bind(builder, "setPluginAgentModelOverride", &subagents, |s, p| async move {
-        s.set_plugin_override(p).await.map(|()| Reply::Undefined)
-    });
-    let builder = bind(builder, "getPrimaryUserAgentsDirectory", &subagents, |s, _| async move {
-        s.primary_user_directory().await.map(Reply::Value)
-    });
+    let builder = bind(
+        builder,
+        "setBuiltInModelOverride",
+        &subagents,
+        |s, p| async move { s.set_built_in_override(p).await.map(|()| Reply::Undefined) },
+    );
+    let builder = bind(
+        builder,
+        "setPluginAgentModelOverride",
+        &subagents,
+        |s, p| async move { s.set_plugin_override(p).await.map(|()| Reply::Undefined) },
+    );
+    let builder = bind(
+        builder,
+        "getPrimaryUserAgentsDirectory",
+        &subagents,
+        |s, _| async move { s.primary_user_directory().await.map(Reply::Value) },
+    );
     let builder = bind(builder, "createAgent", &subagents, |s, p| async move {
         s.create_agent(p).await.map(Reply::Value)
     });
@@ -970,12 +1232,24 @@ mod tests {
             .unwrap();
         assert_eq!(created["agent"]["id"], "user:user:reviewer");
         assert!(home.path().join(".zcode/agents/reviewer.md").exists());
-        service.set_enabled(json!({"agentId":"user:user:reviewer","enabled":false})).await.unwrap();
-        let listed = service.list(json!({"workspacePath": home.path().join("ws").display().to_string()})).await.unwrap();
-        let names: Vec<&str> = listed["agents"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap()).collect();
+        service
+            .set_enabled(json!({"agentId":"user:user:reviewer","enabled":false}))
+            .await
+            .unwrap();
+        let listed = service
+            .list(json!({"workspacePath": home.path().join("ws").display().to_string()}))
+            .await
+            .unwrap();
+        let names: Vec<&str> = listed["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["name"].as_str().unwrap())
+            .collect();
         assert_eq!(names, ["general-purpose", "Explore", "Reviewer"]);
         assert_eq!(listed["userAgents"][0]["enabled"], false, "{listed}");
-        let state = std::fs::read_to_string(home.path().join(".zcode/v2/agents-state.json")).unwrap();
+        let state =
+            std::fs::read_to_string(home.path().join(".zcode/v2/agents-state.json")).unwrap();
         assert_eq!(
             state,
             "{\n  \"builtInModelSelectionOverrides\": {},\n  \"pluginAgentModelSelectionOverrides\": {},\n  \"disabledAgentIds\": [\n    \"user:user:reviewer\"\n  ]\n}"
@@ -992,16 +1266,32 @@ mod tests {
         )
         .unwrap();
         service.prepare_runtime_state().await;
-        assert!(std::fs::read_to_string(home.path().join(".zcode/agents/legacy.md")).unwrap().contains("model: zai-api/GLM-4.6"));
-        let migrated: Value = serde_json::from_str(&std::fs::read_to_string(home.path().join(".zcode/v2/agents-state.json")).unwrap()).unwrap();
-        assert_eq!(migrated["builtInModelSelectionOverrides"]["Explore"]["providerId"], "bigmodel-api");
-        assert!(service
-            .set_plugin_override(json!({"agentId":"user:x"}))
-            .await
-            .is_err());
-        assert!(service
-            .create_agent(json!({"config":{"name":"Explore","description":"d","systemPrompt":"p"}}))
-            .await
-            .is_err());
+        assert!(
+            std::fs::read_to_string(home.path().join(".zcode/agents/legacy.md"))
+                .unwrap()
+                .contains("model: zai-api/GLM-4.6")
+        );
+        let migrated: Value = serde_json::from_str(
+            &std::fs::read_to_string(home.path().join(".zcode/v2/agents-state.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            migrated["builtInModelSelectionOverrides"]["Explore"]["providerId"],
+            "bigmodel-api"
+        );
+        assert!(
+            service
+                .set_plugin_override(json!({"agentId":"user:x"}))
+                .await
+                .is_err()
+        );
+        assert!(
+            service
+                .create_agent(
+                    json!({"config":{"name":"Explore","description":"d","systemPrompt":"p"}})
+                )
+                .await
+                .is_err()
+        );
     }
 }

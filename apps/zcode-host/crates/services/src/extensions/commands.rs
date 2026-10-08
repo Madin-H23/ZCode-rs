@@ -115,8 +115,7 @@ pub fn parse_command_file(content: &str, file_path: &str) -> Map<String, Value> 
     let parts = split_markdown(content);
     let file_name = file_path
         .split(['/', '\\'])
-        .filter(|segment| !segment.is_empty())
-        .next_back()
+        .rfind(|segment| !segment.is_empty())
         .unwrap_or("");
     let stem = strip_md_suffix(file_name);
     let joined = parts.content.join("\n");
@@ -475,7 +474,11 @@ impl CommandsService {
         let config = read_cli_config_lenient(&self.roots).await;
         let overrides = overrides(&config);
         let mut users = Vec::new();
-        if let Some(workspace) = params.workspace_path.as_deref().filter(|path| !path.is_empty()) {
+        if let Some(workspace) = params
+            .workspace_path
+            .as_deref()
+            .filter(|path| !path.is_empty())
+        {
             self.discover_sources(workspace, Some(workspace), &overrides, &mut users)
                 .await;
         }
@@ -484,7 +487,10 @@ impl CommandsService {
             .await;
         let mut deduped: Vec<Value> = Vec::new();
         for command in users {
-            if !deduped.iter().any(|item| name_of(item) == name_of(&command)) {
+            if !deduped
+                .iter()
+                .any(|item| name_of(item) == name_of(&command))
+            {
                 deduped.push(command);
             }
         }
@@ -687,7 +693,10 @@ mod tests {
             },
             Some(content),
         );
-        assert_eq!(generated, "---\nother: keep\ndescription: New desc\n---\n\nNew");
+        assert_eq!(
+            generated,
+            "---\nother: keep\ndescription: New desc\n---\n\nNew"
+        );
         assert_eq!(
             generate_command_file(
                 &CommandConfig {
@@ -704,8 +713,8 @@ mod tests {
 
     #[test]
     fn override_removes_default_entries_in_place() {
-        let mut config = js::parse_record(r#"{"a":1,"command":{"/x.md":{"enable":false}},"z":2}"#)
-            .unwrap();
+        let mut config =
+            js::parse_record(r#"{"a":1,"command":{"/x.md":{"enable":false}},"z":2}"#).unwrap();
         set_override(&mut config, "/y.md", false);
         set_override(&mut config, "/x.md", true);
         assert_eq!(

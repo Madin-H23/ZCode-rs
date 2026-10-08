@@ -9,7 +9,10 @@ const INHERIT_NAMES: [&str; 5] = ["inherit", "main", "sonnet", "opus", "haiku"];
 /// `modelSelectionSchema.safeParse(value).data`：strict，字符串 trim 后非空。
 pub fn parse_selection(value: Option<&Value>) -> Option<Value> {
     let map = value?.as_object()?;
-    if map.keys().any(|key| !matches!(key.as_str(), "providerId" | "modelId" | "options")) {
+    if map
+        .keys()
+        .any(|key| !matches!(key.as_str(), "providerId" | "modelId" | "options"))
+    {
         return None;
     }
     let text = |value: Option<&Value>| {
@@ -171,12 +174,17 @@ fn parse_picker(value: &str) -> Option<Value> {
             "modelId": &raw_model[..index],
             "options": { "reasoningLevel": &raw_model[index + 1..] },
         }))),
-        _ => parse_selection(Some(&json!({ "providerId": provider, "modelId": raw_model }))),
+        _ => parse_selection(Some(
+            &json!({ "providerId": provider, "modelId": raw_model }),
+        )),
     }
 }
 
 /// `parseSubagentMarkdownSelection`：frontmatter 的 `model` + `thoughtLevel`。
-pub fn parse_markdown_selection(model: Option<&Value>, thought_level: Option<&Value>) -> Option<Value> {
+pub fn parse_markdown_selection(
+    model: Option<&Value>,
+    thought_level: Option<&Value>,
+) -> Option<Value> {
     let value = js_trim(model?.as_str()?);
     if value.is_empty() || INHERIT_NAMES.contains(&value) {
         return None;
@@ -294,16 +302,16 @@ fn migrate_model_value(value: &str) -> String {
         if model.is_empty() || !provider.starts_with("builtin:") {
             return value.to_owned();
         }
-        let Some(next_provider) = migrate_provider_id(&provider).filter(|id| *id != provider) else {
+        let Some(next_provider) = migrate_provider_id(&provider).filter(|id| *id != provider)
+        else {
             return value.to_owned();
         };
         // 未改名的模型保留编码原文（含 %24、%2F），不把模型名再当 Picker 解析。
         let model_id = migrate_glm_model_id(&provider, &model);
-        let body = &value["custom:".len()..];
-        let separator = if body.starts_with("builtin:") {
-            body["builtin:".len()..].find(':').map(|index| index + "builtin:".len())
-        } else {
-            body.find(':')
+        let body = value.strip_prefix("custom:").unwrap_or(value);
+        let separator = match body.strip_prefix("builtin:") {
+            Some(rest) => rest.find(':').map(|index| index + "builtin:".len()),
+            None => body.find(':'),
         };
         let Some(separator) = separator else {
             return value.to_owned();
@@ -339,7 +347,11 @@ fn migrate_model_value(value: &str) -> String {
 
 /// `/^(?:﻿)?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/u`：（正文起点，正文终点，整段长度）。
 fn markdown_frontmatter(content: &str) -> Option<(usize, usize, usize)> {
-    let start = if content.starts_with('\u{feff}') { 3 } else { 0 };
+    let start = if content.starts_with('\u{feff}') {
+        3
+    } else {
+        0
+    };
     let rest = &content[start..];
     let rest = rest.strip_prefix("---")?;
     let trimmed = rest.trim_start_matches([' ', '\t']);
@@ -455,7 +467,12 @@ pub fn migrate_markdown_provider(content: &str) -> String {
         migrated.push_str(&migrate_model_line(text));
         migrated.push_str(carriage);
     }
-    format!("{}{}{}", &content[..body_start], migrated, &content[body_end..])
+    format!(
+        "{}{}{}",
+        &content[..body_start],
+        migrated,
+        &content[body_end..]
+    )
 }
 
 fn migrate_model_line(line: &str) -> String {
@@ -496,7 +513,10 @@ fn migrate_model_line(line: &str) -> String {
 }
 
 fn record(value: Option<&Value>) -> Map<String, Value> {
-    value.and_then(Value::as_object).cloned().unwrap_or_default()
+    value
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// `parsePluginSubagentModelSelectionOverrides`。
@@ -572,8 +592,14 @@ pub fn import_state_selections(input: &Map<String, Value>) -> Map<String, Value>
         out
     };
     let mut next = input.clone();
-    next.insert("builtInModelSelectionOverrides".into(), Value::Object(selections));
-    next.insert("pluginAgentModelSelectionOverrides".into(), Value::Object(plugin));
+    next.insert(
+        "builtInModelSelectionOverrides".into(),
+        Value::Object(selections),
+    );
+    next.insert(
+        "pluginAgentModelSelectionOverrides".into(),
+        Value::Object(plugin),
+    );
     next
 }
 
@@ -593,9 +619,15 @@ mod tests {
             migrate_markdown_provider(quoted),
             "---\r\nmodel: \"custom:account%3Azai-individual-coding-plan:GLM-5.1\"\r\n---\r\n"
         );
-        assert_eq!(migrate_markdown_provider("no frontmatter"), "no frontmatter");
+        assert_eq!(
+            migrate_markdown_provider("no frontmatter"),
+            "no frontmatter"
+        );
         let single = "---\nmodel: 'builtin:bigmodel/glm-5'\n---";
-        assert_eq!(migrate_markdown_provider(single), "---\nmodel: 'bigmodel-api/GLM-5'\n---");
+        assert_eq!(
+            migrate_markdown_provider(single),
+            "---\nmodel: 'bigmodel-api/GLM-5'\n---"
+        );
     }
 
     #[test]
@@ -604,12 +636,18 @@ mod tests {
             parse_markdown_selection(Some(&json!("openai/gpt$high")), Some(&json!(" low "))),
             Some(json!({"providerId":"openai","modelId":"gpt","options":{"reasoningLevel":"low"}}))
         );
-        assert_eq!(parse_markdown_selection(Some(&json!("inherit")), None), None);
+        assert_eq!(
+            parse_markdown_selection(Some(&json!("inherit")), None),
+            None
+        );
         assert_eq!(
             format_markdown_model(&json!({"providerId":"a/b","modelId":"m$1"})),
             "custom:a%2Fb:m%241"
         );
-        assert_eq!(parse_selection(Some(&json!({"providerId":" p ","modelId":"m","x":1}))), None);
+        assert_eq!(
+            parse_selection(Some(&json!({"providerId":" p ","modelId":"m","x":1}))),
+            None
+        );
         let state = json!({"builtInModelOverrides":{"Explore":"builtin:zai/glm-4.6"},"disabledAgentIds":[]});
         let imported = import_state_selections(state.as_object().unwrap());
         assert_eq!(

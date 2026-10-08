@@ -72,7 +72,9 @@ fn parse_object(raw: Option<&str>, path: &str) -> Result<Option<Map<String, Valu
     match js::parse(raw) {
         Ok(Value::Object(map)) => Ok(Some(map)),
         Ok(_) => Err(fsx::error(format!("MCP 配置文件 {path} 必须是 JSON 对象"))),
-        Err(message) => Err(fsx::error(format!("无法解析 MCP 配置文件 {path}: {message}"))),
+        Err(message) => Err(fsx::error(format!(
+            "无法解析 MCP 配置文件 {path}: {message}"
+        ))),
     }
 }
 
@@ -95,7 +97,11 @@ fn server_map(parsed: &Map<String, Value>, nested: bool) -> Map<String, Value> {
     js::record(parsed.get("mcpServers"))
 }
 
-fn with_server_map(current: &Map<String, Value>, nested: bool, servers: Map<String, Value>) -> Map<String, Value> {
+fn with_server_map(
+    current: &Map<String, Value>,
+    nested: bool,
+    servers: Map<String, Value>,
+) -> Map<String, Value> {
     let mut next = current.clone();
     if !nested {
         next.insert("mcpServers".into(), Value::Object(servers));
@@ -127,7 +133,10 @@ fn migrate_legacy(servers: &Map<String, Value>) -> (Map<String, Value>, bool) {
     let mut changed = false;
     let mut migrated = Map::new();
     for (name, config) in servers {
-        let Some(object) = config.as_object().filter(|object| object.contains_key(LEGACY_ENABLE_KEY)) else {
+        let Some(object) = config
+            .as_object()
+            .filter(|object| object.contains_key(LEGACY_ENABLE_KEY))
+        else {
             migrated.insert(name.clone(), config.clone());
             continue;
         };
@@ -140,7 +149,11 @@ fn migrate_legacy(servers: &Map<String, Value>) -> (Map<String, Value>, bool) {
 }
 
 /// `removeLegacyMcpEnabledOverride`：清掉旧版按目录写在 `mcp.<目录>` 下的覆盖。
-fn remove_legacy_override(config: &Map<String, Value>, directory: &str, name: &str) -> Option<Map<String, Value>> {
+fn remove_legacy_override(
+    config: &Map<String, Value>,
+    directory: &str,
+    name: &str,
+) -> Option<Map<String, Value>> {
     let mut mcp = config.get("mcp")?.as_object()?.clone();
     let mut path_config = mcp.get(directory)?.as_object()?.clone();
     js::delete(&mut path_config, name)?;
@@ -165,16 +178,24 @@ impl McpSyncService {
         Self { roots, runtime }
     }
 
-    fn config_path(&self, descriptor: Descriptor, scope: Scope, workspace: Option<&str>) -> Result<String, RpcError> {
+    fn config_path(
+        &self,
+        descriptor: Descriptor,
+        scope: Scope,
+        workspace: Option<&str>,
+    ) -> Result<String, RpcError> {
         let (base, segments) = match scope {
             Scope::User => (self.roots.home.clone(), descriptor.user_segments),
             Scope::Workspace => (
-                workspace.filter(|path| !path.is_empty()).map(str::to_owned).ok_or_else(|| {
-                    fsx::error(format!(
-                        "Missing workspace path for {} workspace MCP config",
-                        descriptor.source
-                    ))
-                })?,
+                workspace
+                    .filter(|path| !path.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| {
+                        fsx::error(format!(
+                            "Missing workspace path for {} workspace MCP config",
+                            descriptor.source
+                        ))
+                    })?,
                 descriptor.workspace_segments,
             ),
         };
@@ -183,11 +204,23 @@ impl McpSyncService {
         Ok(fsx::join(&base, &parts))
     }
 
-    fn location(&self, descriptor: Descriptor, scope: Scope, workspace: Option<&str>) -> Result<Value, RpcError> {
+    fn location(
+        &self,
+        descriptor: Descriptor,
+        scope: Scope,
+        workspace: Option<&str>,
+    ) -> Result<Value, RpcError> {
         let path = self.config_path(descriptor, scope, workspace)?;
         let mut location = Map::new();
         location.insert("source".into(), json!(descriptor.source));
-        location.insert("scope".into(), json!(if scope == Scope::Workspace { "project" } else { "user" }));
+        location.insert(
+            "scope".into(),
+            json!(if scope == Scope::Workspace {
+                "project"
+            } else {
+                "user"
+            }),
+        );
         location.insert("directoryPath".into(), json!(fsx::dirname(&path)));
         if let Some(workspace) = workspace.filter(|path| !path.is_empty()) {
             location.insert("projectPath".into(), json!(workspace));
@@ -196,7 +229,12 @@ impl McpSyncService {
     }
 
     /// 读 server map；有旧 `enable` 字段时持锁就地折叠成 `enabled` 并回写（失败只记 warn）。
-    async fn servers_with_migration(&self, path: &str, parsed: &Map<String, Value>, nested: bool) -> Map<String, Value> {
+    async fn servers_with_migration(
+        &self,
+        path: &str,
+        parsed: &Map<String, Value>,
+        nested: bool,
+    ) -> Map<String, Value> {
         let (servers, changed) = migrate_legacy(&server_map(parsed, nested));
         if !changed {
             return servers;
@@ -214,17 +252,27 @@ impl McpSyncService {
         })
         .await;
         if let Err(error) = result {
-            log::warn(format!("[mcp-sync] legacy enable migration failed: {path} {}", error.message));
+            log::warn(format!(
+                "[mcp-sync] legacy enable migration failed: {path} {}",
+                error.message
+            ));
         }
         servers
     }
 
-    async fn directory_servers(&self, descriptor: Descriptor, scope: Scope, workspace: Option<&str>) -> Result<Vec<Value>, RpcError> {
+    async fn directory_servers(
+        &self,
+        descriptor: Descriptor,
+        scope: Scope,
+        workspace: Option<&str>,
+    ) -> Result<Vec<Value>, RpcError> {
         let path = self.config_path(descriptor, scope, workspace)?;
         let Some(parsed) = read_object(&path).await? else {
             return Ok(Vec::new());
         };
-        let servers = self.servers_with_migration(&path, &parsed, descriptor.nested).await;
+        let servers = self
+            .servers_with_migration(&path, &parsed, descriptor.nested)
+            .await;
         let location = self.location(descriptor, scope, workspace)?;
         Ok(servers
             .into_iter()
@@ -248,7 +296,11 @@ impl McpSyncService {
             .collect())
     }
 
-    async fn preferred_servers(&self, scope: Scope, workspace: Option<&str>) -> Result<Vec<Value>, RpcError> {
+    async fn preferred_servers(
+        &self,
+        scope: Scope,
+        workspace: Option<&str>,
+    ) -> Result<Vec<Value>, RpcError> {
         let zcode = self.directory_servers(ZCODE, scope, workspace).await?;
         if !zcode.is_empty() {
             return Ok(zcode);
@@ -257,10 +309,16 @@ impl McpSyncService {
     }
 
     pub async fn load(&self, params: Value) -> Result<Value, RpcError> {
-        let workspace = params.get("workspacePath").and_then(Value::as_str).filter(|path| !path.is_empty());
+        let workspace = params
+            .get("workspacePath")
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty());
         let mut servers = Vec::new();
         if let Some(workspace) = workspace {
-            servers.extend(self.preferred_servers(Scope::Workspace, Some(workspace)).await?);
+            servers.extend(
+                self.preferred_servers(Scope::Workspace, Some(workspace))
+                    .await?,
+            );
         }
         servers.extend(self.preferred_servers(Scope::User, workspace).await?);
         Ok(json!({ "servers": servers }))
@@ -271,7 +329,9 @@ impl McpSyncService {
         let Some(parsed) = read_object(&path).await? else {
             return Ok(Vec::new());
         };
-        let servers = self.servers_with_migration(&path, &parsed, descriptor.nested).await;
+        let servers = self
+            .servers_with_migration(&path, &parsed, descriptor.nested)
+            .await;
         Ok(servers
             .into_iter()
             .map(|(name, config)| Record {
@@ -313,7 +373,12 @@ impl McpSyncService {
     }
 
     pub async fn list_local_candidates(&self) -> Result<Value, RpcError> {
-        let candidates: Vec<Value> = self.effective_records().await?.iter().map(Self::candidate).collect();
+        let candidates: Vec<Value> = self
+            .effective_records()
+            .await?
+            .iter()
+            .map(Self::candidate)
+            .collect();
         Ok(json!({ "candidates": candidates, "localHomeDir": self.roots.home }))
     }
 
@@ -330,7 +395,12 @@ impl McpSyncService {
     }
 
     pub async fn export(&self, params: Value) -> Result<Value, RpcError> {
-        let candidates: Vec<Value> = self.effective_records().await?.iter().map(Self::candidate).collect();
+        let candidates: Vec<Value> = self
+            .effective_records()
+            .await?
+            .iter()
+            .map(Self::candidate)
+            .collect();
         let mut servers = Vec::new();
         for id in js::string_array(params.get("serverIds")) {
             let candidate = candidates
@@ -344,9 +414,20 @@ impl McpSyncService {
 
     pub async fn save(&self, payload: Value) -> Result<(), RpcError> {
         let action = payload.get("action").and_then(Value::as_str).unwrap_or("");
-        let name = payload.get("name").and_then(Value::as_str).unwrap_or("").to_owned();
-        let project = payload.get("projectPath").and_then(Value::as_str).filter(|path| !path.is_empty());
-        let scope = if project.is_some() { Scope::Workspace } else { Scope::User };
+        let name = payload
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let project = payload
+            .get("projectPath")
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty());
+        let scope = if project.is_some() {
+            Scope::Workspace
+        } else {
+            Scope::User
+        };
         if action == "set-enabled" {
             let enabled = payload
                 .get("enabled")
@@ -360,8 +441,13 @@ impl McpSyncService {
             let descriptor = [ZCODE, AGENTS]
                 .into_iter()
                 .find(|descriptor| descriptor.source == source)
-                .ok_or_else(|| fsx::error(format!("Unsupported MCP settings directory source: {source}")))?;
-            self.write_server_enabled(descriptor, &location, &name, enabled).await?;
+                .ok_or_else(|| {
+                    fsx::error(format!(
+                        "Unsupported MCP settings directory source: {source}"
+                    ))
+                })?;
+            self.write_server_enabled(descriptor, &location, &name, enabled)
+                .await?;
             return self.cleanup_legacy_override(&location, &name).await;
         }
         if action == "upsert" && payload.get("config").is_none_or(|config| !truthy(config)) {
@@ -392,7 +478,13 @@ impl McpSyncService {
         .await
     }
 
-    async fn write_server_enabled(&self, descriptor: Descriptor, location: &Value, name: &str, enabled: bool) -> Result<(), RpcError> {
+    async fn write_server_enabled(
+        &self,
+        descriptor: Descriptor,
+        location: &Value,
+        name: &str,
+        enabled: bool,
+    ) -> Result<(), RpcError> {
         let scope = if location.get("scope").and_then(Value::as_str) == Some("project") {
             Scope::Workspace
         } else {
@@ -403,11 +495,19 @@ impl McpSyncService {
             Scope::User => None,
         };
         let path = self.config_path(descriptor, scope, workspace)?;
-        let directory = location.get("directoryPath").and_then(Value::as_str).unwrap_or("").to_owned();
+        let directory = location
+            .get("directoryPath")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         cli_config::update(&path, |raw| {
             let current = parse_object(raw.as_deref(), &path)?.unwrap_or_default();
             let mut servers = server_map(&current, descriptor.nested);
-            let Some(server) = servers.get(name).filter(|server| server.is_object()).cloned() else {
+            let Some(server) = servers
+                .get(name)
+                .filter(|server| server.is_object())
+                .cloned()
+            else {
                 return Ok(Update::Skip(()));
             };
             // 停用状态写在 server 配置对象内，不把目录路径写到 mcp 顶层。
@@ -423,7 +523,11 @@ impl McpSyncService {
 
     async fn cleanup_legacy_override(&self, location: &Value, name: &str) -> Result<(), RpcError> {
         let path = self.config_path(ZCODE, Scope::User, None)?;
-        let directory = location.get("directoryPath").and_then(Value::as_str).unwrap_or("").to_owned();
+        let directory = location
+            .get("directoryPath")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         cli_config::update(&path, |raw| {
             let current = parse_object(raw.as_deref(), &path)?.unwrap_or_default();
             Ok(match remove_legacy_override(&current, &directory, name) {
@@ -442,19 +546,37 @@ impl McpSyncService {
         // 先算已有记录（可能触发旧字段迁移，自己持锁），再持锁合并写入。
         let mut existing = self.effective_by_name().await?;
         let paths = RewritePaths {
-            local_home: params.get("localHomeDir").and_then(Value::as_str).unwrap_or("").to_owned(),
-            local_workspace: params.get("localWorkspacePath").and_then(Value::as_str).map(str::to_owned),
+            local_home: params
+                .get("localHomeDir")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            local_workspace: params
+                .get("localWorkspacePath")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
             remote_home: self.roots.home.clone(),
-            remote_workspace: params.get("remoteWorkspacePath").and_then(Value::as_str).map(str::to_owned),
+            remote_workspace: params
+                .get("remoteWorkspacePath")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         };
-        let servers = params.get("servers").and_then(Value::as_array).cloned().unwrap_or_default();
+        let servers = params
+            .get("servers")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         cli_config::update(&target, |raw| {
             let current = parse_object(raw.as_deref(), &target)?.unwrap_or_default();
             let mut target_servers = server_map(&current, true);
             let mut results = Vec::new();
             let mut changed = false;
             for server in &servers {
-                let name = server.get("name").and_then(Value::as_str).unwrap_or("").to_owned();
+                let name = server
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
                 let key = name_key(&name);
                 if target_servers.get(&name).is_some_and(truthy) {
                     results.push(json!({ "name": name, "status": "skipped", "path": target }));
@@ -466,11 +588,18 @@ impl McpSyncService {
                 }
                 let enabled = server.get("enabled").is_some_and(truthy);
                 let config = server.get("config").cloned().unwrap_or(Value::Null);
-                let rewritten = rewrite_filesystem_config(&name, set_server_enabled(&config, enabled), &paths);
+                let rewritten =
+                    rewrite_filesystem_config(&name, set_server_enabled(&config, enabled), &paths);
                 target_servers.insert(name.clone(), rewritten.clone());
                 existing.insert(
                     key,
-                    Record { name: name.clone(), config: rewritten, enabled, source: "zcode", path: target.clone() },
+                    Record {
+                        name: name.clone(),
+                        config: rewritten,
+                        enabled,
+                        source: "zcode",
+                        path: target.clone(),
+                    },
                 );
                 results.push(json!({ "name": name, "status": "synced", "path": target }));
                 changed = true;
@@ -487,13 +616,18 @@ impl McpSyncService {
     }
 
     pub async fn list_workspace_statuses(&self, params: Value) -> Result<Value, RpcError> {
-        let runtime = self
-            .runtime
-            .clone()
-            .ok_or_else(|| fsx::error("MCP server status listing is unavailable in this runtime"))?;
+        let runtime = self.runtime.clone().ok_or_else(|| {
+            fsx::error("MCP server status listing is unavailable in this runtime")
+        })?;
         let target = WorkspaceTarget::from_value(&params)?;
-        let servers = params.get("mcpServers").filter(|value| !value.is_null()).cloned();
-        let mode = params.get("mode").and_then(Value::as_str).map(str::to_owned);
+        let servers = params
+            .get("mcpServers")
+            .filter(|value| !value.is_null())
+            .cloned();
+        let mode = params
+            .get("mode")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         let request = |omit_servers: bool, omit_mode: bool| {
             let mut body = Map::new();
             body.insert("workspace".into(), target.workspace_ref());
@@ -510,7 +644,9 @@ impl McpSyncService {
             let runtime = runtime.clone();
             let target = target.clone();
             async move {
-                let process = runtime.get_client(&target, RuntimePolicy::StartIfNeeded).await?;
+                let process = runtime
+                    .get_client(&target, RuntimePolicy::StartIfNeeded)
+                    .await?;
                 process.request_value("mcp/list", &body).await
             }
         };
@@ -559,7 +695,12 @@ fn unrecognized_keys(error: &RpcError) -> Vec<String> {
     {
         return Vec::new();
     }
-    let Some(serialized) = error.data.as_deref().and_then(|data| data.get("message")).and_then(Value::as_str) else {
+    let Some(serialized) = error
+        .data
+        .as_deref()
+        .and_then(|data| data.get("message"))
+        .and_then(Value::as_str)
+    else {
         return Vec::new();
     };
     let Ok(Value::Array(issues)) = serde_json::from_str::<Value>(serialized) else {
@@ -567,11 +708,19 @@ fn unrecognized_keys(error: &RpcError) -> Vec<String> {
     };
     let mut keys = Vec::new();
     for issue in issues {
-        let top_level = issue.get("path").and_then(Value::as_array).is_none_or(Vec::is_empty);
+        let top_level = issue
+            .get("path")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty);
         if issue.get("code") != Some(&json!("unrecognized_keys")) || !top_level {
             continue;
         }
-        for key in issue.get("keys").and_then(Value::as_array).into_iter().flatten() {
+        for key in issue
+            .get("keys")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if let Some(key) = key.as_str()
                 && !keys.iter().any(|item: &String| item == key)
             {
@@ -638,13 +787,19 @@ fn is_filesystem_server(name: &str, config: &Value) -> bool {
     if let Some(command) = config.get("command").and_then(Value::as_str) {
         parts.push(command.to_owned());
     }
-    for arg in config.get("args").and_then(Value::as_array).into_iter().flatten() {
+    for arg in config
+        .get("args")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         if let Some(arg) = arg.as_str() {
             parts.push(arg.to_owned());
         }
     }
     let haystack = parts.join(" ").to_lowercase();
-    haystack.contains("@modelcontextprotocol/server-filesystem") || haystack.contains("mcp-server-filesystem")
+    haystack.contains("@modelcontextprotocol/server-filesystem")
+        || haystack.contains("mcp-server-filesystem")
 }
 
 fn rewrite_path_arg(arg: &str, paths: &RewritePaths) -> String {
@@ -668,7 +823,10 @@ fn comparable(raw: &str) -> Option<(String, bool)> {
         return None;
     }
     let bytes = trimmed.as_bytes();
-    let windows = (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
+    let windows = (bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/'))
         || trimmed.starts_with("\\\\");
     if !windows && !trimmed.starts_with('/') {
         return None;
@@ -684,12 +842,22 @@ fn relative_within(base: Option<&str>, candidate: &str) -> Option<String> {
     let base = base.filter(|base| !zcode_cli_domain::js_string::trim(base).is_empty())?;
     let (base_value, insensitive) = comparable(base)?;
     let (candidate_value, _) = comparable(candidate)?;
-    let fold = |value: &str| if insensitive { value.to_lowercase() } else { value.to_owned() };
+    let fold = |value: &str| {
+        if insensitive {
+            value.to_lowercase()
+        } else {
+            value.to_owned()
+        }
+    };
     let (base_cmp, candidate_cmp) = (fold(&base_value), fold(&candidate_value));
     if candidate_cmp == base_cmp {
         return Some(String::new());
     }
-    let prefix = if base_cmp.ends_with('/') { base_cmp } else { format!("{base_cmp}/") };
+    let prefix = if base_cmp.ends_with('/') {
+        base_cmp
+    } else {
+        format!("{base_cmp}/")
+    };
     if !candidate_cmp.starts_with(&prefix) {
         return None;
     }
@@ -698,7 +866,10 @@ fn relative_within(base: Option<&str>, candidate: &str) -> Option<String> {
 
 /// posix / win32 `path.join` 的词法规范化。
 fn normalize_join(base: &str, segments: &[&str], separator: char) -> String {
-    let joined = std::iter::once(base).chain(segments.iter().copied()).collect::<Vec<_>>().join("/");
+    let joined = std::iter::once(base)
+        .chain(segments.iter().copied())
+        .collect::<Vec<_>>()
+        .join("/");
     let unified = joined.replace('\\', "/");
     let (root, rest) = if separator == '\\' && unified.len() >= 2 && unified.as_bytes()[1] == b':' {
         let drive = &unified[..2];
@@ -728,8 +899,16 @@ fn normalize_join(base: &str, segments: &[&str], separator: char) -> String {
         }
     }
     let body = format!("{root}{}", parts.join("/"));
-    let body = if body.is_empty() { ".".to_owned() } else { body };
-    if separator == '\\' { body.replace('/', "\\") } else { body }
+    let body = if body.is_empty() {
+        ".".to_owned()
+    } else {
+        body
+    };
+    if separator == '\\' {
+        body.replace('/', "\\")
+    } else {
+        body
+    }
 }
 
 /// `joinRemotePath`：按远端路径形态选择 posix / win32 拼接。
@@ -737,10 +916,16 @@ fn join_remote(base: &str, relative: &str) -> String {
     if relative.is_empty() {
         return base.to_owned();
     }
-    let segments: Vec<&str> = relative.split(['/', '\\']).filter(|segment| !segment.is_empty()).collect();
+    let segments: Vec<&str> = relative
+        .split(['/', '\\'])
+        .filter(|segment| !segment.is_empty())
+        .collect();
     let normalized = zcode_cli_domain::js_string::trim(base);
     let bytes = normalized.as_bytes();
-    let windows = (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
+    let windows = (bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/'))
         || normalized.starts_with("\\\\");
     if !normalized.starts_with('/') && windows {
         return normalize_join(normalized, &segments, '\\');
@@ -750,27 +935,46 @@ fn join_remote(base: &str, relative: &str) -> String {
 
 pub fn service(mcp: McpSyncService) -> ServiceBuilder {
     let builder = ServiceBuilder::new(CHANNEL);
-    let builder = bind(builder, "loadMcpFromUserDirectory", &mcp, |s, p| async move {
-        s.load(p).await.map(Reply::Value)
-    });
-    let builder = bind(builder, "listWorkspaceMcpServerStatuses", &mcp, |s, p| async move {
-        s.list_workspace_statuses(p).await.map(Reply::Value)
-    });
+    let builder = bind(
+        builder,
+        "loadMcpFromUserDirectory",
+        &mcp,
+        |s, p| async move { s.load(p).await.map(Reply::Value) },
+    );
+    let builder = bind(
+        builder,
+        "listWorkspaceMcpServerStatuses",
+        &mcp,
+        |s, p| async move { s.list_workspace_statuses(p).await.map(Reply::Value) },
+    );
     let builder = bind(builder, "saveMcpToUserDirectory", &mcp, |s, p| async move {
         s.save(p).await.map(|()| Reply::Undefined)
     });
-    let builder = bind(builder, "listLocalUserMcpCandidates", &mcp, |s, _| async move {
-        s.list_local_candidates().await.map(Reply::Value)
-    });
-    let builder = bind(builder, "listRemoteUserMcpStatuses", &mcp, |s, p| async move {
-        s.list_remote_statuses(p).await.map(Reply::Value)
-    });
+    let builder = bind(
+        builder,
+        "listLocalUserMcpCandidates",
+        &mcp,
+        |s, _| async move { s.list_local_candidates().await.map(Reply::Value) },
+    );
+    let builder = bind(
+        builder,
+        "listRemoteUserMcpStatuses",
+        &mcp,
+        |s, p| async move { s.list_remote_statuses(p).await.map(Reply::Value) },
+    );
     let builder = bind(builder, "exportMcpServers", &mcp, |s, p| async move {
         s.export(p).await.map(Reply::Value)
     });
-    let builder = bind(builder, "checkRemoteUserMcpWriteAccess", &mcp, |s, _| async move {
-        Ok(Reply::Value(check_write_access(&s.user_config_directory()).await))
-    });
+    let builder = bind(
+        builder,
+        "checkRemoteUserMcpWriteAccess",
+        &mcp,
+        |s, _| async move {
+            Ok(Reply::Value(
+                check_write_access(&s.user_config_directory()).await,
+            ))
+        },
+    );
     bind(builder, "importMcpServers", &mcp, |s, p| async move {
         s.import(p).await.map(Reply::Value)
     })
@@ -792,7 +996,13 @@ mod tests {
         let rewritten = rewrite_filesystem_config("files", config, &paths);
         assert_eq!(
             rewritten["args"],
-            json!(["-y","@modelcontextprotocol/server-filesystem","/srv/repo/src","/home/me/docs","/etc"])
+            json!([
+                "-y",
+                "@modelcontextprotocol/server-filesystem",
+                "/srv/repo/src",
+                "/home/me/docs",
+                "/etc"
+            ])
         );
         assert_eq!(join_remote("C:\\Users\\me", "a/b"), "C:\\Users\\me\\a\\b");
     }
@@ -832,7 +1042,12 @@ mod tests {
             .unwrap();
         assert_eq!(imported["results"][0]["status"], "skipped");
         assert_eq!(imported["results"][1]["status"], "synced");
-        assert!(service.save(json!({"action":"upsert","name":"z"})).await.is_err());
+        assert!(
+            service
+                .save(json!({"action":"upsert","name":"z"}))
+                .await
+                .is_err()
+        );
         std::fs::write(config_dir.join("config.json"), "{bad").unwrap();
         assert!(service.load(json!({})).await.is_err());
     }

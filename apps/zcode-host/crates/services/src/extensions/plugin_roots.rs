@@ -207,8 +207,9 @@ pub fn resolve_inside(root: &str, raw: &str) -> Option<String> {
     let resolved = fsx::resolve(root, &[raw]);
     let relative = fsx::relative(root, &resolved);
     let sep = std::path::MAIN_SEPARATOR;
-    (relative.is_empty() || (!relative.starts_with("..") && !relative.contains(&format!("..{sep}"))))
-        .then_some(resolved)
+    (relative.is_empty()
+        || (!relative.starts_with("..") && !relative.contains(&format!("..{sep}"))))
+    .then_some(resolved)
 }
 
 /// manifest 的 `skills` / `commands` 字段声明的目录；未声明时默认 `<root>/<key>`（存在才算）。

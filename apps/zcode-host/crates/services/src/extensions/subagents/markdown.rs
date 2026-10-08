@@ -7,7 +7,9 @@ use zcode_cli_domain::js_string::trim as js_trim;
 use super::super::{json as js, yaml};
 use super::selection;
 
-const COLORS: [&str; 8] = ["red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"];
+const COLORS: [&str; 8] = [
+    "red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan",
+];
 const PERMISSION_MODES: [&str; 2] = ["auto", "plan"];
 
 pub enum Parsed {
@@ -30,7 +32,10 @@ pub fn plugin_agent_state_id(plugin_id: &str, name: &str) -> String {
 }
 
 fn split_frontmatter(content: &str) -> (Option<String>, String) {
-    let normalized = content.strip_prefix('\u{feff}').unwrap_or(content).replace("\r\n", "\n");
+    let normalized = content
+        .strip_prefix('\u{feff}')
+        .unwrap_or(content)
+        .replace("\r\n", "\n");
     if !normalized.starts_with("---") {
         return (None, normalized);
     }
@@ -38,7 +43,11 @@ fn split_frontmatter(content: &str) -> (Option<String>, String) {
     if js_trim(lines[0]) != "---" {
         return (None, normalized.clone());
     }
-    let Some(end) = lines.iter().enumerate().position(|(index, line)| index > 0 && js_trim(line) == "---") else {
+    let Some(end) = lines
+        .iter()
+        .enumerate()
+        .position(|(index, line)| index > 0 && js_trim(line) == "---")
+    else {
         return (None, normalized.clone());
     };
     (Some(lines[1..end].join("\n")), lines[end + 1..].join("\n"))
@@ -62,7 +71,11 @@ fn strip_inline_comment(value: &str) -> String {
             };
         }
         if quote.is_none() && c == '#' && index > 0 && is_ws(chars[index - 1]) {
-            return chars[..index].iter().collect::<String>().trim_end_matches(is_ws).to_owned();
+            return chars[..index]
+                .iter()
+                .collect::<String>()
+                .trim_end_matches(is_ws)
+                .to_owned();
         }
     }
     value.to_owned()
@@ -106,8 +119,9 @@ fn split_top_level(value: &str) -> Vec<String> {
 }
 
 fn unquote(value: &str) -> String {
-    let quoted = value.len() >= 1
-        && ((value.starts_with('"') && value.ends_with('"')) || (value.starts_with('\'') && value.ends_with('\'')));
+    let quoted = !value.is_empty()
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')));
     if quoted {
         let inner: Vec<char> = value.chars().collect();
         if inner.len() < 2 {
@@ -148,7 +162,10 @@ fn loose_frontmatter(text: &str) -> Map<String, Value> {
     let mut values = Map::new();
     let mut pending: Option<String> = None;
     for raw in text.split('\n') {
-        let line = raw.strip_suffix('\r').unwrap_or(raw).trim_end_matches(is_ws);
+        let line = raw
+            .strip_suffix('\r')
+            .unwrap_or(raw)
+            .trim_end_matches(is_ws);
         if js_trim(line).is_empty() || line.trim_start_matches(is_ws).starts_with('#') {
             continue;
         }
@@ -158,7 +175,11 @@ fn loose_frontmatter(text: &str) -> Map<String, Value> {
             && rest.starts_with(is_ws)
         {
             let item = rest.trim_start_matches(is_ws);
-            let mut list = values.get(pending_key).and_then(Value::as_array).cloned().unwrap_or_default();
+            let mut list = values
+                .get(pending_key)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
             list.push(scalar_value(item));
             values.insert(pending_key.clone(), Value::Array(list));
             continue;
@@ -311,14 +332,20 @@ pub fn parse(content: &str, path: &str, scope: &str) -> Parsed {
             path,
         );
     };
-    let Some(description) = scalar_string(fm.get("description")).map(|text| text.replace("\\n", "\n")) else {
+    let Some(description) =
+        scalar_string(fm.get("description")).map(|text| text.replace("\\n", "\n"))
+    else {
         return diagnostic(
             "agent_missing_required_frontmatter",
             format!("Agent frontmatter must include description: {path}"),
             path,
         );
     };
-    let source = if scope == "built-in" { "built-in" } else { "user" };
+    let source = if scope == "built-in" {
+        "built-in"
+    } else {
+        "user"
+    };
     let enumerated = |key: &str, allowed: &[&str]| {
         scalar_string(fm.get(key)).filter(|value| allowed.contains(&value.as_str()))
     };
@@ -330,7 +357,9 @@ pub fn parse(content: &str, path: &str, scope: &str) -> Parsed {
     if let Some(color) = enumerated("color", &COLORS) {
         agent.insert("color".into(), json!(color));
     }
-    if let Some(selection) = selection::parse_markdown_selection(fm.get("model"), fm.get("thoughtLevel")) {
+    if let Some(selection) =
+        selection::parse_markdown_selection(fm.get("model"), fm.get("thoughtLevel"))
+    {
         agent.insert("modelSelection".into(), selection);
     }
     if let Some(tools) = tool_list(fm.get("tools")) {
@@ -410,10 +439,11 @@ fn looks_numeric(value: &str) -> bool {
     };
     let digits = |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
     let mantissa_ok = digits(mantissa)
-        || mantissa.split_once('.').is_some_and(|(int, frac)| {
-            (int.is_empty() || digits(int)) && digits(frac)
-        });
-    let exponent_ok = exponent.is_none_or(|exp| digits(exp.strip_prefix(['-', '+']).unwrap_or(exp)));
+        || mantissa
+            .split_once('.')
+            .is_some_and(|(int, frac)| (int.is_empty() || digits(int)) && digits(frac));
+    let exponent_ok =
+        exponent.is_none_or(|exp| digits(exp.strip_prefix(['-', '+']).unwrap_or(exp)));
     mantissa_ok && exponent_ok
 }
 
@@ -447,42 +477,96 @@ fn append_list(lines: &mut Vec<String>, key: &str, values: Option<&Vec<Value>>) 
 
 /// `serializeSubagentMarkdown`。
 pub fn serialize(config: &Map<String, Value>) -> String {
-    let text = |key: &str| config.get(key).and_then(Value::as_str).unwrap_or("").to_owned();
+    let text = |key: &str| {
+        config
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned()
+    };
     let mut lines = vec![
         format!("name: \"{}\"", escape_yaml(&text("name"))),
         format!("description: \"{}\"", escape_yaml(&text("description"))),
     ];
-    append_scalar(&mut lines, "color", config.get("color").and_then(Value::as_str));
-    if let Some(selection) = config.get("modelSelection").filter(|value| value.is_object()) {
-        append_scalar(&mut lines, "model", Some(&selection::format_markdown_model(selection)));
+    append_scalar(
+        &mut lines,
+        "color",
+        config.get("color").and_then(Value::as_str),
+    );
+    if let Some(selection) = config
+        .get("modelSelection")
+        .filter(|value| value.is_object())
+    {
+        append_scalar(
+            &mut lines,
+            "model",
+            Some(&selection::format_markdown_model(selection)),
+        );
         append_scalar(
             &mut lines,
             "thoughtLevel",
-            selection.get("options").and_then(|options| options.get("reasoningLevel")).and_then(Value::as_str),
+            selection
+                .get("options")
+                .and_then(|options| options.get("reasoningLevel"))
+                .and_then(Value::as_str),
         );
     }
-    append_list(&mut lines, "tools", config.get("tools").and_then(Value::as_array));
-    append_list(&mut lines, "disallowedTools", config.get("disallowedTools").and_then(Value::as_array));
-    append_list(&mut lines, "skills", config.get("skills").and_then(Value::as_array));
-    append_scalar(&mut lines, "permissionMode", config.get("permissionMode").and_then(Value::as_str));
+    append_list(
+        &mut lines,
+        "tools",
+        config.get("tools").and_then(Value::as_array),
+    );
+    append_list(
+        &mut lines,
+        "disallowedTools",
+        config.get("disallowedTools").and_then(Value::as_array),
+    );
+    append_list(
+        &mut lines,
+        "skills",
+        config.get("skills").and_then(Value::as_array),
+    );
+    append_scalar(
+        &mut lines,
+        "permissionMode",
+        config.get("permissionMode").and_then(Value::as_str),
+    );
     if let Some(turns) = config.get("maxTurns").filter(|value| !value.is_null()) {
         lines.push(format!("maxTurns: {}", js::stringify(turns)));
     }
     for key in ["background", "injectAgentsMd"] {
         if let Some(flag) = config.get(key).filter(|value| !value.is_null()) {
-            lines.push(format!("{key}: {}", if flag == &Value::Bool(true) { "true" } else { "false" }));
+            lines.push(format!(
+                "{key}: {}",
+                if flag == &Value::Bool(true) {
+                    "true"
+                } else {
+                    "false"
+                }
+            ));
         }
     }
-    if let Some(servers) = config.get("mcpServers").and_then(Value::as_array).filter(|items| !items.is_empty()) {
+    if let Some(servers) = config
+        .get("mcpServers")
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty())
+    {
         if servers.iter().all(Value::is_string) {
             append_list(&mut lines, "mcpServers", Some(servers));
         } else {
             // 对象数组按 YAML 结构写回，避免编辑其他字段时清空 MCP 配置。
-            lines.extend(yaml::stringify_entry("mcpServers", &Value::Array(servers.clone())));
+            lines.extend(yaml::stringify_entry(
+                "mcpServers",
+                &Value::Array(servers.clone()),
+            ));
         }
     }
     let prompt = js_trim(&text("systemPrompt")).to_owned();
-    let body = if prompt.is_empty() { "\n".to_owned() } else { format!("\n{prompt}\n") };
+    let body = if prompt.is_empty() {
+        "\n".to_owned()
+    } else {
+        format!("\n{prompt}\n")
+    };
     format!("---\n{}\n---\n{body}", lines.join("\n"))
 }
 

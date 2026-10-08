@@ -126,7 +126,10 @@ mod tests {
         found.sort();
         let names: Vec<String> = found
             .iter()
-            .map(|path| path.trim_start_matches(&root.display().to_string()).to_owned())
+            .map(|path| {
+                path.trim_start_matches(&root.display().to_string())
+                    .to_owned()
+            })
             .collect();
         assert!(errors.is_empty());
         assert!(names.contains(&"/a/SKILL.md".to_owned()));

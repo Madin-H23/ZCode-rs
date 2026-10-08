@@ -227,6 +227,16 @@ pub fn install(
     );
     registry.implement(tasks::controller::service(controller.clone()));
 
+    // ── extensions ──
+    extensions::install(
+        registry,
+        &agent,
+        extensions::Roots::new(
+            &context.environment.user_home,
+            &context.environment.data_base_dir,
+        ),
+    );
+
     agent::session::warm_up(
         agent.clone(),
         context

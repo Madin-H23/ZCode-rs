@@ -227,7 +227,8 @@ impl SkillSyncService {
                 });
             }
         }
-        candidates.sort_by(|left, right| locale_compare(&left.directory_name, &right.directory_name));
+        candidates
+            .sort_by(|left, right| locale_compare(&left.directory_name, &right.directory_name));
         Ok(candidates)
     }
 
@@ -261,7 +262,9 @@ impl SkillSyncService {
                 let path = fsx::join(&directory, &[&entry.name]);
                 let is_dir = entry.is_dir
                     || (entry.is_symlink
-                        && tokio::fs::metadata(&path).await.is_ok_and(|meta| meta.is_dir()));
+                        && tokio::fs::metadata(&path)
+                            .await
+                            .is_ok_and(|meta| meta.is_dir()));
                 if !is_dir {
                     continue;
                 }
@@ -297,7 +300,9 @@ impl SkillSyncService {
             .candidates_in_root(&self.agents_root())
             .await?
             .into_iter()
-            .filter(|c| !covered.contains(&c.directory_name) && !zcode_names.contains(&name_key(&c.name)))
+            .filter(|c| {
+                !covered.contains(&c.directory_name) && !zcode_names.contains(&name_key(&c.name))
+            })
             .collect();
         let agents = Self::dedupe(agents_raw, &mut seen).await;
         let mut all: Vec<Candidate> = zcode.into_iter().chain(agents).collect();
@@ -359,14 +364,17 @@ impl SkillSyncService {
         for directory_name in directory_names {
             let path = archive::resolve_within(&root, &directory_name, SYNC_PATH_LABEL)?;
             if std::path::Path::new(&path).exists() {
-                statuses.push(json!({ "directoryName": directory_name, "exists": true, "path": path }));
+                statuses
+                    .push(json!({ "directoryName": directory_name, "exists": true, "path": path }));
                 continue;
             }
             let existing_path = requested
                 .get(&directory_name)
                 .and_then(|name| existing.get(&name_key(name)));
             statuses.push(match existing_path {
-                Some(path) => json!({ "directoryName": directory_name, "exists": true, "path": path }),
+                Some(path) => {
+                    json!({ "directoryName": directory_name, "exists": true, "path": path })
+                }
                 None => json!({ "directoryName": directory_name, "exists": false }),
             });
         }
@@ -397,11 +405,19 @@ impl SkillSyncService {
         }
         let selected_bytes: u64 = selected.iter().map(|candidate| candidate.size_bytes).sum();
         if selected_bytes > self.max_archive_bytes {
-            return Err(size_error(selected_bytes, self.max_archive_bytes, "selected-content"));
+            return Err(size_error(
+                selected_bytes,
+                self.max_archive_bytes,
+                "selected-content",
+            ));
         }
         let archive = archive::create(Flavor::Skill, entries).await?;
         if archive.len() as u64 > self.max_archive_bytes {
-            return Err(size_error(archive.len() as u64, self.max_archive_bytes, "archive"));
+            return Err(size_error(
+                archive.len() as u64,
+                self.max_archive_bytes,
+                "archive",
+            ));
         }
         Ok(json!({
             "archive": bytes_value(&archive),
@@ -421,26 +437,45 @@ impl SkillSyncService {
         }
         let archive_bytes = bytes_param(params.get("archive"))?;
         if archive_bytes.len() as u64 > self.max_archive_bytes {
-            return Err(size_error(archive_bytes.len() as u64, self.max_archive_bytes, "archive"));
+            return Err(size_error(
+                archive_bytes.len() as u64,
+                self.max_archive_bytes,
+                "archive",
+            ));
         }
         let target_root = self.zcode_root();
         fsx::mkdirp(&target_root).await?;
-        let temp = fsx::join(&target_root, &[&format!(".sync-tmp-{}", fsx::random_uuid())]);
+        let temp = fsx::join(
+            &target_root,
+            &[&format!(".sync-tmp-{}", fsx::random_uuid())],
+        );
         fsx::mkdirp(&temp).await?;
         let result = self.import_into(&archive_bytes, &target_root, &temp).await;
         let _ = fsx::remove_all(&temp).await;
         result
     }
 
-    async fn import_into(&self, archive_bytes: &[u8], target_root: &str, temp: &str) -> Result<Value, RpcError> {
+    async fn import_into(
+        &self,
+        archive_bytes: &[u8],
+        target_root: &str,
+        temp: &str,
+    ) -> Result<Value, RpcError> {
         // 先解到临时目录并校验 SKILL.md，再逐个复制，避免路径穿越或半成品目录污染。
-        archive::extract(Flavor::Skill, archive_bytes, temp, Some(self.max_archive_bytes)).await?;
+        archive::extract(
+            Flavor::Skill,
+            archive_bytes,
+            temp,
+            Some(self.max_archive_bytes),
+        )
+        .await?;
         let extracted = extracted_directories(temp).await?;
         let mut existing = self.user_directory_by_name().await?;
         let mut results = Vec::new();
         for (directory_name, source) in extracted {
             let target = archive::resolve_within(target_root, &directory_name, SYNC_PATH_LABEL)?;
-            let Some(content) = read_skill_file(&fsx::join(&source, &[SKILL_FILE_NAME])).await? else {
+            let Some(content) = read_skill_file(&fsx::join(&source, &[SKILL_FILE_NAME])).await?
+            else {
                 results.push(json!({
                     "name": fsx::basename(&directory_name),
                     "directoryName": directory_name,
@@ -496,7 +531,9 @@ async fn extracted_directories(root: &str) -> Result<Vec<(String, String)>, RpcE
     let mut directories = Vec::new();
     let mut stack = vec![(root.to_owned(), String::new())];
     while let Some((directory, relative)) = stack.pop() {
-        if !relative.is_empty() && std::path::Path::new(&fsx::join(&directory, &[SKILL_FILE_NAME])).exists() {
+        if !relative.is_empty()
+            && std::path::Path::new(&fsx::join(&directory, &[SKILL_FILE_NAME])).exists()
+        {
             directories.push((relative.clone(), directory.clone()));
         }
         let entries = fsx::read_dir(&directory)
@@ -520,18 +557,27 @@ async fn extracted_directories(root: &str) -> Result<Vec<(String, String)>, RpcE
 
 pub fn service(sync: SkillSyncService) -> ServiceBuilder {
     let builder = ServiceBuilder::new(CHANNEL);
-    let builder = bind(builder, "listLocalUserSkillCandidates", &sync, |s, _| async move {
-        s.list_local_candidates().await.map(Reply::Value)
-    });
-    let builder = bind(builder, "listRemoteUserSkillStatuses", &sync, |s, p| async move {
-        s.list_remote_statuses(p).await.map(Reply::Value)
-    });
+    let builder = bind(
+        builder,
+        "listLocalUserSkillCandidates",
+        &sync,
+        |s, _| async move { s.list_local_candidates().await.map(Reply::Value) },
+    );
+    let builder = bind(
+        builder,
+        "listRemoteUserSkillStatuses",
+        &sync,
+        |s, p| async move { s.list_remote_statuses(p).await.map(Reply::Value) },
+    );
     let builder = bind(builder, "exportSkillsArchive", &sync, |s, p| async move {
         s.export_archive(p).await.map(Reply::Value)
     });
-    let builder = bind(builder, "checkRemoteUserSkillWriteAccess", &sync, |s, _| async move {
-        Ok(Reply::Value(check_write_access(&s.zcode_root()).await))
-    });
+    let builder = bind(
+        builder,
+        "checkRemoteUserSkillWriteAccess",
+        &sync,
+        |s, _| async move { Ok(Reply::Value(check_write_access(&s.zcode_root()).await)) },
+    );
     bind(builder, "importSkillsArchive", &sync, |s, p| async move {
         s.import_archive(p).await.map(Reply::Value)
     })
@@ -584,9 +630,11 @@ mod tests {
             .unwrap();
         assert_eq!(statuses["statuses"][0]["exists"], true);
         assert_eq!(statuses["statuses"][1]["exists"], false);
-        assert!(remote
-            .list_remote_statuses(json!({ "directoryNames": ["../x"] }))
-            .await
-            .is_err());
+        assert!(
+            remote
+                .list_remote_statuses(json!({ "directoryNames": ["../x"] }))
+                .await
+                .is_err()
+        );
     }
 }

@@ -44,7 +44,8 @@ impl Flavor {
 pub fn normalize_relative(path: &str, label: &str) -> Result<String, RpcError> {
     let replaced = path.replace('\\', "/");
     let normalized = replaced.trim_start_matches('/').trim_end_matches('/');
-    let drive = path.len() >= 2 && path.as_bytes()[0].is_ascii_alphabetic() && path.as_bytes()[1] == b':';
+    let drive =
+        path.len() >= 2 && path.as_bytes()[0].is_ascii_alphabetic() && path.as_bytes()[1] == b':';
     if normalized.is_empty()
         || fsx::is_absolute(path)
         || path.starts_with('/')
@@ -126,7 +127,13 @@ fn mode_of(meta: &std::fs::Metadata) -> u32 {
 }
 
 impl Builder {
-    fn write_string(&self, header: &mut [u8], value: &str, offset: usize, length: usize) -> Result<(), RpcError> {
+    fn write_string(
+        &self,
+        header: &mut [u8],
+        value: &str,
+        offset: usize,
+        length: usize,
+    ) -> Result<(), RpcError> {
         let bytes = value.as_bytes();
         if bytes.len() > length {
             if self.flavor == Flavor::Plugin {
@@ -142,7 +149,13 @@ impl Builder {
         Ok(())
     }
 
-    fn write_octal(&self, header: &mut [u8], value: u64, offset: usize, length: usize) -> Result<(), RpcError> {
+    fn write_octal(
+        &self,
+        header: &mut [u8],
+        value: u64,
+        offset: usize,
+        length: usize,
+    ) -> Result<(), RpcError> {
         let encoded = format!("{value:o}");
         let width = length - 1;
         let padded = format!("{encoded:0>width$}");
@@ -173,7 +186,14 @@ impl Builder {
         )))
     }
 
-    fn header(&self, entry_path: &str, mode: u32, mtime: u64, size: u64, directory: bool) -> Result<[u8; BLOCK], RpcError> {
+    fn header(
+        &self,
+        entry_path: &str,
+        mode: u32,
+        mtime: u64,
+        size: u64,
+        directory: bool,
+    ) -> Result<[u8; BLOCK], RpcError> {
         let mut header = [0u8; BLOCK];
         let (name, prefix) = self.split_path(entry_path)?;
         self.write_string(&mut header, &name, 0, 100)?;
@@ -201,7 +221,13 @@ impl Builder {
         Ok(header)
     }
 
-    fn append_file(&mut self, archive_path: &str, content: &[u8], mode: u32, mtime: u64) -> Result<(), RpcError> {
+    fn append_file(
+        &mut self,
+        archive_path: &str,
+        content: &[u8],
+        mode: u32,
+        mtime: u64,
+    ) -> Result<(), RpcError> {
         let header = self.header(archive_path, mode, mtime, content.len() as u64, false)?;
         self.out.extend_from_slice(&header);
         self.out.extend_from_slice(content);
@@ -210,7 +236,11 @@ impl Builder {
         Ok(())
     }
 
-    fn append_source<'a>(&'a mut self, source: &'a str, archive_path: &'a str) -> BoxFuture<'a, Result<(), RpcError>> {
+    fn append_source<'a>(
+        &'a mut self,
+        source: &'a str,
+        archive_path: &'a str,
+    ) -> BoxFuture<'a, Result<(), RpcError>> {
         Box::pin(async move {
             let meta = fs::symlink_metadata(source)
                 .await
@@ -221,7 +251,13 @@ impl Builder {
                 } else {
                     format!("{archive_path}/")
                 };
-                let header = self.header(&directory_path, mode_of(&meta), mtime_seconds(&meta), 0, true)?;
+                let header = self.header(
+                    &directory_path,
+                    mode_of(&meta),
+                    mtime_seconds(&meta),
+                    0,
+                    true,
+                )?;
                 self.out.extend_from_slice(&header);
                 let mut children = fsx::read_dir(source)
                     .await
@@ -286,7 +322,10 @@ pub async fn create(flavor: Flavor, entries: Vec<Entry>) -> Result<Vec<u8>, RpcE
 
 fn read_string(header: &[u8], offset: usize, length: usize) -> String {
     let slice = &header[offset..offset + length];
-    let end = slice.iter().position(|byte| *byte == 0).unwrap_or(slice.len());
+    let end = slice
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(slice.len());
     String::from_utf8_lossy(&slice[..end]).into_owned()
 }
 
@@ -297,7 +336,10 @@ fn read_octal(header: &[u8], offset: usize, length: usize) -> Option<u64> {
     if raw.is_empty() {
         return Some(0);
     }
-    let digits: String = raw.chars().take_while(|c| ('0'..='7').contains(c)).collect();
+    let digits: String = raw
+        .chars()
+        .take_while(|c| ('0'..='7').contains(c))
+        .collect();
     if digits.is_empty() {
         return None;
     }
@@ -334,9 +376,9 @@ fn gunzip(flavor: Flavor, archive: &[u8], max: Option<u64>) -> Result<Vec<u8>, R
                 Some(limit) => {
                     let read = (&mut decoder).take(limit + 1).read_to_end(&mut out);
                     match read {
-                        Ok(_) if out.len() as u64 > limit => Err(format!(
-                            "Cannot create a Buffer larger than {limit} bytes"
-                        )),
+                        Ok(_) if out.len() as u64 > limit => {
+                            Err(format!("Cannot create a Buffer larger than {limit} bytes"))
+                        }
                         Ok(_) => Ok(()),
                         Err(error) => Err(error.to_string()),
                     }
@@ -395,7 +437,11 @@ pub async fn extract(
         let padded = size_usize.div_ceil(BLOCK).saturating_mul(BLOCK);
         let type_flag = {
             let flag = read_string(header, 156, 1);
-            if flag.is_empty() { "0".to_owned() } else { flag }
+            if flag.is_empty() {
+                "0".to_owned()
+            } else {
+                flag
+            }
         };
         let path = normalize_relative(&entry_path(header), &label)?;
         let target = resolve_within(&target_root, &path, &label)?;
@@ -419,9 +465,9 @@ pub async fn extract(
         {
             return Err(match flavor {
                 Flavor::Skill => skill_size_error(next, max, "extracted-content"),
-                Flavor::Plugin => fsx::error(format!(
-                    "plugin sync archive exceeds limit: {next}/{max}"
-                )),
+                Flavor::Plugin => {
+                    fsx::error(format!("plugin sync archive exceeds limit: {next}/{max}"))
+                }
             });
         }
         if offset.saturating_add(size_usize) > buffer.len() {
@@ -497,9 +543,14 @@ mod tests {
         .await
         .unwrap();
         let out = dir.path().join("out");
-        extract(Flavor::Skill, &archive, &out.display().to_string(), Some(1 << 20))
-            .await
-            .unwrap();
+        extract(
+            Flavor::Skill,
+            &archive,
+            &out.display().to_string(),
+            Some(1 << 20),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             std::fs::read_to_string(out.join("group/skill/nested/a.txt")).unwrap(),
             "abc"

@@ -56,11 +56,17 @@ impl Candidate {
         }
         value.insert("path".into(), json!(self.path));
         value.insert("sizeBytes".into(), json!(self.size_bytes));
-        value.insert("enabled".into(), json!(self.enabled_override.unwrap_or(true)));
+        value.insert(
+            "enabled".into(),
+            json!(self.enabled_override.unwrap_or(true)),
+        );
         if let Some(enabled) = self.enabled_override {
             value.insert("enabledOverride".into(), json!(enabled));
         }
-        value.insert("componentTypes".into(), json!(self.manifest.component_types));
+        value.insert(
+            "componentTypes".into(),
+            json!(self.manifest.component_types),
+        );
         Value::Object(value)
     }
 }
@@ -94,7 +100,13 @@ fn short_hash(value: &str) -> String {
 fn safe_directory_name(value: &str) -> String {
     let sanitized: String = js_trim(value)
         .chars()
-        .map(|c| if matches!(c, '\\' | '/' | ':') { '-' } else { c })
+        .map(|c| {
+            if matches!(c, '\\' | '/' | ':') {
+                '-'
+            } else {
+                c
+            }
+        })
         .collect();
     let sanitized = if sanitized.is_empty() {
         "plugin".to_owned()
@@ -199,7 +211,9 @@ fn fingerprint(path: &str) -> BoxFuture<'_, Result<String, RpcError>> {
             return Ok(hex(hash));
         }
         if !meta.is_dir() {
-            return Err(fsx::error(format!("unsupported plugin archive source: {path}")));
+            return Err(fsx::error(format!(
+                "unsupported plugin archive source: {path}"
+            )));
         }
         hash.update(b"dir\0");
         let mut children = fsx::read_dir(path)
@@ -209,7 +223,11 @@ fn fingerprint(path: &str) -> BoxFuture<'_, Result<String, RpcError>> {
         for child in children {
             hash.update(child.name.as_bytes());
             hash.update(b"\0");
-            hash.update(fingerprint(&fsx::join(path, &[&child.name])).await?.as_bytes());
+            hash.update(
+                fingerprint(&fsx::join(path, &[&child.name]))
+                    .await?
+                    .as_bytes(),
+            );
             hash.update(b"\0");
         }
         Ok(hex(hash))
@@ -217,7 +235,10 @@ fn fingerprint(path: &str) -> BoxFuture<'_, Result<String, RpcError>> {
 }
 
 fn hex(hash: Sha256) -> String {
-    hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
+    hash.finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn string_array_non_blank(value: Option<&Value>) -> Vec<String> {
@@ -319,7 +340,10 @@ fn parse_marketplace(value: &Value) -> Result<Marketplace, RpcError> {
     };
     Ok(Marketplace {
         name,
-        description: map.get("description").and_then(Value::as_str).map(str::to_owned),
+        description: map
+            .get("description")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         plugin_root: root_of(map).or_else(|| root_of(&js::record(map.get("metadata")))),
         plugins,
         raw: map.clone(),
@@ -387,15 +411,23 @@ impl PluginSyncService {
             let Some(manifest) = read_manifest(&canonical).await else {
                 continue;
             };
-            let enabled_override = config.overrides.get(&plugin_id_key(&manifest.plugin_id)?).copied();
+            let enabled_override = config
+                .overrides
+                .get(&plugin_id_key(&manifest.plugin_id)?)
+                .copied();
             let base = safe_directory_name(&{
                 let basename = fsx::basename(&canonical);
-                if basename.is_empty() { manifest.name.clone() } else { basename }
+                if basename.is_empty() {
+                    manifest.name.clone()
+                } else {
+                    basename
+                }
             });
             let directory_name = if used.insert(base.clone()) {
                 base
             } else {
-                let deduped = safe_directory_name(&format!("{base}-{}", &short_hash(&canonical)[..8]));
+                let deduped =
+                    safe_directory_name(&format!("{base}-{}", &short_hash(&canonical)[..8]));
                 used.insert(deduped.clone());
                 deduped
             };
@@ -421,7 +453,9 @@ impl PluginSyncService {
             let Some(manifest) = read_manifest(&canonical).await else {
                 continue;
             };
-            result.entry(plugin_id_key(&manifest.plugin_id)?).or_insert(canonical);
+            result
+                .entry(plugin_id_key(&manifest.plugin_id)?)
+                .or_insert(canonical);
         }
         Ok(result)
     }
@@ -445,7 +479,10 @@ impl PluginSyncService {
         let mut statuses = Vec::new();
         for plugin in plugins {
             let directory_name = archive::normalize_relative(
-                plugin.get("directoryName").and_then(Value::as_str).unwrap_or(""),
+                plugin
+                    .get("directoryName")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
                 SYNC_LABEL,
             )?;
             let id = plugin_id(plugin.get("pluginId").and_then(Value::as_str).unwrap_or(""))?;
@@ -483,7 +520,9 @@ impl PluginSyncService {
         let max = self.max_archive_bytes;
         let selected_bytes: u64 = selected.iter().map(|candidate| candidate.size_bytes).sum();
         if selected_bytes > max {
-            return Err(fsx::error(format!("plugin sync archive exceeds limit: {selected_bytes}/{max}")));
+            return Err(fsx::error(format!(
+                "plugin sync archive exceeds limit: {selected_bytes}/{max}"
+            )));
         }
         let describe = |candidate: &Candidate, with_id: bool| {
             let mut value = Map::new();
@@ -507,11 +546,15 @@ impl PluginSyncService {
                 archive_path: candidate.directory_name.clone(),
             });
         }
-        let metadata = json!({ "plugins": selected.iter().map(|c| describe(c, false)).collect::<Vec<_>>() });
+        let metadata =
+            json!({ "plugins": selected.iter().map(|c| describe(c, false)).collect::<Vec<_>>() });
         entries.push(Self::metadata_entry(&metadata));
         let archive = archive::create(Flavor::Plugin, entries).await?;
         if archive.len() as u64 > max {
-            return Err(fsx::error(format!("plugin sync archive exceeds limit: {}/{max}", archive.len())));
+            return Err(fsx::error(format!(
+                "plugin sync archive exceeds limit: {}/{max}",
+                archive.len()
+            )));
         }
         Ok(json!({
             "archive": bytes_value(&archive),
@@ -543,7 +586,9 @@ impl PluginSyncService {
                     }
                 }
                 let manifest_path = manifest_path.ok_or_else(|| {
-                    fsx::error(format!("marketplace manifest not found in directory: {root}"))
+                    fsx::error(format!(
+                        "marketplace manifest not found in directory: {root}"
+                    ))
                 })?;
                 Ok(Loaded {
                     manifest: read_marketplace(&manifest_path).await?,
@@ -554,7 +599,9 @@ impl PluginSyncService {
                 let marketplace = source
                     .get("marketplace")
                     .filter(|value| value.is_object())
-                    .ok_or_else(|| fsx::error("settings marketplace source is missing marketplace manifest"))?;
+                    .ok_or_else(|| {
+                        fsx::error("settings marketplace source is missing marketplace manifest")
+                    })?;
                 Ok(Loaded {
                     manifest: parse_marketplace(marketplace)?,
                     source_root: None,
@@ -575,8 +622,13 @@ impl PluginSyncService {
         let Some(plugin_root) = &loaded.manifest.plugin_root else {
             return Ok(source_root);
         };
-        let resolved = archive::resolve_within(&source_root, plugin_root, "unsafe marketplace pluginRoot")?;
-        Ok(if std::path::Path::new(&resolved).exists() { resolved } else { source_root })
+        let resolved =
+            archive::resolve_within(&source_root, plugin_root, "unsafe marketplace pluginRoot")?;
+        Ok(if std::path::Path::new(&resolved).exists() {
+            resolved
+        } else {
+            source_root
+        })
     }
 
     async fn assert_plugin_root(root: String) -> Result<String, RpcError> {
@@ -597,7 +649,10 @@ impl PluginSyncService {
     ) -> Result<String, RpcError> {
         let requested = required(source_path, label)?;
         let original = source_path.and_then(Value::as_str).unwrap_or("");
-        let relative = requested.strip_prefix("./").unwrap_or(&requested).to_owned();
+        let relative = requested
+            .strip_prefix("./")
+            .unwrap_or(&requested)
+            .to_owned();
         if loaded.source_root.is_none() && allow_absolute {
             if !fsx::is_absolute(&requested) {
                 return Err(fsx::error(format!(
@@ -608,7 +663,9 @@ impl PluginSyncService {
             if directory_exists(&absolute).await {
                 return Self::assert_plugin_root(absolute).await;
             }
-            return Err(fsx::error(format!("local marketplace plugin source does not exist: {original}")));
+            return Err(fsx::error(format!(
+                "local marketplace plugin source does not exist: {original}"
+            )));
         }
         if loaded.source_root.is_none() {
             return Err(fsx::error(format!(
@@ -620,7 +677,9 @@ impl PluginSyncService {
         if directory_exists(&path).await {
             return Self::assert_plugin_root(path).await;
         }
-        Err(fsx::error(format!("local marketplace plugin source does not exist: {original}")))
+        Err(fsx::error(format!(
+            "local marketplace plugin source does not exist: {original}"
+        )))
     }
 
     async fn local_fallback(loaded: &Loaded, entry: &MarketplaceEntry) -> Result<String, RpcError> {
@@ -635,16 +694,28 @@ impl PluginSyncService {
         if directory_exists(&path).await {
             return Self::assert_plugin_root(path).await;
         }
-        Err(fsx::error(format!("local marketplace plugin source does not exist: {path}")))
+        Err(fsx::error(format!(
+            "local marketplace plugin source does not exist: {path}"
+        )))
     }
 
     async fn mirror_entry(loaded: &Loaded, entry: &MarketplaceEntry) -> Result<Mirror, RpcError> {
         if is_remote_source(entry.source.as_ref()) {
-            return Ok(Mirror { entry: entry.clone(), source_path: None, relative_path: None });
+            return Ok(Mirror {
+                entry: entry.clone(),
+                source_path: None,
+                relative_path: None,
+            });
         }
         let source_path = match &entry.source {
             Some(Value::String(_)) => {
-                Self::local_source_path(loaded, entry.source.as_ref(), &format!("{} source", entry.name), false).await?
+                Self::local_source_path(
+                    loaded,
+                    entry.source.as_ref(),
+                    &format!("{} source", entry.name),
+                    false,
+                )
+                .await?
             }
             Some(Value::Object(source))
                 if source.get("source").and_then(Value::as_str) == Some("directory")
@@ -663,15 +734,28 @@ impl PluginSyncService {
         Ok(Mirror {
             entry: entry.clone(),
             source_path: Some(source_path),
-            relative_path: Some(format!("{MIRROR_ROOT}/{}", safe_directory_name(&entry.name))),
+            relative_path: Some(format!(
+                "{MIRROR_ROOT}/{}",
+                safe_directory_name(&entry.name)
+            )),
         })
     }
 
     pub async fn export_marketplace_source(&self, params: Value) -> Result<Value, RpcError> {
         let max = self.max_archive_bytes;
-        let marketplace_id = plugin_id(params.get("marketplaceId").and_then(Value::as_str).unwrap_or(""))?;
+        let marketplace_id = plugin_id(
+            params
+                .get("marketplaceId")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+        )?;
         let mut plugin_names: Vec<String> = Vec::new();
-        for name in params.get("pluginNames").and_then(Value::as_array).cloned().unwrap_or_default() {
+        for name in params
+            .get("pluginNames")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
             let name = required(Some(&name), "plugin name")?;
             if !plugin_names.contains(&name) {
                 plugin_names.push(name);
@@ -713,7 +797,9 @@ impl PluginSyncService {
                 None => Value::Null,
             });
         }
-        let hash_input = js::stringify(&json!({ "manifestContent": manifest_content, "sourceFingerprints": fingerprints }));
+        let hash_input = js::stringify(
+            &json!({ "manifestContent": manifest_content, "sourceFingerprints": fingerprints }),
+        );
         let directory_name = format!(
             "{}-{}",
             safe_directory_name(&marketplace_id),
@@ -758,7 +844,12 @@ impl PluginSyncService {
         js::parse(&raw).map_err(|message| RpcError::new("SyntaxError", message))
     }
 
-    async fn add_plugin_dir(&self, plugin_path: &str, id: &str, enabled: Option<bool>) -> Result<(), RpcError> {
+    async fn add_plugin_dir(
+        &self,
+        plugin_path: &str,
+        id: &str,
+        enabled: Option<bool>,
+    ) -> Result<(), RpcError> {
         let path = self.roots.cli_config_path();
         let resolved = fsx::resolve(plugin_path, &[]);
         let id = id.to_owned();
@@ -797,7 +888,10 @@ impl PluginSyncService {
         let bytes = bytes_param(params.get("archive"))?;
         let max = self.max_archive_bytes;
         if bytes.len() as u64 > max {
-            return Err(fsx::error(format!("plugin sync archive exceeds limit: {}/{max}", bytes.len())));
+            return Err(fsx::error(format!(
+                "plugin sync archive exceeds limit: {}/{max}",
+                bytes.len()
+            )));
         }
         let temp = fsx::join(
             &fsx::path_str(&std::env::temp_dir()),
@@ -811,7 +905,11 @@ impl PluginSyncService {
     async fn import_plugins_into(&self, bytes: &[u8], temp: &str) -> Result<Value, RpcError> {
         archive::extract(Flavor::Plugin, bytes, temp, Some(self.max_archive_bytes)).await?;
         let metadata = Self::read_metadata(temp).await?;
-        let Some(items) = metadata.as_object().and_then(|map| map.get("plugins")).and_then(Value::as_array) else {
+        let Some(items) = metadata
+            .as_object()
+            .and_then(|map| map.get("plugins"))
+            .and_then(Value::as_array)
+        else {
             return Err(fsx::error("invalid plugin sync archive metadata"));
         };
         let mut plugins = Vec::new();
@@ -825,7 +923,12 @@ impl PluginSyncService {
                 &required(item.get("directoryName"), "plugin metadata directory")?,
                 SYNC_LABEL,
             )?;
-            plugins.push((name, id, directory_name, item.get("enabled").and_then(Value::as_bool)));
+            plugins.push((
+                name,
+                id,
+                directory_name,
+                item.get("enabled").and_then(Value::as_bool),
+            ));
         }
         let target_root = self.plugin_root();
         let mut existing = self.configured_paths_by_id().await?;
@@ -895,7 +998,9 @@ impl PluginSyncService {
 
     pub async fn import_marketplace_source(&self, params: Value) -> Result<Value, RpcError> {
         if params.get("overwrite").is_some_and(truthy) {
-            return Err(fsx::error("plugin marketplace source overwrite is not supported"));
+            return Err(fsx::error(
+                "plugin marketplace source overwrite is not supported",
+            ));
         }
         let bytes = bytes_param(params.get("archive"))?;
         let max = self.max_archive_bytes;
@@ -907,7 +1012,10 @@ impl PluginSyncService {
         }
         let temp = fsx::join(
             &fsx::path_str(&std::env::temp_dir()),
-            &[&format!("zcode-plugin-marketplace-source-{}", fsx::random_uuid())],
+            &[&format!(
+                "zcode-plugin-marketplace-source-{}",
+                fsx::random_uuid()
+            )],
         );
         let result = self.import_marketplace_into(&bytes, &temp).await;
         let _ = fsx::remove_all(&temp).await;
@@ -922,15 +1030,22 @@ impl PluginSyncService {
             .and_then(|map| map.get("marketplaceSources"))
             .and_then(Value::as_array)
         else {
-            return Err(fsx::error("invalid plugin marketplace source archive metadata"));
+            return Err(fsx::error(
+                "invalid plugin marketplace source archive metadata",
+            ));
         };
         if sources.len() != 1 {
-            return Err(fsx::error("plugin marketplace source archive must contain one marketplace"));
+            return Err(fsx::error(
+                "plugin marketplace source archive must contain one marketplace",
+            ));
         }
         let Some(item) = sources[0].as_object() else {
             return Err(fsx::error("invalid plugin marketplace source metadata"));
         };
-        let marketplace_id = plugin_id(&required(item.get("marketplaceId"), "marketplace source id")?)?;
+        let marketplace_id = plugin_id(&required(
+            item.get("marketplaceId"),
+            "marketplace source id",
+        )?)?;
         let directory_name = archive::normalize_relative(
             &required(item.get("directoryName"), "marketplace source directory")?,
             SYNC_LABEL,
@@ -946,7 +1061,9 @@ impl PluginSyncService {
         let target_root = fsx::join(&self.plugin_root(), &[MARKETPLACE_SOURCES_DIR]);
         let target = archive::resolve_within(&target_root, &directory_name, SYNC_LABEL)?;
         if std::path::Path::new(&target).exists() {
-            return Ok(json!({ "marketplaceId": marketplace_id, "path": target, "status": "skipped" }));
+            return Ok(
+                json!({ "marketplaceId": marketplace_id, "path": target, "status": "skipped" }),
+            );
         }
         fsx::mkdirp(&fsx::dirname(&target)).await?;
         fsx::copy_recursive(&extracted, &target, false).await?;
@@ -954,7 +1071,10 @@ impl PluginSyncService {
     }
 
     pub async fn check_write_access(&self) -> Value {
-        let directories = [self.plugin_root(), fsx::dirname(&self.roots.cli_config_path())];
+        let directories = [
+            self.plugin_root(),
+            fsx::dirname(&self.roots.cli_config_path()),
+        ];
         for directory in &directories {
             let result = check_write_access(directory).await;
             if result["ok"] != true {
@@ -966,7 +1086,11 @@ impl PluginSyncService {
 }
 
 /// `resolveMarketplacePluginClosure`：选中插件及其同市场依赖（深度优先，去重）。
-fn closure(manifest: &Marketplace, marketplace_id: &str, names: &[String]) -> Result<Vec<MarketplaceEntry>, RpcError> {
+fn closure(
+    manifest: &Marketplace,
+    marketplace_id: &str,
+    names: &[String],
+) -> Result<Vec<MarketplaceEntry>, RpcError> {
     let mut by_name: HashMap<String, MarketplaceEntry> = HashMap::new();
     for entry in &manifest.plugins {
         by_name.insert(entry.name.clone(), entry.clone());
@@ -1002,12 +1126,26 @@ fn closure(manifest: &Marketplace, marketplace_id: &str, names: &[String]) -> Re
                     )));
                 }
             };
-            visit(&dependency_name, &entry.name, marketplace_id, by_name, visited, result)?;
+            visit(
+                &dependency_name,
+                &entry.name,
+                marketplace_id,
+                by_name,
+                visited,
+                result,
+            )?;
         }
         Ok(())
     }
     for name in names {
-        visit(name, name, marketplace_id, &by_name, &mut visited, &mut result)?;
+        visit(
+            name,
+            name,
+            marketplace_id,
+            &by_name,
+            &mut visited,
+            &mut result,
+        )?;
     }
     Ok(result)
 }
@@ -1018,7 +1156,11 @@ fn mirrored_manifest(manifest: &Marketplace, mirrors: &[Mirror]) -> Value {
     let mut result = manifest.raw.clone();
     js::delete(&mut result, "pluginRoot");
     result.insert("name".into(), json!(manifest.name));
-    if let Some(description) = manifest.description.as_ref().filter(|text| !text.is_empty()) {
+    if let Some(description) = manifest
+        .description
+        .as_ref()
+        .filter(|text| !text.is_empty())
+    {
         result.insert("description".into(), json!(description));
     }
     if has_mirrored {
@@ -1045,27 +1187,42 @@ fn mirrored_manifest(manifest: &Marketplace, mirrors: &[Mirror]) -> Value {
 
 pub fn service(sync: PluginSyncService) -> ServiceBuilder {
     let builder = ServiceBuilder::new(CHANNEL);
-    let builder = bind(builder, "listLocalUserPluginCandidates", &sync, |s, _| async move {
-        s.list_local_candidates().await.map(Reply::Value)
-    });
-    let builder = bind(builder, "listRemoteUserPluginStatuses", &sync, |s, p| async move {
-        s.list_remote_statuses(p).await.map(Reply::Value)
-    });
+    let builder = bind(
+        builder,
+        "listLocalUserPluginCandidates",
+        &sync,
+        |s, _| async move { s.list_local_candidates().await.map(Reply::Value) },
+    );
+    let builder = bind(
+        builder,
+        "listRemoteUserPluginStatuses",
+        &sync,
+        |s, p| async move { s.list_remote_statuses(p).await.map(Reply::Value) },
+    );
     let builder = bind(builder, "exportPluginsArchive", &sync, |s, p| async move {
         s.export_plugins(p).await.map(Reply::Value)
     });
-    let builder = bind(builder, "exportMarketplaceSourceArchive", &sync, |s, p| async move {
-        s.export_marketplace_source(p).await.map(Reply::Value)
-    });
+    let builder = bind(
+        builder,
+        "exportMarketplaceSourceArchive",
+        &sync,
+        |s, p| async move { s.export_marketplace_source(p).await.map(Reply::Value) },
+    );
     let builder = bind(builder, "importPluginsArchive", &sync, |s, p| async move {
         s.import_plugins(p).await.map(Reply::Value)
     });
-    let builder = bind(builder, "checkRemoteUserPluginWriteAccess", &sync, |s, _| async move {
-        Ok(Reply::Value(s.check_write_access().await))
-    });
-    bind(builder, "importMarketplaceSourceArchive", &sync, |s, p| async move {
-        s.import_marketplace_source(p).await.map(Reply::Value)
-    })
+    let builder = bind(
+        builder,
+        "checkRemoteUserPluginWriteAccess",
+        &sync,
+        |s, _| async move { Ok(Reply::Value(s.check_write_access().await)) },
+    );
+    bind(
+        builder,
+        "importMarketplaceSourceArchive",
+        &sync,
+        |s, p| async move { s.import_marketplace_source(p).await.map(Reply::Value) },
+    )
 }
 
 #[cfg(all(test, unix))]
@@ -1114,9 +1271,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(imported["results"][0]["status"], "synced", "{imported}");
-        let config = std::fs::read_to_string(remote_home.path().join(".zcode/cli/config.json")).unwrap();
+        let config =
+            std::fs::read_to_string(remote_home.path().join(".zcode/cli/config.json")).unwrap();
         let config: Value = serde_json::from_str(&config).unwrap();
-        assert_eq!(config["plugins"]["enabledPlugins"]["my-plugin@inline"], false);
+        assert_eq!(
+            config["plugins"]["enabledPlugins"]["my-plugin@inline"],
+            false
+        );
         assert_eq!(config["plugins"]["dirs"].as_array().unwrap().len(), 1);
         let again = remote
             .import_plugins(json!({ "archive": exported["archive"] }))
@@ -1154,7 +1315,11 @@ mod tests {
             .unwrap();
         assert_eq!(imported["status"], "synced");
         let manifest: Value = serde_json::from_str(
-            &std::fs::read_to_string(format!("{}/marketplace.json", imported["path"].as_str().unwrap())).unwrap(),
+            &std::fs::read_to_string(format!(
+                "{}/marketplace.json",
+                imported["path"].as_str().unwrap()
+            ))
+            .unwrap(),
         )
         .unwrap();
         assert_eq!(manifest["metadata"]["pluginRoot"], "plugins");

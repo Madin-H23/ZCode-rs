@@ -82,14 +82,17 @@ fn starts_with_heading(line: &str) -> bool {
     }
     let rest = &line[hashes..];
     let spaces = rest.len() - rest.trim_start().len();
-    spaces > 0 && rest.trim_start().chars().next().is_some_and(|c| !c.is_whitespace())
+    spaces > 0
+        && rest
+            .trim_start()
+            .chars()
+            .next()
+            .is_some_and(|c| !c.is_whitespace())
 }
 
 fn loose_inline(value: &str) -> String {
     let trimmed = js_trim(value);
-    let trimmed = trimmed
-        .strip_prefix(['"', '\''])
-        .unwrap_or(trimmed);
+    let trimmed = trimmed.strip_prefix(['"', '\'']).unwrap_or(trimmed);
     trimmed
         .strip_suffix(['"', '\''])
         .unwrap_or(trimmed)
@@ -157,9 +160,7 @@ fn yaml_unsafe_loose_field(text: &str) -> bool {
             return false;
         }
         let raw = js_trim(&line[colon + 1..]);
-        !(raw.is_empty()
-            || raw.starts_with(['"', '\'', '|', '>']))
-            && raw.contains(": ")
+        !(raw.is_empty() || raw.starts_with(['"', '\'', '|', '>'])) && raw.contains(": ")
     })
 }
 
@@ -483,9 +484,13 @@ impl SkillsService {
                 zcode_name_keys.insert(read_name_key(&path).await);
             }
         }
-        let scan_paths =
-            Self::dedupe_scan_roots(&roots.iter().map(|root| root.root_path.clone()).collect::<Vec<_>>())
-                .await;
+        let scan_paths = Self::dedupe_scan_roots(
+            &roots
+                .iter()
+                .map(|root| root.root_path.clone())
+                .collect::<Vec<_>>(),
+        )
+        .await;
         // `new Map(roots.map(...))`：同一路径后出现的描述覆盖先出现的。
         let mut by_path: HashMap<String, RootDescriptor> = HashMap::new();
         for root in &roots {
@@ -533,7 +538,11 @@ impl SkillsService {
                 } else {
                     folder.clone()
                 };
-                let name = if raw_name.is_empty() { folder } else { raw_name };
+                let name = if raw_name.is_empty() {
+                    folder
+                } else {
+                    raw_name
+                };
                 if name.is_empty() {
                     diagnostics.push(diagnostic(
                         "skill_missing_name",
@@ -552,7 +561,9 @@ impl SkillsService {
                     let mut entry = diagnostic(
                         "skill_description_too_long",
                         "error",
-                        format!("Skill description is too long (>{MAX_DESCRIPTION_LENGTH}): {name}"),
+                        format!(
+                            "Skill description is too long (>{MAX_DESCRIPTION_LENGTH}): {name}"
+                        ),
                         &skill_path,
                     );
                     entry["skillName"] = json!(name);
@@ -909,7 +920,8 @@ mod tests {
 
     #[test]
     fn frontmatter_matches_typescript_rules() {
-        let parsed = read_frontmatter("---\r\nname: demo\r\ndescription: Does things\r\n---\r\nBody\r\n");
+        let parsed =
+            read_frontmatter("---\r\nname: demo\r\ndescription: Does things\r\n---\r\nBody\r\n");
         assert_eq!(parsed.name, "demo");
         assert_eq!(parsed.description, "Does things");
         assert_eq!(parsed.body, "Body");
@@ -940,8 +952,8 @@ mod tests {
 
     #[test]
     fn enabled_map_round_trip() {
-        let mut config = js::parse_record(r#"{"skills":{"/b/SKILL.md":{"enable":false,"x":1}}}"#)
-            .unwrap();
+        let mut config =
+            js::parse_record(r#"{"skills":{"/b/SKILL.md":{"enable":false,"x":1}}}"#).unwrap();
         let mut map = SkillsService::enabled_map(&config);
         map.insert("/a/SKILL.md".into(), false);
         write_enabled_map(&mut config, map);

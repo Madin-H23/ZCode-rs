@@ -81,10 +81,7 @@ pub async fn update_cli_config_lenient<T>(
             .unwrap_or_default();
         let (write, value) = mutate(&mut config);
         Ok(if write {
-            cli_config::Update::Write(
-                json::pretty_line(&serde_json::Value::Object(config)),
-                value,
-            )
+            cli_config::Update::Write(json::pretty_line(&serde_json::Value::Object(config)), value)
         } else {
             cli_config::Update::Skip(value)
         })
@@ -120,7 +117,10 @@ pub fn bytes_param(value: Option<&Value>) -> Result<Vec<u8>, RpcError> {
     let invalid = || zcode_host_kit::args::invalid_argument("archive", "expected Uint8Array");
     match value {
         Some(Value::Object(map)) if map.get(NESTED_BYTES_MARKER) == Some(&Value::Bool(true)) => {
-            let text = map.get("base64").and_then(Value::as_str).ok_or_else(invalid)?;
+            let text = map
+                .get("base64")
+                .and_then(Value::as_str)
+                .ok_or_else(invalid)?;
             crate::agent::wire::decode_base64(text).ok_or_else(invalid)
         }
         Some(Value::Object(map)) => (0..map.len())
@@ -187,4 +187,48 @@ pub async fn check_write_access(directory: &str) -> Value {
             serde_json::json!({ "ok": false, "path": directory, "error": error.message })
         }
     }
+}
+
+/// 注册 R5 的 9 个 channel，并把 Subagent 的旧覆盖迁移挂到 CLI 启动前（spawn 环境阶段）。
+pub fn install(
+    registry: &mut zcode_host_kit::ChannelRegistry,
+    agent: &crate::agent::AgentRuntime,
+    roots: Roots,
+) {
+    let runtime = Some(agent.clone());
+    registry.implement(skills::service(skills::SkillsService::new(roots.clone())));
+    registry.implement(skill_sync::service(skill_sync::SkillSyncService::new(
+        roots.clone(),
+    )));
+    registry.implement(plugins::service());
+    registry.implement(plugin_sync::service(plugin_sync::PluginSyncService::new(
+        roots.clone(),
+    )));
+    registry.implement(commands::service(commands::CommandsService::new(
+        roots.clone(),
+    )));
+    registry.implement(memory::service(memory::MemoryService::new(
+        &roots.data_root,
+    )));
+    registry.implement(hooks::service(hooks::HooksService::new(
+        roots.clone(),
+        runtime.clone(),
+    )));
+    registry.implement(mcp_sync::service(mcp_sync::McpSyncService::new(
+        roots.clone(),
+        runtime,
+    )));
+    let subagents = subagents::SubagentsService::new(roots);
+    registry.implement(subagents::service(subagents.clone()));
+    // Node `resolveSpawnEnv` 在每次启动 CLI 前 await `prepareRuntimeState`：CLI 独立读取 agents
+    // 目录与状态文件，必须先完成旧覆盖的导入。贡献的环境为空，只借用这个时机。
+    agent
+        .extensions()
+        .add_env_contributor(std::sync::Arc::new(move |_target| {
+            let subagents = subagents.clone();
+            Box::pin(async move {
+                subagents.prepare_runtime_state().await;
+                std::collections::BTreeMap::new()
+            })
+        }));
 }

@@ -174,7 +174,7 @@ pub fn record(value: Option<&Value>) -> Map<String, Value> {
 }
 
 /// `typeof value === "string" ? value : undefined`。
-pub fn str_of<'a>(value: Option<&'a Value>) -> Option<&'a str> {
+pub fn str_of(value: Option<&Value>) -> Option<&str> {
     value.and_then(Value::as_str)
 }
 

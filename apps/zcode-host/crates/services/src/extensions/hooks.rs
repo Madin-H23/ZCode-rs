@@ -57,7 +57,8 @@ fn valid_hook(hook: &Value) -> bool {
         Some("process") => {
             common
                 && hook.get("args").is_none_or(|args| {
-                    args.as_array().is_some_and(|items| items.iter().all(Value::is_string))
+                    args.as_array()
+                        .is_some_and(|items| items.iter().all(Value::is_string))
                 })
         }
         Some("command") => {
@@ -65,7 +66,8 @@ fn valid_hook(hook: &Value) -> bool {
                 && optional_bool(hook.get("async"))
                 && positive(hook.get("timeout"))
                 && hook.get("shell").is_none_or(|shell| {
-                    *shell == Value::Bool(true) || shell.as_str().is_some_and(|text| !text.is_empty())
+                    *shell == Value::Bool(true)
+                        || shell.as_str().is_some_and(|text| !text.is_empty())
                 })
         }
         _ => false,
@@ -89,9 +91,12 @@ pub fn valid_hooks_config(value: Option<&Value>) -> bool {
     let Some(root) = value.and_then(Value::as_object) else {
         return false;
     };
-    let keys_ok = root
-        .keys()
-        .all(|key| matches!(key.as_str(), "enabled" | "timeoutMs" | "maxOutputBytes" | "events"));
+    let keys_ok = root.keys().all(|key| {
+        matches!(
+            key.as_str(),
+            "enabled" | "timeoutMs" | "maxOutputBytes" | "events"
+        )
+    });
     let events_ok = root.get("events").is_none_or(|events| {
         events.as_object().is_some_and(|events| {
             events.iter().all(|(name, matchers)| {
@@ -122,7 +127,13 @@ struct Source {
     hooks: Map<String, Value>,
 }
 
-fn source_input(path: &str, working_directory: &str, hooks: Map<String, Value>, order: usize, explicit: bool) -> Source {
+fn source_input(
+    path: &str,
+    working_directory: &str,
+    hooks: Map<String, Value>,
+    order: usize,
+    explicit: bool,
+) -> Source {
     let canonical = fsx::resolve(path, &[]);
     let directory = fsx::dirname(&canonical);
     let base_dir = if fsx::basename(&directory) == ".zcode" {
@@ -138,7 +149,8 @@ fn source_input(path: &str, working_directory: &str, hooks: Map<String, Value>, 
         ".zcode/config.json"
     };
     Source {
-        editable: !explicit && canonical == fsx::resolve(working_directory, &[".zcode", "config.json"]),
+        editable: !explicit
+            && canonical == fsx::resolve(working_directory, &[".zcode", "config.json"]),
         canonical_path: canonical,
         base_dir,
         discovery_order: order,
@@ -188,7 +200,11 @@ fn hook_timeout_ms(hook: &Map<String, Value>, default: f64) -> f64 {
         .and_then(Value::as_f64)
         .or_else(|| {
             (hook.get("type") == Some(&json!("command")))
-                .then(|| hook.get("timeout").and_then(Value::as_f64).map(|t| t * 1000.0))
+                .then(|| {
+                    hook.get("timeout")
+                        .and_then(Value::as_f64)
+                        .map(|t| t * 1000.0)
+                })
                 .flatten()
         })
         .unwrap_or(default);
@@ -211,8 +227,13 @@ fn optional_payload(value: Option<&Value>) -> Value {
 }
 
 fn relative_source_path(workspace: &str, source: &str) -> String {
-    let relative = fsx::relative(&fsx::resolve(workspace, &[]), &fsx::resolve(source, &[])).replace('\\', "/");
-    if relative.is_empty() { fsx::basename(source) } else { relative }
+    let relative =
+        fsx::relative(&fsx::resolve(workspace, &[]), &fsx::resolve(source, &[])).replace('\\', "/");
+    if relative.is_empty() {
+        fsx::basename(source)
+    } else {
+        relative
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -225,16 +246,30 @@ struct Slot<'a> {
     hook_index: usize,
 }
 
-fn declaration_digest(hook: &Map<String, Value>, slot: &Slot, default_timeout: f64, max_output: f64) -> String {
+fn declaration_digest(
+    hook: &Map<String, Value>,
+    slot: &Slot,
+    default_timeout: f64,
+    max_output: f64,
+) -> String {
     let execution = if hook.get("type") == Some(&json!("process")) {
-        json!(["process", hook.get("command"), hook.get("args").cloned().unwrap_or(json!([]))])
+        json!([
+            "process",
+            hook.get("command"),
+            hook.get("args").cloned().unwrap_or(json!([]))
+        ])
     } else {
         let shell = match hook.get("shell") {
             None => json!(["unset"]),
             Some(Value::Bool(true)) => json!(["true"]),
             Some(other) => json!(["string", other]),
         };
-        json!(["command", hook.get("command"), hook.get("async") == Some(&Value::Bool(true)), shell])
+        json!([
+            "command",
+            hook.get("command"),
+            hook.get("async") == Some(&Value::Bool(true)),
+            shell
+        ])
     };
     sha256(&json!([
         "workspace-hook-declaration",
@@ -268,10 +303,18 @@ fn entries(workspace: &str, sources: &[Source], root: RuntimeRoot) -> Vec<HookEn
         let source_enabled = source.hooks.get("enabled") != Some(&Value::Bool(false));
         let events = js::record(source.hooks.get("events"));
         for event in EVENTS {
-            let matchers = events.get(event).and_then(Value::as_array).cloned().unwrap_or_default();
+            let matchers = events
+                .get(event)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
             for (matcher_index, matcher) in matchers.iter().enumerate() {
                 let matcher_value = matcher.get("matcher").cloned().unwrap_or(Value::Null);
-                let hooks = matcher.get("hooks").and_then(Value::as_array).cloned().unwrap_or_default();
+                let hooks = matcher
+                    .get("hooks")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
                 for (hook_index, hook) in hooks.iter().enumerate() {
                     let Some(hook) = hook.as_object() else {
                         continue;
@@ -286,11 +329,14 @@ fn entries(workspace: &str, sources: &[Source], root: RuntimeRoot) -> Vec<HookEn
                         matcher_index,
                         hook_index,
                     };
-                    let digest = declaration_digest(hook, &slot, root.timeout_ms, root.max_output_bytes);
+                    let digest =
+                        declaration_digest(hook, &slot, root.timeout_ms, root.max_output_bytes);
                     let mut value = Map::new();
                     value.insert(
                         "reviewItemId".into(),
-                        json!(format!("workspace-hook-{source_index}-{event}-{matcher_index}-{hook_index}")),
+                        json!(format!(
+                            "workspace-hook-{source_index}-{event}-{matcher_index}-{hook_index}"
+                        )),
                     );
                     value.insert("event".into(), json!(event));
                     value.insert("matcherIndex".into(), json!(matcher_index));
@@ -298,9 +344,18 @@ fn entries(workspace: &str, sources: &[Source], root: RuntimeRoot) -> Vec<HookEn
                     value.insert("sourceFileIndex".into(), json!(source_index));
                     value.insert("sourceRelativePath".into(), json!(relative));
                     value.insert("matcher".into(), matcher_value.clone());
-                    value.insert("command".into(), hook.get("command").cloned().unwrap_or(Value::Null));
-                    value.insert("resolvedTimeoutMs".into(), number(hook_timeout_ms(hook, root.timeout_ms)));
-                    value.insert("resolvedMaxOutputBytes".into(), number(root.max_output_bytes));
+                    value.insert(
+                        "command".into(),
+                        hook.get("command").cloned().unwrap_or(Value::Null),
+                    );
+                    value.insert(
+                        "resolvedTimeoutMs".into(),
+                        number(hook_timeout_ms(hook, root.timeout_ms)),
+                    );
+                    value.insert(
+                        "resolvedMaxOutputBytes".into(),
+                        number(root.max_output_bytes),
+                    );
                     if let Some(message) = hook.get("statusMessage").filter(|value| truthy(value)) {
                         value.insert("statusMessage".into(), message.clone());
                     }
@@ -313,7 +368,11 @@ fn entries(workspace: &str, sources: &[Source], root: RuntimeRoot) -> Vec<HookEn
                     value.insert("hookDeclarationDigest".into(), json!(digest));
                     if hook.get("type") == Some(&json!("process")) {
                         value.insert("type".into(), json!("process"));
-                        if let Some(args) = hook.get("args").and_then(Value::as_array).filter(|args| !args.is_empty()) {
+                        if let Some(args) = hook
+                            .get("args")
+                            .and_then(Value::as_array)
+                            .filter(|args| !args.is_empty())
+                        {
                             value.insert("args".into(), Value::Array(args.clone()));
                         }
                     } else {
@@ -325,7 +384,13 @@ fn entries(workspace: &str, sources: &[Source], root: RuntimeRoot) -> Vec<HookEn
                             value.insert("shell".into(), shell.clone());
                         }
                     }
-                    result.push(HookEntry { value, event, matcher_index, hook_index, source_index });
+                    result.push(HookEntry {
+                        value,
+                        event,
+                        matcher_index,
+                        hook_index,
+                        source_index,
+                    });
                 }
             }
         }
@@ -334,11 +399,19 @@ fn entries(workspace: &str, sources: &[Source], root: RuntimeRoot) -> Vec<HookEn
 }
 
 fn digest_of(entry: &HookEntry) -> String {
-    entry.value["hookDeclarationDigest"].as_str().unwrap_or("").to_owned()
+    entry.value["hookDeclarationDigest"]
+        .as_str()
+        .unwrap_or("")
+        .to_owned()
 }
 
 /// `buildWorkspaceHookBundleSnapshot`：没有任何 hook 时为 `None`。
-fn snapshot(identity: &str, workspace: &str, sources: &[Source], entries: &[HookEntry]) -> Option<Value> {
+fn snapshot(
+    identity: &str,
+    workspace: &str,
+    sources: &[Source],
+    entries: &[HookEntry],
+) -> Option<Value> {
     if entries.is_empty() {
         return None;
     }
@@ -409,7 +482,17 @@ fn iso_now() -> String {
 
 // ── Hook 投影（workspaceHookSettingsModel.ts） ──
 
-const KNOWN_FIELDS: [&str; 9] = ["type", "command", "args", "async", "enabled", "shell", "statusMessage", "timeout", "timeoutMs"];
+const KNOWN_FIELDS: [&str; 9] = [
+    "type",
+    "command",
+    "args",
+    "async",
+    "enabled",
+    "shell",
+    "statusMessage",
+    "timeout",
+    "timeoutMs",
+];
 
 fn custom_fields(hook: &Map<String, Value>) -> Option<Value> {
     let custom: Map<String, Value> = hook
@@ -422,7 +505,12 @@ fn custom_fields(hook: &Map<String, Value>) -> Option<Value> {
 
 fn configured_state(entry: &HookEntry, source_path: &str) -> Map<String, Value> {
     let mut state = Map::new();
-    for key in ["sourceRootEnabled", "declarationEnabled", "runtimeHooksEnabled", "configuredEnabled"] {
+    for key in [
+        "sourceRootEnabled",
+        "declarationEnabled",
+        "runtimeHooksEnabled",
+        "configuredEnabled",
+    ] {
         state.insert(key.into(), entry.value[key].clone());
     }
     state.insert("sourcePath".into(), json!(source_path));
@@ -440,7 +528,13 @@ fn raw_hook<'a>(source: &'a Source, entry: &HookEntry) -> Option<&'a Map<String,
         .as_object()
 }
 
-fn to_hook(entry: &HookEntry, source: &Source, id: String, location: Value, workspace_hook: Option<Map<String, Value>>) -> Value {
+fn to_hook(
+    entry: &HookEntry,
+    source: &Source,
+    id: String,
+    location: Value,
+    workspace_hook: Option<Map<String, Value>>,
+) -> Value {
     let raw = raw_hook(source, entry).cloned().unwrap_or_default();
     let state = configured_state(entry, &source.canonical_path);
     let mut hook = Map::new();
@@ -453,7 +547,10 @@ fn to_hook(entry: &HookEntry, source: &Source, id: String, location: Value, work
     hook.insert("type".into(), kind.clone());
     hook.insert("command".into(), entry.value["command"].clone());
     if kind == "process" {
-        hook.insert("args".into(), entry.value.get("args").cloned().unwrap_or(json!([])));
+        hook.insert(
+            "args".into(),
+            entry.value.get("args").cloned().unwrap_or(json!([])),
+        );
     }
     if kind == "command" {
         if let Some(value) = entry.value.get("async") {
@@ -470,7 +567,11 @@ fn to_hook(entry: &HookEntry, source: &Source, id: String, location: Value, work
         .get("timeout")
         .filter(|_| raw.get("type") == Some(&json!("command")))
         .cloned()
-        .or_else(|| raw.get("timeoutMs").and_then(Value::as_f64).map(|ms| number(js_round(ms) / 1000.0)));
+        .or_else(|| {
+            raw.get("timeoutMs")
+                .and_then(Value::as_f64)
+                .map(|ms| number(js_round(ms) / 1000.0))
+        });
     if let Some(timeout) = timeout {
         hook.insert("timeout".into(), timeout);
     }
@@ -498,7 +599,9 @@ fn legacy_hooks(config: Option<&Map<String, Value>>, location: &Value) -> Vec<Va
     let mut counter = 0usize;
     let source = location["source"].as_str().unwrap_or("");
     let scope = location["scope"].as_str().unwrap_or("");
-    let events = config.map(|config| js::record(config.get("hooks"))).unwrap_or_default();
+    let events = config
+        .map(|config| js::record(config.get("hooks")))
+        .unwrap_or_default();
     for (event, matchers) in &events {
         if !EVENTS.contains(&event.as_str()) {
             continue;
@@ -507,13 +610,23 @@ fn legacy_hooks(config: Option<&Map<String, Value>>, location: &Value) -> Vec<Va
             continue;
         };
         for matcher in matchers {
-            for hook in matcher.get("hooks").and_then(Value::as_array).into_iter().flatten() {
+            for hook in matcher
+                .get("hooks")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
                 let kind = hook.get("type").and_then(Value::as_str);
-                if !matches!(kind, Some("command" | "process")) || !hook.get("command").is_some_and(truthy) {
+                if !matches!(kind, Some("command" | "process"))
+                    || !hook.get("command").is_some_and(truthy)
+                {
                     continue;
                 }
                 let mut value = Map::new();
-                value.insert("id".into(), json!(format!("hook-{source}-{scope}-{counter}")));
+                value.insert(
+                    "id".into(),
+                    json!(format!("hook-{source}-{scope}-{counter}")),
+                );
                 counter += 1;
                 value.insert("event".into(), json!(event));
                 if let Some(matcher) = matcher.get("matcher") {
@@ -522,7 +635,13 @@ fn legacy_hooks(config: Option<&Map<String, Value>>, location: &Value) -> Vec<Va
                 value.insert("type".into(), json!(kind));
                 value.insert("command".into(), hook["command"].clone());
                 if kind == Some("process") {
-                    value.insert("args".into(), hook.get("args").filter(|v| !v.is_null()).cloned().unwrap_or(json!([])));
+                    value.insert(
+                        "args".into(),
+                        hook.get("args")
+                            .filter(|v| !v.is_null())
+                            .cloned()
+                            .unwrap_or(json!([])),
+                    );
                 }
                 for key in ["async", "shell"] {
                     if let Some(item) = hook.get(key) {
@@ -536,7 +655,11 @@ fn legacy_hooks(config: Option<&Map<String, Value>>, location: &Value) -> Vec<Va
                     .get("timeout")
                     .filter(|value| !value.is_null())
                     .cloned()
-                    .or_else(|| hook.get("timeoutMs").and_then(Value::as_f64).map(|ms| number(js_round(ms / 1000.0))));
+                    .or_else(|| {
+                        hook.get("timeoutMs")
+                            .and_then(Value::as_f64)
+                            .map(|ms| number(js_round(ms / 1000.0)))
+                    });
                 if let Some(timeout) = timeout {
                     value.insert("timeout".into(), timeout);
                 }
@@ -555,12 +678,22 @@ fn to_events(hooks: &[Value]) -> Value {
     let mut events: Map<String, Value> = Map::new();
     let mut matcher_keys: Vec<(String, Vec<Option<Value>>)> = Vec::new();
     for hook in hooks {
-        let event = hook.get("event").and_then(Value::as_str).unwrap_or("").to_owned();
-        let matcher = hook.get("matcher").filter(|value| !value.is_null()).cloned();
+        let event = hook
+            .get("event")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let matcher = hook
+            .get("matcher")
+            .filter(|value| !value.is_null())
+            .cloned();
         let index = matcher_keys.iter().position(|(name, _)| *name == event);
         let (keys_index, position) = match index {
             Some(index) => {
-                let position = matcher_keys[index].1.iter().position(|key| strict_equal(key.as_ref(), matcher.as_ref()));
+                let position = matcher_keys[index]
+                    .1
+                    .iter()
+                    .position(|key| strict_equal(key.as_ref(), matcher.as_ref()));
                 (index, position)
             }
             None => {
@@ -584,7 +717,10 @@ fn to_events(hooks: &[Value]) -> Value {
                 list.len() - 1
             }
         };
-        if let Some(group_hooks) = list[position].get_mut("hooks").and_then(Value::as_array_mut) {
+        if let Some(group_hooks) = list[position]
+            .get_mut("hooks")
+            .and_then(Value::as_array_mut)
+        {
             group_hooks.push(writable_hook(hook));
         }
     }
@@ -605,14 +741,21 @@ fn strict_equal(left: Option<&Value>, right: Option<&Value>) -> bool {
 /// `getWritableHook`。
 fn writable_hook(hook: &Value) -> Value {
     let mut out = js::record(hook.get("custom"));
-    out.insert("type".into(), hook.get("type").cloned().unwrap_or(Value::Null));
-    out.insert("command".into(), hook.get("command").cloned().unwrap_or(Value::Null));
+    out.insert(
+        "type".into(),
+        hook.get("type").cloned().unwrap_or(Value::Null),
+    );
+    out.insert(
+        "command".into(),
+        hook.get("command").cloned().unwrap_or(Value::Null),
+    );
     let enabled = hook.get("enabled").cloned().unwrap_or(Value::Null);
     let declaration = match hook.get("configuredState").and_then(Value::as_object) {
         None => enabled.clone(),
-        Some(state) if state.get("configuredEnabled") == Some(&enabled) => {
-            state.get("declarationEnabled").cloned().unwrap_or(Value::Null)
-        }
+        Some(state) if state.get("configuredEnabled") == Some(&enabled) => state
+            .get("declarationEnabled")
+            .cloned()
+            .unwrap_or(Value::Null),
         Some(_) => enabled.clone(),
     };
     out.insert("enabled".into(), declaration);
@@ -631,7 +774,11 @@ fn writable_hook(hook: &Value) -> Value {
             out.insert("timeout".into(), timeout.clone());
         }
     } else {
-        if let Some(args) = hook.get("args").and_then(Value::as_array).filter(|args| !args.is_empty()) {
+        if let Some(args) = hook
+            .get("args")
+            .and_then(Value::as_array)
+            .filter(|args| !args.is_empty())
+        {
             out.insert("args".into(), Value::Array(args.clone()));
         }
         if let Some(timeout) = timeout.and_then(Value::as_f64) {
@@ -651,7 +798,11 @@ fn next_root_enabled(existing: Option<&Value>, hooks: &[Value]) -> Option<Value>
                 .and_then(Value::as_object)
                 .is_none_or(|state| state.get("configuredEnabled") != hook.get("enabled"))
     });
-    if enables { Some(json!(true)) } else { existing.cloned() }
+    if enables {
+        Some(json!(true))
+    } else {
+        existing.cloned()
+    }
 }
 
 // ── 服务 ──
@@ -668,7 +819,9 @@ impl HooksService {
     }
 
     fn root_dir(&self, source: &str, workspace: Option<&str>) -> String {
-        let base = workspace.map(str::to_owned).unwrap_or_else(|| self.roots.home.clone());
+        let base = workspace
+            .map(str::to_owned)
+            .unwrap_or_else(|| self.roots.home.clone());
         match (source, workspace) {
             ("zcode", Some(_)) => fsx::join(&base, &[".zcode"]),
             ("zcode", None) => fsx::join(&base, &[".zcode", "cli"]),
@@ -678,15 +831,29 @@ impl HooksService {
     }
 
     fn config_path(&self, source: &str, workspace: Option<&str>) -> String {
-        let file = if source == "zcode" { "config.json" } else { "settings.json" };
+        let file = if source == "zcode" {
+            "config.json"
+        } else {
+            "settings.json"
+        };
         fsx::join(&self.root_dir(source, workspace), &[file])
     }
 
     fn location(&self, source: &str, workspace: Option<&str>) -> Value {
         let mut location = Map::new();
         location.insert("source".into(), json!(source));
-        location.insert("scope".into(), json!(if workspace.is_some() { "project" } else { "user" }));
-        location.insert("directoryPath".into(), json!(self.root_dir(source, workspace)));
+        location.insert(
+            "scope".into(),
+            json!(if workspace.is_some() {
+                "project"
+            } else {
+                "user"
+            }),
+        );
+        location.insert(
+            "directoryPath".into(),
+            json!(self.root_dir(source, workspace)),
+        );
         if let Some(workspace) = workspace {
             location.insert("projectPath".into(), json!(workspace));
         }
@@ -722,7 +889,10 @@ impl HooksService {
         let mut refs: Vec<String> = Vec::new();
         let mut seen = HashSet::new();
         for directory in Self::project_directories(&start).await {
-            for candidate in [fsx::join(&directory, &["zcode.json"]), fsx::join(&directory, &[".zcode", "config.json"])] {
+            for candidate in [
+                fsx::join(&directory, &["zcode.json"]),
+                fsx::join(&directory, &[".zcode", "config.json"]),
+            ] {
                 if fsx::exists(&candidate).await && seen.insert(fsx::resolve(&candidate, &[])) {
                     refs.push(candidate);
                 }
@@ -742,7 +912,13 @@ impl HooksService {
             if !valid_hooks_config(Some(hooks)) {
                 continue;
             }
-            sources.push(source_input(path, working_directory, hooks.as_object().cloned().unwrap_or_default(), order, false));
+            sources.push(source_input(
+                path,
+                working_directory,
+                hooks.as_object().cloned().unwrap_or_default(),
+                order,
+                false,
+            ));
         }
         sources
     }
@@ -754,14 +930,22 @@ impl HooksService {
         if !valid_hooks_config(hooks) {
             return None;
         }
-        let mut source = source_input(&path, &self.roots.home, hooks?.as_object()?.clone(), 0, true);
+        let mut source = source_input(
+            &path,
+            &self.roots.home,
+            hooks?.as_object()?.clone(),
+            0,
+            true,
+        );
         source.editable = true;
         Some(source)
     }
 
     /// trust store 中本 workspace 的 digest；读不了或结构不合规整体视为损坏（fail closed）。
     async fn trusted_digests(&self, identity: &str) -> (HashSet<String>, bool) {
-        let config = Self::read_json(&self.config_path("zcode", None)).await.unwrap_or_default();
+        let config = Self::read_json(&self.config_path("zcode", None))
+            .await
+            .unwrap_or_default();
         let storage = js::record(config.get("storage"));
         let configured = storage
             .get("dir")
@@ -781,7 +965,9 @@ impl HooksService {
         let path = fsx::join(&root, &["security", "workspace-hook-trust-v1.json"]);
         let content = match fsx::read_text(&path).await {
             Ok(content) => content,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (HashSet::new(), false),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return (HashSet::new(), false);
+            }
             Err(error) => {
                 log::warn(format!(
                     "Workspace Hook Trust store 不可读，已 fail-closed 忽略全部持久信任记录 path={path} error={}",
@@ -809,7 +995,10 @@ impl HooksService {
     }
 
     pub async fn load(&self, params: Value) -> Result<Value, RpcError> {
-        let raw_path = params.get("workspacePath").and_then(Value::as_str).unwrap_or("");
+        let raw_path = params
+            .get("workspacePath")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         let workspace = fsx::resolve(raw_path, &[]);
         let identity = params
             .get("workspaceIdentity")
@@ -840,7 +1029,11 @@ impl HooksService {
                 extra.insert("hookDeclarationDigest".into(), json!(digest));
                 extra.insert(
                     "trustState".into(),
-                    json!(if trusted.contains(&digest) { "trusted_persistent" } else { "pending_trust" }),
+                    json!(if trusted.contains(&digest) {
+                        "trusted_persistent"
+                    } else {
+                        "pending_trust"
+                    }),
                 );
                 let location = json!({
                     "source": "zcode",
@@ -848,25 +1041,45 @@ impl HooksService {
                     "directoryPath": fsx::dirname(&source.canonical_path),
                     "projectPath": workspace,
                 });
-                hooks.push(to_hook(entry, source, entry.value["reviewItemId"].as_str().unwrap_or("").to_owned(), location, Some(extra)));
+                hooks.push(to_hook(
+                    entry,
+                    source,
+                    entry.value["reviewItemId"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_owned(),
+                    location,
+                    Some(extra),
+                ));
             }
         }
         for source in ["agents", "claude"] {
             let config = Self::read_json(&self.config_path(source, Some(&workspace))).await;
-            hooks.extend(legacy_hooks(config.as_ref(), &self.location(source, Some(&workspace))));
+            hooks.extend(legacy_hooks(
+                config.as_ref(),
+                &self.location(source, Some(&workspace)),
+            ));
         }
         if let Some(user) = &user {
             let user_entries = entries(&workspace, std::slice::from_ref(user), root);
             let location = self.location("zcode", None);
             for (index, entry) in user_entries.iter().enumerate() {
-                hooks.push(to_hook(entry, user, format!("hook-zcode-user-{index}"), location.clone(), None));
+                hooks.push(to_hook(
+                    entry,
+                    user,
+                    format!("hook-zcode-user-{index}"),
+                    location.clone(),
+                    None,
+                ));
             }
         }
         for source in ["agents", "claude"] {
             let config = Self::read_json(&self.config_path(source, None)).await;
             hooks.extend(legacy_hooks(config.as_ref(), &self.location(source, None)));
         }
-        let enabled = hooks.iter().any(|hook| hook.get("enabled").is_some_and(truthy));
+        let enabled = hooks
+            .iter()
+            .any(|hook| hook.get("enabled").is_some_and(truthy));
         let mut result = Map::new();
         result.insert("hooks".into(), Value::Array(hooks));
         result.insert("hooksEnabled".into(), json!(enabled));
@@ -882,7 +1095,10 @@ impl HooksService {
     async fn write_config(&self, workspace: Option<&str>, hooks: &[Value]) -> Result<(), RpcError> {
         let path = self.config_path("zcode", workspace);
         cli_config::update(&path, |raw| {
-            let mut existing = raw.as_deref().and_then(js::parse_record).unwrap_or_default();
+            let mut existing = raw
+                .as_deref()
+                .and_then(js::parse_record)
+                .unwrap_or_default();
             let mut root = js::record(existing.get("hooks"));
             if let Some(enabled) = next_root_enabled(root.get("enabled"), hooks) {
                 root.insert("enabled".into(), enabled);
@@ -895,17 +1111,27 @@ impl HooksService {
     }
 
     pub async fn save(&self, params: Value) -> Result<(), RpcError> {
-        let workspace = params.get("workspacePath").and_then(Value::as_str).unwrap_or("").to_owned();
+        let workspace = params
+            .get("workspacePath")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         let current = fsx::resolve(&workspace, &[".zcode", "config.json"]);
-        let hooks = params.get("hooks").and_then(Value::as_array).cloned().unwrap_or_default();
+        let hooks = params
+            .get("hooks")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         let editable = |hook: &&Value| hook.get("editable") != Some(&Value::Bool(false));
         let user: Vec<Value> = hooks
             .iter()
             .filter(editable)
-            .filter(|hook| match hook.get("location").filter(|location| !location.is_null()) {
-                None => true,
-                Some(location) => location["source"] == "zcode" && location["scope"] == "user",
-            })
+            .filter(
+                |hook| match hook.get("location").filter(|location| !location.is_null()) {
+                    None => true,
+                    Some(location) => location["source"] == "zcode" && location["scope"] == "user",
+                },
+            )
             .cloned()
             .collect();
         let project: Vec<Value> = hooks
@@ -915,9 +1141,12 @@ impl HooksService {
                 let location = &hook["location"];
                 location["source"] == "zcode"
                     && location["scope"] == "project"
-                    && hook.get("configuredState").filter(|state| truthy(state)).is_none_or(|state| {
-                        fsx::resolve(state["sourcePath"].as_str().unwrap_or(""), &[]) == current
-                    })
+                    && hook
+                        .get("configuredState")
+                        .filter(|state| truthy(state))
+                        .is_none_or(|state| {
+                            fsx::resolve(state["sourcePath"].as_str().unwrap_or(""), &[]) == current
+                        })
             })
             .cloned()
             .collect();
@@ -926,13 +1155,14 @@ impl HooksService {
     }
 
     pub async fn grant_trust(&self, params: Value) -> Result<Value, RpcError> {
-        let runtime = self
-            .runtime
-            .clone()
-            .ok_or_else(|| fsx::error("Workspace Hook trust grant is unavailable in this runtime"))?;
+        let runtime = self.runtime.clone().ok_or_else(|| {
+            fsx::error("Workspace Hook trust grant is unavailable in this runtime")
+        })?;
         let target = WorkspaceTarget::from_value(&params)?;
         // 没有 task 也允许预信任：只拉起该 workspace 的 CLI 控制面，不伪造 session。
-        let process = runtime.get_client(&target, RuntimePolicy::StartIfNeeded).await?;
+        let process = runtime
+            .get_client(&target, RuntimePolicy::StartIfNeeded)
+            .await?;
         process
             .request_value(
                 "workspace/hooks/trustGrant",
@@ -948,13 +1178,18 @@ impl HooksService {
 
 pub fn service(hooks: HooksService) -> ServiceBuilder {
     let builder = ServiceBuilder::new(CHANNEL);
-    let builder = bind(builder, "loadHooks", &hooks, |s, p| async move { s.load(p).await.map(Reply::Value) });
+    let builder = bind(builder, "loadHooks", &hooks, |s, p| async move {
+        s.load(p).await.map(Reply::Value)
+    });
     let builder = bind(builder, "saveHooks", &hooks, |s, p| async move {
         s.save(p).await.map(|()| Reply::Undefined)
     });
-    bind(builder, "grantWorkspaceHookTrust", &hooks, |s, p| async move {
-        s.grant_trust(p).await.map(Reply::Value)
-    })
+    bind(
+        builder,
+        "grantWorkspaceHookTrust",
+        &hooks,
+        |s, p| async move { s.grant_trust(p).await.map(Reply::Value) },
+    )
 }
 
 #[cfg(all(test, unix))]
@@ -963,10 +1198,16 @@ mod tests {
 
     #[test]
     fn schema_matches_zod() {
-        assert!(valid_hooks_config(Some(&json!({"enabled":true,"events":{"Stop":[{"hooks":[{"type":"command","command":"x","shell":true,"extra":1}]}]}}))));
+        assert!(valid_hooks_config(Some(
+            &json!({"enabled":true,"events":{"Stop":[{"hooks":[{"type":"command","command":"x","shell":true,"extra":1}]}]}})
+        )));
         assert!(!valid_hooks_config(Some(&json!({"events":{"Nope":[]}}))));
-        assert!(!valid_hooks_config(Some(&json!({"events":{"Stop":[{"hooks":[]}]}}))));
-        assert!(!valid_hooks_config(Some(&json!({"events":{"Stop":[{"hooks":[{"type":"command","command":"x","shell":false}]}]}}))));
+        assert!(!valid_hooks_config(Some(
+            &json!({"events":{"Stop":[{"hooks":[]}]}})
+        )));
+        assert!(!valid_hooks_config(Some(
+            &json!({"events":{"Stop":[{"hooks":[{"type":"command","command":"x","shell":false}]}]}})
+        )));
         assert!(!valid_hooks_config(Some(&json!({"other":1}))));
         assert!(!valid_hooks_config(None));
         assert!(!valid_hooks_config(Some(&Value::Null)));
@@ -994,9 +1235,14 @@ mod tests {
         assert_eq!(hook["custom"], json!({"note":"x"}));
         assert_eq!(hook["workspaceHook"]["trustState"], "pending_trust");
         assert_eq!(loaded["hooksEnabled"], true);
-        assert_eq!(loaded["workspaceHookSnapshot"]["hooks"][0]["resolvedTimeoutMs"], 5000);
+        assert_eq!(
+            loaded["workspaceHookSnapshot"]["hooks"][0]["resolvedTimeoutMs"],
+            5000
+        );
         service
-            .save(json!({"workspacePath": workspace.display().to_string(), "hooks": loaded["hooks"]}))
+            .save(
+                json!({"workspacePath": workspace.display().to_string(), "hooks": loaded["hooks"]}),
+            )
             .await
             .unwrap();
         let text = std::fs::read_to_string(workspace.join(".zcode/config.json")).unwrap();

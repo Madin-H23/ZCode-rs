@@ -136,8 +136,8 @@ mod tests {
 
     #[test]
     fn parses_scalars_like_the_yaml_package() {
-        let value = parse("name: demo\ncount: 3\nratio: 1.5\nflag: true\nempty:\nlist: [a, b]\n")
-            .unwrap();
+        let value =
+            parse("name: demo\ncount: 3\nratio: 1.5\nflag: true\nempty:\nlist: [a, b]\n").unwrap();
         assert_eq!(
             value,
             json!({"name":"demo","count":3,"ratio":1.5,"flag":true,"empty":null,"list":["a","b"]})
