@@ -177,6 +177,8 @@ const hostConnectionLost = createHostConnectionLostView({
           initialLocale={initialLocaleFlag ? initialLocale : undefined}
           resolveSystemLocale={desktopPlatform.getSystemLocale}
         >
+          {/* 页面刚加载就进入断开状态时，也要通知 HTML 启动壳退场，否则状态页被遮住。 */}
+          <StartupReadyNotifier />
           {screen}
         </ZCodeIntlProvider>
       </AppErrorBoundary>,
