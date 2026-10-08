@@ -113,12 +113,19 @@ export class RustHostProcess extends EventEmitter {
   postMessage(message: unknown, transfer?: MessagePortMain[]): void {
     if (transfer && transfer.length > 0) {
       const attach = hostAttachServicePortMessageSchema.safeParse(message);
-      if (attach.success && attach.data.scope.kind === "local" && transfer.length === 1) {
-        // Main 发起的本地 attachment（如 web-remote-replayable）：签发同 clientMode 的 endpoint 后桥接。
-        void this.attachServicePort(attach.data.attachmentId, attach.data.clientMode, transfer[0]!);
+      if (attach.success && transfer.length === 1) {
+        // Main 发起的 attachment（本地 web-remote-replayable、Bot 远程运行时与手机远控的远端 scope）：
+        // 签发同 clientMode / scope 的 endpoint 后桥接；远端 scope 由 Host 校验 logical session
+        // （docs/specs/rust-host-remote.md §2.4）。
+        void this.attachServicePort(
+          attach.data.attachmentId,
+          attach.data.clientMode,
+          attach.data.scope,
+          transfer[0]!,
+        );
         return;
       }
-      // 远端 scope 的 attachment 随远端 workspace 接入。关闭端口让对端立即感知，而不是一直等待。
+      // 不是 AttachServicePort 的端口转移没有对应的 Rust 接入。关闭端口让对端立即感知，而不是一直等待。
       for (const port of transfer) port.close();
       const type = (message as { type?: unknown } | null)?.type;
       this.logger.warn(`[rustHost] MessagePort attachment is not supported yet: ${String(type)}`);
@@ -137,17 +144,18 @@ export class RustHostProcess extends EventEmitter {
   private async attachServicePort(
     attachmentId: string,
     clientMode: HostIssueAttachmentEndpointMessage["clientMode"],
+    scope: HostIssueAttachmentEndpointMessage["scope"],
     port: MessagePortMain,
   ): Promise<void> {
     // 同一 attachmentId 重新 attach 时替换旧桥（与 Node Host 的 attachment registry 一致）。
     this.portBridges.get(attachmentId)?.close();
     this.portBridges.delete(attachmentId);
     try {
-      const endpoint = await this.requestServiceEndpoint({ attachmentId, clientMode });
+      const endpoint = await this.requestServiceEndpoint({ attachmentId, clientMode, scope });
       const bridge = await bridgeMessagePortToRustHost(port, endpoint);
       this.portBridges.set(attachmentId, bridge);
       this.logger.info(
-        `[rustHost] attached service port, attachmentId=${attachmentId}, clientMode=${clientMode}`,
+        `[rustHost] attached service port, attachmentId=${attachmentId}, clientMode=${clientMode}, scope=${scope.kind}`,
       );
     } catch (error) {
       port.close();

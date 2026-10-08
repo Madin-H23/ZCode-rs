@@ -2,6 +2,7 @@
 // Rust Host 的测试入口（docs/specs/rust-host-r0.md §6）：契约清单一致性、cargo 测试、
 // 以及用真实 TS 客户端连接构建出的 zcode-host。
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -66,6 +67,10 @@ await run("cargo", [
   "-D",
   "warnings",
 ]);
+// 远端 workspace 的测试连接本仓库构建的 zcode-server.cjs（docs/specs/rust-host-remote.md §7）；缺失时先构建。
+if (!existsSync(resolve(root, "packages/server/dist/remote/zcode-server.cjs"))) {
+  await run("pnpm", ["--filter", "@zcode/server", "build:remote"]);
+}
 await run("cargo", ["test", "--manifest-path", manifest]);
 await run("cargo", ["build", "--manifest-path", manifest]);
 
