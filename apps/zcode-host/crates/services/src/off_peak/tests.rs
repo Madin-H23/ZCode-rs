@@ -10,6 +10,7 @@ use rusqlite::Connection;
 use serde_json::{Map, Value, json};
 
 use super::client::{ClientError, ServerClient};
+use super::credentials::CredentialSource;
 use super::service::OffPeakService;
 use crate::providers::ProviderRuntime;
 use crate::tasks_index::TasksIndex;
@@ -227,11 +228,14 @@ fn mock_vars(extra: &[(&str, &str)]) -> BTreeMap<String, String> {
 
 #[tokio::test]
 async fn gateway_and_client_follow_the_ticket_state_machine() {
+    let vars = mock_vars(&[
+        ("ZCODE_OFFPEAK_MOCK_QUOTA_COUNT", "1"),
+        ("ZCODE_OFFPEAK_MOCK_READY_DELAY_MS", "0"),
+    ]);
     let client = ServerClient::new(
-        mock_vars(&[
-            ("ZCODE_OFFPEAK_MOCK_QUOTA_COUNT", "1"),
-            ("ZCODE_OFFPEAK_MOCK_READY_DELAY_MS", "0"),
-        ]),
+        vars.clone(),
+        CredentialSource::new(vars, None),
+        None,
         Some(0),
     )
     .unwrap();
@@ -316,9 +320,14 @@ async fn service_creates_pauses_continues_and_cancels_with_the_mock_gateway() {
     let wake_counter = wakes.clone();
     let service = OffPeakService::new(
         OffPeakRepo::new(index),
-        ServerClient::new(vars.clone(), Some(0)).unwrap(),
+        ServerClient::new(
+            vars.clone(),
+            CredentialSource::new(vars.clone(), None),
+            None,
+            Some(0),
+        )
+        .unwrap(),
         providers(dir.path()),
-        vars,
         Arc::new(move || clock.load(Ordering::SeqCst)),
         Arc::new(move || {
             wake_counter.fetch_add(1, Ordering::SeqCst);
@@ -326,7 +335,7 @@ async fn service_creates_pauses_continues_and_cancels_with_the_mock_gateway() {
         None,
     );
     assert_eq!(
-        service.coding_plan_support(),
+        service.coding_plan_support().await.unwrap(),
         json!({"supported": true, "kind": "bigmodel-personal", "providerFamily": "bigmodel",
                "providerId": "account:bigmodel-individual-coding-plan"})
     );

@@ -45,6 +45,14 @@ pub trait BotDelivery: Send + Sync {
     ) -> BoxFuture<'static, Result<(), String>>;
 }
 
+/// account 区域提供给本区域的请求期鉴权与 ZCode 来源头（闲时任务的真实凭据链，
+/// docs/specs/rust-host-integration.md §2.1）。
+#[derive(Clone)]
+pub struct AccountLink {
+    pub auth: crate::account::auth::AccountRequestAuth,
+    pub source_headers: crate::account::net::SourceHeaders,
+}
+
 /// 本区域共享的依赖。
 pub struct Area {
     /// Host 内部 task 驱动（建会话、发输入、终态），automation、闲时任务、bots 共用。
@@ -63,6 +71,8 @@ pub struct Area {
     pub oauth: crate::account::oauth_repo::OAuthCredentialRepo,
     /// bots 安装时登记；没有登记（或 Bot 未配置）时 automation 不做回推。
     pub bot_delivery: OnceLock<Arc<dyn BotDelivery>>,
+    /// 账号栈（[`Area::with_account`]）；没有时闲时任务只有 mock 凭据。
+    pub account: Option<AccountLink>,
 }
 
 impl Area {
@@ -93,7 +103,14 @@ impl Area {
             credentials,
             oauth,
             bot_delivery: OnceLock::new(),
+            account: None,
         }
+    }
+
+    /// 接入账号栈的请求期鉴权与来源头（install 时由 account 区域提供）。
+    pub fn with_account(mut self, account: AccountLink) -> Self {
+        self.account = Some(account);
+        self
     }
 }
 

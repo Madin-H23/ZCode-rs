@@ -4,6 +4,7 @@
 //! 编排服务（取号、轮询、核销）、`off-peak-task` channel、`off-peak-run` 派发、CLI 反向请求
 //! `offPeak/create|list`，以及本地 workspace 的 Off-Peak 工具面策略。
 pub mod client;
+pub mod credentials;
 pub mod dispatch;
 pub mod gateway;
 pub mod models;
@@ -45,7 +46,13 @@ pub fn channel(service: Arc<OffPeakService>) -> ServiceBuilder {
     ServiceBuilder::new("off-peak-task")
         .method("getCodingPlanSupport", move |_, _| {
             let service = a.clone();
-            async move { Ok(Reply::Value(service.coding_plan_support())) }
+            async move {
+                service
+                    .coding_plan_support()
+                    .await
+                    .map(Reply::Value)
+                    .map_err(|message| RpcError::new("Error", message))
+            }
         })
         .method("getTakeNumberAvailability", move |_, _| {
             let service = b.clone();
@@ -223,7 +230,22 @@ pub fn install(
     router: &mut ControlRouter,
 ) -> Option<Keepalive> {
     let vars = area.context.environment.vars.clone();
-    let client = match client::ServerClient::new(vars.clone(), None) {
+    // 真实凭据链（docs/specs/rust-host-integration.md §2.1）：账号栈注入时用它，否则只有 mock。
+    let credentials = credentials::CredentialSource::new(
+        vars.clone(),
+        area.account
+            .as_ref()
+            .map(|account| credentials::AccountDeps {
+                credentials: area.credentials.clone(),
+                auth: account.auth.clone(),
+                providers: area.providers.clone(),
+            }),
+    );
+    let source_headers = area
+        .account
+        .as_ref()
+        .map(|account| account.source_headers.clone());
+    let client = match client::ServerClient::new(vars, credentials, source_headers, None) {
         Ok(client) => client,
         Err(error) => {
             log::error(format!("off-peak client unavailable: {error:#}"));
@@ -236,7 +258,6 @@ pub fn install(
         OffPeakRepo::new(area.tasks_index.clone()),
         client,
         area.providers.clone(),
-        vars,
         Arc::new(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

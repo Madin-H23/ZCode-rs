@@ -4,6 +4,7 @@
 //! 一条已鉴权的 `@zcode/rpc` 连接（[`HostCore::attach`]）。services 在收到 `InitLocal` 时按
 //! Main 给的路径与环境构建；构建完成前建立的 attachment 先挂起，之后才发 `[200]`。
 pub mod attachments;
+pub mod rpc_telemetry;
 mod server;
 mod startup;
 
@@ -61,15 +62,19 @@ struct Inner {
     startup: Mutex<Option<(InitLocal, Arc<StartupCoordinator>)>>,
     /// attachmentId → 该 attachment 上各条连接的关闭信号（`detach-service-port`、远端断线）。
     connections: Mutex<HashMap<String, Vec<watch::Sender<bool>>>>,
+    /// RPC 网络遥测的观测缓冲（rust-host-integration.md §2.3）。
+    telemetry: Arc<rpc_telemetry::RpcTelemetry>,
 }
 
 impl HostCore {
     pub fn new(config: HostConfig, control: Arc<dyn ControlSink>) -> Self {
         let (registry, _) = watch::channel(None);
+        let telemetry = rpc_telemetry::RpcTelemetry::new(control.clone());
         Self {
             inner: Arc::new(Inner {
                 config,
                 control,
+                telemetry,
                 attachments: AttachmentRegistry::new(CAPABILITY_TTL),
                 registry,
                 router: Mutex::new(ControlRouter::default()),
@@ -134,8 +139,9 @@ impl HostCore {
         ControlOutcome::Continue
     }
 
-    /// Host 退出前回收子进程（CLI 进程树）；未初始化时为空操作。
+    /// Host 退出前冲刷 RPC 遥测并回收子进程（CLI 进程树）；未初始化时只冲刷遥测。
     pub async fn shutdown(&self) {
+        self.inner.telemetry.shutdown();
         let installed = self
             .inner
             .installed
@@ -361,8 +367,10 @@ impl HostCore {
                 inbound,
                 outbound,
                 flow,
+                self.inner.telemetry.clone(),
             ));
         };
+        let telemetry = self.inner.telemetry.clone();
         let core = self.clone();
         tokio::spawn(async move {
             let mut ready = core.inner.registry.subscribe();
@@ -390,7 +398,7 @@ impl HostCore {
             };
             let (_, registry) = watch::channel(Some(attachment.registry));
             let inbound = closable(inbound, vec![close_rx, attachment.closed]);
-            server::serve(context, registry, inbound, outbound, flow).await;
+            server::serve(context, registry, inbound, outbound, flow, telemetry).await;
         })
     }
 }

@@ -1,7 +1,8 @@
 //! CLI → Host 的 automation 反向请求（zcodeAgentService.ts 的 `automation/*` 分支）。
 //!
 //! workspace 一律取发请求的 CLI 进程所属 workspace，不进协议参数。参数按 zcode-protocol 的
-//! strict schema 校验（`nonEmptyString` 会 trim），失败回 -32602；业务错误回 -32603。
+//! strict schema 校验（`support::zod`，`nonEmptyString` 会 trim），失败回 -32602 并带 zod
+//! flatten 的 `data`；业务错误回 -32603。
 use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
@@ -10,186 +11,206 @@ use zcode_host_kit::log;
 use super::service::{AutomationService, Scope};
 use crate::agent::extensions::{ReverseContext, ReverseHandler, ReverseReply};
 use crate::agent::{AgentRuntime, WorkspaceTarget};
+use crate::support::zod::{self, NumCheck, Schema, field, optional};
 use crate::tasks_index::TasksIndex;
-use crate::tasks_index::automation_repo::{parse_bot_delivery_target, parse_model_selection};
+
+const ROOT: &[&str] = &[];
+const INTERVAL: &[&str] = &["interval"];
+const INTERVAL_UNIT: &[&str] = &["intervalUnit"];
+const RECURRING: &[&str] = &["recurring"];
+const MAX_RUNS: &[&str] = &["maxRuns"];
 
 const TASK_MODES: [&str; 6] = ["yolo", "plan", "edit", "auto", "autoEdit", "build"];
 const INTERVAL_UNITS: [&str; 6] = ["minute", "hourly", "daily", "weekly", "monthly", "yearly"];
 
+/// 校验失败时为 zod `error.flatten()`（JSON-RPC 错误的 `data`）。
+pub type Validated = Result<Map<String, Value>, Value>;
 type Parsed = Option<Map<String, Value>>;
 
-/// zod 校验的单个字段：键缺失 = undefined；`null` 对 optional 字段非法（除非 nullable）。
-struct Fields<'a> {
-    input: &'a Map<String, Value>,
-    out: Map<String, Value>,
-    ok: bool,
+fn int(checks: Vec<NumCheck>) -> Schema {
+    Schema::Num { int: true, checks }
 }
 
-fn positive_int(value: &Value, max: Option<f64>) -> bool {
-    value.as_f64().is_some_and(|number| {
-        number.fract() == 0.0 && number > 0.0 && max.is_none_or(|max| number <= max)
-    })
+/// `modelSelectionSchema`（model-selection.ts）。
+pub fn model_selection_schema() -> Schema {
+    Schema::Object(vec![
+        field("providerId", zod::non_empty_string()),
+        field("modelId", zod::non_empty_string()),
+        optional(
+            "options",
+            Schema::Object(vec![optional("reasoningLevel", zod::non_empty_string())]),
+        ),
+    ])
 }
 
-impl<'a> Fields<'a> {
-    fn new(input: &'a Map<String, Value>, allowed: &[&str]) -> Self {
-        let ok = input.keys().all(|key| allowed.contains(&key.as_str()));
-        Self {
-            input,
-            out: Map::new(),
-            ok,
-        }
-    }
-
-    fn field(&mut self, key: &str, required: bool, check: impl Fn(&Value) -> Option<Value>) {
-        match self.input.get(key) {
-            None if required => self.ok = false,
-            None => {}
-            Some(value) => match check(value) {
-                Some(parsed) => {
-                    self.out.insert(key.to_owned(), parsed);
-                }
-                None => self.ok = false,
-            },
-        }
-    }
-
-    fn finish(self) -> Parsed {
-        self.ok.then_some(self.out)
-    }
+/// `zcodeAutomationBotDeliveryTargetSchema`（bots.ts）。
+fn bot_delivery_target_schema() -> Schema {
+    Schema::Object(vec![
+        field("provider", Schema::Enum(&["feishu", "lark", "weixin"])),
+        field("botId", zod::non_empty_string()),
+        field("providerUserId", zod::non_empty_string()),
+        field("chatType", Schema::Enum(&["private", "group"])),
+    ])
 }
 
-fn non_empty(value: &Value) -> Option<Value> {
-    let text = value.as_str()?.trim();
-    (!text.is_empty()).then(|| json!(text))
+fn run(schema: &Schema, params: &Value, refines: &[zod::Refine]) -> Validated {
+    // ReverseContext 把缺省 params 记为 null；zod 对缺省参数报 `received undefined`。
+    let value = (!params.is_null()).then_some(params);
+    zod::parse(schema, value, refines).map_err(|issues| zod::flatten(&issues))
 }
 
-fn any_string(value: &Value) -> Option<Value> {
-    value.as_str().map(|text| json!(text))
-}
-
-fn boolean(value: &Value) -> Option<Value> {
-    value.is_boolean().then(|| value.clone())
-}
-
-fn one_of(values: &'static [&'static str]) -> impl Fn(&Value) -> Option<Value> {
-    move |value| {
-        value
-            .as_str()
-            .filter(|text| values.contains(text))
-            .map(|text| json!(text))
-    }
-}
-
-fn int_in(min: f64, max: f64) -> impl Fn(&Value) -> Option<Value> {
-    move |value| {
-        value
-            .as_f64()
-            .filter(|number| number.fract() == 0.0 && *number >= min && *number <= max)
-            .map(|_| value.clone())
-    }
+fn has(input: &Map<String, Value>, key: &str) -> bool {
+    input.contains_key(key)
 }
 
 /// `zcodeAutomationCreateParamsSchema`。
-pub fn parse_create(params: &Value) -> Parsed {
-    let input = params.as_object()?;
-    let mut fields = Fields::new(
-        input,
-        &[
-            "title",
-            "cronExpr",
+pub fn validate_create(params: &Value) -> Validated {
+    let schema = Schema::Object(vec![
+        optional("title", zod::string()),
+        field("cronExpr", zod::non_empty_string()),
+        optional(
             "relativeDelayMinutes",
-            "prompt",
-            "modelSelection",
-            "mode",
-            "targetTaskId",
-            "botDeliveryTarget",
-            "recurring",
-            "maxRuns",
-            "intervalUnit",
+            int(vec![NumCheck::Gt(0.0), NumCheck::Lte(525_600.0)]),
+        ),
+        field("prompt", zod::non_empty_string()),
+        optional("modelSelection", model_selection_schema()),
+        optional("mode", Schema::Enum(&TASK_MODES)),
+        optional("targetTaskId", zod::non_empty_string()),
+        optional("botDeliveryTarget", bot_delivery_target_schema()),
+        optional("recurring", Schema::Bool),
+        optional("maxRuns", int(vec![NumCheck::Gt(0.0)])),
+        optional("intervalUnit", Schema::Enum(&INTERVAL_UNITS)),
+        optional(
             "interval",
+            int(vec![NumCheck::Gte(1.0), NumCheck::Lte(200.0)]),
+        ),
+    ]);
+    run(
+        &schema,
+        params,
+        &[
+            |input| {
+                (has(input, "intervalUnit") != has(input, "interval"))
+                    .then_some(("intervalUnit and interval must be set together", INTERVAL))
+            },
+            |input| {
+                (has(input, "intervalUnit") && has(input, "relativeDelayMinutes")).then_some((
+                    "intervalUnit cannot combine with a relative delayMinutes",
+                    INTERVAL_UNIT,
+                ))
+            },
+            |input| {
+                (has(input, "intervalUnit") && input.get("recurring") == Some(&json!(false)))
+                    .then_some((
+                        "intervalUnit is a recurring carrier and cannot combine with recurring=false",
+                        RECURRING,
+                    ))
+            },
+            |input| {
+                (has(input, "intervalUnit") && has(input, "maxRuns")).then_some((
+                    "intervalUnit is a recurring carrier and cannot combine with maxRuns",
+                    MAX_RUNS,
+                ))
+            },
         ],
-    );
-    fields.field("title", false, any_string);
-    fields.field("cronExpr", true, non_empty);
-    fields.field("relativeDelayMinutes", false, |value| {
-        positive_int(value, Some(525_600.0)).then(|| value.clone())
-    });
-    fields.field("prompt", true, non_empty);
-    fields.field("modelSelection", false, parse_model_selection);
-    fields.field("mode", false, one_of(&TASK_MODES));
-    fields.field("targetTaskId", false, non_empty);
-    fields.field("botDeliveryTarget", false, parse_bot_delivery_target);
-    fields.field("recurring", false, boolean);
-    fields.field("maxRuns", false, |value| {
-        positive_int(value, None).then(|| value.clone())
-    });
-    fields.field("intervalUnit", false, one_of(&INTERVAL_UNITS));
-    fields.field("interval", false, int_in(1.0, 200.0));
-    let out = fields.finish()?;
-    let unit = out.contains_key("intervalUnit");
-    let refined = unit == out.contains_key("interval")
-        && (!unit || !out.contains_key("relativeDelayMinutes"))
-        && (!unit || out.get("recurring") != Some(&json!(false)))
-        && (!unit || !out.contains_key("maxRuns"));
-    refined.then_some(out)
+    )
 }
 
 /// `zcodeAutomationUpdateParamsSchema`。
-pub fn parse_update(params: &Value) -> Parsed {
-    let input = params.as_object()?;
-    let mut fields = Fields::new(
-        input,
-        &[
-            "automationId",
-            "title",
-            "cronExpr",
-            "prompt",
-            "recurring",
+pub fn validate_update(params: &Value) -> Validated {
+    let schema = Schema::Object(vec![
+        field("automationId", zod::non_empty_string()),
+        optional("title", zod::non_empty_string()),
+        optional("cronExpr", zod::non_empty_string()),
+        optional("prompt", zod::non_empty_string()),
+        optional("recurring", Schema::Bool),
+        optional(
             "maxRuns",
-            "intervalUnit",
+            Schema::Nullable(Box::new(int(vec![NumCheck::Gt(0.0)]))),
+        ),
+        optional("intervalUnit", Schema::Enum(&INTERVAL_UNITS)),
+        optional(
             "interval",
+            int(vec![NumCheck::Gte(1.0), NumCheck::Lte(200.0)]),
+        ),
+    ]);
+    run(
+        &schema,
+        params,
+        &[
+            |input| {
+                (![
+                    "title",
+                    "cronExpr",
+                    "prompt",
+                    "recurring",
+                    "maxRuns",
+                    "intervalUnit",
+                ]
+                .iter()
+                .any(|key| has(input, key)))
+                .then_some(("automation update requires at least one field", ROOT))
+            },
+            |input| {
+                (input.get("maxRuns") == Some(&Value::Null)
+                    && input.get("recurring") != Some(&json!(true)))
+                .then_some(("clearing maxRuns requires recurring=true", MAX_RUNS))
+            },
+            |input| {
+                (input.get("recurring") == Some(&json!(true))
+                    && input.get("maxRuns").is_some_and(Value::is_number))
+                .then_some((
+                    "recurring=true cannot be combined with a numeric maxRuns",
+                    MAX_RUNS,
+                ))
+            },
+            |input| {
+                (has(input, "intervalUnit") != has(input, "interval"))
+                    .then_some(("intervalUnit and interval must be set together", INTERVAL))
+            },
+            |input| {
+                (has(input, "intervalUnit") && input.get("recurring") == Some(&json!(false)))
+                    .then_some((
+                        "intervalUnit is a recurring carrier and cannot combine with recurring=false",
+                        RECURRING,
+                    ))
+            },
+            |input| {
+                let max_runs = input.get("maxRuns");
+                (has(input, "intervalUnit")
+                    && max_runs.is_some()
+                    && !(max_runs == Some(&Value::Null)
+                        && input.get("recurring") == Some(&json!(true))))
+                .then_some((
+                    "intervalUnit is a recurring carrier and only allows maxRuns=null with recurring=true",
+                    MAX_RUNS,
+                ))
+            },
         ],
-    );
-    fields.field("automationId", true, non_empty);
-    fields.field("title", false, non_empty);
-    fields.field("cronExpr", false, non_empty);
-    fields.field("prompt", false, non_empty);
-    fields.field("recurring", false, boolean);
-    fields.field("maxRuns", false, |value| {
-        (value.is_null() || positive_int(value, None)).then(|| value.clone())
-    });
-    fields.field("intervalUnit", false, one_of(&INTERVAL_UNITS));
-    fields.field("interval", false, int_in(1.0, 200.0));
-    let out = fields.finish()?;
-    let has = |key: &str| out.contains_key(key);
-    let max_runs = out.get("maxRuns");
-    let recurring_true = out.get("recurring") == Some(&json!(true));
-    let refined = [
-        "title",
-        "cronExpr",
-        "prompt",
-        "recurring",
-        "maxRuns",
-        "intervalUnit",
-    ]
-    .iter()
-    .any(|key| has(key))
-        && (max_runs != Some(&Value::Null) || recurring_true)
-        && (!recurring_true || !max_runs.is_some_and(Value::is_number))
-        && has("intervalUnit") == has("interval")
-        && (!has("intervalUnit") || out.get("recurring") != Some(&json!(false)))
-        && (!has("intervalUnit")
-            || max_runs.is_none()
-            || (max_runs == Some(&Value::Null) && recurring_true));
-    refined.then_some(out)
+    )
 }
 
-fn parse_id(params: &Value, key: &str) -> Parsed {
-    let input = params.as_object()?;
-    let mut fields = Fields::new(input, &[key]);
-    fields.field(key, true, non_empty);
-    fields.finish()
+/// `zcodeAutomationListParamsSchema.safeParse(request.params ?? {})`。
+pub fn validate_list(params: &Value) -> Validated {
+    let params = if params.is_null() { &json!({}) } else { params };
+    run(&Schema::Object(Vec::new()), params, &[])
+}
+
+/// `zcodeAutomationCheckTaskBindingParamsSchema` / `zcodeAutomationDeleteParamsSchema`。
+pub fn validate_id(params: &Value, key: &'static str) -> Validated {
+    run(
+        &Schema::Object(vec![field(key, zod::non_empty_string())]),
+        params,
+        &[],
+    )
+}
+
+pub fn parse_create(params: &Value) -> Parsed {
+    validate_create(params).ok()
+}
+
+pub fn parse_update(params: &Value) -> Parsed {
+    validate_update(params).ok()
 }
 
 /// `toProtocolAutomation`：协议结果只透出这些字段（undefined 省略）。
@@ -222,10 +243,12 @@ pub fn to_protocol_automation(automation: &Value) -> Value {
     Value::Object(object)
 }
 
-fn invalid(message: &str) -> ReverseReply {
-    ReverseReply::Error {
+/// 参数校验失败：`-32602` + 固定文案 + zod flatten（`client.respondError({code, message, data})`）。
+fn invalid(message: &str, data: Value) -> ReverseReply {
+    ReverseReply::ErrorWithData {
         code: -32602,
         message: message.to_owned(),
+        data,
     }
 }
 
@@ -257,8 +280,9 @@ async fn handle(
     };
     match context.method.as_str() {
         "automation/create" => {
-            let Some(parsed) = parse_create(&params) else {
-                return invalid("Invalid automation create params");
+            let parsed = match validate_create(&params) {
+                Ok(parsed) => parsed,
+                Err(data) => return invalid("Invalid automation create params", data),
             };
             let mut input = parsed.clone();
             input.insert(
@@ -283,8 +307,8 @@ async fn handle(
             ReverseReply::Result(json!({"automation": to_protocol_automation(&automation)}))
         }
         "automation/list" => {
-            if params.as_object().is_none_or(|object| !object.is_empty()) {
-                return invalid("Invalid automation list params");
+            if let Err(data) = validate_list(&params) {
+                return invalid("Invalid automation list params", data);
             }
             match service.list(Some(&scope)).await {
                 Ok(list) => ReverseReply::Result(json!({
@@ -294,8 +318,9 @@ async fn handle(
             }
         }
         "automation/checkTaskBinding" => {
-            let Some(parsed) = parse_id(&params, "targetTaskId") else {
-                return invalid("Invalid automation task binding params");
+            let parsed = match validate_id(&params, "targetTaskId") {
+                Ok(parsed) => parsed,
+                Err(data) => return invalid("Invalid automation task binding params", data),
             };
             let task_id = parsed["targetTaskId"].as_str().unwrap_or_default();
             match service.has_task_binding(&scope, task_id).await {
@@ -304,8 +329,9 @@ async fn handle(
             }
         }
         "automation/update" => {
-            let Some(parsed) = parse_update(&params) else {
-                return invalid("Invalid automation update params");
+            let parsed = match validate_update(&params) {
+                Ok(parsed) => parsed,
+                Err(data) => return invalid("Invalid automation update params", data),
             };
             let automation_id = parsed["automationId"]
                 .as_str()
@@ -322,8 +348,9 @@ async fn handle(
             }
         }
         "automation/delete" => {
-            let Some(parsed) = parse_id(&params, "automationId") else {
-                return invalid("Invalid automation delete params");
+            let parsed = match validate_id(&params, "automationId") {
+                Ok(parsed) => parsed,
+                Err(data) => return invalid("Invalid automation delete params", data),
             };
             let automation_id = parsed["automationId"].as_str().unwrap_or_default();
             match service.delete(automation_id, Some(&scope)).await {
@@ -401,6 +428,6 @@ mod tests {
         assert!(
             parse_update(&json!({"automationId": "a", "maxRuns": 3, "recurring": true})).is_none()
         );
-        assert!(parse_id(&json!({"automationId": ""}), "automationId").is_none());
+        assert!(validate_id(&json!({"automationId": ""}), "automationId").is_err());
     }
 }

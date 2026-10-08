@@ -56,6 +56,10 @@ await run(process.execPath, [
   "scripts/rust-host/extensions-fixtures.ts",
   "--check",
 ]);
+// 跨区域收尾（docs/specs/rust-host-integration.md §6）：反向请求参数的 zod flatten、settings-sync 手动导入。
+for (const script of ["zod-flatten-fixtures.ts", "settings-sync-fixtures.ts"]) {
+  await run(process.execPath, ["--import", "tsx", `scripts/rust-host/${script}`, "--check"]);
+}
 await run("cargo", ["fmt", "--all", "--manifest-path", manifest, "--check"]);
 await run("cargo", [
   "clippy",

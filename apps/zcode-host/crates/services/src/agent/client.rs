@@ -443,6 +443,13 @@ impl ProtocolClient {
         let _ = self.write_line(line).await;
     }
 
+    /// 带 `data` 的错误应答（`{"id", "error": {code, message, data}}`）。
+    pub async fn respond_error_data(&self, id: &RawValue, code: i64, message: &str, data: &Value) {
+        let error = serde_json::json!({"code": code, "message": message, "data": data});
+        let line = format!("{{\"id\":{},\"error\":{error}}}", id.get());
+        let _ = self.write_line(line).await;
+    }
+
     pub fn storage_state(&self) -> Option<Value> {
         self.storage_state.borrow().clone()
     }

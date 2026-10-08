@@ -10,42 +10,35 @@ use super::models::{complete_new_selection, provider_for_family};
 use super::service::OffPeakService;
 use crate::agent::extensions::{ReverseContext, ReverseHandler, ReverseReply};
 use crate::automation::Area;
+use crate::support::zod::{self, Schema, field, optional};
 
 const PERMISSION_MODES: [&str; 4] = ["build", "edit", "plan", "yolo"];
 const INTERNAL_ERROR_MESSAGE: &str = "Internal off-peak service error";
+const INTERNAL_ERROR_CODE: &str = "offpeak_internal_error";
+
+/// 校验失败时为 zod `error.flatten()`（JSON-RPC 错误的 `data`）。
+pub type Validated = Result<Map<String, Value>, Value>;
 
 /// `zcodeOffPeakCreateParamsSchema`（strict，nonEmptyString 会 trim）。
-fn parse_create(params: &Value) -> Option<Map<String, Value>> {
-    let input = params.as_object()?;
-    let allowed = [
-        "title",
-        "prompt",
-        "permissionMode",
-        "model",
-        "thoughtLevel",
-        "boundSessionId",
-    ];
-    if input.keys().any(|key| !allowed.contains(&key.as_str())) {
-        return None;
-    }
-    let mut out = Map::new();
-    for key in allowed {
-        let Some(value) = input.get(key) else {
-            if matches!(key, "title" | "prompt") {
-                return None;
-            }
-            continue;
-        };
-        let text = value.as_str()?.trim();
-        if text.is_empty() {
-            return None;
-        }
-        if key == "permissionMode" && !PERMISSION_MODES.contains(&text) {
-            return None;
-        }
-        out.insert(key.into(), json!(text));
-    }
-    Some(out)
+pub fn validate_create(params: &Value) -> Validated {
+    let schema = Schema::Object(vec![
+        field("title", zod::non_empty_string()),
+        field("prompt", zod::non_empty_string()),
+        optional("permissionMode", Schema::Enum(&PERMISSION_MODES)),
+        optional("model", zod::non_empty_string()),
+        optional("thoughtLevel", zod::non_empty_string()),
+        optional("boundSessionId", zod::non_empty_string()),
+    ]);
+    // ReverseContext 把缺省 params 记为 null；zod 对缺省参数报 `received undefined`。
+    let value = (!params.is_null()).then_some(params);
+    zod::parse(&schema, value, &[]).map_err(|issues| zod::flatten(&issues))
+}
+
+/// `zcodeOffPeakListParamsSchema.safeParse(request.params ?? {})`。
+pub fn validate_list(params: &Value) -> Validated {
+    let params = if params.is_null() { &json!({}) } else { params };
+    zod::parse(&Schema::Object(Vec::new()), Some(params), &[])
+        .map_err(|issues| zod::flatten(&issues))
 }
 
 /// `toProtocolOffPeakTaskSnapshot`：协议最小面。
@@ -71,9 +64,10 @@ fn internal(method: &str, key: &str, error: impl std::fmt::Display) -> ReverseRe
     log::warn(format!(
         "Off-peak 协议请求处理失败 method={method} workspaceKey={key}: {error}"
     ));
-    ReverseReply::Error {
+    ReverseReply::ErrorWithData {
         code: -32603,
         message: INTERNAL_ERROR_MESSAGE.into(),
+        data: json!({"errorCode": INTERNAL_ERROR_CODE}),
     }
 }
 
@@ -116,11 +110,15 @@ async fn create(
     service: &Arc<OffPeakService>,
     gray_source: &Arc<dyn ServiceChannel>,
 ) -> ReverseReply {
-    let Some(parsed) = parse_create(&context.params) else {
-        return ReverseReply::Error {
-            code: -32602,
-            message: "Invalid off-peak create params".into(),
-        };
+    let parsed = match validate_create(&context.params) {
+        Ok(parsed) => parsed,
+        Err(data) => {
+            return ReverseReply::ErrorWithData {
+                code: -32602,
+                message: "Invalid off-peak create params".into(),
+                data,
+            };
+        }
     };
     let gray = GrayOverlay::client_config(area, gray_source)
         .await
@@ -128,7 +126,10 @@ async fn create(
     let support = if allowed_models(&gray, None).is_empty() {
         Value::Null
     } else {
-        service.coding_plan_support()
+        match service.coding_plan_support().await {
+            Ok(support) => support,
+            Err(error) => return internal(&context.method, &context.workspace_key, error),
+        }
     };
     let provider_id = (support["supported"] == true)
         .then(|| provider_for_family(support["providerFamily"].as_str().unwrap_or_default()));
@@ -199,15 +200,11 @@ async fn create(
 }
 
 async fn list(context: &ReverseContext, service: &Arc<OffPeakService>) -> ReverseReply {
-    let params = if context.params.is_null() {
-        json!({})
-    } else {
-        context.params.clone()
-    };
-    if params.as_object().is_none_or(|object| !object.is_empty()) {
-        return ReverseReply::Error {
+    if let Err(data) = validate_list(&context.params) {
+        return ReverseReply::ErrorWithData {
             code: -32602,
             message: "Invalid off-peak list params".into(),
+            data,
         };
     }
     match service.list().await {
@@ -256,13 +253,17 @@ mod tests {
 
     #[test]
     fn create_params_follow_the_protocol_schema() {
-        let parsed = parse_create(&json!({"title": " t ", "prompt": "p"})).unwrap();
+        let parsed = validate_create(&json!({"title": " t ", "prompt": "p"})).unwrap();
         assert_eq!(parsed["title"], "t");
-        assert!(parse_create(&json!({"title": "t"})).is_none());
+        assert!(validate_create(&json!({"title": "t"})).is_err());
         assert!(
-            parse_create(&json!({"title": "t", "prompt": "p", "permissionMode": "auto"})).is_none()
+            validate_create(&json!({"title": "t", "prompt": "p", "permissionMode": "auto"}))
+                .is_err()
         );
-        assert!(parse_create(&json!({"title": "t", "prompt": "p", "extra": 1})).is_none());
+        assert_eq!(
+            validate_create(&json!({"title": "t", "prompt": "p", "extra": 1})).unwrap_err(),
+            json!({"formErrors": ["Unrecognized key: \"extra\""], "fieldErrors": {}})
+        );
         let gray = json!({"enabled": true, "modelSelectionView": {"providers": [
             {"providerId": "a", "models": [{"modelId": "m1"}, {"modelId": "m2"}]},
             {"providerId": "b", "models": [{"modelId": "x"}]},

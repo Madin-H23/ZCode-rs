@@ -1,8 +1,11 @@
 //! `settings-sync` channel（packages/services/src/settings-sync/settingsSyncService.ts）。
 //!
-//! 首启导入提示、Claude 全局 `CLAUDE.md` → `~/.zcode/AGENTS.md` 的迁移已移植；首启 `detect`
-//! 返回空结果（与 TS 相同：首启不扫描）。设置页“从其他 Agent 手动导入”的扫描与导入
-//! （skills / commands / plugins / MCP）尚未移植，见 docs/specs/rust-host-account.md §5。
+//! 首启导入提示、Claude 全局 `CLAUDE.md` → `~/.zcode/AGENTS.md` 的迁移；首启 `detect` 返回空结果
+//! （与 TS 相同：首启不扫描）。设置页“从其他 Agent 手动导入”（skills / commands / plugins / MCP）
+//! 在 [`manual`]，见 docs/specs/rust-host-integration.md §2.2。
+pub mod manual;
+#[cfg(all(test, unix))]
+mod parity_tests;
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -109,6 +112,34 @@ impl SettingsSync {
         ))
     }
 
+    fn paths<'a>(&'a self, request: &'a Value) -> manual::Paths<'a> {
+        manual::Paths {
+            home: self.home.to_str().unwrap_or_default(),
+            workspace: request["workspacePath"]
+                .as_str()
+                .filter(|path| !path.is_empty()),
+        }
+    }
+
+    /// `detect`：手动导入按类别扫描；首启与其余请求返回空结果。
+    pub async fn detect(&self, request: &Value) -> Value {
+        manual::detect(&self.paths(request), request).await
+    }
+
+    /// `importSelected`：逐条 selection 导入并汇总。
+    pub async fn import_selected(&self, request: &Value) -> Value {
+        let selections = request["selections"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let result = manual::import_selected(&self.paths(request), &selections).await;
+        log::info(format!(
+            "[settings-sync] import finished success={} skipped={} failed={}",
+            result["successCount"], result["skippedCount"], result["failedCount"]
+        ));
+        result
+    }
+
     pub async fn first_run_prompt_state(&self) -> Value {
         let settings = self.settings.get().await;
         json!({"handled": settings["settingsSyncFirstRunPromptHandled"] == true})
@@ -123,8 +154,14 @@ impl SettingsSync {
 }
 
 pub fn service(sync: SettingsSync) -> ServiceBuilder {
-    let (status, copy, detect, state, mark) =
-        (sync.clone(), sync.clone(), sync.clone(), sync.clone(), sync);
+    let (status, copy, detect, import, state, mark) = (
+        sync.clone(),
+        sync.clone(),
+        sync.clone(),
+        sync.clone(),
+        sync.clone(),
+        sync,
+    );
     ServiceBuilder::new("settings-sync")
         .method("getClaudeAgentsFileMigrationStatus", move |_, _| {
             let sync = status.clone();
@@ -143,21 +180,17 @@ pub fn service(sync: SettingsSync) -> ServiceBuilder {
             }
         })
         .method("detect", move |_, args| {
-            let _ = &detect;
+            let sync = detect.clone();
             async move {
                 let request: Value = args.opt(0, "request")?.unwrap_or_else(|| json!({}));
-                let manual = request["intent"] == "manualImport"
-                    && request["categories"]
-                        .as_array()
-                        .is_some_and(|categories| !categories.is_empty());
-                if manual {
-                    return Err(RpcError::new(
-                        "NotImplemented",
-                        "settings-sync manual import is not implemented in the Rust Host yet",
-                    )
-                    .with_code(zcode_host_kit::NOT_IMPLEMENTED_CODE));
-                }
-                Ok(Reply::Value(json!({"agents": []})))
+                Ok(Reply::Value(sync.detect(&request).await))
+            }
+        })
+        .method("importSelected", move |_, args| {
+            let sync = import.clone();
+            async move {
+                let request: Value = args.opt(0, "request")?.unwrap_or_else(|| json!({}));
+                Ok(Reply::Value(sync.import_selected(&request).await))
             }
         })
         .method("getFirstRunPromptState", move |_, _| {

@@ -258,10 +258,9 @@ impl TaskDriver {
         if options.automation_id.is_some() {
             params.insert("titleGenerationEnabled".into(), json!(false));
         }
-        // 本地 workspace 下发 Off-Peak 工具面（isOffPeakToolSupported）；灰度与准入在 offPeak/create 校验。
-        if crate::off_peak::dispatch::tool_supported(target) {
-            params.insert("offPeakToolEnabled".into(), json!(true));
-        }
+        // 工具面参数（本地 workspace 的 Off-Peak、动态工作流灰度）与 Node createSession 同源注入；
+        // Off-Peak 的灰度与准入仍在 offPeak/create 校验。
+        params.extend(self.agent.extensions().session_tool_flags(target).await);
         let snapshot = process
             .request_value("session/create", &Value::Object(params))
             .await?;
@@ -337,10 +336,8 @@ impl TaskDriver {
         {
             params.insert("thoughtLevel".into(), json!(level));
         }
-        // 冷恢复同样下发 Off-Peak 工具面，否则恢复出来的会话会丢掉工具簇。
-        if crate::off_peak::dispatch::tool_supported(target) {
-            params.insert("offPeakToolEnabled".into(), json!(true));
-        }
+        // 冷恢复同样下发工具面参数，否则恢复出来的会话会丢掉工具簇。
+        params.extend(self.agent.extensions().session_tool_flags(target).await);
         process
             .request_value("session/resume", &Value::Object(params))
             .await

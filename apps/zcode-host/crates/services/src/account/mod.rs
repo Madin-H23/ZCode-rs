@@ -299,16 +299,21 @@ impl AccountStack {
         )));
     }
 
-    /// `coding-plan-subscription`（需要 provider runtime 投影闲时视图）。
-    pub fn register_coding_plan(&self, registry: &mut ChannelRegistry, runtime: &ProviderRuntime) {
-        registry.implement(coding_plan::service(
-            coding_plan::CodingPlanSubscription::new(
-                self.api.clone(),
-                self.account_api.clone(),
-                self.credentials.clone(),
-                runtime.clone(),
-            ),
-        ));
+    /// `coding-plan-subscription`（需要 provider runtime 投影闲时视图）。返回同一实例（共享
+    /// client-config 缓存），供动态工作流门禁等 Host 内部读取方使用。
+    pub fn register_coding_plan(
+        &self,
+        registry: &mut ChannelRegistry,
+        runtime: &ProviderRuntime,
+    ) -> coding_plan::CodingPlanSubscription {
+        let plan = coding_plan::CodingPlanSubscription::new(
+            self.api.clone(),
+            self.account_api.clone(),
+            self.credentials.clone(),
+            runtime.clone(),
+        );
+        registry.implement(coding_plan::service(plan.clone()));
+        plan
     }
 
     /// provider-settings 的写成员（个人配置）与模型连通性测试；`refresh` 同时刷新账号层。

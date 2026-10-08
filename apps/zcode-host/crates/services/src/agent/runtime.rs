@@ -1451,6 +1451,15 @@ impl ClientHandler for Handler {
                     ReverseReply::Error { code, message } => {
                         client.respond_error(&request.id, code, &message).await
                     }
+                    ReverseReply::ErrorWithData {
+                        code,
+                        message,
+                        data,
+                    } => {
+                        client
+                            .respond_error_data(&request.id, code, &message, &data)
+                            .await
+                    }
                     ReverseReply::Hold => {}
                 }
             });

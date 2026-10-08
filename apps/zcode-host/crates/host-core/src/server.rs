@@ -4,6 +4,7 @@
 //! （Node 版此时异常逃出消息处理器，同样不会应答）。
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use futures_util::StreamExt;
 use tokio::sync::{mpsc, watch};
@@ -13,6 +14,8 @@ use zcode_host_rpc::{RequestKind, RpcError, RpcValue, read_request};
 
 use zcode_host_kit::{CallContext, ChannelRegistry, FlowState, Reply, log};
 
+use crate::rpc_telemetry::RpcTelemetry;
+
 type Active = Arc<Mutex<HashMap<i32, AbortHandle>>>;
 
 pub(crate) async fn serve(
@@ -21,6 +24,7 @@ pub(crate) async fn serve(
     mut inbound: mpsc::UnboundedReceiver<Vec<u8>>,
     outbound: mpsc::UnboundedSender<Vec<u8>>,
     mut flow: watch::Receiver<FlowState>,
+    telemetry: Arc<RpcTelemetry>,
 ) {
     let registry = match ready.wait_for(Option::is_some).await {
         Ok(registry) => registry.clone(),
@@ -71,10 +75,24 @@ pub(crate) async fn serve(
                     let _ = outbound.send(codec::promise_error(request.id, &error));
                     continue;
                 };
+                // RPC 网络遥测（NetworkTelemetryChannelServer）：只包已登记的 channel，计时含整个调用。
+                let started = Instant::now();
                 let call = channel.call(&context, &request.name, args);
                 let (id, outbound, tracked) = (request.id, outbound.clone(), active.clone());
+                let (telemetry, channel_name, method) = (
+                    telemetry.clone(),
+                    request.channel.clone(),
+                    request.name.clone(),
+                );
                 let task = tokio::spawn(async move {
-                    let response = match call.await {
+                    let result = call.await;
+                    telemetry.record(
+                        &channel_name,
+                        &method,
+                        started.elapsed(),
+                        result.as_ref().err(),
+                    );
+                    let response = match result {
                         Ok(reply) => encode_reply(RESPONSE_PROMISE_SUCCESS, id, reply),
                         Err(error) => codec::promise_error(id, &error),
                     };
@@ -203,6 +221,12 @@ mod tests {
         (header, reader.value().unwrap())
     }
 
+    struct NullSink;
+
+    impl zcode_host_control::ControlSink for NullSink {
+        fn send(&self, _message: zcode_host_control::HostToMain) {}
+    }
+
     struct Harness {
         ready: watch::Sender<Option<Arc<ChannelRegistry>>>,
         to_server: mpsc::UnboundedSender<Vec<u8>>,
@@ -220,7 +244,10 @@ mod tests {
             client_mode: ClientMode::DesktopContinuous,
         };
         let (flow, flow_rx) = watch::channel(FlowState::Drained);
-        tokio::spawn(serve(context, ready_rx, inbound, outbound, flow_rx));
+        let telemetry = crate::rpc_telemetry::RpcTelemetry::new(Arc::new(NullSink));
+        tokio::spawn(serve(
+            context, ready_rx, inbound, outbound, flow_rx, telemetry,
+        ));
         Harness {
             ready,
             to_server,

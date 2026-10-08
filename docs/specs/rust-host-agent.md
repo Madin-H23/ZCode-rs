@@ -117,7 +117,7 @@ V4 界面不再使用，但契约仍暴露；语义同 Node：
 
 ### 2.7 功能门禁与 workspace 策略
 
-Node 的两个门禁在 Rust Host 由扩展点提供（`Extensions::set_off_peak_tool_gate`、`set_dynamic_workflow_gate`），由拥有对应能力的 service 登记；未登记等于关闭（与 Node 未注入 options 相同）：
+Node 的两个门禁在 Rust Host 由扩展点提供（`Extensions::enable_off_peak_tools`、`set_dynamic_workflow_gate`），由拥有对应能力的 service 登记；未登记等于关闭（与 Node 未注入 options 相同）。闲时工具由 off-peak 安装时打开；动态工作流的唯一来源是 `coding-plan-subscription` 的 client config，install 的 integration 段登记（[rust-host-integration.md](rust-host-integration.md) §2.4）。Host 自己发起的 create / resume（tasks、automation）从 `Extensions::session_tool_flags` 取这组参数：
 
 1. **闲时工具**：门禁存在且 workspace 是本地（无 remoteSessionId，identity 不是远端 identity）时开启。
 2. **动态工作流**：门禁在本 Host 进程内只判定一次并缓存；判定失败按关闭处理且不重试。

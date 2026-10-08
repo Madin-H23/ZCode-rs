@@ -37,6 +37,12 @@ pub enum ReverseReply {
         code: i64,
         message: String,
     },
+    /// 带 `data` 的错误（Node `client.respondError({code, message, data})`，例如 zod flatten）。
+    ErrorWithData {
+        code: i64,
+        message: String,
+        data: Value,
+    },
     /// 不应答（例如权限请求，等 V4 的 resolveInteraction 赢得赛跑）。
     Hold,
 }
@@ -200,6 +206,23 @@ impl Extensions {
                 }
             })
             .await
+    }
+
+    /// 会话创建 / 恢复请求的工具面参数（`buildSessionCreateParams` / `buildSessionResumeParams` 的
+    /// `offPeakToolEnabled`、`dynamicWorkflowEnabled`）：门禁关闭时不写字段。Host 自己发起的
+    /// create / resume（tasks、automation）都从这里取，docs/specs/rust-host-integration.md §2.4。
+    pub async fn session_tool_flags(
+        &self,
+        target: &WorkspaceTarget,
+    ) -> serde_json::Map<String, Value> {
+        let mut flags = serde_json::Map::new();
+        if self.off_peak_tools_for(target) {
+            flags.insert("offPeakToolEnabled".into(), Value::Bool(true));
+        }
+        if self.dynamic_workflow_enabled().await {
+            flags.insert("dynamicWorkflowEnabled".into(), Value::Bool(true));
+        }
+        flags
     }
 
     /// 登记 `zcode-agent` 成员；同名后登记的覆盖先登记的。连接相关的内置成员优先。

@@ -25,7 +25,7 @@
 - 与 `gitService.ts` 相同：先跑一次 `git status`；`includeUnstaged` 缺省为 `true`；按 `currentSessionFilePaths` 过滤（`commitMessageFileScope.ts` 的路径规则逐条移植）；没有文件时报 `There are no changes available to commit.`；前 8 个文件取 diff，失败的 diff 丢弃。
 - 模型：读 `model-selection` 视图的 `preferredSelection`（与 Node `node.ts` 的 `readCurrentModel` 相同），缺失时报 `未读取到当前模型。`。
 - prompt、裁剪上限、Conventional Commit 校验与去装饰规则逐字移植 `gitCommitMessageGenerator.ts`；locale 缺省时读 Host 环境的 `LC_ALL` / `LC_MESSAGES` / `LANG`（Node 读 `Intl` 默认 locale），只有 `zh*` 视为中文。
-- 调用链：`AgentRuntime.get_client(target)` → 使用前钩子（`UseReason::WorkspaceGenerateText`，对应 Node `ensureAccountProviderConfigSynced(reason: "workspace_generate_text")`）→ `workspace/generateText`（`querySource: "git_commit_message"`，带 `operationId`）。
+- 调用链：agent 区域唯一的 `AgentApi::generate_workspace_text`（Node `zcodeAgentService.generateWorkspaceText`）：写 client → 使用前钩子（`UseReason::GenerateText`，对应 Node `ensureAccountProviderConfigSynced(reason: "workspace_generate_text")`）→ `workspace/generateText`（`querySource: "git_commit_message"`，带 `operationId`）。workspace 区域不再有自己的实现（[rust-host-integration.md](rust-host-integration.md) §2.6）。
 - 取消：Renderer 取消调用或连接断开时，Host 丢弃该调用的 future；守卫在 drop 时向同一 CLI 发 `workspace/cancelGenerateText { operationId }`（尽力而为，失败只记 debug）。
 - 错误信息与 Node 一致：模型请求失败 `模型请求失败。`，输出不合规 `模型没有返回可用的 Conventional Commit 提交消息。`。UI 只显示通用失败文案，不按 message 分支。
 

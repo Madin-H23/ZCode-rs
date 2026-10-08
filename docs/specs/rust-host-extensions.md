@@ -77,7 +77,7 @@
 
 ## 3. 共享文件与锁
 
-`~/.zcode/cli/config.json` 的写入方：本文的 skills、commands、mcp-sync、hooks、plugin-sync，Node 的 settings-sync，Main 的 MCP 用户目录 IPC，以及 CLI 的插件命令。修复前所有写入方都是“读 → 改 → 写”且不持锁，并发时后写者覆盖前者。
+`~/.zcode/cli/config.json` 的写入方：本文的 skills、commands、mcp-sync、hooks、plugin-sync，settings-sync 手动导入（Rust Host 内同样经 `cli_config::update`，见 [rust-host-integration.md](rust-host-integration.md) §2.2），Main 的 MCP 用户目录 IPC，以及 CLI 的插件命令。修复前所有写入方都是“读 → 改 → 写”且不持锁，并发时后写者覆盖前者。
 
 规则（同 S0 对 `setting.json` 的修复）：
 
@@ -125,7 +125,6 @@ AgentRuntime.start(target)
 | skills、commands 在原文件上 `writeFile`，不持锁                           | 持锁原子写，0600                                                                 | 修复跨进程丢更新；0600 与 mcp-sync、hooks、CLI 一致（文件含 MCP 密钥）                            |
 | `mcp/list` 走独立的 mcp-status lane（插件管理 workspace，5 分钟空闲回收） | 发给该 workspace 自己的 CLI（`AgentRuntime::get_client`）                        | Rust CLI 校验请求 workspace 与进程 workspace 一致；Rust Host 尚无 mcp-status lane（agent 子系统） |
 | CLI 写插件启用状态（`plugins/setEnabled`）不持锁                          | 不变                                                                             | 不改 CLI；与 Host 写入同时发生的窗口只在用户同时操作两个页面时出现                                |
-| settings-sync 写 `config.json` 不持锁                                     | 不在本文                                                                         | settings-sync 属 R1，由其负责方接入同一 helper                                                    |
 | Subagent `mcpServers` 对象数组用 `yaml` 库 `stringify` 写回               | 自带的 YAML 块风格输出                                                           | 常见结构（字符串、数字、布尔、嵌套对象/数组）输出相同；特殊字符串一律双引号                       |
 | YAML 解析用 `yaml` 包                                                     | `yaml-rust2`                                                                     | name/description 等标量结果相同；非法 YAML 都回退到相同的宽松读取                                 |
 | `localeCompare` 为 ICU                                                    | ASCII 范围一致的近似                                                             | 只影响非 ASCII 名称的并列排序                                                                     |

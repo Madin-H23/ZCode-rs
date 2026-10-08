@@ -1,0 +1,1926 @@
+{
+  "source": "scripts/rust-host/settings-sync-fixtures.ts",
+  "sourceTree": {
+    "home/.claude/skills/alpha/SKILL.md": "---\nname: Alpha\nversion: 1.0\n---\nbody\n",
+    "home/.claude/skills/beta/SKILL.md": "---\r\nname: \"Beta\"\r\n---\r\n",
+    "home/.claude/skills/nested/deep/gamma/SKILL.md": "no frontmatter\n",
+    "home/.claude/skills/node_modules/x/SKILL.md": "---\nname: excluded\n---\n",
+    "home/.claude/skills/broken/SKILL.md": "---\nname: [bad\nversion: '2'\n---\n",
+    "home/.claude/skills/num/SKILL.md": "---\nname: 42\nversion: 1.5\n---\n",
+    "home/.codex/skills/alpha2/SKILL.md": "---\nname: alpha\n---\n",
+    "home/.codex/skills/Zeta/SKILL.md": "---\nversion: 3\n---\nzeta body\n",
+    "home/.codex/skills/Zeta/notes/extra.txt": "extra\n",
+    "ws/.claude/skills/proj-skill/SKILL.md": "---\nname: Proj Skill\ndescription: x\n---\n",
+    "ws/skills/openclaw-skill/SKILL.md": "---\nname: claw\n---\n",
+    "home/.zcode/skills/existing/SKILL.md": "---\nname: beta\n---\n",
+    "home/.claude/commands/review.md": "---\ndescription: Review code\nargument-hint: <file>\n---\nReview $ARGUMENTS\n",
+    "home/.claude/commands/git/commit.md": "Commit everything\n",
+    "home/.claude/commands/.hidden/x.md": "hidden\n",
+    "home/.claude/commands/README.MD": "readme\n",
+    "home/.claude/commands/notes.txt": "not a command\n",
+    "home/.codex/commands/deploy.md": "---\ndescription: |\n  multi\n  line\n---\nDeploy\n",
+    "ws/.claude/commands/local.md": "Local\n",
+    "home/.zcode/commands/review.md": "existing\n",
+    "home/.claude/plugins/p1/.claude-plugin/plugin.json": "{\"name\":\"plugin-one\",\"version\":\" 1.2.0 \"}",
+    "home/.claude/plugins/p1/skills/s/SKILL.md": "plugin skill\n",
+    "home/.claude/plugins/p2/.zcode-plugin/plugin.json": "{\"name\":\" \"}",
+    "home/.claude/plugins/p3/.codex-plugin/plugin.json": "{\"name\":\"three\"}",
+    "home/.claude/plugins/no-manifest/readme.txt": "x\n",
+    "home/.claude/plugins/.hidden/.claude-plugin/plugin.json": "{\"name\":\"hidden\"}",
+    "home/somewhere/three-copy/.claude-plugin/plugin.json": "{\"name\":\"Three\"}",
+    "ws/.codex/plugins/wp/.claude-plugin/plugin.json": "{\"name\":\"ws-plugin\"}",
+    "home/.zcode/cli/config.json": "{\n  \"theme\": \"dark\",\n  \"plugins\": {\n    \"dirs\": [\n      \"<ROOT>/home/somewhere/three-copy\",\n      7\n    ]\n  }\n}\n",
+    "home/.claude/settings.json": "{\"mcpServers\":{\"github\":{\"command\":\"npx\",\"args\":[\"-y\",\"gh\"],\"timeout\":5,\"env\":{\"A\":\"1\"}},\" \":{\"command\":\"blank\"},\"bad\":1},\"other\":true}",
+    "ws/.mcp.json": "{\"mcpServers\":{\"local-db\":{\"type\":\"stdio\",\"command\":\"db\"}}}",
+    "home/.codex/config.toml": "[mcp_servers.search]\ncommand = \"search\"\nargs = [\"--x\"]\nstartup_timeout_sec = 10\n\n[mcp_servers.alpha]\nurl = \"http://127.0.0.1:1\"\n",
+    "home/.config/opencode/opencode.json": "{\"mcp\":{\"oc\":{\"type\":\"local\",\"command\":[\"node\",\"srv.js\",\"--port\"],\"enabled\":true},\"remote1\":{\"type\":\"remote\",\"url\":\"https://example.invalid\"},\"loc2\":{\"type\":\"local\",\"command\":\" run \"},\"plain\":{\"command\":[\"x\"],\"type\":\"stdio\"}}}",
+    "home/.agents/mcp.json": "{\"mcpServers\":{\"GitHub\":{\"command\":\"other\"}}}",
+    "ws/.zcode/config.json": "{\"mcp\":{\"servers\":{\"local-db\":{\"command\":\"old\"}}}}"
+  },
+  "ops": [
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "manualImport",
+        "categories": ["skills"]
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "manualImport",
+        "categories": ["commands"]
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "manualImport",
+        "categories": ["plugins"]
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "manualImport",
+        "categories": ["mcpServers"]
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "intent": "manualImport",
+        "categories": ["skills"]
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "firstRun",
+        "categories": ["skills"]
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "manualImport",
+        "categories": []
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "manualImport",
+        "categories": ["providers"]
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "manualImport",
+        "categories": ["mcpServers", "commands"]
+      }
+    },
+    {
+      "op": "importSelected",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "selections": [
+          {
+            "agent": "claudeCode",
+            "category": "skills",
+            "sourceScope": "global",
+            "targetScope": "global",
+            "importMode": "symlink",
+            "skillPaths": ["<ROOT>/home/.claude/skills/alpha", "<ROOT>/home/.claude/skills/beta"]
+          },
+          {
+            "agent": "codexCli",
+            "category": "skills",
+            "targetScope": "global",
+            "importMode": "copy"
+          },
+          {
+            "agent": "claudeCode",
+            "category": "skills",
+            "sourceScope": "project",
+            "targetScope": "project"
+          },
+          {
+            "agent": "openClaw",
+            "category": "skills",
+            "importMode": "copy"
+          }
+        ]
+      }
+    },
+    {
+      "op": "importSelected",
+      "request": {
+        "selections": [
+          {
+            "agent": "claudeCode",
+            "category": "skills",
+            "sourceScope": "global",
+            "targetScope": "project"
+          }
+        ]
+      }
+    },
+    {
+      "op": "importSelected",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "selections": [
+          {
+            "agent": "claudeCode",
+            "category": "commands",
+            "importMode": "symlink"
+          },
+          {
+            "agent": "codexCli",
+            "category": "commands",
+            "targetScope": "project",
+            "importMode": "copy"
+          }
+        ]
+      }
+    },
+    {
+      "op": "importSelected",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "selections": [
+          {
+            "agent": "claudeCode",
+            "category": "plugins",
+            "importMode": "symlink"
+          },
+          {
+            "agent": "claudeCode",
+            "category": "plugins",
+            "importMode": "symlink"
+          },
+          {
+            "agent": "codexCli",
+            "category": "plugins",
+            "targetScope": "project",
+            "importMode": "copy"
+          }
+        ]
+      }
+    },
+    {
+      "op": "importSelected",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "selections": [
+          {
+            "agent": "claudeCode",
+            "category": "mcpServers"
+          },
+          {
+            "agent": "agents",
+            "category": "mcpServers"
+          },
+          {
+            "agent": "codexCli",
+            "category": "mcpServers",
+            "targetScope": "project"
+          },
+          {
+            "agent": "openCode",
+            "category": "mcpServers",
+            "mcpServerPaths": []
+          },
+          {
+            "agent": "openCode",
+            "category": "mcpServers"
+          },
+          {
+            "agent": "claudeCode",
+            "category": "providers"
+          }
+        ]
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "manualImport",
+        "categories": ["skills"]
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "manualImport",
+        "categories": ["commands"]
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "manualImport",
+        "categories": ["plugins"]
+      }
+    },
+    {
+      "op": "detect",
+      "request": {
+        "workspacePath": "<ROOT>/ws",
+        "intent": "manualImport",
+        "categories": ["mcpServers"]
+      }
+    }
+  ],
+  "results": [
+    {
+      "agents": [
+        {
+          "agent": "claudeCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "skills",
+              "discoveredCount": 6,
+              "importableCount": 5,
+              "skippedCount": 1,
+              "sourcePaths": ["<ROOT>/home/.claude/skills", "<ROOT>/ws/.claude/skills"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.claude/skills",
+                  "discoveredCount": 5,
+                  "importableCount": 4,
+                  "skippedCount": 1,
+                  "skills": [
+                    {
+                      "name": "[bad",
+                      "path": "<ROOT>/home/.claude/skills/broken",
+                      "importable": true,
+                      "version": "2"
+                    },
+                    {
+                      "name": "42",
+                      "path": "<ROOT>/home/.claude/skills/num",
+                      "importable": true,
+                      "version": "1.5"
+                    },
+                    {
+                      "name": "Alpha",
+                      "path": "<ROOT>/home/.claude/skills/alpha",
+                      "importable": true,
+                      "version": "1"
+                    },
+                    {
+                      "name": "Beta",
+                      "path": "<ROOT>/home/.claude/skills/beta",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    },
+                    {
+                      "name": "gamma",
+                      "path": "<ROOT>/home/.claude/skills/nested/deep/gamma",
+                      "importable": true
+                    }
+                  ]
+                },
+                {
+                  "scope": "project",
+                  "path": "<ROOT>/ws/.claude/skills",
+                  "discoveredCount": 1,
+                  "importableCount": 1,
+                  "skippedCount": 0,
+                  "skills": [
+                    {
+                      "name": "Proj Skill",
+                      "path": "<ROOT>/ws/.claude/skills/proj-skill",
+                      "importable": true
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": true
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "skills",
+              "discoveredCount": 2,
+              "importableCount": 2,
+              "skippedCount": 0,
+              "sourcePaths": ["<ROOT>/home/.codex/skills"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.codex/skills",
+                  "discoveredCount": 2,
+                  "importableCount": 2,
+                  "skippedCount": 0,
+                  "skills": [
+                    {
+                      "name": "alpha",
+                      "path": "<ROOT>/home/.codex/skills/alpha2",
+                      "importable": true
+                    },
+                    {
+                      "name": "Zeta",
+                      "path": "<ROOT>/home/.codex/skills/Zeta",
+                      "importable": true,
+                      "version": "3"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": true
+            }
+          ]
+        },
+        {
+          "agent": "openClaw",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "skills",
+              "discoveredCount": 1,
+              "importableCount": 1,
+              "skippedCount": 0,
+              "sourcePaths": ["<ROOT>/ws/skills"],
+              "sourceRoots": [
+                {
+                  "scope": "project",
+                  "path": "<ROOT>/ws/skills",
+                  "discoveredCount": 1,
+                  "importableCount": 1,
+                  "skippedCount": 0,
+                  "skills": [
+                    {
+                      "name": "claw",
+                      "path": "<ROOT>/ws/skills/openclaw-skill",
+                      "importable": true
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agents": [
+        {
+          "agent": "claudeCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "commands",
+              "discoveredCount": 4,
+              "importableCount": 3,
+              "skippedCount": 1,
+              "sourcePaths": ["<ROOT>/home/.claude/commands", "<ROOT>/ws/.claude/commands"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.claude/commands",
+                  "discoveredCount": 3,
+                  "importableCount": 2,
+                  "skippedCount": 1,
+                  "commands": [
+                    {
+                      "name": "/git/commit",
+                      "path": "<ROOT>/home/.claude/commands/git/commit.md",
+                      "importable": true
+                    },
+                    {
+                      "name": "/README",
+                      "path": "<ROOT>/home/.claude/commands/README.MD",
+                      "importable": true
+                    },
+                    {
+                      "name": "/review",
+                      "path": "<ROOT>/home/.claude/commands/review.md",
+                      "importable": false,
+                      "skipReason": "targetExists",
+                      "description": "Review code",
+                      "argumentHint": "<file>"
+                    }
+                  ]
+                },
+                {
+                  "scope": "project",
+                  "path": "<ROOT>/ws/.claude/commands",
+                  "discoveredCount": 1,
+                  "importableCount": 1,
+                  "skippedCount": 0,
+                  "commands": [
+                    {
+                      "name": "/local",
+                      "path": "<ROOT>/ws/.claude/commands/local.md",
+                      "importable": true
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "commands",
+              "discoveredCount": 1,
+              "importableCount": 1,
+              "skippedCount": 0,
+              "sourcePaths": ["<ROOT>/home/.codex/commands"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.codex/commands",
+                  "discoveredCount": 1,
+                  "importableCount": 1,
+                  "skippedCount": 0,
+                  "commands": [
+                    {
+                      "name": "/deploy",
+                      "path": "<ROOT>/home/.codex/commands/deploy.md",
+                      "importable": true,
+                      "description": "| multi line"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agents": [
+        {
+          "agent": "claudeCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "plugins",
+              "discoveredCount": 2,
+              "importableCount": 1,
+              "skippedCount": 1,
+              "sourcePaths": ["<ROOT>/home/.claude/plugins"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.claude/plugins",
+                  "discoveredCount": 2,
+                  "importableCount": 1,
+                  "skippedCount": 1,
+                  "plugins": [
+                    {
+                      "name": "plugin-one",
+                      "path": "<ROOT>/home/.claude/plugins/p1",
+                      "importable": true,
+                      "version": "1.2.0"
+                    },
+                    {
+                      "name": "three",
+                      "path": "<ROOT>/home/.claude/plugins/p3",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "plugins",
+              "discoveredCount": 1,
+              "importableCount": 1,
+              "skippedCount": 0,
+              "sourcePaths": ["<ROOT>/ws/.codex/plugins"],
+              "sourceRoots": [
+                {
+                  "scope": "project",
+                  "path": "<ROOT>/ws/.codex/plugins",
+                  "discoveredCount": 1,
+                  "importableCount": 1,
+                  "skippedCount": 0,
+                  "plugins": [
+                    {
+                      "name": "ws-plugin",
+                      "path": "<ROOT>/ws/.codex/plugins/wp",
+                      "importable": true
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agents": [
+        {
+          "agent": "claudeCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "mcpServers",
+              "discoveredCount": 2,
+              "importableCount": 1,
+              "skippedCount": 1,
+              "sourcePaths": ["<ROOT>/home/.claude/settings.json", "<ROOT>/ws/.mcp.json"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.claude/settings.json",
+                  "discoveredCount": 1,
+                  "importableCount": 1,
+                  "skippedCount": 0,
+                  "mcpServers": [
+                    {
+                      "name": "github",
+                      "path": "<ROOT>/home/.claude/settings.json#github",
+                      "importable": true
+                    }
+                  ]
+                },
+                {
+                  "scope": "project",
+                  "path": "<ROOT>/ws/.mcp.json",
+                  "discoveredCount": 1,
+                  "importableCount": 0,
+                  "skippedCount": 1,
+                  "mcpServers": [
+                    {
+                      "name": "local-db",
+                      "path": "<ROOT>/ws/.mcp.json#local-db",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "mcpServers",
+              "discoveredCount": 2,
+              "importableCount": 2,
+              "skippedCount": 0,
+              "sourcePaths": ["<ROOT>/home/.codex/config.toml"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.codex/config.toml",
+                  "discoveredCount": 2,
+                  "importableCount": 2,
+                  "skippedCount": 0,
+                  "mcpServers": [
+                    {
+                      "name": "alpha",
+                      "path": "<ROOT>/home/.codex/config.toml#alpha",
+                      "importable": true
+                    },
+                    {
+                      "name": "search",
+                      "path": "<ROOT>/home/.codex/config.toml#search",
+                      "importable": true
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "openCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "mcpServers",
+              "discoveredCount": 4,
+              "importableCount": 4,
+              "skippedCount": 0,
+              "sourcePaths": ["<ROOT>/home/.config/opencode/opencode.json"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.config/opencode/opencode.json",
+                  "discoveredCount": 4,
+                  "importableCount": 4,
+                  "skippedCount": 0,
+                  "mcpServers": [
+                    {
+                      "name": "loc2",
+                      "path": "<ROOT>/home/.config/opencode/opencode.json#loc2",
+                      "importable": true
+                    },
+                    {
+                      "name": "oc",
+                      "path": "<ROOT>/home/.config/opencode/opencode.json#oc",
+                      "importable": true
+                    },
+                    {
+                      "name": "plain",
+                      "path": "<ROOT>/home/.config/opencode/opencode.json#plain",
+                      "importable": true
+                    },
+                    {
+                      "name": "remote1",
+                      "path": "<ROOT>/home/.config/opencode/opencode.json#remote1",
+                      "importable": true
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "agents",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "mcpServers",
+              "discoveredCount": 1,
+              "importableCount": 1,
+              "skippedCount": 0,
+              "sourcePaths": ["<ROOT>/home/.agents/mcp.json"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.agents/mcp.json",
+                  "discoveredCount": 1,
+                  "importableCount": 1,
+                  "skippedCount": 0,
+                  "mcpServers": [
+                    {
+                      "name": "GitHub",
+                      "path": "<ROOT>/home/.agents/mcp.json#GitHub",
+                      "importable": true
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agents": [
+        {
+          "agent": "claudeCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "skills",
+              "discoveredCount": 5,
+              "importableCount": 4,
+              "skippedCount": 1,
+              "sourcePaths": ["<ROOT>/home/.claude/skills"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.claude/skills",
+                  "discoveredCount": 5,
+                  "importableCount": 4,
+                  "skippedCount": 1,
+                  "skills": [
+                    {
+                      "name": "[bad",
+                      "path": "<ROOT>/home/.claude/skills/broken",
+                      "importable": true,
+                      "version": "2"
+                    },
+                    {
+                      "name": "42",
+                      "path": "<ROOT>/home/.claude/skills/num",
+                      "importable": true,
+                      "version": "1.5"
+                    },
+                    {
+                      "name": "Alpha",
+                      "path": "<ROOT>/home/.claude/skills/alpha",
+                      "importable": true,
+                      "version": "1"
+                    },
+                    {
+                      "name": "Beta",
+                      "path": "<ROOT>/home/.claude/skills/beta",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    },
+                    {
+                      "name": "gamma",
+                      "path": "<ROOT>/home/.claude/skills/nested/deep/gamma",
+                      "importable": true
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": true
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "skills",
+              "discoveredCount": 2,
+              "importableCount": 2,
+              "skippedCount": 0,
+              "sourcePaths": ["<ROOT>/home/.codex/skills"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.codex/skills",
+                  "discoveredCount": 2,
+                  "importableCount": 2,
+                  "skippedCount": 0,
+                  "skills": [
+                    {
+                      "name": "alpha",
+                      "path": "<ROOT>/home/.codex/skills/alpha2",
+                      "importable": true
+                    },
+                    {
+                      "name": "Zeta",
+                      "path": "<ROOT>/home/.codex/skills/Zeta",
+                      "importable": true,
+                      "version": "3"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agents": []
+    },
+    {
+      "agents": []
+    },
+    {
+      "agents": []
+    },
+    {
+      "agents": [
+        {
+          "agent": "claudeCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "commands",
+              "discoveredCount": 4,
+              "importableCount": 3,
+              "skippedCount": 1,
+              "sourcePaths": ["<ROOT>/home/.claude/commands", "<ROOT>/ws/.claude/commands"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.claude/commands",
+                  "discoveredCount": 3,
+                  "importableCount": 2,
+                  "skippedCount": 1,
+                  "commands": [
+                    {
+                      "name": "/git/commit",
+                      "path": "<ROOT>/home/.claude/commands/git/commit.md",
+                      "importable": true
+                    },
+                    {
+                      "name": "/README",
+                      "path": "<ROOT>/home/.claude/commands/README.MD",
+                      "importable": true
+                    },
+                    {
+                      "name": "/review",
+                      "path": "<ROOT>/home/.claude/commands/review.md",
+                      "importable": false,
+                      "skipReason": "targetExists",
+                      "description": "Review code",
+                      "argumentHint": "<file>"
+                    }
+                  ]
+                },
+                {
+                  "scope": "project",
+                  "path": "<ROOT>/ws/.claude/commands",
+                  "discoveredCount": 1,
+                  "importableCount": 1,
+                  "skippedCount": 0,
+                  "commands": [
+                    {
+                      "name": "/local",
+                      "path": "<ROOT>/ws/.claude/commands/local.md",
+                      "importable": true
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "commands",
+              "discoveredCount": 1,
+              "importableCount": 1,
+              "skippedCount": 0,
+              "sourcePaths": ["<ROOT>/home/.codex/commands"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.codex/commands",
+                  "discoveredCount": 1,
+                  "importableCount": 1,
+                  "skippedCount": 0,
+                  "commands": [
+                    {
+                      "name": "/deploy",
+                      "path": "<ROOT>/home/.codex/commands/deploy.md",
+                      "importable": true,
+                      "description": "| multi line"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "successCount": 4,
+      "skippedCount": 2,
+      "failedCount": 0,
+      "taskResults": [
+        {
+          "agent": "claudeCode",
+          "category": "skills",
+          "status": "success",
+          "importedCount": 1,
+          "skippedCount": 1,
+          "failedCount": 0,
+          "skillResults": [
+            {
+              "name": "Alpha",
+              "path": "<ROOT>/home/.claude/skills/alpha",
+              "sourceScope": "global",
+              "status": "imported",
+              "version": "1"
+            },
+            {
+              "name": "Beta",
+              "path": "<ROOT>/home/.claude/skills/beta",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "sameNameExists"
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "category": "skills",
+          "status": "success",
+          "importedCount": 1,
+          "skippedCount": 1,
+          "failedCount": 0,
+          "skillResults": [
+            {
+              "name": "alpha",
+              "path": "<ROOT>/home/.codex/skills/alpha2",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "sameNameExists"
+            },
+            {
+              "name": "Zeta",
+              "path": "<ROOT>/home/.codex/skills/Zeta",
+              "sourceScope": "global",
+              "status": "imported",
+              "version": "3"
+            }
+          ]
+        },
+        {
+          "agent": "claudeCode",
+          "category": "skills",
+          "status": "success",
+          "importedCount": 1,
+          "skippedCount": 0,
+          "failedCount": 0,
+          "skillResults": [
+            {
+              "name": "Proj Skill",
+              "path": "<ROOT>/ws/.claude/skills/proj-skill",
+              "sourceScope": "project",
+              "status": "imported"
+            }
+          ]
+        },
+        {
+          "agent": "openClaw",
+          "category": "skills",
+          "status": "success",
+          "importedCount": 1,
+          "skippedCount": 0,
+          "failedCount": 0,
+          "skillResults": [
+            {
+              "name": "claw",
+              "path": "<ROOT>/ws/skills/openclaw-skill",
+              "sourceScope": "project",
+              "status": "imported"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "successCount": 0,
+      "skippedCount": 5,
+      "failedCount": 0,
+      "taskResults": [
+        {
+          "agent": "claudeCode",
+          "category": "skills",
+          "status": "skipped",
+          "importedCount": 0,
+          "skippedCount": 5,
+          "failedCount": 0,
+          "skillResults": [
+            {
+              "name": "Alpha",
+              "path": "<ROOT>/home/.claude/skills/alpha",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "targetExists",
+              "version": "1"
+            },
+            {
+              "name": "Beta",
+              "path": "<ROOT>/home/.claude/skills/beta",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "targetExists"
+            },
+            {
+              "name": "[bad",
+              "path": "<ROOT>/home/.claude/skills/broken",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "targetExists",
+              "version": "2"
+            },
+            {
+              "name": "gamma",
+              "path": "<ROOT>/home/.claude/skills/nested/deep/gamma",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "targetExists"
+            },
+            {
+              "name": "42",
+              "path": "<ROOT>/home/.claude/skills/num",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "targetExists",
+              "version": "1.5"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "successCount": 4,
+      "skippedCount": 1,
+      "failedCount": 0,
+      "taskResults": [
+        {
+          "agent": "claudeCode",
+          "category": "commands",
+          "status": "success",
+          "importedCount": 3,
+          "skippedCount": 1,
+          "failedCount": 0,
+          "commandResults": [
+            {
+              "name": "/git/commit",
+              "path": "<ROOT>/home/.claude/commands/git/commit.md",
+              "sourceScope": "global",
+              "status": "imported"
+            },
+            {
+              "name": "/README",
+              "path": "<ROOT>/home/.claude/commands/README.MD",
+              "sourceScope": "global",
+              "status": "imported"
+            },
+            {
+              "name": "/review",
+              "path": "<ROOT>/home/.claude/commands/review.md",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "targetExists"
+            },
+            {
+              "name": "/local",
+              "path": "<ROOT>/ws/.claude/commands/local.md",
+              "sourceScope": "project",
+              "status": "imported"
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "category": "commands",
+          "status": "success",
+          "importedCount": 1,
+          "skippedCount": 0,
+          "failedCount": 0,
+          "commandResults": [
+            {
+              "name": "/deploy",
+              "path": "<ROOT>/home/.codex/commands/deploy.md",
+              "sourceScope": "global",
+              "status": "imported"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "successCount": 2,
+      "skippedCount": 3,
+      "failedCount": 0,
+      "taskResults": [
+        {
+          "agent": "claudeCode",
+          "category": "plugins",
+          "status": "success",
+          "importedCount": 1,
+          "skippedCount": 1,
+          "failedCount": 0,
+          "pluginResults": [
+            {
+              "name": "plugin-one",
+              "path": "<ROOT>/home/.claude/plugins/p1",
+              "sourceScope": "global",
+              "status": "imported",
+              "version": "1.2.0"
+            },
+            {
+              "name": "three",
+              "path": "<ROOT>/home/.claude/plugins/p3",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "sameNameExists"
+            }
+          ]
+        },
+        {
+          "agent": "claudeCode",
+          "category": "plugins",
+          "status": "skipped",
+          "importedCount": 0,
+          "skippedCount": 2,
+          "failedCount": 0,
+          "pluginResults": [
+            {
+              "name": "plugin-one",
+              "path": "<ROOT>/home/.claude/plugins/p1",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "targetExists",
+              "version": "1.2.0"
+            },
+            {
+              "name": "three",
+              "path": "<ROOT>/home/.claude/plugins/p3",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "sameNameExists"
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "category": "plugins",
+          "status": "success",
+          "importedCount": 1,
+          "skippedCount": 0,
+          "failedCount": 0,
+          "pluginResults": [
+            {
+              "name": "ws-plugin",
+              "path": "<ROOT>/ws/.codex/plugins/wp",
+              "sourceScope": "project",
+              "status": "imported"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "successCount": 7,
+      "skippedCount": 3,
+      "failedCount": 0,
+      "taskResults": [
+        {
+          "agent": "claudeCode",
+          "category": "mcpServers",
+          "status": "success",
+          "importedCount": 1,
+          "skippedCount": 1,
+          "failedCount": 0,
+          "mcpServerResults": [
+            {
+              "name": "github",
+              "path": "<ROOT>/home/.claude/settings.json#github",
+              "sourceScope": "global",
+              "status": "imported"
+            },
+            {
+              "name": "local-db",
+              "path": "<ROOT>/ws/.mcp.json#local-db",
+              "sourceScope": "project",
+              "status": "skipped",
+              "skipReason": "sameNameExists"
+            }
+          ]
+        },
+        {
+          "agent": "agents",
+          "category": "mcpServers",
+          "status": "skipped",
+          "importedCount": 0,
+          "skippedCount": 1,
+          "failedCount": 0,
+          "mcpServerResults": [
+            {
+              "name": "GitHub",
+              "path": "<ROOT>/home/.agents/mcp.json#GitHub",
+              "sourceScope": "global",
+              "status": "skipped",
+              "skipReason": "sameNameExists"
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "category": "mcpServers",
+          "status": "success",
+          "importedCount": 2,
+          "skippedCount": 0,
+          "failedCount": 0,
+          "mcpServerResults": [
+            {
+              "name": "search",
+              "path": "<ROOT>/home/.codex/config.toml#search",
+              "sourceScope": "global",
+              "status": "imported"
+            },
+            {
+              "name": "alpha",
+              "path": "<ROOT>/home/.codex/config.toml#alpha",
+              "sourceScope": "global",
+              "status": "imported"
+            }
+          ]
+        },
+        {
+          "agent": "openCode",
+          "category": "mcpServers",
+          "status": "skipped",
+          "importedCount": 0,
+          "skippedCount": 0,
+          "failedCount": 0,
+          "mcpServerResults": []
+        },
+        {
+          "agent": "openCode",
+          "category": "mcpServers",
+          "status": "success",
+          "importedCount": 4,
+          "skippedCount": 0,
+          "failedCount": 0,
+          "mcpServerResults": [
+            {
+              "name": "oc",
+              "path": "<ROOT>/home/.config/opencode/opencode.json#oc",
+              "sourceScope": "global",
+              "status": "imported"
+            },
+            {
+              "name": "remote1",
+              "path": "<ROOT>/home/.config/opencode/opencode.json#remote1",
+              "sourceScope": "global",
+              "status": "imported"
+            },
+            {
+              "name": "loc2",
+              "path": "<ROOT>/home/.config/opencode/opencode.json#loc2",
+              "sourceScope": "global",
+              "status": "imported"
+            },
+            {
+              "name": "plain",
+              "path": "<ROOT>/home/.config/opencode/opencode.json#plain",
+              "sourceScope": "global",
+              "status": "imported"
+            }
+          ]
+        },
+        {
+          "agent": "claudeCode",
+          "category": "providers",
+          "status": "skipped",
+          "importedCount": 0,
+          "skippedCount": 1,
+          "failedCount": 0
+        }
+      ]
+    },
+    {
+      "agents": [
+        {
+          "agent": "claudeCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "skills",
+              "discoveredCount": 6,
+              "importableCount": 3,
+              "skippedCount": 3,
+              "sourcePaths": ["<ROOT>/home/.claude/skills", "<ROOT>/ws/.claude/skills"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.claude/skills",
+                  "discoveredCount": 5,
+                  "importableCount": 3,
+                  "skippedCount": 2,
+                  "skills": [
+                    {
+                      "name": "[bad",
+                      "path": "<ROOT>/home/.claude/skills/broken",
+                      "importable": true,
+                      "version": "2"
+                    },
+                    {
+                      "name": "42",
+                      "path": "<ROOT>/home/.claude/skills/num",
+                      "importable": true,
+                      "version": "1.5"
+                    },
+                    {
+                      "name": "Alpha",
+                      "path": "<ROOT>/home/.claude/skills/alpha",
+                      "importable": false,
+                      "skipReason": "targetExists",
+                      "version": "1"
+                    },
+                    {
+                      "name": "Beta",
+                      "path": "<ROOT>/home/.claude/skills/beta",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    },
+                    {
+                      "name": "gamma",
+                      "path": "<ROOT>/home/.claude/skills/nested/deep/gamma",
+                      "importable": true
+                    }
+                  ]
+                },
+                {
+                  "scope": "project",
+                  "path": "<ROOT>/ws/.claude/skills",
+                  "discoveredCount": 1,
+                  "importableCount": 0,
+                  "skippedCount": 1,
+                  "skills": [
+                    {
+                      "name": "Proj Skill",
+                      "path": "<ROOT>/ws/.claude/skills/proj-skill",
+                      "importable": false,
+                      "skipReason": "targetExists"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": true
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "skills",
+              "discoveredCount": 2,
+              "importableCount": 0,
+              "skippedCount": 2,
+              "sourcePaths": ["<ROOT>/home/.codex/skills"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.codex/skills",
+                  "discoveredCount": 2,
+                  "importableCount": 0,
+                  "skippedCount": 2,
+                  "skills": [
+                    {
+                      "name": "alpha",
+                      "path": "<ROOT>/home/.codex/skills/alpha2",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    },
+                    {
+                      "name": "Zeta",
+                      "path": "<ROOT>/home/.codex/skills/Zeta",
+                      "importable": false,
+                      "skipReason": "targetExists",
+                      "version": "3"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "openClaw",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "skills",
+              "discoveredCount": 1,
+              "importableCount": 0,
+              "skippedCount": 1,
+              "sourcePaths": ["<ROOT>/ws/skills"],
+              "sourceRoots": [
+                {
+                  "scope": "project",
+                  "path": "<ROOT>/ws/skills",
+                  "discoveredCount": 1,
+                  "importableCount": 0,
+                  "skippedCount": 1,
+                  "skills": [
+                    {
+                      "name": "claw",
+                      "path": "<ROOT>/ws/skills/openclaw-skill",
+                      "importable": false,
+                      "skipReason": "targetExists"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agents": [
+        {
+          "agent": "claudeCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "commands",
+              "discoveredCount": 4,
+              "importableCount": 0,
+              "skippedCount": 4,
+              "sourcePaths": ["<ROOT>/home/.claude/commands", "<ROOT>/ws/.claude/commands"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.claude/commands",
+                  "discoveredCount": 3,
+                  "importableCount": 0,
+                  "skippedCount": 3,
+                  "commands": [
+                    {
+                      "name": "/git/commit",
+                      "path": "<ROOT>/home/.claude/commands/git/commit.md",
+                      "importable": false,
+                      "skipReason": "targetExists"
+                    },
+                    {
+                      "name": "/README",
+                      "path": "<ROOT>/home/.claude/commands/README.MD",
+                      "importable": false,
+                      "skipReason": "targetExists"
+                    },
+                    {
+                      "name": "/review",
+                      "path": "<ROOT>/home/.claude/commands/review.md",
+                      "importable": false,
+                      "skipReason": "targetExists",
+                      "description": "Review code",
+                      "argumentHint": "<file>"
+                    }
+                  ]
+                },
+                {
+                  "scope": "project",
+                  "path": "<ROOT>/ws/.claude/commands",
+                  "discoveredCount": 1,
+                  "importableCount": 0,
+                  "skippedCount": 1,
+                  "commands": [
+                    {
+                      "name": "/local",
+                      "path": "<ROOT>/ws/.claude/commands/local.md",
+                      "importable": false,
+                      "skipReason": "targetExists"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "commands",
+              "discoveredCount": 1,
+              "importableCount": 1,
+              "skippedCount": 0,
+              "sourcePaths": ["<ROOT>/home/.codex/commands"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.codex/commands",
+                  "discoveredCount": 1,
+                  "importableCount": 1,
+                  "skippedCount": 0,
+                  "commands": [
+                    {
+                      "name": "/deploy",
+                      "path": "<ROOT>/home/.codex/commands/deploy.md",
+                      "importable": true,
+                      "description": "| multi line"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agents": [
+        {
+          "agent": "claudeCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "plugins",
+              "discoveredCount": 2,
+              "importableCount": 0,
+              "skippedCount": 2,
+              "sourcePaths": ["<ROOT>/home/.claude/plugins"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.claude/plugins",
+                  "discoveredCount": 2,
+                  "importableCount": 0,
+                  "skippedCount": 2,
+                  "plugins": [
+                    {
+                      "name": "plugin-one",
+                      "path": "<ROOT>/home/.claude/plugins/p1",
+                      "importable": false,
+                      "skipReason": "targetExists",
+                      "version": "1.2.0"
+                    },
+                    {
+                      "name": "three",
+                      "path": "<ROOT>/home/.claude/plugins/p3",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "plugins",
+              "discoveredCount": 1,
+              "importableCount": 0,
+              "skippedCount": 1,
+              "sourcePaths": ["<ROOT>/ws/.codex/plugins"],
+              "sourceRoots": [
+                {
+                  "scope": "project",
+                  "path": "<ROOT>/ws/.codex/plugins",
+                  "discoveredCount": 1,
+                  "importableCount": 0,
+                  "skippedCount": 1,
+                  "plugins": [
+                    {
+                      "name": "ws-plugin",
+                      "path": "<ROOT>/ws/.codex/plugins/wp",
+                      "importable": false,
+                      "skipReason": "targetExists"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agents": [
+        {
+          "agent": "claudeCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "mcpServers",
+              "discoveredCount": 2,
+              "importableCount": 0,
+              "skippedCount": 2,
+              "sourcePaths": ["<ROOT>/home/.claude/settings.json", "<ROOT>/ws/.mcp.json"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.claude/settings.json",
+                  "discoveredCount": 1,
+                  "importableCount": 0,
+                  "skippedCount": 1,
+                  "mcpServers": [
+                    {
+                      "name": "github",
+                      "path": "<ROOT>/home/.claude/settings.json#github",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    }
+                  ]
+                },
+                {
+                  "scope": "project",
+                  "path": "<ROOT>/ws/.mcp.json",
+                  "discoveredCount": 1,
+                  "importableCount": 0,
+                  "skippedCount": 1,
+                  "mcpServers": [
+                    {
+                      "name": "local-db",
+                      "path": "<ROOT>/ws/.mcp.json#local-db",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "codexCli",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "mcpServers",
+              "discoveredCount": 2,
+              "importableCount": 2,
+              "skippedCount": 0,
+              "sourcePaths": ["<ROOT>/home/.codex/config.toml"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.codex/config.toml",
+                  "discoveredCount": 2,
+                  "importableCount": 2,
+                  "skippedCount": 0,
+                  "mcpServers": [
+                    {
+                      "name": "alpha",
+                      "path": "<ROOT>/home/.codex/config.toml#alpha",
+                      "importable": true
+                    },
+                    {
+                      "name": "search",
+                      "path": "<ROOT>/home/.codex/config.toml#search",
+                      "importable": true
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "openCode",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "mcpServers",
+              "discoveredCount": 4,
+              "importableCount": 0,
+              "skippedCount": 4,
+              "sourcePaths": ["<ROOT>/home/.config/opencode/opencode.json"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.config/opencode/opencode.json",
+                  "discoveredCount": 4,
+                  "importableCount": 0,
+                  "skippedCount": 4,
+                  "mcpServers": [
+                    {
+                      "name": "loc2",
+                      "path": "<ROOT>/home/.config/opencode/opencode.json#loc2",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    },
+                    {
+                      "name": "oc",
+                      "path": "<ROOT>/home/.config/opencode/opencode.json#oc",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    },
+                    {
+                      "name": "plain",
+                      "path": "<ROOT>/home/.config/opencode/opencode.json#plain",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    },
+                    {
+                      "name": "remote1",
+                      "path": "<ROOT>/home/.config/opencode/opencode.json#remote1",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        },
+        {
+          "agent": "agents",
+          "discovered": true,
+          "categories": [
+            {
+              "category": "mcpServers",
+              "discoveredCount": 1,
+              "importableCount": 0,
+              "skippedCount": 1,
+              "sourcePaths": ["<ROOT>/home/.agents/mcp.json"],
+              "sourceRoots": [
+                {
+                  "scope": "global",
+                  "path": "<ROOT>/home/.agents/mcp.json",
+                  "discoveredCount": 1,
+                  "importableCount": 0,
+                  "skippedCount": 1,
+                  "mcpServers": [
+                    {
+                      "name": "GitHub",
+                      "path": "<ROOT>/home/.agents/mcp.json#GitHub",
+                      "importable": false,
+                      "skipReason": "sameNameExists"
+                    }
+                  ]
+                }
+              ],
+              "selectedByDefault": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "tree": [
+    {
+      "path": "home/.zcode/cli",
+      "type": "dir"
+    },
+    {
+      "path": "home/.zcode/cli/config.json",
+      "type": "file",
+      "content": "{\n  \"theme\": \"dark\",\n  \"plugins\": {\n    \"dirs\": [\n      \"<ROOT>/home/somewhere/three-copy\",\n      \"<ROOT>/home/.zcode/plugins/p1\"\n    ]\n  },\n  \"mcp\": {\n    \"servers\": {\n      \"github\": {\n        \"command\": \"npx\",\n        \"args\": [\n          \"-y\",\n          \"gh\"\n        ],\n        \"env\": {\n          \"A\": \"1\"\n        }\n      },\n      \"oc\": {\n        \"enabled\": true,\n        \"command\": \"node\",\n        \"args\": [\n          \"srv.js\",\n          \"--port\"\n        ],\n        \"type\": \"stdio\"\n      },\n      \"remote1\": {\n        \"type\": \"remote\",\n        \"url\": \"https://example.invalid\"\n      },\n      \"loc2\": {\n        \"type\": \"stdio\",\n        \"command\": \"run\"\n      },\n      \"plain\": {\n        \"command\": \"x\",\n        \"args\": []\n      }\n    }\n  }\n}\n"
+    },
+    {
+      "path": "home/.zcode/commands",
+      "type": "dir"
+    },
+    {
+      "path": "home/.zcode/commands/README.MD",
+      "type": "symlink",
+      "target": "<ROOT>/home/.claude/commands/README.MD"
+    },
+    {
+      "path": "home/.zcode/commands/git",
+      "type": "dir"
+    },
+    {
+      "path": "home/.zcode/commands/git/commit.md",
+      "type": "symlink",
+      "target": "<ROOT>/home/.claude/commands/git/commit.md"
+    },
+    {
+      "path": "home/.zcode/commands/review.md",
+      "type": "file",
+      "content": "existing\n"
+    },
+    {
+      "path": "home/.zcode/plugins",
+      "type": "dir"
+    },
+    {
+      "path": "home/.zcode/plugins/p1",
+      "type": "symlink",
+      "target": "<ROOT>/home/.claude/plugins/p1"
+    },
+    {
+      "path": "home/.zcode/skills",
+      "type": "dir"
+    },
+    {
+      "path": "home/.zcode/skills/Zeta",
+      "type": "dir"
+    },
+    {
+      "path": "home/.zcode/skills/Zeta/SKILL.md",
+      "type": "file",
+      "content": "---\nversion: 3\n---\nzeta body\n"
+    },
+    {
+      "path": "home/.zcode/skills/Zeta/notes",
+      "type": "dir"
+    },
+    {
+      "path": "home/.zcode/skills/Zeta/notes/extra.txt",
+      "type": "file",
+      "content": "extra\n"
+    },
+    {
+      "path": "home/.zcode/skills/alpha",
+      "type": "symlink",
+      "target": "<ROOT>/home/.claude/skills/alpha"
+    },
+    {
+      "path": "home/.zcode/skills/existing",
+      "type": "dir"
+    },
+    {
+      "path": "home/.zcode/skills/existing/SKILL.md",
+      "type": "file",
+      "content": "---\nname: beta\n---\n"
+    },
+    {
+      "path": "ws/.zcode/commands",
+      "type": "dir"
+    },
+    {
+      "path": "ws/.zcode/commands/deploy.md",
+      "type": "file",
+      "content": "---\ndescription: |\n  multi\n  line\n---\nDeploy\n"
+    },
+    {
+      "path": "ws/.zcode/commands/local.md",
+      "type": "symlink",
+      "target": "<ROOT>/ws/.claude/commands/local.md"
+    },
+    {
+      "path": "ws/.zcode/config.json",
+      "type": "file",
+      "content": "{\n  \"mcp\": {\n    \"servers\": {\n      \"local-db\": {\n        \"command\": \"old\"\n      },\n      \"search\": {\n        \"command\": \"search\",\n        \"args\": [\n          \"--x\"\n        ]\n      },\n      \"alpha\": {\n        \"url\": \"http://127.0.0.1:1\"\n      }\n    }\n  },\n  \"plugins\": {\n    \"dirs\": [\n      \"<ROOT>/ws/.zcode/plugins/wp\"\n    ]\n  }\n}\n"
+    },
+    {
+      "path": "ws/.zcode/plugins",
+      "type": "dir"
+    },
+    {
+      "path": "ws/.zcode/plugins/wp",
+      "type": "dir"
+    },
+    {
+      "path": "ws/.zcode/plugins/wp/.claude-plugin",
+      "type": "dir"
+    },
+    {
+      "path": "ws/.zcode/plugins/wp/.claude-plugin/plugin.json",
+      "type": "file",
+      "content": "{\"name\":\"ws-plugin\"}"
+    },
+    {
+      "path": "ws/.zcode/skills",
+      "type": "dir"
+    },
+    {
+      "path": "ws/.zcode/skills/openclaw-skill",
+      "type": "dir"
+    },
+    {
+      "path": "ws/.zcode/skills/openclaw-skill/SKILL.md",
+      "type": "file",
+      "content": "---\nname: claw\n---\n"
+    },
+    {
+      "path": "ws/.zcode/skills/proj-skill",
+      "type": "symlink",
+      "target": "<ROOT>/ws/.claude/skills/proj-skill"
+    }
+  ]
+}
