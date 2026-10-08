@@ -315,6 +315,20 @@ pub fn install(
         agent::session::SessionService::new(agent_api.clone(), Some(task_service.clone())),
     ));
 
+    // ── remote ──（docs/specs/rust-host-remote.md）
+    // 先于 automation：本地 Bots 安装时注入远端区域的 Bot 远端运行时（§2.9）。
+    let remote = remote::install(
+        &context,
+        remote::provisioning::ProvisioningSources {
+            settings: settings.clone(),
+            credentials: account.credentials.clone(),
+            providers: providers.clone(),
+        },
+        &controller,
+        task_context.realtime().cloned(),
+        router,
+    );
+
     // ── automation ──（R6：automation、闲时任务、bots、conversation-share、cua-permission）
     let automation = automation::install(
         automation::Area::new(
@@ -332,10 +346,15 @@ pub fn install(
         .with_account(automation::AccountLink {
             auth: account.auth.clone(),
             source_headers: account.api.source_headers().clone(),
-        }),
+        })
+        .with_remote_bots(remote.bots_runtime()),
         registry,
         router,
     );
+    // 远端 attachment 的 bots channel 按连接从本地 Bots 派生（§2.9.8）。
+    if let Some(bots) = automation.bots() {
+        remote.bind_bots(bots.clone());
+    }
 
     // ── workspace ──
     // git（提交信息生成回调 Agent）、git-checkpoint、media-preview（Main 授权路径）、
@@ -363,18 +382,6 @@ pub fn install(
             &context.environment.data_base_dir,
         ),
     );
-    // ── remote ──
-    let remote = remote::install(
-        &context,
-        remote::provisioning::ProvisioningSources {
-            settings: settings.clone(),
-            credentials: account.credentials.clone(),
-            providers: providers.clone(),
-        },
-        &controller,
-        router,
-    );
-
     // ── integration ──（docs/specs/rust-host-integration.md）
     // 动态工作流门禁的唯一写入方：coding-plan-subscription 的 client config（Node
     // `resolveDynamicWorkflowClientConfig`）。必须在预热拉起 CLI 之前登记，进程就绪前的

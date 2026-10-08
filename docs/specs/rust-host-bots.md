@@ -20,7 +20,7 @@ R6 首版只做了飞书 / Lark 长连接、20 个成员和终态摘要回推。
 | 问答与权限               | `botsService.ts` elicitation / permission 分支、飞书问答卡片                     | `interaction.rs`、`feishu/cards.rs`                      |
 | 入站、授权、上下文、附件 | `botsService.ts` `processProviderCallback`、`withAuthorizedContext` 等           | `inbound.rs`、`aes.rs`（微信 CDN 解密）                  |
 
-不在本规格：远端 workspace 的 Bot 运行时与 `/reconnect` 实连（见第 7 节，留接缝）。
+远端 workspace 的 Bot 运行时（连接判定、`/reconnect` 实连、远端任务能力、realtime 镜像）由远端区域实现，规则见 [rust-host-remote.md](rust-host-remote.md) §2.9；本规格第 7 节只写 Bot 侧的接缝与去重。
 
 ## 2. 产品规则
 
@@ -53,7 +53,7 @@ R6 首版只做了飞书 / Lark 长连接、20 个成员和终态摘要回推。
 4. **飞书长连接**：同 R6（`rust-host-automation.md` 7.1 第 8–10 条）。
 5. **停止**：`stopPolling` / `stopWebSocket` 通知停止并等待请求退出、锁释放，再把状态改为 idle（`...Stopped`）。
 6. **Host 退出**（Node `disposeServiceResourcesAndWait` → `IBotsService.disposeAllAndWait`）：Main 发 `dispose` 后 `Installed::shutdown` 在 `agent.dispose_all()` 之前调用 automation `AreaHandle::shutdown` → `Bots::shutdown`。顺序：置关闭标记（之后的配置对齐不再登记新运行时，判断与登记在同一把表锁里）→ 中止会话订阅（退订）→ 停 typing（飞书删 reaction，后台尽力）→ 清临时交互卡、运行中任务、/status 进展、入站去重与串行队列 → 同时停 Telegram / 微信长轮询与飞书长连接，打断进行中的请求，各自释放跨进程运行锁。等待上限 1 s：Main 在 dispose 3.5 s 后强杀 Host，大部分时间要留给 CLI 进程树回收；正常情况下收尾只要几毫秒，只有正在处理入站消息时才会等满。超时只记 warn，Host 退出后持有者进程不在，其他进程拿锁时按进程存活检查立即接管。重复调用直接返回。
-7. **后台运行时总是开启**：Rust Host 只作为桌面本地 Host 运行，`bots::install` 固定 `background = true`，负责 Bot 长连接、轮询与 Telegram 命令同步。desktop-attached 远端 Host 是 Node `zcode-server`，按它自己的 `runStartupBackgroundTasks` 决定，不经过 Rust Host。`background = false` 分支（不起运行时、不同步命令）只为与 Node 结构对齐保留，测试用它关闭自动对齐。
+7. **后台运行时总是开启**：Rust Host 只作为桌面本地 Host 运行，`bots::install` 固定 `background = true`，负责 Bot 长连接、轮询与 Telegram 命令同步。desktop-attached 远端 Host 是 Node `zcode-server`，按它自己的 `runStartupBackgroundTasks` 决定，不经过 Rust Host。`background = false` 分支（不起运行时、不同步命令）用于远端 attachment 的 Bots 实例（Node 远端集合的 `runStartupBackgroundTasks:false`，见 rust-host-remote.md §2.9.8），测试也用它关闭自动对齐。
 
 ### 2.4 入站
 
@@ -206,7 +206,6 @@ Host 退出 ◄── Main 3.5 s 后强杀兜底
 | 权限请求摘要用 `getPermissionRequestPreview`                                                         | 用 V4 交互的 `summary` 与 detail 里的 command / path                                                | V4 交互已带 CLI 生成的摘要；Bot 会话硬锁 yolo，正常不出现权限请求                 |
 | `/status` 的已工作时长读任务快照消息                                                                 | 读 `session/read` 消息（不做可见性过滤与连续助手消息合并）                                          | 只影响少数边界上的时长与进展取值                                                  |
 | 首发配置失败时删除临时任务（`applyDraftConfigOptions`）                                              | 建会话时直接带 `mode: yolo`，没有单独的配置步骤                                                     | 结果相同（任务硬锁 yolo），没有中间态                                             |
-| 远端 workspace 的 Bot 运行时、`/reconnect`                                                           | 远端上下文视为未连接（第 7 节）                                                                     | 远端在另一个区域                                                                  |
 | 开放平台 / Telegram / iLink 基址固定                                                                 | `ZCODE_FEISHU_OPEN_BASE_URL`、`ZCODE_TELEGRAM_API_BASE_URL`、`ZCODE_WEIXIN_ILINK_BASE_URL` 等可覆盖 | 只供测试与 E2E 指向 127.0.0.1 mock                                                |
 | `/new` 继承模型时用 `parseBotModelOptionValue` 解析 `provider/model$level`，`$level` 留在 modelId 里 | 先去掉 `$level` 后缀（档位另由思考档位带上）                                                        | Node 的写法让 `/new` 之后的下一条消息必然解析模型失败（Node 缺陷，已报告）        |
 | `listWorkspaceRefs` 5 s 缓存                                                                         | 每次读设置                                                                                          | 设置读取本身已缓存                                                                |
@@ -215,11 +214,32 @@ Host 退出 ◄── Main 3.5 s 后强杀兜底
 
 ## 7. 远端 workspace 接缝
 
-`RemoteBots` trait（`bots/mod.rs`）对应 Node `BotRemoteWorkspaceService`：`is_connected`、`ensure_connected`、`task_port(target)`。当前安装的是 `NoRemote`：`is_connected` 恒为 false、`ensure_connected` 回 `remote reconnect service unavailable`。因此：
+`RemoteBots` trait（`bots/mod.rs`）对应 Node `BotRemoteWorkspaceService`：`available`、`is_connected`、`ensure_connected`、`tasks(target)`、`sync_app_runtime_preferences`。`bots::install` 注入 automation `Area` 带来的实现：桌面 Host 里是远端区域的 `RemoteBotRuntime`（rust-host-remote.md §2.9），没有远端区域时（单测、只装 automation 的组合）是 `NoRemote`（远端上下文一律视为未连接，`/reconnect` 回 `remoteReconnectUnavailable`）。入站、选择与回复流水线对本地 / 远端只有 `tasks_for` 一处分叉：带 `workspaceIdentity` 的上下文只用 `RemoteBots::tasks`，拿不到时回“runtime 不可用，请 /重连”，绝不落到本地。
 
-- 带 `workspaceIdentity` 的上下文：`help`、`status`、`workspace`、`reconnect`、`reply` 照常处理，其余回 `remoteDisconnected`；`/status` 显示远端未连接；`/reconnect` 回 `remoteReconnectUnavailable`。
-- `syncAppRuntimePreferences` 转给 `RemoteBots::sync_app_runtime_preferences`（缺省空操作）。
-- 远端区域合并后只需提供实现并在 `bots::install` 注入，入站、选择与回复流水线不用改。Node 对 `/reconnect` 的两层幂等（同一 provider 消息 2 分钟内只执行一次、同一聊天与 workspace 3 秒内只重连一次）只在远端可用时才有意义，随远端实现一起补。
+- 带 `workspaceIdentity` 且未连接的上下文：`help`、`status`、`workspace`、`reconnect`、`reply` 照常处理，其余回 `remoteDisconnected`；`/status` 显示远端未连接；草稿只给最小默认值，不为未连接的远端申请运行时。
+- `syncAppRuntimePreferences` 转给 `RemoteBots::sync_app_runtime_preferences`（只推给已就绪的远端运行时）。
+- `/reconnect`（`handleReconnect`）的顺序与两层幂等同 Node：
+  1. 本地项目回 `remoteReconnectLocal`；没有远端服务回 `remoteReconnectUnavailable`。
+  2. **投递去重**：键 `botId::provider::(chatId ?? providerUserId)::providerMessageId`，在执行前登记，2 分钟内同一条 provider 消息的重投直接不回复（不随失败释放，`/reconnect` 有副作用）。
+  3. **命令去重**：键 `botId::provider::(chatId ?? providerUserId)::workspaceKey`。同键已有重连在途时等它结束后不回复；同键上次重连在 3 s 内结束时不回复（不论重连成败；只有处理本身出错时不记录，同 Node）。在途登记在重连结束或调用被取消时都会移除（Rust 的入站处理可能被丢弃，不能留下永远在途的键）。
+  4. 已连接回 `/status`；否则先发“正在重连”（发送失败只记 warn），再 `ensure_connected`：失败回 `remoteReconnectFailed{workspacePath, message}`，成功时草稿上下文刷新默认选项，回 `/status`。结束时记录该键的完成时间。
+
+```text
+/reconnect（带 workspaceIdentity）
+  ─► 投递键已在 2 min 内登记？── 是 ─► 不回复
+  ─► 登记投递键
+  ─► 命令键有在途重连？── 是 ─► 等它结束 ─► 不回复
+  ─► 命令键 3 s 内刚重连过？── 是 ─► 不回复
+  ─► RemoteBots.is_connected ─► Main 状态查询 ── 已连接 ─► /status
+  ─► 在途登记(命令键) ─► 通道：“正在重连” ─► RemoteBots.ensure_connected ─► Main 重连（route 复用 / 在途合并 / 新建）
+  ◄─ ok：刷新草稿 ─► /status          ◄─ 失败：remoteReconnectFailed
+  ─► 记录命令键完成时间 ─► 移除在途登记
+普通消息（已连接）
+  ─► RemoteBots.tasks(target) ─► 远端 RemotePort ─► 与第 5 节相同的建会话 / watch / 发送 / 投影
+     （远端调用与 realtime 镜像见 rust-host-remote.md §2.9）
+```
+
+远端 Bot 路径与 Main、远端 server 之间的完整事件顺序见 rust-host-remote.md §2.9 的图；Bot 侧（入站、投影、回复）与第 5 节相同。
 
 ## 8. 验收
 
@@ -231,4 +251,5 @@ Host 退出 ◄── Main 3.5 s 后强杀兜底
 - `cargo test -p zcode-host-services --test bots_cli`（`ZCODE_TEST_CLI_RUST_BINARY`）：真实 Rust CLI + mock 模型，Bot 的订阅与投影器从真实帧得到正文 chunk、Bash 工具调用与完成、轮次收口，第二轮不重放上一轮。
 - Host 退出：`bots::tests_channels::shutdown_releases_runtime_locks_without_waiting_for_the_lease`（Telegram 与微信长轮询挂着时 shutdown 立即返回、锁目录删除、别的持有者马上拿到锁，之后的对齐不再起运行时）、飞书长连接测试断言锁在 shutdown 后删除；`cargo test -p zcode-host --test bots_shutdown`（真实 zcode-host：预置 Telegram Bot，长轮询挂在 127.0.0.1 mock 上，Main 发 `dispose` 后 3 s 内正常退出且 `telegram-polling` 锁已删除）。
 - 工具面参数：`bots::tests_commands::bot_initiated_resume_carries_session_tool_flags`（Bot 直接发的 resume 参数在门禁打开时带两个字段，远端只带动态工作流，门禁关闭时不写）。
+- 远端接缝：`bots::tests_commands::reconnect_is_idempotent_per_delivery_and_per_chat_workspace`（被取消的重连不留下在途登记；同一聊天的 `/reconnect` 卡在重连时，同一条 provider 消息的重投与紧接着的另一条 `/reconnect` 都不执行、不回复，只发生一次真实重连，结束后回 `/status`）；远端运行时本身见 rust-host-remote.md §7（`remote::bots_tests`、`--test remote_bots`）。
 - E2E `automation-bots`：隔离 App 预置一个已绑定的 Telegram Bot（Bot API mock 在 127.0.0.1），Host 启动即同步菜单并长轮询；mock 投递一条消息，Host 建会话（yolo）、Rust CLI 跑 mock 模型，断言 mock 的 sendMessage 收到回复、typing 已发、offset 提交为 2，侧栏出现 Bot 创建的任务并能打开看到同一段回复。

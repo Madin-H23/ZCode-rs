@@ -387,3 +387,116 @@ async fn bot_initiated_resume_carries_session_tool_flags() {
                "dynamicWorkflowEnabled": true})
     );
 }
+
+/// 可编排的远端运行时：`ensure_connected` 等闸门放行后才成功，并把上下文标成已连接。
+struct ScriptedRemote {
+    tasks: Arc<FakeTasks>,
+    connected: Arc<std::sync::atomic::AtomicBool>,
+    ensures: Arc<std::sync::atomic::AtomicUsize>,
+    gate: Arc<tokio::sync::Semaphore>,
+}
+
+impl super::RemoteBots for ScriptedRemote {
+    fn available(&self) -> bool {
+        true
+    }
+
+    fn is_connected(
+        &self,
+        _: crate::agent::WorkspaceTarget,
+    ) -> futures_util::future::BoxFuture<'static, bool> {
+        let connected = self.connected.load(std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async move { connected })
+    }
+
+    fn ensure_connected(
+        &self,
+        _: crate::agent::WorkspaceTarget,
+    ) -> futures_util::future::BoxFuture<'static, Result<(), String>> {
+        let (connected, ensures, gate) = (
+            self.connected.clone(),
+            self.ensures.clone(),
+            self.gate.clone(),
+        );
+        Box::pin(async move {
+            ensures.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _permit = gate.acquire().await.unwrap();
+            connected.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        })
+    }
+
+    fn tasks(&self, _: &crate::agent::WorkspaceTarget) -> Option<Arc<dyn super::TaskPort>> {
+        Some(self.tasks.clone())
+    }
+}
+
+fn reconnect_message(message_id: &str) -> Inbound {
+    let mut message = inbound("/reconnect");
+    message.actor.provider_message_id = Some(message_id.into());
+    message
+}
+
+#[tokio::test]
+async fn reconnect_is_idempotent_per_delivery_and_per_chat_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join(".zcode/v2");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("setting.json"),
+        json!({"lastWorkspaceSession": [{"kind": "remote", "workspacePath": "/srv/app",
+            "workspaceIdentity": "remote:docker:c1:/srv/app",
+            "target": {"kind": "docker", "container": "c1"},
+            "lastOpenedAt": 1, "lastConnectionStatus": "connected"}]})
+        .to_string(),
+    )
+    .unwrap();
+    let remote = Arc::new(ScriptedRemote {
+        tasks: FakeTasks::new(),
+        connected: Arc::default(),
+        ensures: Arc::default(),
+        gate: Arc::new(tokio::sync::Semaphore::new(0)),
+    });
+    let bots = super::test_support::bots_with_remote(
+        dir.path(),
+        "http://127.0.0.1:9",
+        remote.tasks.clone(),
+        remote.clone(),
+        false,
+    );
+    bots.save_bot(&json!({"bot": bound_bot("tg-1", "telegram", "42", json!({}))}))
+        .await
+        .unwrap();
+    let ensures = || remote.ensures.load(std::sync::atomic::Ordering::SeqCst);
+
+    // 第一条 /reconnect 卡在重连里；同一聊天的后续消息按聊天串行排在它后面。
+    let spawn = |message_id: &'static str| {
+        let bots = bots.clone();
+        tokio::spawn(async move { bots.handle_inbound(&reconnect_message(message_id)).await })
+    };
+    // 被取消的重连（例如 Host 退出时丢弃了入站处理）不能留下永远“在途”的登记。
+    let cancelled = spawn("m0");
+    eventually("reconnect started", || (ensures() == 1).then_some(())).await;
+    cancelled.abort();
+    let _ = cancelled.await;
+    let first = spawn("m1");
+    eventually("reconnect restarted", || (ensures() == 2).then_some(())).await;
+    let replayed = spawn("m1");
+    let again = spawn("m2");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!replayed.is_finished() && !again.is_finished());
+    remote.gate.add_permits(1);
+    let replies = first.await.unwrap().unwrap();
+    assert!(
+        replies[0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("工作区: app\n"),
+        "status after reconnect: {replies:?}"
+    );
+    // 同一条 provider 消息重投：不执行、不回复。
+    assert!(replayed.await.unwrap().unwrap().is_empty());
+    // 同一聊天与 workspace 刚重连完（3 s 内）：不执行、不回复。
+    assert!(again.await.unwrap().unwrap().is_empty());
+    assert_eq!(ensures(), 2, "one real reconnect after the cancelled one");
+}

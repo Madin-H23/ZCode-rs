@@ -128,7 +128,7 @@ fn workspace_target(params: &Value) -> Value {
 }
 
 /// `withTrustedConnection`：先删除所有可伪造字段，再写入 Host 真值。
-fn with_trusted_connection(params: &Value, carrier: &Value) -> Value {
+pub(super) fn with_trusted_connection(params: &Value, carrier: &Value) -> Value {
     let mut forwarded = params.as_object().cloned().unwrap_or_default();
     for key in [
         TRUSTED_CONNECTION_FIELD,

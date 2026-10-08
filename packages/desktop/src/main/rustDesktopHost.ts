@@ -114,7 +114,8 @@ export class RustHostProcess extends EventEmitter {
     if (transfer && transfer.length > 0) {
       const attach = hostAttachServicePortMessageSchema.safeParse(message);
       if (attach.success && transfer.length === 1) {
-        // Main 发起的 attachment（本地 web-remote-replayable、Bot 远程运行时与手机远控的远端 scope）：
+        // Main 发起的 attachment（本地 web-remote-replayable 与手机远控的远端 scope；Bot 远端运行时在 Host
+        // 内解析 logical session，不经这里，见 docs/specs/rust-host-remote.md §2.9）：
         // 签发同 clientMode / scope 的 endpoint 后桥接；远端 scope 由 Host 校验 logical session
         // （docs/specs/rust-host-remote.md §2.4）。
         void this.attachServicePort(

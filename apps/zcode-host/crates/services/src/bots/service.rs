@@ -109,6 +109,8 @@ pub struct Bots {
     pub(crate) live_progress: Mutex<HashMap<String, (&'static str, String)>>,
     /// 聊天上下文 → 临时交互卡片。
     pub(crate) transient_cards: Mutex<HashMap<String, TransientCard>>,
+    /// `/reconnect` 的两层幂等（docs/specs/rust-host-bots.md 第 7 节）。
+    pub(crate) reconnects: Mutex<super::inbound::Reconnects>,
     /// 流式卡片节流间隔（测试可缩短）。
     pub(crate) card_interval_ms: Mutex<u64>,
     /// 流式卡片失败退避的基数（测试可缩短）。
@@ -212,6 +214,7 @@ impl Bots {
             pending_selections: Mutex::new(HashMap::new()),
             pending_tasks: Mutex::new(HashMap::new()),
             pending_workspaces: Mutex::new(HashMap::new()),
+            reconnects: Mutex::new(super::inbound::Reconnects::default()),
             watches: Mutex::new(HashMap::new()),
             typing: Mutex::new(HashMap::new()),
             live_progress: Mutex::new(HashMap::new()),
