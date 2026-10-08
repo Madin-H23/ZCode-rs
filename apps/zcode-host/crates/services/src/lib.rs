@@ -12,6 +12,7 @@ use zcode_host_kit::ChannelRegistry;
 pub mod account;
 pub mod agent;
 pub mod broadcast;
+pub mod extensions;
 pub mod file;
 pub mod file_watcher;
 pub mod git;
