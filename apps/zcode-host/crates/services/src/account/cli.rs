@@ -175,6 +175,16 @@ impl AccountConfigSync {
         Ok(())
     }
 
+    /// 任一仍在运行的已用进程（App 用量读全局会话库，任意 workspace 的 CLI 都可以）。
+    pub fn any_process(&self) -> Option<Arc<AgentProcess>> {
+        self.processes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .filter_map(|tracked| tracked.process.upgrade())
+            .find(|process| !process.client.is_closed())
+    }
+
     /// 账号层变化：推送给仍在运行、用过的进程（`handleAccountProviderConfigChanged`）。
     pub fn start_push(&self) {
         let sync = self.clone();

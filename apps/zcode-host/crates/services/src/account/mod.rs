@@ -18,6 +18,7 @@ pub mod oauth_adapters;
 pub mod oauth_repo;
 pub mod official_mcp;
 pub mod onboarding;
+pub mod usage;
 #[cfg(test)]
 pub(crate) mod oauth_tests;
 
@@ -33,7 +34,7 @@ use crate::providers::ProviderRuntime;
 use crate::settings::SettingStore;
 use crate::tasks_index::{ListFilter, TasksIndex};
 
-pub use legacy_stub::{coding_plan_service, usage_stats_service};
+pub use legacy_stub::coding_plan_service;
 
 /// `ZCODE_JWT_INVALID_BROADCAST_CHANNEL`。
 const JWT_INVALID_BROADCAST_CHANNEL: &str = "auth:zcode-jwt-invalid";
@@ -202,6 +203,22 @@ impl AccountStack {
             }),
         );
         registry.implement(onboarding::service(records));
+        let sync = self.config_sync.clone();
+        registry.implement(usage::service(usage::UsageStats::new(
+            self.api.clone(),
+            self.auth.clone(),
+            self.credentials.clone(),
+            self.billing.clone(),
+            self.official_mcp.clone(),
+            Arc::new(move |params| {
+                let process = sync.any_process();
+                Box::pin(async move {
+                    let process = process
+                        .ok_or_else(|| zcode_host_kit::RpcError::new("Error", "no_active_workspace"))?;
+                    process.request_value("v4/usage/stats", &params).await
+                })
+            }),
+        )));
     }
 
     /// provider-settings 的写成员（个人配置）与模型连通性测试；`refresh` 同时刷新账号层。

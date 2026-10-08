@@ -88,7 +88,7 @@ async fn serve_backend(listener: TcpListener, log: Arc<Mutex<Vec<(String, String
                 "/api/v1/zcode-plan/billing/balance" => json!({"code": 0, "data": {
                     "server_time": now_seconds(),
                     "plans": [{"user_plan_id": "up1", "plan_id": "zcode-v3-start-plan", "status": "active", "ends_at": now_seconds() + 86400}],
-                    "balances": [{"user_plan_id": "up1", "capabilities": ["model:glm-5.3-flash"]}],
+                    "balances": [{"user_plan_id": "up1", "plan_id": "zcode-v3-start-plan", "capabilities": ["model:glm-5.3-flash"], "total_units": 100, "used_units": 10, "remaining_units": 90}],
                 }}),
                 "/api/biz/customer/getCustomerInfo" => json!({"code": 200, "data": {"organizations": [
                     {"organizationId": "org-1", "organizationName": "默认机构", "projects": [{"projectId": "proj-1", "projectName": "默认项目"}]},
@@ -100,8 +100,11 @@ async fn serve_backend(listener: TcpListener, log: Arc<Mutex<Vec<(String, String
                     json!({"code": 200, "data": {"secretKey": "secret-xyz"}})
                 }
                 "/api/biz/subscription/list" => json!({"code": 200, "data": [
-                    {"productName": "GLM Coding Pro", "status": "VALID", "inCurrentPeriod": true},
+                    {"productId": "pro", "productName": "GLM Coding Pro", "status": "VALID", "inCurrentPeriod": true, "billingCycle": "monthly"},
                 ]}),
+                "/api/monitor/usage/quota/limit" => json!({"code": 200, "data": {"level": "pro", "limits": [
+                    {"type": "TIME_LIMIT", "remaining": 7, "percentage": 30, "nextResetTime": 123},
+                ]}}),
                 _ => json!({"code": 404}),
             };
             let body = body.to_string();
@@ -270,6 +273,38 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
             .unwrap();
         assert_eq!(subscription.2, "key-abc.secret-xyz");
     }
+
+    // 额度与套餐快照（Composer 工具栏）：个人 Coding Plan 与 Start Plan。
+    let usage = zcode_host_services::account::usage::UsageStats::new(
+        account.api.clone(),
+        account.auth.clone(),
+        account.credentials.clone(),
+        account.billing.clone(),
+        account.official_mcp.clone(),
+        Arc::new(|_| Box::pin(async { Ok(Value::Null) })),
+    );
+    let individual = usage
+        .entitlement_snapshot(&json!({
+            "preferredProviderId": "account:zai-individual-coding-plan",
+            "accountAccess": {"type": "zhipu-account", "accountType": "zai", "mode": "individual-coding-plan", "entitled": true},
+        }))
+        .await
+        .unwrap();
+    assert_eq!(individual["subscription"]["details"][0]["productName"], "GLM Coding Pro");
+    assert_eq!(individual["remaining"]["count"], 7);
+    assert_eq!(individual["quota"]["level"], "pro");
+    assert_eq!(individual["context"], json!({"scope": "personal", "productId": "pro", "displayName": "GLM Coding Pro"}));
+    assert!(individual.get("unavailableReason").is_none());
+    let start = usage
+        .entitlement_snapshot(&json!({
+            "preferredProviderId": "account:zai-start-plan",
+            "accountAccess": {"type": "zhipu-account", "accountType": "zai", "mode": "start-plan", "entitled": true},
+        }))
+        .await
+        .unwrap();
+    assert_eq!(start["provider"]["name"], "Z.ai - Coding Plan");
+    assert_eq!(start["quota"]["level"], "Start");
+    assert_eq!(start["subscription"]["details"][0]["productId"], "zcode-v3-start-plan");
 
     // 反向请求：按模型固定的 Account Access 应答，不需要 UI。
     let handler = runtime

@@ -232,7 +232,6 @@ pub fn install(
         storage.tasks_index.clone(),
         context.environment.app_config_dir(),
     );
-    registry.implement(account::usage_stats_service());
     registry.implement(account::coding_plan_service(providers.clone()));
     account.register_provider_writes(registry, &providers, &agent);
     registry.implement(settings_sync::service(settings_sync::SettingsSync::new(

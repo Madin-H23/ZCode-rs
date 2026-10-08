@@ -4,25 +4,6 @@ use zcode_host_kit::{Reply, ServiceBuilder};
 
 use crate::providers::ProviderRuntime;
 
-pub fn usage_stats_service() -> ServiceBuilder {
-    ServiceBuilder::new("usage-stats").method("getEntitlementSnapshot", |_, _| async {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis() as u64)
-            .unwrap_or_default();
-        Ok(Reply::Value(json!({
-            "generatedAt": now,
-            "authenticated": true,
-            "unavailableReason": "not_configured",
-            "context": {"scope": "personal"},
-            "provider": null,
-            "remaining": null,
-            "subscription": null,
-            "quota": null,
-        })))
-    })
-}
-
 pub fn coding_plan_service(providers: ProviderRuntime) -> ServiceBuilder {
     ServiceBuilder::new("coding-plan-subscription")
         .method(

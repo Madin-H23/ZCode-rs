@@ -27,6 +27,9 @@ print_stdout = "deny"
 [workspace.dependencies]
 anyhow = "1"
 base64 = "0.22"
+# 用量 / 套餐的本地时间与 IANA 时区换算（同 CLI 的版本）。
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono-tz = "0.10"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 getrandom = "0.3"
 # 账号服务的 IANA 时区（X-Client-Timezone，同 CLI 的 net crate）。
