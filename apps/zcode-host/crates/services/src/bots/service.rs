@@ -1,20 +1,23 @@
-//! `IBotsService` 的管理面（botsService.ts 的公开方法）与 `bots` channel。
+//! `IBotsService` 的管理面（botsService.ts 的公开方法）与 `bots` channel（22 个成员）。
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
 use zcode_host_kit::{Args, Reply, RpcError, ServiceBuilder, log};
 
-use super::TaskPort;
-use super::feishu::api::{AppCredentials, FeishuApi};
+use super::channel::{Polling, PollingRuntimes};
+use super::feishu::api::AppCredentials;
 use super::model::{
     self, ALL_BOT_WORKSPACES, BOT_BIND_CODE_TTL_MS, is_feishu, normalize_allowed_workspaces,
     normalize_bot, string_list,
 };
 use super::now_ms;
+use super::providers::Providers;
 use super::runtime::Runtimes;
 use super::store::BotsRepo;
+use super::{RemoteBots, TaskPort};
 use crate::account::credential::CredentialStore;
 use crate::settings::SettingStore;
 
@@ -32,23 +35,53 @@ pub struct BindCode {
 pub struct BotsDeps {
     pub repo: BotsRepo,
     pub credentials: CredentialStore,
-    pub api: Arc<FeishuApi>,
+    pub providers: Arc<Providers>,
     pub settings: SettingStore,
     pub tasks: Arc<dyn TaskPort>,
+    pub remote: Arc<dyn RemoteBots>,
+    /// 附件缓存目录（`<appConfig>/bot-attachments`）。
+    pub attachments_dir: PathBuf,
     pub background: bool,
+}
+
+/// `/task` 列表里的候选（保留 workspace 身份，按序号选择时不必二次解析）。
+#[derive(Debug, Clone)]
+pub struct TaskEntry {
+    pub task: Value,
+    pub workspace_path: String,
+    pub workspace_identity: Option<String>,
+}
+
+/// 飞书流式卡片模式下的临时交互卡片（问答 / 权限原地更新的那张）。
+#[derive(Debug, Clone)]
+pub struct TransientCard {
+    pub bot: Value,
+    pub task_id: String,
+    pub message_id: String,
+}
+
+/// 运行中任务的 typing：飞书 reaction（结束时删除），或 Telegram / 微信的周期重发任务。
+pub struct Typing {
+    pub bot: Value,
+    pub target: super::providers::TypingTarget,
+    pub repeat: Option<tokio::task::AbortHandle>,
 }
 
 pub struct Bots {
     pub(crate) repo: BotsRepo,
     pub(crate) credentials: CredentialStore,
-    pub(crate) api: Arc<FeishuApi>,
+    pub(crate) providers: Arc<Providers>,
     pub(crate) settings: SettingStore,
     pub(crate) tasks: Arc<dyn TaskPort>,
+    pub(crate) remote: Arc<dyn RemoteBots>,
+    pub(crate) attachments_dir: PathBuf,
     pub(crate) background: bool,
     pub(crate) bind_codes: Mutex<HashMap<String, BindCode>>,
     /// `runtimeByBotId`。
     runtime_status: Mutex<HashMap<String, Map<String, Value>>>,
     pub(crate) runtimes: Runtimes,
+    pub(crate) telegram_runtimes: PollingRuntimes,
+    pub(crate) weixin_runtimes: PollingRuntimes,
     /// 每个聊天上下文串行处理入站消息（`enqueueInboundProcessing`）。
     pub(crate) inbound_queues: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// 2 分钟内处理过的入站消息（`recentInboundDeliveryAtByKey`）。
@@ -57,6 +90,23 @@ pub struct Bots {
     pub(crate) running: Mutex<HashSet<String>>,
     pub(crate) delivery_warnings: Mutex<HashMap<String, i64>>,
     pub(crate) name_retry_ms: Mutex<Vec<u64>>,
+    pub(crate) webhook_retry_ms: Mutex<Vec<u64>>,
+    /// 聊天上下文 → 待选项（`pendingSelectionsByContext`，SelectionPrompt JSON）。
+    pub(crate) pending_selections: Mutex<HashMap<String, Value>>,
+    pub(crate) pending_tasks: Mutex<HashMap<String, HashMap<String, TaskEntry>>>,
+    pub(crate) pending_workspaces: Mutex<HashMap<String, HashMap<String, Value>>>,
+    /// 已订阅的会话流（`streamSubscriptions`，键为 `workspaceKey::taskId`）。
+    pub(crate) watches: Mutex<HashMap<String, Option<tokio::task::AbortHandle>>>,
+    /// taskId → 运行中的 typing。
+    pub(crate) typing: Mutex<HashMap<String, Typing>>,
+    /// taskId → /status 的最新进展（`liveStatusProgressByTaskId`）。
+    pub(crate) live_progress: Mutex<HashMap<String, (&'static str, String)>>,
+    /// 聊天上下文 → 临时交互卡片。
+    pub(crate) transient_cards: Mutex<HashMap<String, TransientCard>>,
+    /// 流式卡片节流间隔（测试可缩短）。
+    pub(crate) card_interval_ms: Mutex<u64>,
+    /// 流式卡片失败退避的基数（测试可缩短）。
+    pub(crate) card_backoff_ms: Mutex<i64>,
 }
 
 pub(crate) fn guard<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -70,16 +120,10 @@ pub(crate) fn error(message: impl std::fmt::Display) -> RpcError {
 }
 
 fn anyhow_error(error: anyhow::Error) -> RpcError {
-    error_message(&error)
-}
-
-fn error_message(error: &anyhow::Error) -> RpcError {
     RpcError::new("Error", error.to_string())
 }
 
-pub(crate) fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key).and_then(Value::as_str)
-}
+pub(crate) use super::util::text;
 
 pub(crate) fn find_bot(config: &Value, bot_id: &str) -> Option<Value> {
     config["bots"]
@@ -140,18 +184,32 @@ impl Bots {
         Arc::new(Self {
             repo: deps.repo,
             credentials: deps.credentials,
-            api: deps.api,
+            providers: deps.providers,
             settings: deps.settings,
             tasks: deps.tasks,
+            remote: deps.remote,
+            attachments_dir: deps.attachments_dir,
             background: deps.background,
             bind_codes: Mutex::new(HashMap::new()),
             runtime_status: Mutex::new(HashMap::new()),
             runtimes: Runtimes::default(),
+            telegram_runtimes: PollingRuntimes::default(),
+            weixin_runtimes: PollingRuntimes::default(),
             inbound_queues: Mutex::new(HashMap::new()),
             recent_inbound: Mutex::new(HashMap::new()),
             running: Mutex::new(HashSet::new()),
             delivery_warnings: Mutex::new(HashMap::new()),
             name_retry_ms: Mutex::new(FEISHU_NAME_RETRY_MS.to_vec()),
+            webhook_retry_ms: Mutex::new(super::webhook::RETRY_DELAYS_MS.to_vec()),
+            pending_selections: Mutex::new(HashMap::new()),
+            pending_tasks: Mutex::new(HashMap::new()),
+            pending_workspaces: Mutex::new(HashMap::new()),
+            watches: Mutex::new(HashMap::new()),
+            typing: Mutex::new(HashMap::new()),
+            live_progress: Mutex::new(HashMap::new()),
+            transient_cards: Mutex::new(HashMap::new()),
+            card_interval_ms: Mutex::new(super::watch::CARD_MIN_UPDATE_INTERVAL_MS),
+            card_backoff_ms: Mutex::new(super::watch::CARD_BACKOFF_BASE_MS),
         })
     }
 
@@ -228,7 +286,7 @@ impl Bots {
             credential_ref: text(bot, "credentialRef").unwrap_or_default(),
             app_secret: &secret,
         };
-        self.api.tenant_token(&app).await.map(Some)
+        self.providers.feishu.tenant_token(&app).await.map(Some)
     }
 
     async fn read_config(&self) -> Result<Value, RpcError> {
@@ -285,27 +343,21 @@ impl Bots {
         Ok(saved)
     }
 
-    /// `adapter.resolveName`：只有飞书 / Lark 能从开放平台读应用名称。
+    /// `adapter.resolveName` 带重试：飞书 0 / 800 / 1800 ms，其余通道只试一次。
     async fn resolve_name(&self, bot: &Value) -> Option<String> {
         let provider = text(bot, "provider").unwrap_or_default();
-        if !is_feishu(provider) {
-            return None;
-        }
-        let delays = guard(&self.name_retry_ms).clone();
+        let delays = if is_feishu(provider) {
+            guard(&self.name_retry_ms).clone()
+        } else {
+            vec![0]
+        };
         let mut last_error = None;
         for delay in delays {
             if delay > 0 {
                 // 飞书 / Lark 扫码创建应用后，应用信息接口可能短暂不可读；重试后再回填名称。
                 tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
             }
-            let secret = self.feishu_secret(bot).await?;
-            let app = AppCredentials {
-                provider,
-                app_id: text(bot, "feishuAppId").unwrap_or_default(),
-                credential_ref: text(bot, "credentialRef").unwrap_or_default(),
-                app_secret: &secret,
-            };
-            match self.api.read_app_display_name(&app).await {
+            match self.provider_resolve_name(bot).await {
                 Ok(Some(name)) if !name.trim().is_empty() => return Some(name.trim().to_owned()),
                 Ok(_) => {}
                 Err(error) => last_error = Some(error),
@@ -383,14 +435,27 @@ impl Bots {
         Ok(bot)
     }
 
+    /// 删除或摘密钥前先停掉该 Bot 的连接（Telegram 先清菜单，用的还是旧 token）。
+    async fn stop_bot_runtime(self: &Arc<Self>, bot: &Value) {
+        let id = text(bot, "id").unwrap_or_default();
+        match text(bot, "provider").unwrap_or_default() {
+            "telegram" => {
+                let mut disabled = bot.clone();
+                disabled["enabled"] = json!(false);
+                self.sync_telegram_commands(&disabled).await;
+            }
+            "weixin" => self.stop_polling(Polling::Weixin, id).await,
+            provider if is_feishu(provider) => self.stop_websocket(id).await,
+            _ => {}
+        }
+    }
+
     pub async fn remove_bot_secret(self: &Arc<Self>, bot_id: &str) -> Result<Value, RpcError> {
         let config = self.read_config().await?;
         let bot =
             find_bot(&config, bot_id).ok_or_else(|| error(format!("Bot not found: {bot_id}")))?;
         let provider = text(&bot, "provider").unwrap_or_default().to_owned();
-        if is_feishu(&provider) {
-            self.stop_websocket(bot_id).await;
-        }
+        self.stop_bot_runtime(&bot).await;
         // 只移除密钥时如果保留旧绑定身份，UI 会显示“已连通”但运行时已经没有 token 可用；
         // 同步清理绑定状态，让 Bot 回到可重新添加的状态。
         let mut next_bot = bot.as_object().cloned().unwrap_or_default();
@@ -435,7 +500,7 @@ impl Bots {
         Ok(next_bot)
     }
 
-    async fn delete_state(&self, key: &str) -> Result<(), RpcError> {
+    pub(crate) async fn delete_state(&self, key: &str) -> Result<(), RpcError> {
         let mut state = self.repo.read_state().await.map_err(anyhow_error)?;
         if let Some(bots) = state["bots"].as_object_mut() {
             bots.shift_remove(key);
@@ -447,11 +512,8 @@ impl Bots {
     pub async fn delete_bot(self: &Arc<Self>, bot_id: &str) -> Result<(), RpcError> {
         let config = self.read_config().await?;
         let bot = find_bot(&config, bot_id);
-        if bot
-            .as_ref()
-            .is_some_and(|bot| is_feishu(text(bot, "provider").unwrap_or_default()))
-        {
-            self.stop_websocket(bot_id).await;
+        if let Some(bot) = &bot {
+            self.stop_bot_runtime(bot).await;
         }
         let mut next = config.clone();
         next["bots"] = Value::Array(
@@ -464,6 +526,7 @@ impl Bots {
                 .collect(),
         );
         self.write_config(&next).await?;
+        self.schedule_refresh();
         self.delete_state(bot_id).await?;
         for key in ["credentialRef", "webhookSecretRef"] {
             if let Some(reference) = bot.as_ref().and_then(|bot| text(bot, key)) {
@@ -482,37 +545,17 @@ impl Bots {
             return Ok(json!({"ok": false, "message": "Bot not found."}));
         };
         let provider = text(&bot, "provider").unwrap_or_default();
-        let result = match provider {
-            "feishu" | "lark" => {
-                if bot["enabled"] != true {
-                    json!({"ok": false, "message": "Feishu bot is disabled."})
-                } else if text(&bot, "feishuAppId").is_none()
-                    || text(&bot, "credentialRef").is_none()
-                {
-                    json!({"ok": false, "message": "Feishu App ID and App Secret are required."})
-                } else {
-                    match self.tenant_token(&bot).await.map_err(anyhow_error)? {
-                        Some(_) => {
-                            json!({"ok": true, "message": "Feishu app credentials are valid."})
-                        }
-                        None => {
-                            json!({"ok": false, "message": "Feishu app credentials are missing."})
-                        }
-                    }
-                }
+        match self.provider_test(&bot).await.map_err(anyhow_error)? {
+            Some(mut result) => {
+                result["provider"] = json!(provider);
+                Ok(result)
             }
-            "discord" | "wecom" => {
-                return Ok(json!({
-                    "ok": false,
-                    "message": format!("{provider} is reserved for a future version."),
-                    "provider": provider,
-                }));
-            }
-            _ => return Err(not_implemented(provider)),
-        };
-        let mut result = result;
-        result["provider"] = json!(provider);
-        Ok(result)
+            None => Ok(json!({
+                "ok": false,
+                "message": format!("{provider} is reserved for a future version."),
+                "provider": provider,
+            })),
+        }
     }
 
     pub async fn create_bind_code(&self, params: &Value) -> Result<Value, RpcError> {
@@ -544,7 +587,8 @@ impl Bots {
         Ok(json!({"code": code, "expiresAt": expires_at}))
     }
 
-    /// `watchAutomationRun`：只对已启用、通道一致的 Bot 回推终态摘要。
+    /// `watchAutomationRun`：只对已启用、通道一致的 Bot 回推终态摘要（固定 summary_changes）。
+    /// 订阅建立后才返回，调用方随后才发送 prompt。
     pub async fn watch_automation_run(self: &Arc<Self>, params: &Value) {
         let target = &params["target"];
         let provider = text(target, "provider").unwrap_or_default();
@@ -573,13 +617,20 @@ impl Bots {
                     chat_type: text(target, "chatType").unwrap_or("private").to_owned(),
                     ..super::feishu::Actor::default()
                 };
-                let workspace = crate::agent::WorkspaceTarget {
-                    workspace_path: text(params, "workspacePath").unwrap_or_default().to_owned(),
-                    workspace_identity: text(params, "workspaceIdentity").map(str::to_owned),
-                    remote_session_id: None,
-                };
-                let task_id = text(params, "taskId").unwrap_or_default().to_owned();
-                self.watch_task(bot, actor, workspace, task_id, None);
+                let mut context = Map::new();
+                context.insert("botId".into(), bot["id"].clone());
+                context.insert("workspacePath".into(), params["workspacePath"].clone());
+                if let Some(identity) = text(params, "workspaceIdentity") {
+                    context.insert("workspaceIdentity".into(), json!(identity));
+                }
+                context.insert("mode".into(), json!("task"));
+                context.insert("activeTaskId".into(), params["taskId"].clone());
+                context.insert("updatedAt".into(), json!(now_ms()));
+                // automation 回推固定为终态摘要：不复用用户当前的回复颗粒度，后台任务不持续推中间过程。
+                let mut user = bot.clone();
+                user["replyMode"] = json!("summary_changes");
+                self.watch_task_stream(&bot, &actor, &Value::Object(context), &user)
+                    .await;
                 None
             }
         };
@@ -596,14 +647,31 @@ impl Bots {
             }
         }
     }
-}
 
-pub(crate) fn not_implemented(provider: &str) -> RpcError {
-    RpcError::new(
-        "NotImplemented",
-        format!("bots: the {provider} channel is not implemented in the Rust Host yet"),
-    )
-    .with_code(zcode_host_kit::NOT_IMPLEMENTED_CODE)
+    /// 配置变更后三个运行时一起对齐（`telegramRuntime / weixinRuntime / feishuRuntime.scheduleRefresh`）。
+    pub fn schedule_refresh(self: &Arc<Self>) {
+        if !self.background {
+            return;
+        }
+        self.schedule_feishu_refresh();
+        self.schedule_polling_refresh();
+    }
+
+    /// 停止全部长连接与轮询（Host 退出）。
+    pub async fn dispose(&self) {
+        for (_, watch) in guard(&self.watches).drain() {
+            if let Some(watch) = watch {
+                watch.abort();
+            }
+        }
+        for (_, typing) in guard(&self.typing).drain() {
+            if let Some(repeat) = typing.repeat {
+                repeat.abort();
+            }
+        }
+        self.dispose_feishu().await;
+        self.dispose_polling().await;
+    }
 }
 
 fn arg(args: &Args, index: usize) -> Value {
@@ -613,9 +681,15 @@ fn arg(args: &Args, index: usize) -> Value {
 type Handler = fn(Arc<Bots>, Args) -> BoxFuture<'static, Result<Reply, RpcError>>;
 
 pub fn channel(bots: Arc<Bots>) -> ServiceBuilder {
-    let members: [(&str, Handler); 20] = [
-        ("syncAppRuntimePreferences", |_, _| {
-            Box::pin(async { Ok(Reply::Undefined) })
+    let members: [(&str, Handler); 22] = [
+        ("syncAppRuntimePreferences", |bots, args| {
+            // 只服务远端 Bot 运行时（Node 转给 remoteWorkspaceService）；本地无事可做。
+            Box::pin(async move {
+                bots.remote
+                    .sync_app_runtime_preferences(arg(&args, 0))
+                    .await;
+                Ok(Reply::Undefined)
+            })
         }),
         ("getStatus", |bots, _| {
             Box::pin(async move { bots.get_status().await.map(Reply::Value) })
@@ -636,7 +710,8 @@ pub fn channel(bots: Arc<Bots>) -> ServiceBuilder {
         ("beginFeishuRegistration", |bots, args| {
             Box::pin(async move {
                 let params = arg(&args, 0);
-                bots.api
+                bots.providers
+                    .feishu
                     .begin_registration(text(&params, "domain"))
                     .await
                     .map(Reply::Value)
@@ -645,8 +720,25 @@ pub fn channel(bots: Arc<Bots>) -> ServiceBuilder {
         }),
         ("pollFeishuRegistration", |bots, args| {
             Box::pin(async move {
-                bots.api
+                bots.providers
+                    .feishu
                     .poll_registration(&arg(&args, 0))
+                    .await
+                    .map(Reply::Value)
+                    .map_err(anyhow_error)
+            })
+        }),
+        ("beginWeixinRegistration", |bots, _| {
+            Box::pin(async move {
+                super::weixin::begin_registration(&bots)
+                    .await
+                    .map(Reply::Value)
+                    .map_err(anyhow_error)
+            })
+        }),
+        ("pollWeixinRegistration", |bots, args| {
+            Box::pin(async move {
+                super::weixin::poll_registration(&bots, &arg(&args, 0))
                     .await
                     .map(Reply::Value)
                     .map_err(anyhow_error)

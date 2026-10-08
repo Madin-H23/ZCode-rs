@@ -269,6 +269,251 @@ impl FeishuApi {
             .map(str::to_owned))
     }
 
+    /// `updateFeishuInteractiveMessage`：PATCH 同一条消息的卡片（流式卡片、交互卡片原地更新）。
+    pub async fn update_card(
+        &self,
+        provider: &str,
+        token: &str,
+        message_id: &str,
+        card: &Value,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/open-apis/im/v1/messages/{}",
+            self.endpoints.open(provider),
+            crate::bots::util::encode_uri_component(message_id)
+        );
+        let body = json!({"msg_type": "interactive", "content": card.to_string()});
+        let response = self
+            .json(
+                self.http
+                    .patch(url)
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(body.to_string()),
+            )
+            .await?;
+        if !response.ok || response.payload["code"] != 0 {
+            return Err(message_error(
+                "update streaming card",
+                response.status,
+                &response.payload,
+                response.log_id.as_deref(),
+                None,
+            ));
+        }
+        Ok(())
+    }
+
+    /// `addFeishuTypingReaction`：返回 reaction_id。
+    pub async fn add_reaction(
+        &self,
+        provider: &str,
+        token: &str,
+        message_id: &str,
+    ) -> Result<Option<String>> {
+        let url = format!(
+            "{}/open-apis/im/v1/messages/{message_id}/reactions",
+            self.endpoints.open(provider)
+        );
+        let response = self
+            .json(
+                self.http
+                    .post(url)
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(json!({"reaction_type": {"emoji_type": "Typing"}}).to_string()),
+            )
+            .await?;
+        if !response.ok {
+            bail!(
+                "Feishu add typing reaction failed: HTTP {}",
+                response.status
+            );
+        }
+        if response.payload["code"] != 0 {
+            bail!(
+                "{}",
+                response.payload["msg"]
+                    .as_str()
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or("Feishu add typing reaction failed.")
+            );
+        }
+        Ok(response.payload["data"]["reaction_id"]
+            .as_str()
+            .map(str::to_owned))
+    }
+
+    /// `deleteFeishuTypingReaction`。
+    pub async fn delete_reaction(
+        &self,
+        provider: &str,
+        token: &str,
+        message_id: &str,
+        reaction_id: &str,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/open-apis/im/v1/messages/{message_id}/reactions/{reaction_id}",
+            self.endpoints.open(provider)
+        );
+        let response = self
+            .json(
+                self.http
+                    .delete(url)
+                    .header("authorization", format!("Bearer {token}")),
+            )
+            .await?;
+        if !response.ok {
+            bail!(
+                "Feishu delete typing reaction failed: HTTP {}",
+                response.status
+            );
+        }
+        if response.payload["code"] != 0 {
+            bail!(
+                "{}",
+                response.payload["msg"]
+                    .as_str()
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or("Feishu delete typing reaction failed.")
+            );
+        }
+        Ok(())
+    }
+
+    /// `interactive/v1/card/update`（卡片回调的 card update token 原地更新）。
+    pub async fn card_update(&self, provider: &str, token: &str, body: &Value) -> Result<()> {
+        let url = format!(
+            "{}/open-apis/interactive/v1/card/update",
+            self.endpoints.open(provider)
+        );
+        let response = self
+            .json(
+                self.http
+                    .post(url)
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(body.to_string()),
+            )
+            .await?;
+        if !response.ok {
+            bail!(
+                "Feishu update interactive card failed: HTTP {}",
+                response.status
+            );
+        }
+        if response.payload["code"] != 0 {
+            bail!(
+                "{}",
+                response.payload["msg"]
+                    .as_str()
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or("Feishu update interactive card failed.")
+            );
+        }
+        Ok(())
+    }
+
+    /// `readFeishuUserDisplayName` 的网络部分：`name || en_name || nickname`。
+    pub async fn user_name(
+        &self,
+        provider: &str,
+        token: &str,
+        user_id: &str,
+    ) -> Result<Option<String>> {
+        let id_type = if user_id.starts_with("ou_") {
+            "open_id"
+        } else if user_id.starts_with("on_") {
+            "union_id"
+        } else {
+            "user_id"
+        };
+        let url = format!(
+            "{}/open-apis/contact/v3/users/{}?user_id_type={id_type}",
+            self.endpoints.open(provider),
+            crate::bots::util::encode_uri_component(user_id)
+        );
+        let response = self
+            .json(
+                self.http
+                    .get(url)
+                    .header("authorization", format!("Bearer {token}")),
+            )
+            .await?;
+        if !response.ok {
+            bail!(
+                "Feishu get user info failed user={user_id}: HTTP {}",
+                response.status
+            );
+        }
+        if response.payload["code"] != 0 {
+            let message = response.payload["msg"]
+                .as_str()
+                .filter(|m| !m.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("Feishu get user info failed user={user_id}."));
+            bail!("{message}");
+        }
+        let user = &response.payload["data"]["user"];
+        Ok(["name", "en_name", "nickname"].iter().find_map(|key| {
+            user[*key]
+                .as_str()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+        }))
+    }
+
+    /// 附件下载：`im/v1/messages/<messageId>/resources/<fileKey>?type=`。
+    pub async fn resource(
+        &self,
+        provider: &str,
+        token: &str,
+        message_id: &str,
+        file_key: &str,
+        kind: &str,
+    ) -> Result<Vec<u8>> {
+        let resource_type = match kind {
+            "image" => "image",
+            "video" => "media",
+            other => other,
+        };
+        let url = format!(
+            "{}/open-apis/im/v1/messages/{}/resources/{}?type={resource_type}",
+            self.endpoints.open(provider),
+            crate::bots::util::encode_uri_component(message_id),
+            crate::bots::util::encode_uri_component(file_key)
+        );
+        let work = async {
+            let response = self
+                .http
+                .get(url)
+                .header("authorization", format!("Bearer {token}"))
+                .timeout(crate::bots::providers::ATTACHMENT_TIMEOUT)
+                .send()
+                .await?;
+            if !response.status().is_success() {
+                bail!(
+                    "Feishu attachment download failed: HTTP {}",
+                    response.status().as_u16()
+                );
+            }
+            Ok(response.bytes().await?.to_vec())
+        };
+        match tokio::time::timeout(crate::bots::providers::ATTACHMENT_TIMEOUT, work).await {
+            Ok(Ok(bytes)) => Ok(bytes),
+            Ok(Err(error))
+                if error
+                    .downcast_ref::<reqwest::Error>()
+                    .is_some_and(reqwest::Error::is_timeout) =>
+            {
+                bail!("Feishu attachment download timed out.")
+            }
+            Ok(Err(error)) => Err(error),
+            Err(_) => bail!("Feishu attachment download timed out."),
+        }
+    }
+
     /// 长连接接入点（node-sdk `pullConnectConfig`）：返回 (ws url, ClientConfig)。
     pub async fn ws_endpoint(
         &self,

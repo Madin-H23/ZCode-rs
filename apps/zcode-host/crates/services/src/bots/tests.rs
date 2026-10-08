@@ -1,32 +1,25 @@
 //! bots 测试：对拍 fixture（TS 生成）+ 127.0.0.1 上的飞书 mock（开放平台 HTTP 与长连接 WS）。
 //! 不连任何真实飞书服务，不读写真实 HOME。
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
-use futures_util::future::BoxFuture;
-use futures_util::stream::BoxStream;
-use futures_util::{FutureExt, SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
-use zcode_host_kit::EventHub;
 
 use super::feishu::api::{Endpoints, FeishuApi};
+use super::feishu::cards::{self, StreamBlock, StreamState, StreamStatus};
 use super::feishu::frame::{Frame, METHOD_CONTROL, METHOD_DATA};
 use super::feishu::{card_markdown, parse_callback, split_text, strip_mentions};
 use super::model::{
     import_legacy_config, import_legacy_state, message, normalize_allowed_workspaces,
     normalize_bot, parse_command, parse_config_file, parse_state_file,
 };
-use super::service::{Bots, BotsDeps};
 use super::store::BotsRepo;
-use super::{FinalReply, TaskPort};
+use super::test_support::{Answer, FakeTasks, MockServer, bots_with, eventually};
 use crate::account::credential::CredentialStore;
-use crate::agent::WorkspaceTarget;
-use crate::automation::driver::{SendText, TerminalOutcome};
-use crate::off_peak::gateway::{read_request, write_json};
-use crate::settings::SettingStore;
+use crate::automation::driver::TerminalOutcome;
 
 fn parity() -> Value {
     serde_json::from_str(include_str!("fixtures/parity.json")).unwrap()
@@ -217,97 +210,96 @@ async fn runtime_lock_is_exclusive_until_released() {
 
 // ── 飞书 mock ──
 
+/// 飞书开放平台 mock：token、应用名、发卡片（记录）、PATCH 卡片（记录）、长连接接入点、扫码注册。
 #[derive(Default)]
-struct Mock {
-    /// 发给飞书的消息（im/v1/messages 的请求体）。
-    sent: Mutex<Vec<Value>>,
+struct Feishu {
     ws_url: Mutex<String>,
     poll_count: Mutex<u32>,
 }
 
-impl Mock {
-    fn cards(&self) -> Vec<String> {
-        self.sent
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|body| {
-                let card: Value = serde_json::from_str(body["content"].as_str().unwrap()).unwrap();
-                card["body"]["elements"][0]["content"]
-                    .as_str()
-                    .unwrap()
-                    .to_owned()
-            })
-            .collect()
-    }
+fn card_text(card: &Value) -> String {
+    card["body"]["elements"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|element| element["content"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-async fn mock_open(mock: Arc<Mock>) -> String {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
-    let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-    tokio::spawn(async move {
-        loop {
-            let Ok((mut stream, _)) = listener.accept().await else {
-                continue;
-            };
-            let mock = mock.clone();
-            tokio::spawn(async move {
-                let Ok(Some(request)) = read_request(&mut stream).await else {
-                    return;
-                };
-                let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
-                let form = String::from_utf8_lossy(&request.body).to_string();
-                let path = request
-                    .path
-                    .split('?')
-                    .next()
-                    .unwrap_or_default()
-                    .to_owned();
-                let response = match path.as_str() {
-                    "/open-apis/auth/v3/tenant_access_token/internal" => {
-                        if body["app_secret"] == "app-secret" {
-                            json!({"code": 0, "tenant_access_token": "t-1", "expire": 7200})
-                        } else {
-                            json!({"code": 10014, "msg": "app secret invalid"})
-                        }
-                    }
-                    "/open-apis/application/v6/applications/cli_0123456789abcdef" => {
-                        json!({"code": 0, "data": {"app": {"app_name": " Mock Bot "}}})
-                    }
-                    "/open-apis/im/v1/messages" => {
-                        assert_eq!(request.headers["authorization"], "Bearer t-1");
-                        mock.sent.lock().unwrap().push(body);
-                        json!({"code": 0, "data": {"message_id": "om_out"}})
-                    }
-                    "/callback/ws/endpoint" => {
-                        let url = mock.ws_url.lock().unwrap().clone();
-                        json!({"code": 0, "data": {"URL": url, "ClientConfig": {
-                            "PingInterval": 120, "ReconnectCount": 1, "ReconnectInterval": 1, "ReconnectNonce": 0}}})
-                    }
-                    "/oauth/v1/app/registration" if form.contains("action=init") => {
-                        json!({"supported_auth_methods": ["client_secret"]})
-                    }
-                    "/oauth/v1/app/registration" if form.contains("action=begin") => json!({
-                        "device_code": "dev-1", "user_code": "U-1", "interval": 3, "expire_in": 60,
-                        "verification_uri_complete": "https://accounts.example/verify?code=1&from=web",
-                    }),
-                    "/oauth/v1/app/registration" => {
-                        let mut count = mock.poll_count.lock().unwrap();
-                        *count += 1;
-                        match *count {
-                            1 => json!({"error": "authorization_pending"}),
-                            2 => json!({"error": "slow_down"}),
-                            _ => json!({"client_id": "cli_0123456789abcdef", "client_secret": "s",
-                                "app": {"name": "Scanned"}, "user_info": {"open_id": "ou_owner"}}),
-                        }
-                    }
-                    _ => json!({"code": 404}),
-                };
-                let _ = write_json(&mut stream, 200, &response, &[]).await;
-            });
-        }
+/// 发出的卡片（POST 创建）与原地更新（PATCH）的正文。
+fn sent_cards(server: &MockServer) -> Vec<(String, Value)> {
+    server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| {
+            request.path.starts_with("/open-apis/im/v1/messages")
+                && !request.path.contains("/reactions")
+        })
+        .map(|request| {
+            let card: Value =
+                serde_json::from_str(request.body["content"].as_str().unwrap_or("null")).unwrap();
+            (request.method.clone(), card)
+        })
+        .collect()
+}
+
+async fn feishu_server(state: Arc<Feishu>) -> MockServer {
+    let server = MockServer::start().await;
+    let counter = Arc::new(Mutex::new(0u32));
+    server.on(move |request| {
+        let body = &request.body;
+        let form = String::from_utf8_lossy(&request.raw).to_string();
+        Some(match request.path.as_str() {
+            "/open-apis/auth/v3/tenant_access_token/internal" => Answer::json(200, if body["app_secret"] == "app-secret" {
+                json!({"code": 0, "tenant_access_token": "t-1", "expire": 7200})
+            } else {
+                json!({"code": 10014, "msg": "app secret invalid"})
+            }),
+            "/open-apis/application/v6/applications/cli_0123456789abcdef" => {
+                Answer::json(200, json!({"code": 0, "data": {"app": {"app_name": " Mock Bot "}}}))
+            }
+            "/open-apis/im/v1/messages" => {
+                assert_eq!(request.headers["authorization"], "Bearer t-1");
+                let mut count = counter.lock().unwrap();
+                *count += 1;
+                Answer::json(200, json!({"code": 0, "data": {"message_id": format!("om_{count}")}}))
+            }
+            path if path.starts_with("/open-apis/im/v1/messages/") && path.ends_with("/reactions") => {
+                Answer::json(200, json!({"code": 0, "data": {"reaction_id": "r1"}}))
+            }
+            path if path.starts_with("/open-apis/im/v1/messages/") => Answer::json(200, json!({"code": 0})),
+            path if path.starts_with("/open-apis/contact/v3/users/") => {
+                Answer::json(200, json!({"code": 0, "data": {"user": {"name": "Ann"}}}))
+            }
+            "/callback/ws/endpoint" => {
+                let url = state.ws_url.lock().unwrap().clone();
+                Answer::json(200, json!({"code": 0, "data": {"URL": url, "ClientConfig": {
+                    "PingInterval": 120, "ReconnectCount": 1, "ReconnectInterval": 1, "ReconnectNonce": 0}}}))
+            }
+            "/oauth/v1/app/registration" if form.contains("action=init") => {
+                Answer::json(200, json!({"supported_auth_methods": ["client_secret"]}))
+            }
+            "/oauth/v1/app/registration" if form.contains("action=begin") => Answer::json(200, json!({
+                "device_code": "dev-1", "user_code": "U-1", "interval": 3, "expire_in": 60,
+                "verification_uri_complete": "https://accounts.example/verify?code=1&from=web",
+            })),
+            "/oauth/v1/app/registration" => {
+                let mut count = state.poll_count.lock().unwrap();
+                *count += 1;
+                Answer::json(200, match *count {
+                    1 => json!({"error": "authorization_pending"}),
+                    2 => json!({"error": "slow_down"}),
+                    _ => json!({"client_id": "cli_0123456789abcdef", "client_secret": "s",
+                        "app": {"name": "Scanned"}, "user_info": {"open_id": "ou_owner"}}),
+                })
+            }
+            _ => return None,
+        })
     });
-    origin
+    server
 }
 
 /// 一次长连接：把测试发来的帧推给客户端，并把客户端回的帧转给测试。
@@ -345,16 +337,7 @@ async fn mock_ws() -> (
     (url, to_client, from_client)
 }
 
-fn event_frame(message_id: &str, text: &str) -> Frame {
-    let payload = json!({
-        "schema": "2.0",
-        "header": {"event_id": format!("ev-{message_id}"), "event_type": "im.message.receive_v1"},
-        "event": {
-            "sender": {"sender_id": {"open_id": "ou_user"}},
-            "message": {"message_id": message_id, "chat_id": "oc_chat", "chat_type": "p2p",
-                "message_type": "text", "content": json!({"text": text}).to_string()},
-        },
-    });
+fn data_frame(message_id: &str, payload: Value) -> Frame {
     Frame {
         service: 7,
         method: METHOD_DATA,
@@ -369,132 +352,38 @@ fn event_frame(message_id: &str, text: &str) -> Frame {
     }
 }
 
-struct FakeTasks {
-    terminal: EventHub<TerminalOutcome>,
-    created: Mutex<Vec<(String, Value, Option<String>)>>,
-    sent: Mutex<Vec<(String, SendText)>>,
-}
-
-impl TaskPort for FakeTasks {
-    fn create(
-        &self,
-        target: WorkspaceTarget,
-        selection: Value,
-        mode: Option<String>,
-    ) -> BoxFuture<'static, Result<String, String>> {
-        let mut created = self.created.lock().unwrap();
-        created.push((target.workspace_path, selection, mode));
-        let id = format!("task-{}", created.len());
-        async move { Ok(id) }.boxed()
-    }
-    fn resume(
-        &self,
-        _: WorkspaceTarget,
-        _: String,
-    ) -> BoxFuture<'static, Result<Option<Value>, String>> {
-        async { Ok(Some(json!({"providerId": "zai", "modelId": "GLM-5"}))) }.boxed()
-    }
-    fn send(
-        &self,
-        target: WorkspaceTarget,
-        task_id: String,
-        input: SendText,
-    ) -> BoxFuture<'static, Result<(), String>> {
-        self.sent
-            .lock()
-            .unwrap()
-            .push((task_id.clone(), input.clone()));
-        let terminal = self.terminal.clone();
-        async move {
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                terminal.emit(TerminalOutcome {
-                    workspace_key: target.key(),
-                    session_id: task_id,
-                    outcome: "succeeded",
-                    input_id: Some(input.input_id),
-                });
-            });
-            Ok(())
-        }
-        .boxed()
-    }
-    fn stop(&self, _: WorkspaceTarget, _: String) -> BoxFuture<'static, Result<(), String>> {
-        async { Ok(()) }.boxed()
-    }
-    fn list(&self, _: String) -> BoxFuture<'static, Vec<Value>> {
-        async { Vec::new() }.boxed()
-    }
-    fn deleted_ids(&self, _: String) -> BoxFuture<'static, Vec<String>> {
-        async { Vec::new() }.boxed()
-    }
-    fn terminal_outcomes(&self) -> BoxStream<'static, TerminalOutcome> {
-        self.terminal.subscribe().boxed()
-    }
-    fn final_reply(&self, _: WorkspaceTarget, _: String) -> BoxFuture<'static, FinalReply> {
-        async {
-            FinalReply {
-                text: Some("Hi from the agent".into()),
-                error: None,
-            }
-        }
-        .boxed()
-    }
-    fn model_view(&self, input: Option<Value>) -> BoxFuture<'static, Value> {
-        async move {
-            match input {
-                Some(input) => json!({"effectiveSelection": input["selection"]}),
-                None => json!({
-                    "preferredSelection": {"providerId": "zai", "modelId": "GLM-5", "options": {"reasoningLevel": "high"}},
-                    "providers": [{"providerId": "zai", "providerName": "Z.ai", "models": [{"modelId": "GLM-5"}]}],
-                }),
-            }
-        }
-        .boxed()
-    }
-}
-
-async fn eventually<T>(what: &str, mut check: impl FnMut() -> Option<T>) -> T {
-    for _ in 0..200 {
-        if let Some(value) = check() {
-            return value;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    panic!("timed out waiting for {what}");
-}
-
-fn setup(dir: &std::path::Path, origin: &str, tasks: Arc<FakeTasks>) -> Arc<Bots> {
-    let config_dir = dir.join(".zcode").join("v2");
-    std::fs::create_dir_all(&config_dir).unwrap();
-    std::fs::write(
-        config_dir.join("setting.json"),
-        json!({"lastWorkspaceSession": [{"kind": "local", "workspacePath": "/tmp/ws-bot"}]})
-            .to_string(),
+fn event_frame(message_id: &str, text: &str) -> Frame {
+    data_frame(
+        message_id,
+        json!({
+            "schema": "2.0",
+            "header": {"event_id": format!("ev-{message_id}"), "event_type": "im.message.receive_v1"},
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_user"}},
+                "message": {"message_id": message_id, "chat_id": "oc_chat", "chat_type": "p2p",
+                    "message_type": "text", "content": json!({"text": text}).to_string()},
+            },
+        }),
     )
-    .unwrap();
-    let endpoints = Endpoints {
-        feishu_open: origin.to_owned(),
-        lark_open: origin.to_owned(),
-        feishu_accounts: origin.to_owned(),
-        lark_accounts: origin.to_owned(),
-    };
-    let bots = Bots::new(BotsDeps {
-        repo: BotsRepo::new(config_dir.clone()),
-        credentials: CredentialStore::new(&config_dir, "test"),
-        api: Arc::new(FeishuApi::new(endpoints).unwrap()),
-        settings: SettingStore::new(dir),
-        tasks,
-        background: false,
-    });
-    *bots.name_retry_ms.lock().unwrap() = vec![0];
-    bots
+}
+
+fn card_action_frame(id: &str, command: &str) -> Frame {
+    data_frame(
+        id,
+        json!({
+            "schema": "2.0",
+            "header": {"event_id": format!("ev-{id}"), "event_type": "card.action.trigger"},
+            "event": {"operator": {"open_id": "ou_user"}, "token": "c-token",
+                "action": {"value": {"command": command, "zcodeCardText": "Pick"}},
+                "context": {"open_chat_id": "oc_chat", "open_message_id": "om_x"}},
+        }),
+    )
 }
 
 #[tokio::test]
 async fn feishu_registration_polls_until_success() {
-    let mock = Arc::new(Mock::default());
-    let origin = mock_open(mock.clone()).await;
+    let server = feishu_server(Arc::new(Feishu::default())).await;
+    let origin = server.origin.clone();
     let api = FeishuApi::new(Endpoints {
         feishu_open: origin.clone(),
         lark_open: origin.clone(),
@@ -527,14 +416,8 @@ async fn feishu_registration_polls_until_success() {
 #[tokio::test]
 async fn management_members_round_trip_through_the_files() {
     let dir = tempfile::tempdir().unwrap();
-    let mock = Arc::new(Mock::default());
-    let origin = mock_open(mock.clone()).await;
-    let tasks = Arc::new(FakeTasks {
-        terminal: EventHub::new(),
-        created: Mutex::default(),
-        sent: Mutex::default(),
-    });
-    let bots = setup(dir.path(), &origin, tasks);
+    let server = feishu_server(Arc::new(Feishu::default())).await;
+    let bots = bots_with(dir.path(), &server.origin, FakeTasks::new());
     let saved = bots
         .save_bot(&json!({
             "bot": {"id": " feishu-1 ", "name": "", "provider": "feishu", "enabled": true,
@@ -594,21 +477,39 @@ async fn management_members_round_trip_through_the_files() {
     assert!(!credentials.contains("bot:feishu-1:credential"));
     bots.delete_bot("feishu-1").await.unwrap();
     assert_eq!(bots.get_status().await.unwrap()["botsCount"], 0);
+    // discord / wecom 没有适配器。
+    bots.save_bot(
+        &json!({"bot": {"id": "d1", "name": "D", "provider": "discord", "enabled": true,
+        "allowedWorkspaces": ["*"], "allowedCommands": {}, "currentOptions": {}}}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        bots.test_bot("d1").await.unwrap(),
+        json!({"ok": false, "message": "discord is reserved for a future version.", "provider": "discord"})
+    );
+}
+
+async fn wait_ack(from_client: &mut mpsc::UnboundedReceiver<Frame>, message_id: &str) -> Frame {
+    loop {
+        let frame = from_client.recv().await.unwrap();
+        if frame.method == METHOD_DATA && frame.header("message_id") == Some(message_id) {
+            return frame;
+        }
+    }
 }
 
 #[tokio::test]
-async fn feishu_long_connection_binds_then_runs_a_message() {
+async fn feishu_long_connection_binds_then_streams_a_card_reply() {
     let dir = tempfile::tempdir().unwrap();
-    let mock = Arc::new(Mock::default());
-    let origin = mock_open(mock.clone()).await;
+    let state = Arc::new(Feishu::default());
+    let server = feishu_server(state.clone()).await;
     let (url, to_client, mut from_client) = mock_ws().await;
-    *mock.ws_url.lock().unwrap() = url;
-    let tasks = Arc::new(FakeTasks {
-        terminal: EventHub::new(),
-        created: Mutex::default(),
-        sent: Mutex::default(),
-    });
-    let bots = setup(dir.path(), &origin, tasks.clone());
+    *state.ws_url.lock().unwrap() = url;
+    let tasks = FakeTasks::new();
+    tasks.script.lock().unwrap().tools = vec![("Bash".into(), json!({"command": "ls -la"}))];
+    let bots = bots_with(dir.path(), &server.origin, tasks.clone());
+    *bots.card_interval_ms.lock().unwrap() = 0;
     bots.save_bot(&json!({
         "bot": {"id": "feishu-1", "name": "Bot", "provider": "feishu", "enabled": true,
             "feishuAppId": "cli_0123456789abcdef", "allowedWorkspaces": ["*"],
@@ -619,7 +520,7 @@ async fn feishu_long_connection_binds_then_runs_a_message() {
     }))
     .await
     .unwrap();
-    bots.refresh().await.unwrap();
+    bots.refresh_feishu().await.unwrap();
     eventually("connected status", || {
         let status = bots.runtime_status("feishu-1")?;
         (status.get("message") == Some(&json!("Feishu WebSocket is running."))).then_some(())
@@ -628,20 +529,14 @@ async fn feishu_long_connection_binds_then_runs_a_message() {
 
     // 未绑定：任何命令都回 botDisabled（找不到绑定这个用户的 Bot）。
     to_client.send(event_frame("m0", "/help")).unwrap();
-    let ack = loop {
-        let frame = from_client.recv().await.unwrap();
-        if frame.method == METHOD_DATA {
-            break frame;
-        }
-    };
-    assert_eq!(ack.header("message_id"), Some("m0"));
+    let ack = wait_ack(&mut from_client, "m0").await;
     assert!(ack.header("biz_rt").is_some());
     assert_eq!(ack.payload.as_deref(), Some(br#"{"code":200}"#.as_slice()));
     eventually("botDisabled reply", || {
-        (mock.cards().len() == 1).then_some(())
+        (sent_cards(&server).len() == 1).then_some(())
     })
     .await;
-    assert_eq!(mock.cards()[0], "当前 bot 未启用。");
+    assert_eq!(card_text(&sent_cards(&server)[0].1), "当前 bot 未启用。");
 
     let code = bots
         .create_bind_code(&json!({"botId": "feishu-1"}))
@@ -651,30 +546,72 @@ async fn feishu_long_connection_binds_then_runs_a_message() {
     to_client
         .send(event_frame("m1", &format!("/bind {code}")))
         .unwrap();
-    eventually("bind reply", || (mock.cards().len() == 2).then_some(())).await;
-    let bind = &mock.cards()[1];
+    eventually("bind reply", || {
+        (sent_cards(&server).len() == 2).then_some(())
+    })
+    .await;
+    let bind = card_text(&sent_cards(&server)[1].1);
     assert!(bind.starts_with("绑定成功。"), "{bind}");
     assert!(!bind.contains("/回复"), "reply command is disabled: {bind}");
     let config = bots.repo.read_config().await.unwrap();
     assert_eq!(config["bots"][0]["providerUserId"], "ou_user");
+    // 绑定时从通讯录补了昵称。
+    assert_eq!(config["bots"][0]["displayName"], "Ann");
 
     to_client.send(event_frame("m2", "/status")).unwrap();
-    eventually("status reply", || (mock.cards().len() == 3).then_some(())).await;
+    eventually("status reply", || {
+        (sent_cards(&server).len() == 3).then_some(())
+    })
+    .await;
     assert_eq!(
-        mock.cards()[2],
+        card_text(&sent_cards(&server)[2].1),
         "工作区: ws-bot  \n模型: Z.ai/GLM-5\n\n---\n\n任务: 草稿  \n状态: 草稿"
     );
+    // 短命令的 Typing reaction 在回复后删除。
+    eventually("typing reaction removed", || {
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request.method == "DELETE" && request.path.ends_with("/reactions/r1"))
+            .then_some(())
+    })
+    .await;
 
-    // 同一条消息重投只处理一次。
+    // 普通消息：流式卡片先创建，再随工具与正文 PATCH，终态显示已完成。同一条消息重投只处理一次。
     to_client.send(event_frame("m3", "hello agent")).unwrap();
     to_client.send(event_frame("m3", "hello agent")).unwrap();
-    eventually("terminal reply", || (mock.cards().len() == 4).then_some(())).await;
-    assert_eq!(mock.cards()[3], "Hi from the agent");
+    let final_card = eventually("completed card", || {
+        sent_cards(&server)
+            .into_iter()
+            .skip(3)
+            .map(|(_, card)| card_text(&card))
+            .find(|text| text.contains("✅ 已完成"))
+    })
+    .await;
+    assert!(final_card.contains("Hi from the agent"), "{final_card}");
+    let cards_after = sent_cards(&server).into_iter().skip(3).collect::<Vec<_>>();
+    assert_eq!(
+        cards_after[0].0, "POST",
+        "the streaming card is created once"
+    );
+    assert!(cards_after[1..].iter().all(|(method, _)| method == "PATCH"));
+    let with_tools = cards_after
+        .iter()
+        .find(|(_, card)| card.to_string().contains("collapsible_panel"))
+        .expect("tool panel");
+    assert!(
+        with_tools.1.to_string().contains("Bash"),
+        "{}",
+        with_tools.1
+    );
     let created = tasks.created.lock().unwrap().clone();
     assert_eq!(created.len(), 1);
     assert_eq!(created[0].0, "/tmp/ws-bot");
     assert_eq!(created[0].2.as_deref(), Some("yolo"));
     let sent = tasks.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].1.text, "hello agent");
     assert_eq!(
         sent[0].1.bot_delivery_target,
@@ -682,14 +619,46 @@ async fn feishu_long_connection_binds_then_runs_a_message() {
             json!({"provider": "feishu", "botId": "feishu-1", "providerUserId": "ou_user", "chatType": "private"})
         )
     );
-    let state = bots.repo.read_state().await.unwrap();
-    assert_eq!(state["bots"]["feishu-1"]["mode"], "task");
-    assert_eq!(state["bots"]["feishu-1"]["activeTaskId"], "task-1");
+    let state_file = bots.repo.read_state().await.unwrap();
+    assert_eq!(state_file["bots"]["feishu-1"]["mode"], "task");
+    assert_eq!(state_file["bots"]["feishu-1"]["activeTaskId"], "task-1");
 
-    // 未移植的选择类命令回未知命令。
+    // 选择命令：/model 回供应商选择卡片，点击按钮经长连接同步回包返回模型卡片。
+    let before = sent_cards(&server).len();
     to_client.send(event_frame("m4", "/model")).unwrap();
-    eventually("unknown reply", || (mock.cards().len() == 5).then_some(())).await;
-    assert_eq!(mock.cards()[4], "未知命令：**/model**");
+    eventually("model card", || {
+        (sent_cards(&server).len() > before).then_some(())
+    })
+    .await;
+    let model_card = sent_cards(&server)[before].1.clone();
+    assert!(
+        card_text(&model_card).starts_with("当前模型 Z.ai/GLM-5$high"),
+        "{model_card}"
+    );
+    assert!(
+        model_card.to_string().contains("/model provider zai"),
+        "{model_card}"
+    );
+    to_client
+        .send(card_action_frame("c1", "/model provider mock"))
+        .unwrap();
+    let ack = wait_ack(&mut from_client, "c1").await;
+    let body: Value = serde_json::from_slice(ack.payload.as_deref().unwrap()).unwrap();
+    assert_eq!(body["code"], 200);
+    let data: Value = serde_json::from_slice(
+        &base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            body["data"].as_str().unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let card = &data["card"]["data"];
+    assert!(card_text(card).contains("选择模型"), "{card}");
+    assert!(
+        card.to_string().contains("/model model custom:mock:m1"),
+        "{card}"
+    );
 
     bots.dispose().await;
     assert_eq!(
@@ -701,14 +670,9 @@ async fn feishu_long_connection_binds_then_runs_a_message() {
 #[tokio::test]
 async fn automation_runs_are_delivered_to_the_bound_chat() {
     let dir = tempfile::tempdir().unwrap();
-    let mock = Arc::new(Mock::default());
-    let origin = mock_open(mock.clone()).await;
-    let tasks = Arc::new(FakeTasks {
-        terminal: EventHub::new(),
-        created: Mutex::default(),
-        sent: Mutex::default(),
-    });
-    let bots = setup(dir.path(), &origin, tasks.clone());
+    let server = feishu_server(Arc::new(Feishu::default())).await;
+    let tasks = FakeTasks::new();
+    let bots = bots_with(dir.path(), &server.origin, tasks.clone());
     bots.save_bot(&json!({
         "bot": {"id": "feishu-1", "name": "Bot", "provider": "feishu", "enabled": true,
             "feishuAppId": "cli_0123456789abcdef", "providerUserId": "ou_user", "allowedWorkspaces": ["*"],
@@ -723,23 +687,119 @@ async fn automation_runs_are_delivered_to_the_bound_chat() {
         "workspacePath": "/tmp/ws-bot",
     }))
     .await;
-    tasks.terminal.emit(TerminalOutcome {
-        workspace_key: "/tmp/ws-bot".into(),
-        session_id: "run-session".into(),
-        outcome: "succeeded",
-        input_id: Some("run-1".into()),
-    });
-    eventually("automation reply", || {
-        (mock.cards().len() == 1).then_some(())
+    // automation 派发方随后才发送 prompt。
+    use super::TaskPort;
+    tasks
+        .send(
+            crate::agent::WorkspaceTarget::local("/tmp/ws-bot"),
+            "run-session".into(),
+            crate::automation::driver::SendText {
+                input_id: "run-1".into(),
+                text: "daily report".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    // Node 把 automation 回推的颗粒度设为 summary_changes，但飞书只支持流式卡片，归一后仍是流式卡片。
+    let done = eventually("automation reply", || {
+        sent_cards(&server)
+            .into_iter()
+            .map(|(_, card)| card_text(&card))
+            .find(|text| text.contains("✅ 已完成"))
     })
     .await;
-    assert_eq!(mock.sent.lock().unwrap()[0]["receive_id"], "oc_group");
-    assert_eq!(mock.cards()[0], "Hi from the agent");
+    assert_eq!(done, "Hi from the agent\n_✅ 已完成_");
+    let request = &server.to("/open-apis/im/v1/messages")[0];
+    assert_eq!(request.body["receive_id"], "oc_group");
+    assert_eq!(request.query, "receive_id_type=chat_id");
+    let count = sent_cards(&server).len();
     // 通道不一致：跳过。
     bots.watch_automation_run(&json!({
         "target": {"provider": "lark", "botId": "feishu-1", "providerUserId": "ou_user", "chatType": "private"},
         "taskId": "other", "workspacePath": "/tmp/ws-bot",
     }))
     .await;
-    assert_eq!(mock.cards().len(), 1);
+    assert_eq!(sent_cards(&server).len(), count);
+}
+
+#[tokio::test]
+async fn subscription_failure_falls_back_to_terminal_outcomes() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = feishu_server(Arc::new(Feishu::default())).await;
+    let tasks = FakeTasks::new();
+    *tasks.subscribe_fails.lock().unwrap() = true;
+    let bots = bots_with(dir.path(), &server.origin, tasks.clone());
+    bots.save_bot(&json!({
+        "bot": {"id": "feishu-1", "name": "Bot", "provider": "feishu", "enabled": true,
+            "feishuAppId": "cli_0123456789abcdef", "providerUserId": "ou_user", "allowedWorkspaces": ["*"],
+            "allowedCommands": {}, "currentOptions": {}},
+        "credentialValue": "app-secret",
+    }))
+    .await
+    .unwrap();
+    bots.watch_automation_run(&json!({
+        "target": {"provider": "feishu", "botId": "feishu-1", "providerUserId": "ou_user", "chatType": "private"},
+        "taskId": "run-session", "workspacePath": "/tmp/ws-bot",
+    }))
+    .await;
+    tasks.terminal.emit(TerminalOutcome {
+        workspace_key: "/tmp/ws-bot".into(),
+        session_id: "run-session".into(),
+        outcome: "succeeded",
+        input_id: Some("run-1".into()),
+    });
+    eventually("fallback reply", || {
+        (sent_cards(&server).len() == 1).then_some(())
+    })
+    .await;
+    assert_eq!(card_text(&sent_cards(&server)[0].1), "Fallback reply");
+}
+
+#[test]
+fn streaming_cards_split_by_element_budget() {
+    let mut blocks = Vec::new();
+    for index in 0..120 {
+        blocks.push(StreamBlock::Message(format!("part {index}")));
+        blocks.push(StreamBlock::Tools {
+            summaries: vec![format!("- 完成 · Bash · `echo {index}`")],
+            title: None,
+            expanded: None,
+        });
+    }
+    let state = StreamState {
+        locale: None,
+        blocks,
+        status: StreamStatus::Completed,
+    };
+    let segments = cards::split_streaming(&state);
+    assert!(segments.len() > 1);
+    for segment in &segments[..segments.len() - 1] {
+        assert_eq!(segment.status, StreamStatus::Sealed);
+        assert!(cards::tagged_elements(segment) <= cards::STREAMING_CARD_TAGGED_ELEMENT_BUDGET);
+        // 封存段不带状态行。
+        assert!(!cards::streaming(segment).to_string().contains("已完成"));
+    }
+    let last = segments.last().unwrap();
+    assert_eq!(last.status, StreamStatus::Completed);
+    assert!(cards::streaming(last).to_string().contains("✅ 已完成"));
+    let empty = cards::streaming(&StreamState {
+        locale: Some("en-US".into()),
+        blocks: Vec::new(),
+        status: StreamStatus::Running,
+    });
+    assert_eq!(empty["body"]["elements"][1]["content"], "_Running_");
+    let selection = cards::interactive(
+        &json!({"text": "Pick", "selection": {"action": "task.set", "cancelLabel": "取消",
+        "options": [{"id": "t1", "label": ""}]}}),
+    );
+    assert_eq!(selection["body"]["elements"][1]["text"]["content"], "1");
+    assert_eq!(
+        selection["body"]["elements"][1]["behaviors"][0]["value"]["command"],
+        "/task t1"
+    );
+    assert_eq!(
+        selection["body"]["elements"][2]["behaviors"][0]["value"]["command"],
+        "/cancel"
+    );
 }

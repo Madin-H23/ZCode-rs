@@ -1,14 +1,16 @@
-//! 入站消息处理（botsService.ts `handleInboundMessage` / `processProviderCallback` 的飞书子集）。
+//! 入站消息处理（botsService.ts `handleInboundMessage`、`processProviderCallback`、授权、上下文、
+//! `/bind`、`/help`、`/status`、`/new`、`/stop`、`/reconnect`、普通消息与附件）。
 //!
-//! 已实现：`/bind`、`/help`、`/status`、`/new`、`/stop`、`/cancel`、未知命令与普通消息（新建或续用
-//! 会话并在终态回推）。选择类命令（`/workspace`、`/model`、`/mode`、`/think`、`/task`、`/reply`）、
-//! 权限与问答回复、`/reconnect` 尚未移植，回 `unknownCommand`。
+//! 选择命令在 [`super::selection`]，问答与权限在 [`super::interaction`]，回复流水线在 [`super::watch`]。
 use std::sync::Arc;
 
+use anyhow::{Result, anyhow};
+use base64::Engine;
 use serde_json::{Map, Value, json};
 use zcode_host_kit::{RpcError, log};
 
-use super::feishu::{Actor, Inbound, parse_callback};
+use super::TaskPort;
+use super::feishu::{Actor, Inbound};
 use super::model::{
     self, ZCODE_AGENT_PROVIDER, filter_allowed_workspaces, is_feishu, is_workspace_allowed,
     message as msg, normalize_allowed_workspaces, normalize_command_policy,
@@ -16,33 +18,69 @@ use super::model::{
     workspace_label, workspace_ref,
 };
 use super::now_ms;
-use super::service::{Bots, error, find_bot, guard, text};
+use super::providers::{OutboundExtras, outbound};
+use super::selection::{
+    is_draft, parse_model_option, select_current, select_option, selection_value,
+};
+use super::service::{Bots, find_bot, guard};
+use super::status::{format_duration, latest_progress, task_status, worked_duration};
+use super::util::{js_slice, sha256_hex, text};
+use super::watch::{context_target, strip_pending};
 use crate::agent::WorkspaceTarget;
 use crate::automation::driver::{SendText, uuid_v7};
-use crate::conversation_share::client::encode_uri_component;
 
 const INBOUND_DEDUPE_TTL_MS: i64 = 2 * 60_000;
 /// Bot 硬锁 yolo 运行模式。
 const BOT_FORCED_MODE: &str = "yolo";
+const MAX_ATTACHMENTS: usize = 4;
+const MAX_ATTACHMENT_BYTES: usize = 5 * 1024 * 1024;
+/// `BOT_MENU_COMMAND_ORDER` 与帮助文案。
+const HELP_COMMANDS: [(&str, &str); 9] = [
+    ("help", "helpHelp"),
+    ("status", "helpStatus"),
+    ("new", "helpNew"),
+    ("workspace", "helpWorkspace"),
+    ("model", "helpModel"),
+    ("mode", "helpMode"),
+    ("thoughtLevel", "helpThoughtLevel"),
+    ("reply", "helpReply"),
+    ("bind", "helpBind"),
+];
 
+/// `withAuthorizedContext` 的结果。
 pub(crate) struct Auth {
+    pub config: Value,
     pub bot: Value,
+    /// Bot 配置化后用户就是 Bot 本身（`findBoundUser`）。
+    pub user: Value,
     pub context: Value,
     pub locale: Option<String>,
 }
 
-/// `createOutbound`。
-pub(crate) fn outbound(actor: &Actor, text: String, locale: Option<&str>) -> Value {
-    let mut out = json!({
-        "botId": actor.bot_id,
-        "provider": actor.provider,
-        "providerUserId": actor.reply_target(),
-        "text": text,
-    });
-    if let Some(locale) = locale {
-        out["locale"] = json!(locale);
+/// `requireActiveTask` 的结果。
+pub(crate) struct Active {
+    pub task_id: String,
+    pub task: Value,
+    pub config_options: Value,
+}
+
+impl Active {
+    /// `readCurrentActiveTaskModel`：会话 configOptions 的模型，其次任务元数据。
+    pub fn current_model(&self) -> Option<String> {
+        select_current(&self.config_options, "model")
+            .or_else(|| text(&self.task, "model").map(str::to_owned))
+            .filter(|model| !model.is_empty())
     }
-    out
+
+    /// 任务所在 workspace（读模型视图、标签用）。
+    pub fn context(&self) -> Value {
+        let mut context = Map::new();
+        context.insert("workspacePath".into(), self.task["workspacePath"].clone());
+        if let Some(identity) = text(&self.task, "workspaceIdentity") {
+            context.insert("workspaceIdentity".into(), json!(identity));
+        }
+        Value::Object(context)
+    }
 }
 
 /// `BotInboundMessage` JSON → [`Inbound`]。
@@ -52,9 +90,11 @@ pub fn inbound_from_value(value: &Value) -> Option<Inbound> {
     Some(Inbound {
         bot_id: string(value, "botId")?,
         text: string(value, "text").unwrap_or_default(),
-        has_attachment: value["attachments"]
-            .as_array()
-            .is_some_and(|items| !items.is_empty()),
+        attachments: value["attachments"].as_array().cloned().unwrap_or_default(),
+        elicitation_response: value
+            .get("elicitationResponse")
+            .filter(|response| response.is_object())
+            .cloned(),
         actor: Actor {
             provider: string(actor, "provider")?,
             bot_id: string(actor, "botId")?,
@@ -63,18 +103,9 @@ pub fn inbound_from_value(value: &Value) -> Option<Inbound> {
             chat_type: string(actor, "chatType").unwrap_or_else(|| "private".into()),
             chat_id: string(actor, "chatId"),
             provider_message_id: string(actor, "providerMessageId"),
+            provider_context_token: string(actor, "providerContextToken"),
         },
     })
-}
-
-fn context_target(context: &Value) -> WorkspaceTarget {
-    WorkspaceTarget {
-        workspace_path: text(context, "workspacePath")
-            .unwrap_or_default()
-            .to_owned(),
-        workspace_identity: text(context, "workspaceIdentity").map(str::to_owned),
-        remote_session_id: None,
-    }
 }
 
 fn context_key(context: &Value) -> String {
@@ -82,41 +113,6 @@ fn context_key(context: &Value) -> String {
         text(context, "workspacePath").unwrap_or_default(),
         text(context, "workspaceIdentity"),
     )
-}
-
-/// `formatBotModelSelectionValue`。
-fn selection_value(selection: &Value) -> Option<String> {
-    let provider = text(selection, "providerId")?;
-    let model = text(selection, "modelId")?;
-    Some(if provider == ZCODE_AGENT_PROVIDER {
-        model.to_owned()
-    } else {
-        format!(
-            "custom:{}:{}",
-            encode_uri_component(provider),
-            encode_uri_component(model)
-        )
-    })
-}
-
-fn decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = Vec::new();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%'
-            && let Some(byte) = text
-                .get(index + 1..index + 3)
-                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
-        {
-            out.push(byte);
-            index += 3;
-            continue;
-        }
-        out.push(bytes[index]);
-        index += 1;
-    }
-    String::from_utf8(out).unwrap_or_else(|_| text.to_owned())
 }
 
 /// `formatStatusStateValue`。
@@ -141,7 +137,131 @@ fn line(locale: Option<&str>, label: &str, value: &str) -> String {
     format!("{}: {value}", msg(locale, label, &[]))
 }
 
+fn plain(actor: &Actor, body: String) -> Vec<Value> {
+    vec![outbound(actor, body, OutboundExtras::default())]
+}
+
+/// `isSessionExpiredError`。
+fn is_session_expired(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    lower.contains("session not found:") || lower.contains("session is not active:")
+}
+
+/// `requiresRemoteWorkspaceRuntime`。
+fn requires_remote_runtime(command: &str) -> bool {
+    !matches!(
+        command,
+        "help" | "status" | "workspace" | "reconnect" | "reply"
+    )
+}
+
+/// `isUserCommandAllowed`。
+fn command_allowed(bot: &Value, command: &str) -> bool {
+    match command {
+        "help" | "message" | "approve" | "task" | "stop" => true,
+        "reconnect" => normalize_command_policy(&bot["allowedCommands"])["workspace"] != false,
+        other => normalize_command_policy(&bot["allowedCommands"])[other] != false,
+    }
+}
+
+/// `sanitizeAttachmentFilename`。
+fn sanitize_filename(filename: &str) -> String {
+    let normalized: String = filename
+        .trim()
+        .chars()
+        .map(|c| {
+            if (c as u32) < 32 || "\\/:*?\"<>|".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    if normalized.is_empty() {
+        "attachment".into()
+    } else {
+        js_slice(&normalized, 0, 160)
+    }
+}
+
+/// `formatAttachmentSize`。
+fn attachment_size(size: Option<f64>) -> String {
+    match size.filter(|size| *size > 0.0) {
+        None => "unknown size".into(),
+        Some(size) if size >= 1024.0 * 1024.0 => format!("{:.1}MB", size / (1024.0 * 1024.0)),
+        Some(size) if size >= 1024.0 => format!("{}KB", (size / 1024.0).ceil() as i64),
+        Some(size) => format!("{}B", size as i64),
+    }
+}
+
+/// `formatAttachmentRejectedReason`：下载类错误换成可行动的提示，不暴露通道内部细节。
+fn attachment_rejected_reason(message: &str, locale: Option<&str>) -> String {
+    let lower = message.to_lowercase();
+    if lower.contains("exceeds 5mb") {
+        return msg(locale, "attachmentTooLarge", &[]);
+    }
+    let download_failed = lower.contains("attachment download failed")
+        || lower.contains("file download failed")
+        || lower.contains("attachment download timed out")
+        || lower.contains("file download timed out")
+        || (lower.starts_with("download ")
+            && (lower.contains(" failed: http") || lower.contains(" timed out")));
+    if download_failed {
+        return msg(locale, "attachmentDownloadUnavailable", &[]);
+    }
+    message.to_owned()
+}
+
+/// `resolveAutomationBotDeliveryTarget`：会话里创建的 automation 默认回推到这个聊天。
+fn automation_target(actor: &Actor) -> Option<Value> {
+    if !matches!(actor.provider.as_str(), "feishu" | "lark" | "weixin") {
+        return None;
+    }
+    let user = actor
+        .chat_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .unwrap_or(actor.provider_user_id.trim());
+    (!user.is_empty()).then(|| {
+        json!({
+            "provider": actor.provider,
+            "botId": actor.bot_id,
+            "providerUserId": user,
+            "chatType": actor.chat_type,
+        })
+    })
+}
+
 impl Bots {
+    /// 上下文对应的任务能力：本地 workspace 用本 Host；远端只用远端运行时，不能静默落到本地。
+    pub(crate) fn tasks_for(&self, target: &WorkspaceTarget) -> Result<Arc<dyn TaskPort>, String> {
+        if target
+            .workspace_identity
+            .as_deref()
+            .is_some_and(|id| !id.trim().is_empty())
+        {
+            return self.remote.tasks(target).ok_or_else(|| {
+                format!(
+                    "当前远端项目 {} runtime 不可用，请发送 **/重连** 后重试。",
+                    target.workspace_path
+                )
+            });
+        }
+        Ok(self.tasks.clone())
+    }
+
+    /// `isRemoteWorkspaceConnected`：本地恒为已连接；远端没有重连服务时视为未连接。
+    async fn remote_connected(&self, context: &Value) -> bool {
+        if text(context, "workspaceIdentity").is_none() {
+            return true;
+        }
+        if !self.remote.available() {
+            return false;
+        }
+        self.remote.is_connected(context_target(context)).await
+    }
+
     /// `listWorkspaceRefs`：当前 workspace + settings.lastWorkspaceSession（按身份 key 去重）。
     pub async fn workspace_refs(&self, params: &Value) -> Vec<Value> {
         let mut refs: Vec<Value> = Vec::new();
@@ -212,9 +332,9 @@ impl Bots {
         (same.len() == 1).then(|| same[0].clone())
     }
 
-    /// `buildInitializedDraftOptions`：远端（Rust Host 尚无远端连接）只给最小默认值。
-    fn initialized_draft(context: &Value) -> Value {
-        if text(context, "workspaceIdentity").is_some() {
+    /// `buildInitializedDraftOptions`：远端未连接时只给最小默认值，不偷偷申请远端运行时。
+    pub(crate) async fn initialized_draft(&self, context: &Value) -> Value {
+        if text(context, "workspaceIdentity").is_some() && !self.remote_connected(context).await {
             json!({"provider": ZCODE_AGENT_PROVIDER})
         } else {
             json!({"provider": ZCODE_AGENT_PROVIDER, "mode": BOT_FORCED_MODE})
@@ -222,7 +342,7 @@ impl Bots {
     }
 
     /// `readContext`：已有状态时按最新 workspace 列表自愈身份；没有时取第一个允许的 workspace（不落盘）。
-    async fn read_context(&self, bot: &Value) -> anyhow::Result<Option<Value>> {
+    async fn read_context(&self, bot: &Value) -> Result<Option<Value>> {
         let state = self.repo.read_state().await?;
         let bot_id = text(bot, "id").unwrap_or_default();
         let workspaces = self.workspace_refs(&Value::Null).await;
@@ -260,24 +380,24 @@ impl Bots {
         else {
             return Ok(None);
         };
-        let mut context = json!({
-            "botId": bot_id,
-            "workspacePath": workspace["workspacePath"],
-        });
+        let mut context = Map::new();
+        context.insert("botId".into(), json!(bot_id));
+        context.insert("workspacePath".into(), workspace["workspacePath"].clone());
         if let Some(identity) = text(&workspace, "workspaceIdentity") {
-            context["workspaceIdentity"] = json!(identity);
+            context.insert("workspaceIdentity".into(), json!(identity));
         }
-        context["workspaceId"] = workspace["id"].clone();
-        context["mode"] = json!("draft");
-        context["activeTaskId"] = Value::Null;
-        context["draftOptions"] = Self::initialized_draft(&context);
+        context.insert("workspaceId".into(), workspace["id"].clone());
+        context.insert("mode".into(), json!("draft"));
+        context.insert("activeTaskId".into(), Value::Null);
+        let mut context = Value::Object(context);
+        context["draftOptions"] = self.initialized_draft(&context).await;
         context["updatedAt"] = json!(now_ms());
         Ok(Some(context))
     }
 
-    pub(crate) async fn write_context(&self, context: &Value) -> anyhow::Result<()> {
+    pub(crate) async fn write_context(&self, context: &Value) -> Result<()> {
         let mut state = self.repo.read_state().await?;
-        let mut next = context.clone();
+        let mut next = strip_pending(context);
         next["updatedAt"] = json!(now_ms());
         let id = text(context, "botId").unwrap_or_default().to_owned();
         if let Some(bots) = state["bots"].as_object_mut() {
@@ -287,12 +407,12 @@ impl Bots {
         Ok(())
     }
 
-    /// `writeDraftContext`：进入新任务草稿，清掉旧任务与待处理交互。
-    async fn write_draft_context(
+    /// `writeDraftContext`：进入新任务草稿，清掉旧任务、待答交互与该 Bot 的待选项。
+    pub(crate) async fn write_draft_context(
         &self,
         context: &Value,
         draft: Option<Value>,
-    ) -> anyhow::Result<Value> {
+    ) -> Result<Value> {
         let mut next = context.as_object().cloned().unwrap_or_default();
         next.insert("mode".into(), json!("draft"));
         next.insert("activeTaskId".into(), Value::Null);
@@ -307,17 +427,54 @@ impl Bots {
             next.insert("draftOptions".into(), draft);
         }
         let next = Value::Object(next);
+        self.clear_pending_for_bot(text(context, "botId").unwrap_or_default());
         self.write_context(&next).await?;
         Ok(next)
     }
 
-    /// `normalizeBotWorkspaceConfig`：旧的 path-only 授权升级成身份 key（变化时写回配置）。
-    async fn normalize_workspace_config(
+    /// `ensureDraftOptions`：草稿没有选项时按默认值初始化并写回。
+    pub(crate) async fn ensure_draft_options(&self, context: &Value) -> Result<Value> {
+        if let Some(draft) = context
+            .get("draftOptions")
+            .filter(|draft| draft.is_object())
+        {
+            // 旧三方 CLI 的草稿 provider 统一归一成 ZCode Agent。
+            if draft["provider"] != ZCODE_AGENT_PROVIDER {
+                let mut normalized = draft.clone();
+                normalized["provider"] = json!(ZCODE_AGENT_PROVIDER);
+                let mut next = context.clone();
+                next["draftOptions"] = normalized.clone();
+                self.write_context(&next).await?;
+                return Ok(normalized);
+            }
+            return Ok(draft.clone());
+        }
+        let draft = self.initialized_draft(context).await;
+        let mut next = context.clone();
+        next["draftOptions"] = draft.clone();
+        self.write_context(&next).await?;
+        Ok(draft)
+    }
+
+    /// `writeDraftOptions`。
+    pub(crate) async fn write_draft_options(&self, context: &Value, draft: Value) -> Result<Value> {
+        let mut draft = draft;
+        draft["provider"] = json!(ZCODE_AGENT_PROVIDER);
+        let mut next = context.clone();
+        next["mode"] = json!("draft");
+        next["activeTaskId"] = Value::Null;
+        next["draftOptions"] = draft;
+        self.write_context(&next).await?;
+        Ok(next)
+    }
+
+    /// `normalizeBotWorkspaceConfig`：旧的 path-only 授权升级成身份 key（变化时写回配置）。返回 (bot, workspaces)。
+    pub(crate) async fn normalize_workspace_config(
         &self,
         config: &Value,
         bot: &Value,
         current: Value,
-    ) -> anyhow::Result<Value> {
+    ) -> Result<(Value, Vec<Value>)> {
         let workspaces = self
             .workspace_refs(&json!({"currentWorkspace": current}))
             .await;
@@ -336,31 +493,32 @@ impl Bots {
             }
             self.repo.write_config(&next).await?;
         }
-        Ok(next_bot)
+        Ok((next_bot, workspaces))
     }
 
     /// `withAuthorizedContext`。
-    async fn authorize(
-        &self,
+    pub(crate) async fn authorize(
+        self: &Arc<Self>,
         inbound: &Inbound,
         command: &str,
-    ) -> anyhow::Result<Result<Auth, Vec<Value>>> {
+    ) -> Result<Result<Auth, Vec<Value>>> {
         let locale = self.locale().await;
-        let locale_ref = locale.as_deref();
+        let actor = &inbound.actor;
         let reply = |id: &str, values: &[(&str, &str)]| {
-            Err(vec![outbound(
-                &inbound.actor,
-                msg(locale_ref, id, values),
-                None,
-            )])
+            Err(plain(actor, msg(locale.as_deref(), id, values)))
         };
         let config = self.repo.read_config().await?;
-        let actor = &inbound.actor;
-        // `findAuthorizedBot`：启用、同通道、绑定的是这个用户。
+        // `findAuthorizedBot`：微信扫码登录没有用户 id，按 botId 找；其余通道按绑定的用户找。
         let bot = config["bots"].as_array().into_iter().flatten().find(|bot| {
-            bot["enabled"] == true
-                && text(bot, "provider") == Some(actor.provider.as_str())
-                && text(bot, "providerUserId") == Some(actor.provider_user_id.as_str())
+            if actor.provider == "weixin" {
+                bot["enabled"] == true
+                    && text(bot, "provider") == Some("weixin")
+                    && text(bot, "id") == Some(actor.bot_id.as_str())
+            } else {
+                bot["enabled"] == true
+                    && text(bot, "provider") == Some(actor.provider.as_str())
+                    && text(bot, "providerUserId") == Some(actor.provider_user_id.as_str())
+            }
         });
         let Some(bot) = bot
             .filter(|bot| text(bot, "id") == Some(inbound.bot_id.as_str()))
@@ -371,18 +529,20 @@ impl Bots {
         if actor.chat_type != "private" {
             return Ok(reply("privateChatOnly", &[]));
         }
-        let allowed = match command {
-            "help" | "message" | "approve" | "task" | "stop" => true,
-            "reconnect" => normalize_command_policy(&bot["allowedCommands"])["workspace"] != false,
-            other => normalize_command_policy(&bot["allowedCommands"])[other] != false,
-        };
-        if !allowed {
+        if actor.provider != "weixin"
+            && text(&bot, "providerUserId") != Some(actor.provider_user_id.as_str())
+        {
+            return Ok(reply("userNotBound", &[]));
+        }
+        if !command_allowed(&bot, command) {
             return Ok(reply("commandNotAllowed", &[]));
         }
         let Some(context) = self.read_context(&bot).await? else {
             return Ok(reply("noWorkspaceAllowed", &[]));
         };
-        let path = text(&context, "workspacePath").unwrap_or_default();
+        let path = text(&context, "workspacePath")
+            .unwrap_or_default()
+            .to_owned();
         let mut current = Map::new();
         current.insert(
             "id".into(),
@@ -392,12 +552,12 @@ impl Bots {
                     .unwrap_or_else(|| context_key(&context))
             ),
         );
-        current.insert("label".into(), json!(workspace_label(path)));
+        current.insert("label".into(), json!(workspace_label(&path)));
         current.insert("workspacePath".into(), json!(path));
         if let Some(identity) = text(&context, "workspaceIdentity") {
             current.insert("workspaceIdentity".into(), json!(identity));
         }
-        let bot = self
+        let (bot, _) = self
             .normalize_workspace_config(&config, &bot, Value::Object(current))
             .await?;
         if let Some(id) = text(&context, "workspaceId")
@@ -405,89 +565,146 @@ impl Bots {
         {
             return Ok(reply("workspaceOutOfScope", &[]));
         }
-        // Rust Host 还没有远端 workspace 连接：远端上下文视为未连接，只放行不需要运行时的命令。
-        let needs_runtime = !matches!(
-            command,
-            "help" | "status" | "workspace" | "reconnect" | "reply"
-        );
-        if text(&context, "workspaceIdentity").is_some() && needs_runtime {
-            return Ok(reply("remoteDisconnected", &[("workspacePath", path)]));
+        // 远端未连接时只放行不需要运行时的命令；恢复只能由显式 /reconnect 触发。
+        if text(&context, "workspaceIdentity").is_some()
+            && requires_remote_runtime(command)
+            && !self.remote_connected(&context).await
+        {
+            return Ok(reply("remoteDisconnected", &[("workspacePath", &path)]));
         }
+        self.send_inbound_typing(&bot, actor).await;
         Ok(Ok(Auth {
+            config,
+            user: bot.clone(),
             bot,
             context,
             locale,
         }))
     }
 
-    /// `isContextActiveTaskRunning`。
-    async fn is_active_task_running(&self, context: &Value) -> bool {
+    /// `isContextActiveTaskRunning`：只有本进程发起、尚未观察到终态的任务才算运行中。
+    pub(crate) async fn is_active_task_running(self: &Arc<Self>, context: &Value) -> bool {
         let Some(task_id) = text(context, "activeTaskId") else {
             return false;
         };
         if !guard(&self.running).contains(task_id) {
             return false;
         }
-        if text(context, "workspaceIdentity").is_some() {
+        if text(context, "workspaceIdentity").is_some() && !self.remote_connected(context).await {
             return false;
         }
-        let tasks = self.tasks.list(context_key(context)).await;
-        let status = tasks
-            .iter()
-            .find(|task| text(task, "taskId") == Some(task_id))
-            .and_then(|task| text(task, "status"));
-        if matches!(status, Some("completed" | "error")) {
+        let target = context_target(context);
+        let Ok(tasks) = self.tasks_for(&target) else {
+            return true;
+        };
+        let status = match tasks.read_session(target, task_id.to_owned()).await {
+            Ok(snapshot) => crate::tasks::meta::meta_from_snapshot(&snapshot)["status"].clone(),
+            Err(_) => Value::Null,
+        };
+        if matches!(status.as_str(), Some("completed" | "error")) {
             guard(&self.running).remove(task_id);
+            self.stop_typing(task_id);
             return false;
         }
         true
     }
 
-    async fn model_label(&self, value: Option<String>) -> String {
-        let Some(value) = value.filter(|value| !value.is_empty()) else {
-            return "-".into();
-        };
-        let view = self.tasks.model_view(None).await;
-        let label_of = |provider_id: &str| {
-            view["providers"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .find_map(|provider| {
-                    (text(provider, "providerId") == Some(provider_id)
-                        && provider["models"]
-                            .as_array()
-                            .is_some_and(|models| !models.is_empty()))
-                    .then(|| {
-                        text(provider, "providerName")
-                            .map(str::trim)
-                            .filter(|name| !name.is_empty())
-                            .unwrap_or(provider_id)
-                            .to_owned()
-                    })
-                })
-        };
-        if let Some(body) = value.strip_prefix("custom:") {
-            let (provider, model) = match body.split_once(':') {
-                Some((provider, model)) => (decode(provider), Some(decode(model))),
-                None => (decode(body), None),
-            };
-            return match (label_of(&provider), model) {
-                (Some(label), Some(model)) => format!("{label}/{model}"),
-                (Some(label), None) => label,
-                (None, _) => value,
-            };
+    /// `readContextActiveTaskMeta`：先查 tasks-index，再读会话快照。
+    async fn active_task_meta(&self, context: &Value) -> Option<Value> {
+        let task_id = text(context, "activeTaskId")?;
+        let target = context_target(context);
+        let tasks = self.tasks_for(&target).ok()?;
+        if let Some(task) = tasks
+            .list(target.key())
+            .await
+            .into_iter()
+            .find(|task| text(task, "taskId") == Some(task_id))
+        {
+            return Some(task);
         }
-        match value.split_once('/') {
-            Some((provider, model)) if !provider.is_empty() && !model.is_empty() => {
-                label_of(provider).map_or(value.clone(), |label| format!("{label}/{model}"))
-            }
-            _ => value,
-        }
+        let snapshot = tasks.read_session(target, task_id.to_owned()).await.ok()?;
+        Some(crate::tasks::meta::meta_from_snapshot(&snapshot))
     }
 
-    /// `buildStatusText`（不含已工作时长与实时进展）。
-    async fn status_text(&self, context: &Value, locale: Option<&str>) -> String {
+    /// `requireActiveTask`：没有活动任务时返回 None（调用方回 noActiveTask）。
+    pub(crate) async fn require_active_task(
+        &self,
+        _actor: &Actor,
+        auth: &Auth,
+    ) -> Result<Option<Active>> {
+        let Some(task_id) = text(&auth.context, "activeTaskId").map(str::to_owned) else {
+            return Ok(None);
+        };
+        let Some(task) = self.active_task_meta(&auth.context).await else {
+            return Ok(None);
+        };
+        let target = context_target(&auth.context);
+        let tasks = self.tasks_for(&target).map_err(anyhow::Error::msg)?;
+        let config_options = tasks
+            .config_options(target, task_id.clone())
+            .await
+            .map_err(anyhow::Error::msg)?;
+        Ok(Some(Active {
+            task_id,
+            task,
+            config_options,
+        }))
+    }
+
+    /// `buildActiveTaskDraftOptions`：`/new` 继承当前任务的模型与思考档位，模式硬锁 yolo。
+    async fn active_task_draft(&self, context: &Value) -> Value {
+        let task = self.active_task_meta(context).await;
+        let Some(task) = task.filter(|task| {
+            text(task, "provider").is_some() && text(context, "activeTaskId").is_some()
+        }) else {
+            return self.initialized_draft(context).await;
+        };
+        let target = context_target(context);
+        let options = match self.tasks_for(&target) {
+            Ok(tasks) => tasks
+                .config_options(
+                    target,
+                    text(context, "activeTaskId").unwrap_or_default().to_owned(),
+                )
+                .await
+                .unwrap_or_else(|_| json!([])),
+            Err(_) => json!([]),
+        };
+        let forced = select_option(&options, "mode")
+            .and_then(|option| option["options"].as_array())
+            .is_some_and(|items| items.iter().any(|item| item["value"] == BOT_FORCED_MODE));
+        let current =
+            select_current(&options, "model").or_else(|| text(&task, "model").map(str::to_owned));
+        // 有意与 Node 不同：Node 用 parseBotModelOptionValue 解析 `provider/model$level`，会把档位后缀
+        // 留在 modelId 里，下一条消息解析模型必然失败；这里先去掉 `$level`（档位另由 thoughtLevel 带上）。
+        let parsed = current
+            .filter(|value| !value.is_empty())
+            .map(|value| match value.split_once('$') {
+                Some((model, _)) if !value.starts_with("custom:") => model.to_owned(),
+                _ => value,
+            })
+            .and_then(|value| parse_model_option(&value));
+        let level = select_current(&options, "thoughtLevel").filter(|level| !level.is_empty());
+        let mut draft = Map::new();
+        draft.insert("provider".into(), json!(ZCODE_AGENT_PROVIDER));
+        if let Some(mut selection) = parsed {
+            if let Some(level) = level {
+                selection["options"] = json!({"reasoningLevel": level});
+            }
+            draft.insert("modelSelection".into(), selection);
+        }
+        if forced {
+            draft.insert("mode".into(), json!(BOT_FORCED_MODE));
+        }
+        Value::Object(draft)
+    }
+
+    /// `buildStatusText`。
+    pub(crate) async fn status_text(
+        &self,
+        context: &Value,
+        locale: Option<&str>,
+    ) -> Result<String> {
         let workspaces = self.workspace_refs(&Value::Null).await;
         let workspace_id = text(context, "workspaceId");
         let workspace = workspaces
@@ -500,16 +717,20 @@ impl Bots {
                     .to_owned()
             });
         let task_id = text(context, "activeTaskId");
-        if text(context, "workspaceIdentity").is_some() {
+        if !self.remote_connected(context).await {
             let draft_model = context["draftOptions"]
                 .get("modelSelection")
                 .and_then(selection_value);
             let task = task_id
                 .map(str::to_owned)
                 .unwrap_or_else(|| msg(locale, "statusDraft", &[]));
-            return [
+            return Ok([
                 line(locale, "statusWorkspace", &workspace),
-                line(locale, "statusModel", &self.model_label(draft_model).await),
+                line(
+                    locale,
+                    "statusModel",
+                    &self.model_label(draft_model.as_deref(), context).await,
+                ),
                 "------".to_owned(),
                 line(locale, "statusTask", &task),
                 line(
@@ -526,76 +747,122 @@ impl Bots {
                     )],
                 ),
             ]
-            .join("\n");
+            .join("\n"));
         }
-        let task = match task_id {
-            Some(id) => self
-                .tasks
-                .list(context_key(context))
-                .await
-                .into_iter()
-                .find(|task| text(task, "taskId") == Some(id)),
+        let target = context_target(context);
+        let tasks = self.tasks_for(&target).map_err(anyhow::Error::msg)?;
+        let listed = tasks.list(target.key()).await;
+        let active = task_id.and_then(|id| {
+            listed
+                .iter()
+                .find(|task| text(task, "taskId") == Some(id))
+                .cloned()
+        });
+        let snapshot = match task_id {
+            Some(id) => tasks.read_session(target.clone(), id.to_owned()).await.ok(),
             None => None,
         };
-        let model_value = match &task {
-            Some(task) => text(task, "model").map(str::to_owned),
-            None => {
-                let selection = context["draftOptions"].get("modelSelection").cloned();
-                let view = self
-                    .tasks
-                    .model_view(
-                        selection
-                            .clone()
-                            .map(|selection| json!({"selection": selection})),
-                    )
-                    .await;
-                let effective = if selection.is_some() {
-                    &view["effectiveSelection"]
-                } else {
-                    &view["preferredSelection"]
-                };
-                selection_value(effective)
+        let status_task = active.or_else(|| {
+            snapshot
+                .as_ref()
+                .map(crate::tasks::meta::meta_from_snapshot)
+                .filter(|meta| meta["taskId"].is_string())
+        });
+        let progress = match (task_id, &status_task) {
+            (Some(id), task)
+                if task
+                    .as_ref()
+                    .is_none_or(|task| task_status(task) == "running") =>
+            {
+                guard(&self.live_progress)
+                    .get(id)
+                    .map(|(_, text)| text.clone())
+                    .or_else(|| snapshot.as_ref().and_then(latest_progress))
             }
+            _ => None,
         };
-        let task_line = match &task {
-            Some(task) => format!(
-                "{}: {} ({})",
-                msg(locale, "statusTask", &[]),
-                text(task, "title").unwrap_or_default(),
-                text(task, "taskId").unwrap_or_default()
-            ),
-            None => line(locale, "statusTask", &msg(locale, "statusDraft", &[])),
+        let worked = status_task.as_ref().and_then(|task| {
+            worked_duration(snapshot.as_ref().unwrap_or(&Value::Null), task, now_ms())
+        });
+        let options = match task_id {
+            Some(id) => tasks
+                .config_options(target.clone(), id.to_owned())
+                .await
+                .map_err(anyhow::Error::msg)?,
+            None => json!([]),
         };
-        let state = match &task {
-            Some(task) => text(task, "status").unwrap_or("running").to_owned(),
-            None => "draft".to_owned(),
+        let draft = if status_task.is_none() && is_draft(context) {
+            Some(self.ensure_draft_options(context).await?)
+        } else {
+            None
         };
-        [
+        let draft_effective = match &draft {
+            Some(draft) => {
+                let original = draft.get("modelSelection").filter(|s| s.is_object());
+                let view = tasks
+                    .model_view(original.map(|selection| json!({"selection": selection})))
+                    .await;
+                let key = if original.is_some() {
+                    "effectiveSelection"
+                } else {
+                    "preferredSelection"
+                };
+                view.get(key).and_then(selection_value)
+            }
+            None => None,
+        };
+        let model = select_current(&options, "model")
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                status_task
+                    .as_ref()
+                    .and_then(|task| text(task, "model").map(str::to_owned))
+            })
+            .or(draft_effective)
+            .unwrap_or_else(|| "-".into());
+        let mut lines = vec![
             line(locale, "statusWorkspace", &workspace),
-            line(locale, "statusModel", &self.model_label(model_value).await),
+            line(
+                locale,
+                "statusModel",
+                &self.model_label(Some(&model), context).await,
+            ),
             "------".to_owned(),
-            task_line,
-            line(locale, "statusState", &state_label(locale, &state)),
-        ]
-        .join("\n")
+            match &status_task {
+                Some(task) => format!(
+                    "{}: {} ({})",
+                    msg(locale, "statusTask", &[]),
+                    text(task, "title").unwrap_or_default(),
+                    text(task, "taskId").unwrap_or_default()
+                ),
+                None => line(locale, "statusTask", &msg(locale, "statusDraft", &[])),
+            },
+            line(
+                locale,
+                "statusState",
+                &state_label(
+                    locale,
+                    &status_task
+                        .as_ref()
+                        .map(task_status)
+                        .unwrap_or_else(|| "draft".into()),
+                ),
+            ),
+        ];
+        if let Some(worked) = worked {
+            lines.push(line(locale, "statusWorked", &format_duration(worked)));
+        }
+        if let Some(progress) = progress {
+            lines.push(line(locale, "statusProgress", &progress));
+        }
+        Ok(lines.join("\n"))
     }
 
     /// `buildHelpText`。
-    fn help_text(locale: Option<&str>, bot: &Value) -> String {
-        let commands = &bot["allowedCommands"];
+    pub(crate) fn help_text(locale: Option<&str>, bot: &Value) -> String {
         let mut lines = vec![msg(locale, "helpTitle", &[])];
-        for (command, id) in [
-            ("help", "helpHelp"),
-            ("status", "helpStatus"),
-            ("new", "helpNew"),
-            ("workspace", "helpWorkspace"),
-            ("model", "helpModel"),
-            ("mode", "helpMode"),
-            ("thoughtLevel", "helpThoughtLevel"),
-            ("reply", "helpReply"),
-            ("bind", "helpBind"),
-        ] {
-            if command != "help" && command != "bind" && commands[command] == false {
+        for (command, id) in HELP_COMMANDS {
+            if command != "help" && command != "bind" && bot["allowedCommands"][command] == false {
                 continue;
             }
             lines.push(msg(locale, id, &[]));
@@ -603,16 +870,12 @@ impl Bots {
         lines.join("\n")
     }
 
-    async fn handle_bind(&self, inbound: &Inbound, code: &str) -> anyhow::Result<Vec<Value>> {
+    async fn handle_bind(&self, inbound: &Inbound, code: &str) -> Result<Vec<Value>> {
         let locale = self.locale().await;
         let locale = locale.as_deref();
         let actor = &inbound.actor;
         if actor.chat_type != "private" {
-            return Ok(vec![outbound(
-                actor,
-                msg(locale, "bindPrivateOnly", &[]),
-                None,
-            )]);
+            return Ok(plain(actor, msg(locale, "bindPrivateOnly", &[])));
         }
         let key = code.trim().to_uppercase();
         let record = guard(&self.bind_codes).get(&key).map(|record| {
@@ -625,19 +888,11 @@ impl Bots {
         let Some((bot_id, allowed, _)) = record
             .filter(|(bot_id, _, expires_at)| *expires_at > now_ms() && *bot_id == inbound.bot_id)
         else {
-            return Ok(vec![outbound(
-                actor,
-                msg(locale, "bindCodeInvalid", &[]),
-                None,
-            )]);
+            return Ok(plain(actor, msg(locale, "bindCodeInvalid", &[])));
         };
         let config = self.repo.read_config().await?;
         let Some(bot) = find_bot(&config, &bot_id) else {
-            return Ok(vec![outbound(
-                actor,
-                msg(locale, "bindBotMissing", &[]),
-                None,
-            )]);
+            return Ok(plain(actor, msg(locale, "bindBotMissing", &[])));
         };
         // 重新绑定覆盖旧 providerUserId：一个 Bot 同一时间只有一个沟通对象。
         let mut next = bot.clone();
@@ -655,7 +910,7 @@ impl Bots {
             text(&bot, "provider").unwrap_or_default(),
             text(&bot, "replyMode")
         ));
-        super::service::validate(&config, &next).map_err(|error| anyhow::anyhow!(error.message))?;
+        super::service::validate(&config, &next).map_err(|error| anyhow!(error.message))?;
         let mut updated = config.clone();
         if let Some(bots) = updated["bots"].as_array_mut() {
             for item in bots.iter_mut() {
@@ -666,12 +921,58 @@ impl Bots {
         }
         self.repo.write_config(&updated).await?;
         guard(&self.bind_codes).remove(&key);
-        let text = [
-            msg(locale, "bindSuccess", &[]),
-            Self::help_text(locale, &next),
+        Ok(plain(
+            actor,
+            [
+                msg(locale, "bindSuccess", &[]),
+                Self::help_text(locale, &next),
+            ]
+            .join("\n\n"),
+        ))
+    }
+
+    /// 微信首条普通消息只做激活（扫码登录拿不到用户 id，第一条入站消息建立会话目标）。
+    async fn weixin_activation(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        command: &Value,
+    ) -> Result<Option<Vec<Value>>> {
+        if inbound.actor.provider != "weixin" || command["type"] != "message" {
+            return Ok(None);
+        }
+        let state = self.repo.read_state().await?;
+        let existing = &state["bots"][&inbound.bot_id];
+        let initialized = [
+            "weixinActivatedAt",
+            "draftOptions",
+            "activeTaskId",
+            "pendingPermissionOptions",
+            "pendingElicitation",
         ]
-        .join("\n\n");
-        Ok(vec![outbound(actor, text, None)])
+        .iter()
+        .any(|key| !existing[*key].is_null());
+        if initialized {
+            return Ok(None);
+        }
+        let auth = match self.authorize(inbound, "help").await? {
+            Ok(auth) => auth,
+            Err(reply) => return Ok(Some(reply)),
+        };
+        if !auth.context["weixinActivatedAt"].is_null() {
+            return Ok(None);
+        }
+        let mut context = auth.context.clone();
+        context["weixinActivatedAt"] = json!(now_ms());
+        self.write_context(&context).await?;
+        let locale = auth.locale.as_deref();
+        Ok(Some(plain(
+            &inbound.actor,
+            [
+                msg(locale, "weixinActivatedWelcome", &[]),
+                Self::help_text(locale, &auth.bot),
+            ]
+            .join("\n\n"),
+        )))
     }
 
     /// 入站命令分发（`handleInboundMessage`）；同一聊天上下文串行处理。
@@ -679,18 +980,7 @@ impl Bots {
         self: &Arc<Self>,
         inbound: &Inbound,
     ) -> Result<Vec<Value>, RpcError> {
-        let actor = &inbound.actor;
-        let queue_key = format!(
-            "{}::{}::{}",
-            actor.bot_id,
-            actor.provider,
-            actor
-                .chat_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .unwrap_or(&actor.provider_user_id)
-        );
+        let queue_key = self.actor_key(&inbound.actor);
         let queue = guard(&self.inbound_queues)
             .entry(queue_key)
             .or_default()
@@ -701,122 +991,452 @@ impl Bots {
             .map_err(|error| super::service::error(format!("{error:#}")))
     }
 
-    async fn dispatch(self: &Arc<Self>, inbound: &Inbound) -> anyhow::Result<Vec<Value>> {
+    async fn dispatch(self: &Arc<Self>, inbound: &Inbound) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
-        let mut command = model::parse_command(&inbound.text);
-        // 非微信通道里纯文本 "0" 不是取消，而是普通消息。
-        if command["type"] == "selection.cancel"
+        if let Some(response) = &inbound.elicitation_response {
+            return Ok(match self.authorize(inbound, "message").await? {
+                Ok(auth) => {
+                    self.handle_structured_elicitation(&auth, actor, response)
+                        .await?
+                }
+                Err(reply) => reply,
+            });
+        }
+        let parsed = model::parse_command(&inbound.text);
+        let command = if parsed["type"] == "message" {
+            self.resolve_pending_command(actor, text(&parsed, "text").unwrap_or_default())
+                .unwrap_or(parsed)
+        } else if parsed["type"] == "selection.cancel"
             && actor.provider != "weixin"
             && inbound.text.trim() == "0"
         {
-            command = json!({"type": "message", "text": inbound.text});
+            // 非微信通道里纯文本 "0" 不是取消，而是普通消息。
+            self.clear_pending(actor);
+            json!({"type": "message", "text": inbound.text})
+        } else {
+            parsed
+        };
+        if let Some(reply) = self.weixin_activation(inbound, &command).await? {
+            return Ok(reply);
         }
         let kind = text(&command, "type").unwrap_or_default().to_owned();
-        let unknown = |name: &str, locale: Option<&str>| {
-            vec![outbound(
-                actor,
-                msg(locale, "unknownCommand", &[("command", name)]),
-                None,
-            )]
-        };
+        let value = text(&command, "value").unwrap_or_default().to_owned();
+        macro_rules! authorized {
+            ($command:expr) => {
+                match self.authorize(inbound, $command).await? {
+                    Ok(auth) => auth,
+                    Err(reply) => return Ok(reply),
+                }
+            };
+        }
         match kind.as_str() {
+            "selection.cancel" => self.handle_selection_cancel(inbound).await,
             "bind" => {
                 self.handle_bind(inbound, text(&command, "code").unwrap_or_default())
                     .await
             }
-            "help" => Ok(match self.authorize(inbound, "help").await? {
-                Ok(auth) => vec![outbound(
+            "help" => {
+                let auth = authorized!("help");
+                Ok(plain(
                     actor,
                     Self::help_text(auth.locale.as_deref(), &auth.bot),
-                    None,
-                )],
-                Err(reply) => reply,
-            }),
-            "status" => Ok(match self.authorize(inbound, "status").await? {
-                Ok(auth) => {
-                    let locale = auth.locale.as_deref();
-                    vec![outbound(
-                        actor,
-                        self.status_text(&auth.context, locale).await,
-                        locale,
-                    )]
-                }
-                Err(reply) => reply,
-            }),
+                ))
+            }
+            "status" => {
+                let auth = authorized!("status");
+                self.status_reply(actor, &auth.context, auth.locale.as_deref())
+                    .await
+            }
+            "reconnect" => self.handle_reconnect(inbound).await,
             "new" => {
-                let auth = match self.authorize(inbound, "new").await? {
-                    Ok(auth) => auth,
-                    Err(reply) => return Ok(reply),
-                };
+                let auth = authorized!("new");
                 let locale = auth.locale.as_deref();
                 if self.is_active_task_running(&auth.context).await {
-                    return Ok(vec![outbound(actor, msg(locale, "taskRunning", &[]), None)]);
+                    return Ok(plain(actor, msg(locale, "taskRunning", &[])));
                 }
-                let draft = Self::initialized_draft(&auth.context);
+                let draft = self.active_task_draft(&auth.context).await;
                 let context = self.write_draft_context(&auth.context, Some(draft)).await?;
-                Ok(vec![outbound(
-                    actor,
-                    self.status_text(&context, locale).await,
-                    locale,
-                )])
+                self.status_reply(actor, &context, locale).await
+            }
+            "workspace.list" => {
+                let auth = authorized!("workspace");
+                self.handle_workspace_list(inbound, auth).await
+            }
+            "workspace.set" => {
+                let auth = authorized!("workspace");
+                self.handle_workspace_set(inbound, auth, &value).await
+            }
+            "model.list" => {
+                let auth = authorized!("model");
+                self.handle_model_list(inbound, auth).await
+            }
+            "model.provider.set" => {
+                let auth = authorized!("model");
+                self.handle_model_provider_set(inbound, auth, &value).await
+            }
+            "model.set" => {
+                let auth = authorized!("model");
+                self.handle_model_set(inbound, auth, &value).await
+            }
+            "mode.list" | "mode.set" => {
+                // Bot 硬锁 yolo：不提供模式选择，也拒绝任何切换。
+                let auth = authorized!("mode");
+                Ok(plain(actor, msg(auth.locale.as_deref(), "modeLocked", &[])))
+            }
+            "thoughtLevel.list" => {
+                let auth = authorized!("thoughtLevel");
+                self.handle_thought_list(inbound, auth).await
+            }
+            "thoughtLevel.set" => {
+                let auth = authorized!("thoughtLevel");
+                self.handle_thought_set(inbound, auth, &value).await
+            }
+            "task.list" => {
+                let auth = authorized!("task");
+                self.handle_task_list(inbound, auth).await
+            }
+            "task.set" => {
+                let auth = authorized!("task");
+                self.handle_task_set(inbound, auth, &value).await
+            }
+            "reply.list" => {
+                let auth = authorized!("reply");
+                self.handle_reply_list(inbound, auth).await
+            }
+            "reply.set" => {
+                let auth = authorized!("reply");
+                self.handle_reply_set(inbound, auth, &value).await
             }
             "stop" => {
-                let auth = match self.authorize(inbound, "stop").await? {
-                    Ok(auth) => auth,
-                    Err(reply) => return Ok(reply),
-                };
-                let locale = auth.locale.as_deref();
-                let Some(task_id) = text(&auth.context, "activeTaskId").map(str::to_owned) else {
-                    return Ok(vec![outbound(
-                        actor,
-                        msg(locale, "noActiveTask", &[]),
-                        None,
-                    )]);
-                };
-                if let Err(message) = self
-                    .tasks
-                    .stop(context_target(&auth.context), task_id.clone())
-                    .await
-                {
-                    return Ok(vec![outbound(
-                        actor,
-                        msg(locale, "taskFailed", &[("message", &message)]),
-                        None,
-                    )]);
-                }
-                guard(&self.running).remove(&task_id);
-                Ok(vec![outbound(
-                    actor,
-                    self.status_text(&auth.context, locale).await,
-                    locale,
-                )])
+                let auth = authorized!("stop");
+                self.handle_stop(inbound, auth).await
             }
-            // 没有待处理的选择（Rust Host 不发选择卡）：同 Node 回未知命令 0。
-            "selection.cancel" => Ok(unknown("0", self.locale().await.as_deref())),
-            "unknown" => Ok(unknown(
-                text(&command, "name").unwrap_or_default(),
-                self.locale().await.as_deref(),
-            )),
+            "permission.respond" => {
+                let auth = authorized!("approve");
+                self.handle_permission_respond(&auth, inbound, &value).await
+            }
+            "elicitation.respond" => {
+                let auth = authorized!("message");
+                self.handle_elicitation_value(&auth, actor, &value).await
+            }
+            "elicitation.submit" => {
+                let auth = authorized!("message");
+                if !auth.context["pendingElicitation"].is_object() || actor.provider != "weixin" {
+                    // 非微信通道的“完成”必须从带 token 的按钮进入，避免误提交上一轮问答。
+                    return Ok(plain(
+                        actor,
+                        msg(auth.locale.as_deref(), "elicitationExpired", &[]),
+                    ));
+                }
+                self.submit_pending_elicitation(&auth, actor, "accept")
+                    .await
+            }
+            "approve" => {
+                let auth = authorized!("approve");
+                self.handle_approve(
+                    &auth,
+                    inbound,
+                    text(&command, "requestId").unwrap_or_default(),
+                    text(&command, "optionId"),
+                )
+                .await
+            }
+            "deny" => {
+                let auth = authorized!("approve");
+                self.handle_approve(
+                    &auth,
+                    inbound,
+                    text(&command, "requestId").unwrap_or_default(),
+                    None,
+                )
+                .await
+            }
             "message" => self.handle_message(inbound).await,
-            _ => {
-                let name = inbound
-                    .text
-                    .trim()
-                    .trim_start_matches('/')
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or_default()
-                    .to_lowercase();
-                log::info(format!(
-                    "bots command not available in the Rust Host command={kind}"
+            _ => Ok(plain(
+                actor,
+                msg(
+                    self.locale().await.as_deref(),
+                    "unknownCommand",
+                    &[("command", text(&command, "name").unwrap_or_default())],
+                ),
+            )),
+        }
+    }
+
+    /// `handleSelectionCancel`。
+    async fn handle_selection_cancel(self: &Arc<Self>, inbound: &Inbound) -> Result<Vec<Value>> {
+        let actor = &inbound.actor;
+        let pending = self.pending_selection(actor);
+        if pending
+            .as_ref()
+            .is_some_and(|selection| selection["action"] == "elicitation.respond")
+        {
+            let auth = match self.authorize(inbound, "message").await? {
+                Ok(auth) => auth,
+                Err(reply) => return Ok(reply),
+            };
+            self.clear_pending(actor);
+            if !auth.context["pendingElicitation"].is_object() {
+                return Ok(plain(
+                    actor,
+                    msg(auth.locale.as_deref(), "elicitationExpired", &[]),
                 ));
-                Ok(unknown(&name, self.locale().await.as_deref()))
+            }
+            return self
+                .submit_pending_elicitation(&auth, actor, "cancel")
+                .await;
+        }
+        if pending.is_none() {
+            if let Ok(auth) = self.authorize(inbound, "message").await?
+                && auth.context["pendingElicitation"].is_object()
+            {
+                return self
+                    .submit_pending_elicitation(&auth, actor, "cancel")
+                    .await;
+            }
+            let locale = self.locale().await;
+            return Ok(plain(
+                actor,
+                msg(locale.as_deref(), "unknownCommand", &[("command", "0")]),
+            ));
+        }
+        self.clear_pending(actor);
+        let auth = match self.authorize(inbound, "message").await? {
+            Ok(auth) => auth,
+            Err(reply) => return Ok(reply),
+        };
+        self.status_reply(actor, &auth.context, auth.locale.as_deref())
+            .await
+    }
+
+    /// `/reconnect`：本地项目不需要重连；远端交给 [`super::RemoteBots`]（当前没有远端运行时）。
+    async fn handle_reconnect(self: &Arc<Self>, inbound: &Inbound) -> Result<Vec<Value>> {
+        let actor = &inbound.actor;
+        let auth = match self.authorize(inbound, "workspace").await? {
+            Ok(auth) => auth,
+            Err(reply) => return Ok(reply),
+        };
+        let locale = auth.locale.as_deref();
+        let path = text(&auth.context, "workspacePath")
+            .unwrap_or_default()
+            .to_owned();
+        if text(&auth.context, "workspaceIdentity").is_none() {
+            return Ok(plain(actor, msg(locale, "remoteReconnectLocal", &[])));
+        }
+        if !self.remote.available() {
+            return Ok(plain(
+                actor,
+                msg(
+                    locale,
+                    "remoteReconnectUnavailable",
+                    &[("workspacePath", &path)],
+                ),
+            ));
+        }
+        if self.remote_connected(&auth.context).await {
+            return self.status_reply(actor, &auth.context, locale).await;
+        }
+        // “正在重连”是即时提示：在真正重连前发出，发送失败不能中断重连。
+        let starting = plain(
+            actor,
+            msg(
+                locale,
+                "remoteReconnectStarting",
+                &[("workspacePath", &path)],
+            ),
+        );
+        if let Err(error) = self.send_outbound(&auth.bot, &starting[0]).await {
+            log::warn(format!(
+                "send reconnect starting failed bot={}: {error:#}",
+                inbound.bot_id
+            ));
+        }
+        match self
+            .remote
+            .ensure_connected(context_target(&auth.context))
+            .await
+        {
+            Err(message) => Ok(plain(
+                actor,
+                msg(
+                    locale,
+                    "remoteReconnectFailed",
+                    &[("workspacePath", &path), ("message", &message)],
+                ),
+            )),
+            Ok(()) => {
+                if is_draft(&auth.context) {
+                    let mut context = auth.context.clone();
+                    context["draftOptions"] = self.initialized_draft(&context).await;
+                    self.write_context(&context).await?;
+                }
+                self.status_reply(actor, &auth.context, locale).await
             }
         }
     }
 
-    /// 普通消息：草稿态新建会话，任务态续用当前会话；输入在后台发送，终态回推。
-    async fn handle_message(self: &Arc<Self>, inbound: &Inbound) -> anyhow::Result<Vec<Value>> {
+    async fn handle_stop(self: &Arc<Self>, inbound: &Inbound, auth: Auth) -> Result<Vec<Value>> {
+        let actor = &inbound.actor;
+        let locale = auth.locale.as_deref();
+        let Some(task_id) = text(&auth.context, "activeTaskId").map(str::to_owned) else {
+            return Ok(plain(actor, msg(locale, "noActiveTask", &[])));
+        };
+        let target = context_target(&auth.context);
+        let result = match self.tasks_for(&target) {
+            Ok(tasks) => tasks.stop(target, task_id.clone()).await,
+            Err(message) => Err(message),
+        };
+        if let Err(message) = result {
+            return Ok(plain(
+                actor,
+                msg(locale, "taskFailed", &[("message", &message)]),
+            ));
+        }
+        guard(&self.running).remove(&task_id);
+        self.stop_typing(&task_id);
+        self.status_reply(actor, &auth.context, locale).await
+    }
+
+    // ── 普通消息 ──
+
+    /// 附件字节：内嵌 base64、本地路径、通道下载、下载地址，依次尝试。
+    async fn attachment_bytes(
+        &self,
+        bot: &Value,
+        attachment: &Value,
+        actor: &Actor,
+    ) -> Result<Option<(Value, Vec<u8>)>> {
+        if let Some(data) = text(attachment, "dataBase64") {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(data.trim())
+                .unwrap_or_default();
+            return Ok(Some((attachment.clone(), bytes)));
+        }
+        if let Some(path) = text(attachment, "localPath") {
+            return Ok(Some((attachment.clone(), tokio::fs::read(path).await?)));
+        }
+        if let Some(downloaded) = self.provider_download(bot, attachment, actor).await? {
+            return Ok(Some((downloaded.attachment, downloaded.data)));
+        }
+        let Some(url) = text(attachment, "downloadUrl") else {
+            return Ok(None);
+        };
+        let filename = text(attachment, "filename").unwrap_or_default();
+        let data = self
+            .providers
+            .http
+            .bytes(
+                self.providers.http.client().get(url),
+                &format!("download {filename} failed"),
+                &format!("download {filename} timed out."),
+            )
+            .await?;
+        Ok(Some((attachment.clone(), data)))
+    }
+
+    /// `prepareBotMessageContent`：下载附件、缓存到本地；图片与音频作为 prompt 附件，其余写入路径。
+    async fn prepare_content(
+        &self,
+        bot: &Value,
+        inbound: &Inbound,
+        locale: Option<&str>,
+    ) -> Result<(String, Vec<Value>)> {
+        let raw: Vec<Value> = inbound
+            .attachments
+            .iter()
+            .take(MAX_ATTACHMENTS)
+            .cloned()
+            .collect();
+        let mut prompt_attachments = Vec::new();
+        let mut lines = Vec::new();
+        for attachment in &raw {
+            let filename = text(attachment, "filename").unwrap_or_default().to_owned();
+            let mime = text(attachment, "mimeType").unwrap_or_default().to_owned();
+            let Some((resolved, data)) = self
+                .attachment_bytes(bot, attachment, &inbound.actor)
+                .await?
+            else {
+                lines.push(format!(
+                    "附件：{filename} ({mime}, {})，未能下载。",
+                    attachment_size(attachment["sizeBytes"].as_f64())
+                ));
+                continue;
+            };
+            if data.len() > MAX_ATTACHMENT_BYTES {
+                return Err(anyhow!(
+                    "{} exceeds 5MB.",
+                    text(&resolved, "filename").unwrap_or_default()
+                ));
+            }
+            let message_key = inbound
+                .actor
+                .provider_message_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("message-{}", now_ms()));
+            let digest = sha256_hex(
+                format!(
+                    "{}:{message_key}:{}",
+                    inbound.bot_id,
+                    text(&resolved, "id").unwrap_or_default()
+                )
+                .as_bytes(),
+            );
+            let filename = text(&resolved, "filename").unwrap_or_default().to_owned();
+            let path = self
+                .attachments_dir
+                .join(sanitize_filename(&inbound.bot_id))
+                .join(sanitize_filename(&message_key))
+                .join(format!(
+                    "{}-{}",
+                    &digest[..16],
+                    sanitize_filename(&filename)
+                ));
+            if let Some(parent) = path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            tokio::fs::write(&path, &data).await?;
+            let local = path.to_string_lossy().into_owned();
+            let mime = text(&resolved, "mimeType").unwrap_or_default().to_owned();
+            let size = attachment_size(Some(data.len() as f64));
+            let kind = text(&resolved, "kind").unwrap_or("file");
+            if matches!(kind, "image" | "audio") {
+                prompt_attachments.push(json!({
+                    "kind": kind, "filename": filename, "mimeType": mime,
+                    "dataBase64": base64::engine::general_purpose::STANDARD.encode(&data),
+                    "localPath": local,
+                }));
+                // 附件已下载缓存：把本地路径写进 prompt，避免模型再去访问临时 URL。
+                lines.push(format!(
+                    "附件：{filename} ({mime}, {size})，已作为{}输入提供，并保存到：{local}。如需读取附件，请直接使用这个本地路径，不要下载或访问临时/远程 URL。",
+                    if kind == "image" { "图片" } else { "音频" }
+                ));
+                continue;
+            }
+            lines.push(format!(
+                "附件：{filename} ({mime}, {size})，已保存到：{local}"
+            ));
+        }
+        let trimmed = inbound.text.trim();
+        let base = if !trimmed.is_empty() {
+            trimmed.to_owned()
+        } else if !raw.is_empty() {
+            msg(locale, "attachmentOnlyPrompt", &[])
+        } else {
+            String::new()
+        };
+        let content = std::iter::once(base)
+            .chain(lines)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        Ok((content, prompt_attachments))
+    }
+
+    /// 普通消息：草稿态新建会话，任务态续用当前会话；先订阅回复流，再在后台发送输入。
+    async fn handle_message(self: &Arc<Self>, inbound: &Inbound) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let mut auth = match self.authorize(inbound, "message").await? {
             Ok(auth) => auth,
@@ -824,50 +1444,57 @@ impl Bots {
         };
         let locale = auth.locale.clone();
         let locale = locale.as_deref();
+        let target = context_target(&auth.context);
+        let tasks = self.tasks_for(&target).map_err(anyhow::Error::msg)?;
         let mut deleted_task: Option<String> = None;
         if auth.context["mode"] == "task"
             && let Some(task_id) = text(&auth.context, "activeTaskId").map(str::to_owned)
-            && self
-                .tasks
+            && tasks
                 .deleted_ids(context_key(&auth.context))
                 .await
                 .contains(&task_id)
         {
-            // 软删除的任务不能凭 activeTaskId 续跑：回到草稿，用当前草稿的选择新建。
+            // 软删除的任务不能凭 activeTaskId 续跑：回到草稿，用当前草稿的有效选择新建。
             deleted_task = Some(task_id);
             auth.context = self.write_draft_context(&auth.context, None).await?;
+        }
+        if let Some(reply) = self
+            .handle_elicitation_text(&auth, actor, &inbound.text)
+            .await?
+        {
+            return Ok(reply);
         }
         if auth.context["mode"] == "task"
             && text(&auth.context, "activeTaskId").is_some()
             && self.is_active_task_running(&auth.context).await
         {
-            return Ok(vec![outbound(actor, msg(locale, "taskRunning", &[]), None)]);
+            return Ok(plain(actor, msg(locale, "taskRunning", &[])));
         }
-        if inbound.has_attachment {
-            // Rust Host 还不下载 Bot 附件。
-            let reason = msg(locale, "attachmentDownloadUnavailable", &[]);
-            return Ok(vec![outbound(
-                actor,
-                msg(locale, "attachmentRejected", &[("message", &reason)]),
-                None,
-            )]);
-        }
-        let target = context_target(&auth.context);
-        let bot_target = automation_target(actor);
-        let draft_task =
-            auth.context["mode"] == "draft" || text(&auth.context, "activeTaskId").is_none();
-        let (task_id, selection, context) = if draft_task {
+        let (content, attachments) = match self.prepare_content(&auth.bot, inbound, locale).await {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let reason = attachment_rejected_reason(&format!("{error:#}"), locale);
+                return Ok(plain(
+                    actor,
+                    msg(locale, "attachmentRejected", &[("message", &reason)]),
+                ));
+            }
+        };
+        let (task_id, selection, context) = if is_draft(&auth.context) {
             let draft = match auth
                 .context
                 .get("draftOptions")
                 .filter(|value| value.is_object())
             {
                 Some(draft) => draft.clone(),
-                None => Self::initialized_draft(&auth.context),
+                None => self.initialized_draft(&auth.context).await,
             };
-            let original = draft.get("modelSelection").cloned();
-            let view = self
-                .tasks
+            // 只在首次创建前解析原意图；创建、配置和首发都固定这份结果。
+            let original = draft
+                .get("modelSelection")
+                .filter(|s| s.is_object())
+                .cloned();
+            let view = tasks
                 .model_view(
                     original
                         .clone()
@@ -886,11 +1513,10 @@ impl Bots {
                 anyhow::bail!("Bot 无法从目标 Host 解析 Submission 模型");
             }
             let mode = text(&draft, "mode").map(str::to_owned);
-            let task_id = self
-                .tasks
+            let task_id = tasks
                 .create(target.clone(), submission.clone(), mode)
                 .await
-                .map_err(|message| anyhow::anyhow!(message))?;
+                .map_err(|message| anyhow!(message))?;
             let mut context = auth.context.as_object().cloned().unwrap_or_default();
             context.insert("mode".into(), json!("task"));
             context.insert("activeTaskId".into(), json!(task_id));
@@ -903,10 +1529,11 @@ impl Bots {
                     text(&auth.bot, "id").unwrap_or_default(),
                     context_key(&context)
                 ));
+                // 切换已经持久化：通知失败不能让回调释放去重记录并重跑原消息。
                 if let Err(error) = self
                     .send_outbound(
                         &auth.bot,
-                        &outbound(actor, msg(locale, "deletedTaskReplaced", &[]), None),
+                        &plain(actor, msg(locale, "deletedTaskReplaced", &[]))[0],
                     )
                     .await
                 {
@@ -920,14 +1547,14 @@ impl Bots {
             let task_id = text(&auth.context, "activeTaskId")
                 .unwrap_or_default()
                 .to_owned();
-            let original = self
-                .tasks
+            // Bot 只是同一会话的输入端：以会话原选择解析本次输入，不改写会话。
+            let original = tasks
                 .resume(target.clone(), task_id.clone())
                 .await
-                .map_err(|message| anyhow::anyhow!(message))?;
+                .map_err(|message| anyhow!(message))?;
             let view = match &original {
                 Some(selection) => {
-                    self.tasks
+                    tasks
                         .model_view(Some(json!({"selection": selection})))
                         .await
                 }
@@ -943,42 +1570,39 @@ impl Bots {
             (task_id, effective, auth.context.clone())
         };
         guard(&self.running).insert(task_id.clone());
-        let input_id = uuid_v7();
-        // 先订阅终态再发送，避免快速完成的轮次漏掉回推。
-        self.watch_task(
-            auth.bot.clone(),
-            actor.clone(),
-            context_target(&context),
-            task_id.clone(),
-            Some(input_id.clone()),
-        );
+        // 先订阅回复流（收到初始快照）再发送，快速完成的轮次也不会漏。
+        self.watch_task_stream(&auth.bot, actor, &context, &auth.user)
+            .await;
         let bots = self.clone();
         let bot = auth.bot.clone();
         let actor = actor.clone();
-        let text_input = inbound.text.clone();
+        let input = SendText {
+            input_id: uuid_v7(),
+            text: content,
+            model_selection: Some(selection),
+            bot_delivery_target: automation_target(&actor),
+            ..SendText::default()
+        };
+        // 发送在后台进行：轮询通道是单循环顺序处理 update，等整轮结束会让按钮回调排队。
         tokio::spawn(async move {
-            let input = SendText {
-                input_id,
-                text: text_input,
-                model_selection: Some(selection),
-                bot_delivery_target: bot_target,
-                ..SendText::default()
+            let result = if attachments.is_empty() {
+                tasks.send(target, task_id.clone(), input).await
+            } else {
+                tasks
+                    .send_with_attachments(target, task_id.clone(), input, attachments)
+                    .await
             };
-            if let Err(message) = bots.tasks.send(target, task_id.clone(), input).await {
+            if let Err(message) = result {
                 guard(&bots.running).remove(&task_id);
+                bots.stop_typing(&task_id);
                 let locale = bots.locale().await;
                 let locale = locale.as_deref();
-                let expired = message.contains("Session not found:")
-                    || message.contains("Session is not active:");
-                let text = if expired {
+                let body = if is_session_expired(&message) {
                     msg(locale, "sessionExpiredNewTaskHint", &[])
                 } else {
                     msg(locale, "taskFailed", &[("message", &message)])
                 };
-                if let Err(error) = bots
-                    .send_outbound(&bot, &outbound(&actor, text, None))
-                    .await
-                {
+                if let Err(error) = bots.send_outbound(&bot, &plain(&actor, body)[0]).await {
                     log::warn(format!(
                         "bots prompt failure notice failed task={task_id}: {error:#}"
                     ));
@@ -988,101 +1612,7 @@ impl Bots {
         Ok(Vec::new())
     }
 
-    /// `processProviderCallback`（飞书 / Lark）：解析、去重、处理并投递回复。`synchronous_card` 为卡片
-    /// 按钮回调：回复由长连接同步回包承载，不另发消息。
-    pub async fn process_callback(
-        self: &Arc<Self>,
-        provider: &str,
-        payload: Value,
-        synchronous_card: bool,
-    ) -> Value {
-        let locale = self.locale().await;
-        let Some(inbound) = parse_callback(&payload) else {
-            log::debug(format!(
-                "provider callback parsed provider={provider} count=0"
-            ));
-            return json!({"ok": true, "replies": []});
-        };
-        let config = match self.repo.read_config().await {
-            Ok(config) => config,
-            Err(error) => {
-                log::warn(format!(
-                    "provider callback failed provider={provider}: {error:#}"
-                ));
-                return json!({"ok": false, "replies": [], "status": 503});
-            }
-        };
-        let bot = find_bot(&config, &inbound.bot_id);
-        if let Some(bot) = &bot
-            && let Some(reference) = text(bot, "webhookSecretRef")
-            && let Some(expected) = self.load_credential(Some(reference)).await
-        {
-            let token = text(&payload, "token").or_else(|| text(&payload["header"], "token"));
-            if token != Some(expected.as_str()) {
-                return json!({"ok": true, "replies": [outbound(&inbound.actor, msg(locale.as_deref(), "webhookSecretInvalid", &[]), None)]});
-            }
-        }
-        if !self.mark_inbound(&inbound) {
-            log::info(format!(
-                "provider callback duplicated provider={provider} bot={} messageId={}",
-                inbound.bot_id,
-                inbound
-                    .actor
-                    .provider_message_id
-                    .as_deref()
-                    .unwrap_or_default()
-            ));
-            return json!({"ok": true, "replies": []});
-        }
-        log::info(format!(
-            "provider callback provider={provider} bot={} user={}",
-            inbound.bot_id, inbound.actor.provider_user_id
-        ));
-        let replies = match self.handle_inbound(&inbound).await {
-            Ok(replies) => replies,
-            Err(failure) => {
-                self.release_inbound(&inbound);
-                log::warn(format!(
-                    "provider callback failed provider={provider} bot={} user={}: {}",
-                    inbound.bot_id, inbound.actor.provider_user_id, failure.message
-                ));
-                let expired = failure.message.contains("Session not found:")
-                    || failure.message.contains("Session is not active:");
-                let text = if expired {
-                    msg(locale.as_deref(), "sessionExpiredNewTaskHint", &[])
-                } else {
-                    msg(
-                        locale.as_deref(),
-                        "callbackFailed",
-                        &[("message", &failure.message)],
-                    )
-                };
-                let reply = outbound(&inbound.actor, text, None);
-                if let Some(bot) = &bot
-                    && let Err(error) = self.send_outbound(bot, &reply).await
-                {
-                    log::warn(format!(
-                        "provider callback failure notice failed provider={provider}: {error:#}"
-                    ));
-                }
-                return json!({"ok": false, "replies": [reply], "status": 503});
-            }
-        };
-        if let Some(bot) = &bot
-            && (!synchronous_card || replies.is_empty())
-        {
-            for reply in &replies {
-                if let Err(error) = self.send_outbound(bot, reply).await {
-                    self.release_inbound(&inbound);
-                    log::warn(format!(
-                        "provider callback reply failed provider={provider}: {error:#}"
-                    ));
-                    return json!({"ok": false, "replies": replies, "status": 503});
-                }
-            }
-        }
-        json!({"ok": true, "replies": replies})
-    }
+    // ── 通道回调 ──
 
     fn delivery_key(inbound: &Inbound) -> Option<String> {
         let id = inbound.actor.provider_message_id.as_deref()?.trim();
@@ -1117,67 +1647,260 @@ impl Bots {
         }
     }
 
-    /// `handleProviderCallback(Response)`：只有飞书 / Lark 通道。
+    /// `processProviderCallback`：解析、校验、去重、处理并投递回复。
+    pub async fn process_callback(
+        self: &Arc<Self>,
+        provider: &str,
+        payload: Value,
+        _synchronous: bool,
+    ) -> Value {
+        let locale = self.locale().await;
+        let locale = locale.as_deref();
+        let config = match self.repo.read_config().await {
+            Ok(config) => config,
+            Err(error) => {
+                log::warn(format!(
+                    "provider callback failed provider={provider}: {error:#}"
+                ));
+                return json!({"ok": false, "replies": [], "status": 503});
+            }
+        };
+        let payload = if is_feishu(provider) && payload.is_object() {
+            let mut object = Map::new();
+            object.insert("zcodeProvider".into(), json!(provider));
+            object.extend(payload.as_object().cloned().unwrap_or_default());
+            Value::Object(object)
+        } else {
+            payload
+        };
+        let Some(parsed) = Self::parse_callback(provider, &payload) else {
+            return json!({"ok": false, "replies": [], "status": 400});
+        };
+        if is_feishu(provider) {
+            log::debug(format!(
+                "provider callback parsed provider={provider} count={}",
+                parsed.len()
+            ));
+        }
+        let mut replies: Vec<Value> = Vec::new();
+        let mut business_failure = false;
+        for inbound in parsed {
+            let bot = find_bot(&config, &inbound.bot_id);
+            if let Some(bot) = &bot {
+                let secret = if text(bot, "provider") == Some("webhook") {
+                    Some(text(&payload, "webhookSecret"))
+                } else if is_feishu(text(bot, "provider").unwrap_or_default()) {
+                    Some(text(&payload, "token").or_else(|| text(&payload["header"], "token")))
+                } else {
+                    None
+                };
+                if let Some(received) = secret
+                    && let Some(expected) = self
+                        .load_credential(text(bot, "webhookSecretRef"))
+                        .await
+                        .filter(|expected| !expected.is_empty())
+                    && received != Some(expected.as_str())
+                {
+                    replies.push(
+                        plain(&inbound.actor, msg(locale, "webhookSecretInvalid", &[])).remove(0),
+                    );
+                    continue;
+                }
+            }
+            let mut inbound = inbound;
+            if let Some(bot) = &bot
+                && inbound.actor.display_name.is_none()
+            {
+                match self
+                    .provider_actor_display_name(bot, &inbound.actor.provider_user_id)
+                    .await
+                {
+                    Ok(Some(name)) if !name.trim().is_empty() => {
+                        inbound.actor.display_name = Some(name.trim().to_owned())
+                    }
+                    Ok(_) => {}
+                    // 昵称需要额外通讯录权限，缺权限时不能阻断消息处理和绑定。
+                    Err(error) => log::debug(format!(
+                        "resolve actor displayName failed provider={provider} bot={} user={}: {error:#}",
+                        inbound.bot_id, inbound.actor.provider_user_id
+                    )),
+                }
+            }
+            if !self.mark_inbound(&inbound) {
+                log::info(format!(
+                    "provider callback duplicated provider={provider} bot={} user={} messageId={}",
+                    inbound.bot_id,
+                    inbound.actor.provider_user_id,
+                    inbound
+                        .actor
+                        .provider_message_id
+                        .as_deref()
+                        .unwrap_or_default()
+                ));
+                continue;
+            }
+            log::info(format!(
+                "provider callback provider={provider} bot={} user={}",
+                inbound.bot_id, inbound.actor.provider_user_id
+            ));
+            let outbound_messages = match self.handle_inbound(&inbound).await {
+                Ok(messages) => messages,
+                Err(failure) => {
+                    self.release_inbound(&inbound);
+                    business_failure = true;
+                    log::warn(format!(
+                        "provider callback failed provider={provider} bot={} user={}: {}",
+                        inbound.bot_id, inbound.actor.provider_user_id, failure.message
+                    ));
+                    let body = if is_session_expired(&failure.message) {
+                        msg(locale, "sessionExpiredNewTaskHint", &[])
+                    } else {
+                        msg(locale, "callbackFailed", &[("message", &failure.message)])
+                    };
+                    let notice = plain(&inbound.actor, body).remove(0);
+                    replies.push(notice.clone());
+                    // 错误提示发送成功不等于消息已消费：不确认回调，ok=false 让外部游标重投。
+                    if let Some(bot) = &bot {
+                        if let Err(error) = self.send_outbound(bot, &notice).await {
+                            log::warn(format!(
+                                "provider callback failure notice failed provider={provider}: {error:#}"
+                            ));
+                        }
+                        self.stop_inbound_typing(bot, &inbound.actor).await;
+                    }
+                    continue;
+                }
+            };
+            replies.extend(outbound_messages.iter().cloned());
+            let Some(bot) = &bot else {
+                continue;
+            };
+            if let Err(error) = self
+                .deliver_replies(
+                    bot,
+                    provider,
+                    &payload,
+                    &inbound,
+                    &outbound_messages,
+                    locale,
+                )
+                .await
+            {
+                self.release_inbound(&inbound);
+                log::warn(format!(
+                    "provider callback reply failed provider={provider}: {error:#}"
+                ));
+                return json!({"ok": false, "replies": replies, "status": 503});
+            }
+        }
+        let mut result = json!({"ok": !business_failure, "replies": replies});
+        if business_failure {
+            result["status"] = json!(503);
+        }
+        result
+    }
+
+    /// 回调成功后的确认与投递（Telegram toast、飞书 card/update、临时交互卡片、普通发送）。
+    async fn deliver_replies(
+        &self,
+        bot: &Value,
+        provider: &str,
+        payload: &Value,
+        inbound: &Inbound,
+        outbound_messages: &[Value],
+        locale: Option<&str>,
+    ) -> Result<()> {
+        let key = self.actor_key(&inbound.actor);
+        let transient = guard(&self.transient_cards).get(&key).cloned();
+        let first = outbound_messages.first();
+        let synchronous = is_feishu(provider)
+            && payload["zcodeFeishuSynchronousCardAction"] == true
+            && first.is_some();
+        let first_elicitation = first.is_some_and(|message| message["elicitation"].is_object());
+        let callback_text = first
+            .and_then(|message| text(message, "text"))
+            .map(str::to_owned)
+            .unwrap_or_else(|| msg(locale, "received", &[]));
+        let mut handled_by_update = synchronous;
+        if !synchronous && (transient.is_none() || first_elicitation) {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                self.provider_acknowledge(bot, payload, &callback_text, first),
+            )
+            .await
+            {
+                Ok(Ok(handled)) => handled_by_update = handled,
+                Ok(Err(error)) => log::warn(format!(
+                    "provider callback acknowledge failed provider={provider}: {error:#}"
+                )),
+                Err(_) => log::warn(format!(
+                    "provider callback acknowledge failed provider={provider}: Bot provider callback acknowledgement timed out after 3000ms."
+                )),
+            }
+        }
+        if let Some(card) = &transient
+            && let Some(first) = first
+        {
+            if !synchronous && handled_by_update && first_elicitation {
+                // card/update 返回成功后客户端仍可能停在旧题：再 PATCH 同一张卡强制刷新。
+                if let Err(error) = self
+                    .feishu_update_card(
+                        &card.bot,
+                        &card.message_id,
+                        &super::feishu::cards::for_message(first),
+                    )
+                    .await
+                {
+                    log::warn(format!(
+                        "refresh transient interaction card failed provider={provider}: {error:#}"
+                    ));
+                }
+            }
+            if handled_by_update && first["elicitation"]["status"] != "pending" {
+                guard(&self.transient_cards).remove(&key);
+            }
+        }
+        if !handled_by_update {
+            for message in outbound_messages {
+                if transient.is_some() {
+                    if message["selection"].is_object()
+                        || message["elicitation"]["status"] == "pending"
+                    {
+                        self.upsert_transient_card(
+                            bot,
+                            &inbound.actor,
+                            &transient
+                                .as_ref()
+                                .map(|c| c.task_id.clone())
+                                .unwrap_or_default(),
+                            message,
+                        )
+                        .await?;
+                        continue;
+                    }
+                    let interaction_command = ["/approve", "/deny"].iter().any(|command| {
+                        inbound.text.strip_prefix(command).is_some_and(|rest| {
+                            rest.is_empty() || rest.starts_with(char::is_whitespace)
+                        })
+                    });
+                    if message["elicitation"].is_object() || interaction_command {
+                        self.finalize_transient_card(&inbound.actor, message).await;
+                        continue;
+                    }
+                }
+                self.send_outbound(bot, message).await?;
+            }
+        }
+        self.stop_inbound_typing(bot, &inbound.actor).await;
+        Ok(())
+    }
+
+    /// `handleProviderCallback(Response)`：payload 必须自带 botId（Webhook 由 HTTP 入口按路由补上）。
     pub async fn provider_callback(
         self: &Arc<Self>,
         provider: &str,
         payload: Value,
     ) -> Result<Value, RpcError> {
-        if !is_feishu(provider) {
-            return Err(super::service::not_implemented(provider));
-        }
-        let mut payload = payload;
-        if payload.is_object() {
-            let mut object = Map::new();
-            object.insert("zcodeProvider".into(), json!(provider));
-            object.extend(payload.as_object().cloned().unwrap_or_default());
-            payload = Value::Object(object);
-        }
-        if text(&payload, "botId").is_none() {
-            // `findCallbackBot`：没带 botId 时取该通道第一个启用的 Bot。
-            let config = self
-                .repo
-                .read_config()
-                .await
-                .map_err(|error| error_text(&error))?;
-            if let Some(id) = config["bots"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .find_map(|bot| {
-                    (text(bot, "provider") == Some(provider) && bot["enabled"] == true)
-                        .then(|| text(bot, "id").map(str::to_owned))
-                        .flatten()
-                })
-            {
-                payload["botId"] = json!(id);
-            }
-        }
         Ok(self.process_callback(provider, payload, false).await)
     }
-}
-
-fn error_text(failure: &anyhow::Error) -> RpcError {
-    error(failure.to_string())
-}
-
-/// `resolveAutomationBotDeliveryTarget`：会话里创建的 automation 默认回推到这个聊天。
-fn automation_target(actor: &Actor) -> Option<Value> {
-    if !matches!(actor.provider.as_str(), "feishu" | "lark" | "weixin") {
-        return None;
-    }
-    let user = actor
-        .chat_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .unwrap_or(actor.provider_user_id.trim());
-    (!user.is_empty()).then(|| {
-        json!({
-            "provider": actor.provider,
-            "botId": actor.bot_id,
-            "providerUserId": user,
-            "chatType": actor.chat_type,
-        })
-    })
 }

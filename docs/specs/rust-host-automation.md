@@ -150,6 +150,8 @@ sessions-index：会话 running → 终态 ─► markTerminal ─► 会话置�
 
 ## 7. bots
 
+> 本节是 R6 首版（飞书长连接与基础命令）。全部通道、微信扫码注册、流式卡片、选择命令、问答与权限、附件，以及 Bot 读会话的方式（`session/read` + V4 帧，取代 legacy 任务快照）见 [rust-host-bots.md](rust-host-bots.md)；两者冲突时以后者为准，7.1 第 15 条与 7.4 的偏差表已被它取代。
+
 模块：`bots/`（`model.rs` 数据规则与 schema、`store.rs` 配置/状态文件、`credentials.rs` 凭据文件、`feishu/` 开放平台 HTTP、长连接帧与客户端、`runtime.rs` 长连接生命周期、`runtime_lock.rs` 跨进程运行锁、`inbound.rs` 入站命令、`delivery.rs` 投递与终态回推、`service.rs` 管理面与 channel）。本阶段只实现飞书 / Lark 通道。
 
 ### 7.1 规则
