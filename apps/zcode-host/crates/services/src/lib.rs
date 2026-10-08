@@ -17,6 +17,7 @@ pub mod file_watcher;
 pub mod git;
 pub mod main_bridge;
 pub mod providers;
+pub mod remote;
 pub mod settings;
 pub mod store;
 pub mod support;
