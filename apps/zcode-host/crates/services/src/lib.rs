@@ -381,6 +381,13 @@ pub fn install(
         .extensions()
         .set_dynamic_workflow_gate(integration::dynamic_workflow_gate(coding_plan));
 
+    // ── setting（数据目录迁移）──（docs/specs/rust-host-setting.md）
+    // `updateDataBaseDir` 叠在 R1 的 setting channel 上：守卫 → 复制 `.zcode/v2` → 经 SettingStore
+    // 写 `dataBaseDir`。Host 自己的数据根运行期不变，重启后由 Main 按 setting.json 下发。
+    registry.implement(settings::data_dir::service(
+        settings::data_dir::DataDirMove::new(settings.clone(), &context.environment),
+    ));
+
     agent::session::warm_up(
         agent.clone(),
         context

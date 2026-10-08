@@ -61,6 +61,14 @@ await run(process.execPath, [
 for (const script of ["zod-flatten-fixtures.ts", "settings-sync-fixtures.ts"]) {
   await run(process.execPath, ["--import", "tsx", `scripts/rust-host/${script}`, "--check"]);
 }
+// setting.updateDataBaseDir（docs/specs/rust-host-setting.md §6）：path.win32、安装目录守卫、fs.cp 复制与
+// 写设置的对拍 fixture（settings/fixtures/data-dir-parity.json）由真实 TS 代码生成。
+await run(process.execPath, [
+  "--import",
+  "tsx",
+  "scripts/rust-host/setting-data-dir-fixtures.ts",
+  "--check",
+]);
 await run("cargo", ["fmt", "--all", "--manifest-path", manifest, "--check"]);
 await run("cargo", [
   "clippy",

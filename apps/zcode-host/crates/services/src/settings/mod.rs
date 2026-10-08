@@ -3,6 +3,7 @@
 //! 文件固定在 `<home>/.zcode/v2/setting.json`（home 取 `ZCODE_DESKTOP_HOME_DIR`，否则 HOME），
 //! 与 Main 的 setting service 共享。读改写全程持跨进程锁（S0 修复后的语义），进程内另有写队列
 //! 保证 `get` 不会越过已入队的写入。
+pub mod data_dir;
 pub mod schema;
 
 use std::path::{Path, PathBuf};

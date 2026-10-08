@@ -1,0 +1,1753 @@
+{
+  "source": "scripts/rust-host/setting-data-dir-fixtures.ts",
+  "win32": {
+    "cwd": "C:\\work",
+    "driveCwds": {
+      "=D:": "D:\\dcwd"
+    },
+    "paths": [
+      {
+        "input": "",
+        "normalize": ".",
+        "resolve": "C:\\work"
+      },
+      {
+        "input": ".",
+        "normalize": ".",
+        "resolve": "C:\\work"
+      },
+      {
+        "input": "..",
+        "normalize": "..",
+        "resolve": "C:\\"
+      },
+      {
+        "input": "/",
+        "normalize": "\\",
+        "resolve": "C:\\"
+      },
+      {
+        "input": "\\",
+        "normalize": "\\",
+        "resolve": "C:\\"
+      },
+      {
+        "input": "\\\\",
+        "normalize": "\\",
+        "resolve": "C:\\"
+      },
+      {
+        "input": "\\\\\\x",
+        "normalize": "\\x",
+        "resolve": "C:\\x"
+      },
+      {
+        "input": "C:",
+        "normalize": "C:.",
+        "resolve": "C:\\work"
+      },
+      {
+        "input": "c:",
+        "normalize": "c:.",
+        "resolve": "c:\\work"
+      },
+      {
+        "input": "C:\\",
+        "normalize": "C:\\",
+        "resolve": "C:\\"
+      },
+      {
+        "input": "C:\\a\\b",
+        "normalize": "C:\\a\\b",
+        "resolve": "C:\\a\\b"
+      },
+      {
+        "input": "C:/a/../b/",
+        "normalize": "C:\\b\\",
+        "resolve": "C:\\b"
+      },
+      {
+        "input": "C:\\a\\.\\b\\\\c\\\\",
+        "normalize": "C:\\a\\b\\c\\",
+        "resolve": "C:\\a\\b\\c"
+      },
+      {
+        "input": "C:\\..\\..",
+        "normalize": "C:\\",
+        "resolve": "C:\\"
+      },
+      {
+        "input": "C:foo",
+        "normalize": "C:foo",
+        "resolve": "C:\\work\\foo"
+      },
+      {
+        "input": "D:foo\\..\\bar",
+        "normalize": "D:bar",
+        "resolve": "D:\\dcwd\\bar"
+      },
+      {
+        "input": "E:rel",
+        "normalize": "E:rel",
+        "resolve": "E:\\rel"
+      },
+      {
+        "input": "\\\\server\\share",
+        "normalize": "\\\\server\\share\\",
+        "resolve": "\\\\server\\share\\"
+      },
+      {
+        "input": "\\\\server\\share\\x\\..\\..",
+        "normalize": "\\\\server\\share\\",
+        "resolve": "\\\\server\\share\\"
+      },
+      {
+        "input": "//server/share/",
+        "normalize": "\\\\server\\share\\",
+        "resolve": "\\\\server\\share\\"
+      },
+      {
+        "input": "\\\\server",
+        "normalize": "\\server",
+        "resolve": "C:\\server"
+      },
+      {
+        "input": "\\\\?\\C:\\x",
+        "normalize": "\\\\?\\C:\\x",
+        "resolve": "\\\\?\\C:\\x"
+      },
+      {
+        "input": "\\\\?\\COM1:x",
+        "normalize": "\\\\?\\COM1:\\x",
+        "resolve": "\\\\?\\COM1:x"
+      },
+      {
+        "input": "\\\\.\\PHYSICALDRIVE0",
+        "normalize": "\\\\.\\PHYSICALDRIVE0",
+        "resolve": "\\\\.\\PHYSICALDRIVE0"
+      },
+      {
+        "input": "\\foo\\..\\..\\bar",
+        "normalize": "\\bar",
+        "resolve": "C:\\bar"
+      },
+      {
+        "input": "foo/bar/..",
+        "normalize": "foo",
+        "resolve": "C:\\work\\foo"
+      },
+      {
+        "input": "..\\..\\x",
+        "normalize": "..\\..\\x",
+        "resolve": "C:\\x"
+      },
+      {
+        "input": "ZCode",
+        "normalize": "ZCode",
+        "resolve": "C:\\work\\ZCode"
+      },
+      {
+        "input": "CON",
+        "normalize": "CON",
+        "resolve": "C:\\work\\CON"
+      },
+      {
+        "input": "CONx",
+        "normalize": ".\\CONx",
+        "resolve": "C:\\work\\CONx"
+      },
+      {
+        "input": "CON:",
+        "normalize": ".\\CON:.",
+        "resolve": "C:\\work\\CON:"
+      },
+      {
+        "input": "COM1:x",
+        "normalize": ".\\COM1:x",
+        "resolve": "C:\\work\\COM1:x"
+      },
+      {
+        "input": "com¹:y",
+        "normalize": ".\\com¹:y",
+        "resolve": "C:\\work\\com¹:y"
+      },
+      {
+        "input": "a:b",
+        "normalize": "a:b",
+        "resolve": "a:\\b"
+      },
+      {
+        "input": "x:\\y:z",
+        "normalize": "x:\\y:z",
+        "resolve": "x:\\y:z"
+      },
+      {
+        "input": "1:\\x",
+        "normalize": ".\\1:\\x",
+        "resolve": "C:\\work\\1:\\x"
+      },
+      {
+        "input": "  C:\\x  ",
+        "normalize": ".\\  C:\\x  ",
+        "resolve": "C:\\work\\  C:\\x  "
+      },
+      {
+        "input": "C:\\Program Files\\ZCode.",
+        "normalize": "C:\\Program Files\\ZCode.",
+        "resolve": "C:\\Program Files\\ZCode."
+      },
+      {
+        "input": "C:\\Program Files\\été",
+        "normalize": "C:\\Program Files\\été",
+        "resolve": "C:\\Program Files\\été"
+      }
+    ],
+    "joins": [
+      {
+        "parts": ["C:\\Program Files", "ZCode"],
+        "join": "C:\\Program Files\\ZCode"
+      },
+      {
+        "parts": ["c:\\program files\\", "ZCode"],
+        "join": "c:\\program files\\ZCode"
+      },
+      {
+        "parts": ["C:\\Users\\u\\AppData\\Local", "Programs", "ZCode"],
+        "join": "C:\\Users\\u\\AppData\\Local\\Programs\\ZCode"
+      },
+      {
+        "parts": ["//server", "share"],
+        "join": "\\\\server\\share\\"
+      },
+      {
+        "parts": ["\\\\server\\share", "x"],
+        "join": "\\\\server\\share\\x"
+      },
+      {
+        "parts": ["///x", "y"],
+        "join": "\\x\\y"
+      },
+      {
+        "parts": ["", ""],
+        "join": "."
+      },
+      {
+        "parts": ["a", "", "b"],
+        "join": "a\\b"
+      },
+      {
+        "parts": ["CON:", "x"],
+        "join": "CON:\\x"
+      },
+      {
+        "parts": ["a", "b:c"],
+        "join": "a\\b:c"
+      },
+      {
+        "parts": ["C:", "x"],
+        "join": "C:\\x"
+      },
+      {
+        "parts": ["/a/", "/b/"],
+        "join": "\\a\\b\\"
+      }
+    ]
+  },
+  "validation": [
+    {
+      "name": "install dir itself",
+      "target": "C:\\Program Files\\ZCode",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\Program Files\\ZCode"
+      }
+    },
+    {
+      "name": "inside, forward slashes, lower case",
+      "target": "c:/program files/zcode/data",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\Program Files\\ZCode"
+      }
+    },
+    {
+      "name": "sibling with same prefix",
+      "target": "C:\\Program Files\\ZCodeData",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": true
+      }
+    },
+    {
+      "name": "dot-dot leaves install dir",
+      "target": "C:\\Program Files\\ZCode\\..\\Other",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": true
+      }
+    },
+    {
+      "name": "trailing separator",
+      "target": "C:\\Program Files\\ZCode\\",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\Program Files\\ZCode"
+      }
+    },
+    {
+      "name": "dot segments",
+      "target": "C:\\Program Files\\.\\ZCode\\.",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\Program Files\\ZCode"
+      }
+    },
+    {
+      "name": "trailing dot name",
+      "target": "C:\\Program Files\\ZCode.",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": true
+      }
+    },
+    {
+      "name": "padded with spaces",
+      "target": "  C:\\Program Files\\ZCode  ",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\Program Files\\ZCode"
+      }
+    },
+    {
+      "name": "x86",
+      "target": "C:\\Program Files (x86)\\ZCode\\x",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\Program Files (x86)\\ZCode"
+      }
+    },
+    {
+      "name": "local app data",
+      "target": "C:\\Users\\u\\AppData\\Local\\Programs\\ZCode",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\Users\\u\\AppData\\Local\\Programs\\ZCode"
+      }
+    },
+    {
+      "name": "other drive",
+      "target": "D:\\Data",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": true
+      }
+    },
+    {
+      "name": "lower-case env keys",
+      "target": "C:\\PF\\ZCode\\x",
+      "env": {
+        "programfiles": "C:\\PF"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\PF\\ZCode"
+      }
+    },
+    {
+      "name": "blank exact key falls back to case-insensitive match",
+      "target": "E:\\Apps\\ZCode",
+      "env": {
+        "ProgramFiles": "   ",
+        "programfiles": "E:\\Apps"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "E:\\Apps\\ZCode"
+      }
+    },
+    {
+      "name": "custom install dir with trailing separator",
+      "target": "d:\\tools\\zcode custom\\data",
+      "env": {
+        "ZCODE_WINDOWS_APP_INSTALL_DIR": "  D:\\Tools\\ZCode Custom\\  "
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "D:\\Tools\\ZCode Custom\\"
+      }
+    },
+    {
+      "name": "app install dir option wins",
+      "target": "F:\\ZCode",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local",
+        "ZCODE_WINDOWS_APP_INSTALL_DIR": "F:\\ZCode\\"
+      },
+      "appInstallDir": "F:\\ZCode",
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "F:\\ZCode"
+      }
+    },
+    {
+      "name": "UNC install dir",
+      "target": "//server/share/zcode/x",
+      "env": {
+        "ZCODE_WINDOWS_APP_INSTALL_DIR": "\\\\server\\share\\ZCode"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "\\\\server\\share\\ZCode"
+      }
+    },
+    {
+      "name": "verbatim prefix",
+      "target": "\\\\?\\C:\\Program Files\\ZCode",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": true
+      }
+    },
+    {
+      "name": "duplicate candidates keep the first spelling",
+      "target": "C:\\PROGRAM FILES\\ZCODE",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramW6432": "c:\\program files\\"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\Program Files\\ZCode"
+      }
+    },
+    {
+      "name": "rooted path takes the cwd drive",
+      "target": "\\Program Files\\ZCode",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\Program Files\\ZCode"
+      }
+    },
+    {
+      "name": "relative path resolves against cwd",
+      "target": "ZCode\\data",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "cwd": "C:\\Program Files",
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\Program Files\\ZCode"
+      }
+    },
+    {
+      "name": "drive-relative path uses =C:",
+      "target": "C:ZCode",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local",
+        "=C:": "C:\\Program Files"
+      },
+      "result": {
+        "ok": false,
+        "code": "DATA_BASE_DIR_FORBIDDEN_WINDOWS_INSTALL_DIR",
+        "forbiddenDir": "C:\\Program Files\\ZCode"
+      }
+    },
+    {
+      "name": "drive-relative path without =X: falls back to drive root",
+      "target": "C:ZCode",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "cwd": "D:\\x",
+      "result": {
+        "ok": true
+      }
+    },
+    {
+      "name": "no candidates",
+      "target": "C:\\Program Files\\ZCode",
+      "env": {},
+      "result": {
+        "ok": true
+      }
+    },
+    {
+      "name": "not windows (darwin)",
+      "target": "C:\\Program Files\\ZCode",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "platform": "darwin",
+      "result": {
+        "ok": true
+      }
+    },
+    {
+      "name": "not windows (linux)",
+      "target": "C:\\Program Files\\ZCode",
+      "env": {
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "platform": "linux",
+      "result": {
+        "ok": true
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "fresh target",
+      "kind": "copy",
+      "tree": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir",
+          "mode": 448
+        },
+        {
+          "path": "old/.zcode/v2/tasks-index.sqlite",
+          "type": "file",
+          "content": "sqlite bytes",
+          "mode": 384
+        },
+        {
+          "path": "old/.zcode/v2/provider_config.json",
+          "type": "file",
+          "content": "{\"schemaVersion\":1}",
+          "mode": 420
+        },
+        {
+          "path": "old/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\"dataBaseDir\":\"<old>\"}"
+        },
+        {
+          "path": "old/.zcode/v2/setting.json.lock",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/setting.json.lock/owner",
+          "type": "file",
+          "content": "pid"
+        },
+        {
+          "path": "old/.zcode/v2/setting.json.123.tmp",
+          "type": "file",
+          "content": "partial"
+        },
+        {
+          "path": "old/.zcode/v2/setting.jsonx",
+          "type": "file",
+          "content": "not a bootstrap file"
+        },
+        {
+          "path": "old/.zcode/v2/sessions",
+          "type": "dir",
+          "mode": 488
+        },
+        {
+          "path": "old/.zcode/v2/sessions/abc123",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/sessions/abc123/task.json",
+          "type": "file",
+          "content": "{\"id\":\"task\"}",
+          "mode": 416
+        },
+        {
+          "path": "old/.zcode/v2/sessions/abc123/setting.json",
+          "type": "file",
+          "content": "nested bootstrap name"
+        },
+        {
+          "path": "old/.zcode/v2/empty",
+          "type": "dir",
+          "mode": 457
+        },
+        {
+          "path": "old/.zcode/v2/read-only",
+          "type": "dir",
+          "mode": 365
+        },
+        {
+          "path": "old/.zcode/v2/read-only/frozen.txt",
+          "type": "file",
+          "content": "frozen",
+          "mode": 292
+        },
+        {
+          "path": "old/.zcode/v2/script.sh",
+          "type": "file",
+          "content": "#!/bin/sh\n",
+          "mode": 493
+        },
+        {
+          "path": "old/.zcode/v2/linked-file",
+          "type": "symlink",
+          "target": "<ROOT>/outside/file.txt"
+        },
+        {
+          "path": "old/.zcode/v2/linked-dir",
+          "type": "symlink",
+          "target": "<ROOT>/outside"
+        },
+        {
+          "path": "old/.zcode/v2/dangling",
+          "type": "symlink",
+          "target": "<ROOT>/missing"
+        },
+        {
+          "path": "outside",
+          "type": "dir"
+        },
+        {
+          "path": "outside/file.txt",
+          "type": "file",
+          "content": "outside"
+        }
+      ],
+      "from": "old",
+      "to": "new",
+      "dump": ["new"],
+      "outcome": {
+        "ok": true
+      },
+      "after": [
+        {
+          "path": "new",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode/v2",
+          "type": "dir",
+          "mode": 448
+        },
+        {
+          "path": "new/.zcode/v2/empty",
+          "type": "dir",
+          "mode": 457
+        },
+        {
+          "path": "new/.zcode/v2/provider_config.json",
+          "type": "file",
+          "mode": 420,
+          "content": "{\"schemaVersion\":1}"
+        },
+        {
+          "path": "new/.zcode/v2/read-only",
+          "type": "dir",
+          "mode": 365
+        },
+        {
+          "path": "new/.zcode/v2/read-only/frozen.txt",
+          "type": "file",
+          "mode": 292,
+          "content": "frozen"
+        },
+        {
+          "path": "new/.zcode/v2/script.sh",
+          "type": "file",
+          "mode": 493,
+          "content": "#!/bin/sh\n"
+        },
+        {
+          "path": "new/.zcode/v2/sessions",
+          "type": "dir",
+          "mode": 488
+        },
+        {
+          "path": "new/.zcode/v2/sessions/abc123",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "new/.zcode/v2/sessions/abc123/task.json",
+          "type": "file",
+          "mode": 416,
+          "content": "{\"id\":\"task\"}"
+        },
+        {
+          "path": "new/.zcode/v2/setting.jsonx",
+          "type": "file",
+          "mode": 420,
+          "content": "not a bootstrap file"
+        },
+        {
+          "path": "new/.zcode/v2/tasks-index.sqlite",
+          "type": "file",
+          "mode": 384,
+          "content": "sqlite bytes"
+        }
+      ]
+    },
+    {
+      "name": "merge into existing target",
+      "kind": "copy",
+      "tree": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir",
+          "mode": 448
+        },
+        {
+          "path": "old/.zcode/v2/tasks-index.sqlite",
+          "type": "file",
+          "content": "sqlite bytes",
+          "mode": 384
+        },
+        {
+          "path": "old/.zcode/v2/provider_config.json",
+          "type": "file",
+          "content": "{\"schemaVersion\":1}",
+          "mode": 420
+        },
+        {
+          "path": "old/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\"dataBaseDir\":\"<old>\"}"
+        },
+        {
+          "path": "old/.zcode/v2/setting.json.lock",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/setting.json.lock/owner",
+          "type": "file",
+          "content": "pid"
+        },
+        {
+          "path": "old/.zcode/v2/setting.json.123.tmp",
+          "type": "file",
+          "content": "partial"
+        },
+        {
+          "path": "old/.zcode/v2/setting.jsonx",
+          "type": "file",
+          "content": "not a bootstrap file"
+        },
+        {
+          "path": "old/.zcode/v2/sessions",
+          "type": "dir",
+          "mode": 488
+        },
+        {
+          "path": "old/.zcode/v2/sessions/abc123",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/sessions/abc123/task.json",
+          "type": "file",
+          "content": "{\"id\":\"task\"}",
+          "mode": 416
+        },
+        {
+          "path": "old/.zcode/v2/sessions/abc123/setting.json",
+          "type": "file",
+          "content": "nested bootstrap name"
+        },
+        {
+          "path": "old/.zcode/v2/empty",
+          "type": "dir",
+          "mode": 457
+        },
+        {
+          "path": "old/.zcode/v2/read-only",
+          "type": "dir",
+          "mode": 365
+        },
+        {
+          "path": "old/.zcode/v2/read-only/frozen.txt",
+          "type": "file",
+          "content": "frozen",
+          "mode": 292
+        },
+        {
+          "path": "old/.zcode/v2/script.sh",
+          "type": "file",
+          "content": "#!/bin/sh\n",
+          "mode": 493
+        },
+        {
+          "path": "old/.zcode/v2/linked-file",
+          "type": "symlink",
+          "target": "<ROOT>/outside/file.txt"
+        },
+        {
+          "path": "old/.zcode/v2/linked-dir",
+          "type": "symlink",
+          "target": "<ROOT>/outside"
+        },
+        {
+          "path": "old/.zcode/v2/dangling",
+          "type": "symlink",
+          "target": "<ROOT>/missing"
+        },
+        {
+          "path": "outside",
+          "type": "dir"
+        },
+        {
+          "path": "outside/file.txt",
+          "type": "file",
+          "content": "outside"
+        },
+        {
+          "path": "new/.zcode/v2",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "new/.zcode/v2/provider_config.json",
+          "type": "file",
+          "content": "existing wins",
+          "mode": 384
+        },
+        {
+          "path": "new/.zcode/v2/sessions",
+          "type": "dir",
+          "mode": 448
+        },
+        {
+          "path": "new/.zcode/v2/sessions/keep.json",
+          "type": "file",
+          "content": "target only"
+        },
+        {
+          "path": "new/.zcode/v2/linked-file",
+          "type": "file",
+          "content": "regular file where source has a symlink"
+        },
+        {
+          "path": "new/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "target bootstrap stays"
+        }
+      ],
+      "from": "old",
+      "to": "new",
+      "dump": ["new"],
+      "outcome": {
+        "ok": true
+      },
+      "after": [
+        {
+          "path": "new",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode/v2",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "new/.zcode/v2/empty",
+          "type": "dir",
+          "mode": 457
+        },
+        {
+          "path": "new/.zcode/v2/linked-file",
+          "type": "file",
+          "mode": 420,
+          "content": "regular file where source has a symlink"
+        },
+        {
+          "path": "new/.zcode/v2/provider_config.json",
+          "type": "file",
+          "mode": 384,
+          "content": "existing wins"
+        },
+        {
+          "path": "new/.zcode/v2/read-only",
+          "type": "dir",
+          "mode": 365
+        },
+        {
+          "path": "new/.zcode/v2/read-only/frozen.txt",
+          "type": "file",
+          "mode": 292,
+          "content": "frozen"
+        },
+        {
+          "path": "new/.zcode/v2/script.sh",
+          "type": "file",
+          "mode": 493,
+          "content": "#!/bin/sh\n"
+        },
+        {
+          "path": "new/.zcode/v2/sessions",
+          "type": "dir",
+          "mode": 448
+        },
+        {
+          "path": "new/.zcode/v2/sessions/abc123",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "new/.zcode/v2/sessions/abc123/task.json",
+          "type": "file",
+          "mode": 416,
+          "content": "{\"id\":\"task\"}"
+        },
+        {
+          "path": "new/.zcode/v2/sessions/keep.json",
+          "type": "file",
+          "mode": 420,
+          "content": "target only"
+        },
+        {
+          "path": "new/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "target bootstrap stays"
+        },
+        {
+          "path": "new/.zcode/v2/setting.jsonx",
+          "type": "file",
+          "mode": 420,
+          "content": "not a bootstrap file"
+        },
+        {
+          "path": "new/.zcode/v2/tasks-index.sqlite",
+          "type": "file",
+          "mode": 384,
+          "content": "sqlite bytes"
+        }
+      ]
+    },
+    {
+      "name": "directory over existing file",
+      "kind": "copy",
+      "tree": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/sessions",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/sessions/a.json",
+          "type": "file",
+          "content": "a"
+        },
+        {
+          "path": "new/.zcode/v2",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode/v2/sessions",
+          "type": "file",
+          "content": "a file"
+        }
+      ],
+      "from": "old",
+      "to": "new",
+      "dump": ["new"],
+      "outcome": {
+        "ok": false,
+        "error": {
+          "name": "SystemError",
+          "code": "ERR_FS_CP_DIR_TO_NON_DIR",
+          "message": "Cannot overwrite non-directory with directory: cp returned EISDIR (cannot overwrite non-directory <ROOT>/new/.zcode/v2/sessions with directory <ROOT>/old/.zcode/v2/sessions) <ROOT>/new/.zcode/v2/sessions"
+        }
+      },
+      "after": [
+        {
+          "path": "new",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode/v2",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "new/.zcode/v2/sessions",
+          "type": "file",
+          "mode": 420,
+          "content": "a file"
+        }
+      ]
+    },
+    {
+      "name": "file over existing directory",
+      "kind": "copy",
+      "tree": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/tasks-index.sqlite",
+          "type": "file",
+          "content": "db"
+        },
+        {
+          "path": "new/.zcode/v2/tasks-index.sqlite",
+          "type": "dir"
+        }
+      ],
+      "from": "old",
+      "to": "new",
+      "dump": ["new"],
+      "outcome": {
+        "ok": false,
+        "error": {
+          "name": "SystemError",
+          "code": "ERR_FS_CP_NON_DIR_TO_DIR",
+          "message": "Cannot overwrite directory with non-directory: cp returned ENOTDIR (cannot overwrite directory <ROOT>/new/.zcode/v2/tasks-index.sqlite with non-directory <ROOT>/old/.zcode/v2/tasks-index.sqlite) <ROOT>/new/.zcode/v2/tasks-index.sqlite"
+        }
+      },
+      "after": [
+        {
+          "path": "new",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode/v2",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "new/.zcode/v2/tasks-index.sqlite",
+          "type": "dir",
+          "mode": 493
+        }
+      ]
+    },
+    {
+      "name": "missing source",
+      "kind": "copy",
+      "tree": [
+        {
+          "path": "old",
+          "type": "dir"
+        }
+      ],
+      "from": "old",
+      "to": "new",
+      "dump": ["new"],
+      "outcome": {
+        "ok": false,
+        "error": {
+          "name": "Error",
+          "code": "ENOENT",
+          "message": "ENOENT: no such file or directory, lstat '<ROOT>/old/.zcode/v2'"
+        }
+      },
+      "after": [
+        {
+          "path": "new",
+          "type": "missing"
+        }
+      ]
+    },
+    {
+      "name": "target inside source",
+      "kind": "copy",
+      "tree": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/a.txt",
+          "type": "file",
+          "content": "a"
+        }
+      ],
+      "from": "old",
+      "to": "old/.zcode/v2/nested",
+      "dump": ["old/.zcode/v2"],
+      "outcome": {
+        "ok": false,
+        "error": {
+          "name": "SystemError",
+          "code": "ERR_FS_CP_EINVAL",
+          "message": "Invalid src or dest: cp returned EINVAL (cannot copy <ROOT>/old/.zcode/v2 to a subdirectory of self <ROOT>/old/.zcode/v2/nested/.zcode/v2) <ROOT>/old/.zcode/v2/nested/.zcode/v2"
+        }
+      },
+      "after": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "old/.zcode/v2/a.txt",
+          "type": "file",
+          "mode": 420,
+          "content": "a"
+        }
+      ]
+    },
+    {
+      "name": "same directory spelled differently",
+      "kind": "copy",
+      "tree": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/a.txt",
+          "type": "file",
+          "content": "a"
+        }
+      ],
+      "from": "old",
+      "to": "old/./",
+      "dump": ["old/.zcode/v2"],
+      "outcome": {
+        "ok": false,
+        "error": {
+          "name": "SystemError",
+          "code": "ERR_FS_CP_EINVAL",
+          "message": "Invalid src or dest: cp returned EINVAL (src and dest cannot be the same) <ROOT>/old/.zcode/v2"
+        }
+      },
+      "after": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "old/.zcode/v2/a.txt",
+          "type": "file",
+          "mode": 420,
+          "content": "a"
+        }
+      ]
+    },
+    {
+      "name": "source v2 is a symlink",
+      "kind": "copy",
+      "tree": [
+        {
+          "path": "real/v2",
+          "type": "dir"
+        },
+        {
+          "path": "real/v2/a.txt",
+          "type": "file",
+          "content": "a"
+        },
+        {
+          "path": "old/.zcode",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2",
+          "type": "symlink",
+          "target": "<ROOT>/real/v2"
+        }
+      ],
+      "from": "old",
+      "to": "new",
+      "dump": ["new"],
+      "outcome": {
+        "ok": true
+      },
+      "after": [
+        {
+          "path": "new",
+          "type": "missing"
+        }
+      ]
+    },
+    {
+      "name": "target base is a symlink to the source base",
+      "kind": "copy",
+      "tree": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/a.txt",
+          "type": "file",
+          "content": "a"
+        },
+        {
+          "path": "new",
+          "type": "symlink",
+          "target": "<ROOT>/old"
+        }
+      ],
+      "from": "old",
+      "to": "new",
+      "dump": ["old/.zcode/v2"],
+      "outcome": {
+        "ok": false,
+        "error": {
+          "name": "SystemError",
+          "code": "ERR_FS_CP_EINVAL",
+          "message": "Invalid src or dest: cp returned EINVAL (src and dest cannot be the same) <ROOT>/new/.zcode/v2"
+        }
+      },
+      "after": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "old/.zcode/v2/a.txt",
+          "type": "file",
+          "mode": 420,
+          "content": "a"
+        }
+      ]
+    },
+    {
+      "name": "fifo in source",
+      "kind": "copy",
+      "tree": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/pipe",
+          "type": "fifo"
+        },
+        {
+          "path": "new/.zcode/v2",
+          "type": "dir"
+        }
+      ],
+      "from": "old",
+      "to": "new",
+      "dump": ["new"],
+      "outcome": {
+        "ok": false,
+        "error": {
+          "name": "SystemError",
+          "code": "ERR_FS_CP_FIFO_PIPE",
+          "message": "Cannot copy a FIFO pipe: cp returned EINVAL (cannot copy a FIFO pipe: <ROOT>/new/.zcode/v2/pipe) <ROOT>/new/.zcode/v2/pipe"
+        }
+      },
+      "after": [
+        {
+          "path": "new",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode/v2",
+          "type": "dir",
+          "mode": 493
+        }
+      ]
+    },
+    {
+      "name": "update: padded target",
+      "kind": "update",
+      "tree": [
+        {
+          "path": "old/.zcode/v2",
+          "type": "dir",
+          "mode": 448
+        },
+        {
+          "path": "old/.zcode/v2/tasks-index.sqlite",
+          "type": "file",
+          "content": "sqlite bytes",
+          "mode": 384
+        },
+        {
+          "path": "old/.zcode/v2/provider_config.json",
+          "type": "file",
+          "content": "{\"schemaVersion\":1}",
+          "mode": 420
+        },
+        {
+          "path": "old/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\"dataBaseDir\":\"<old>\"}"
+        },
+        {
+          "path": "old/.zcode/v2/setting.json.lock",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/setting.json.lock/owner",
+          "type": "file",
+          "content": "pid"
+        },
+        {
+          "path": "old/.zcode/v2/setting.json.123.tmp",
+          "type": "file",
+          "content": "partial"
+        },
+        {
+          "path": "old/.zcode/v2/setting.jsonx",
+          "type": "file",
+          "content": "not a bootstrap file"
+        },
+        {
+          "path": "old/.zcode/v2/sessions",
+          "type": "dir",
+          "mode": 488
+        },
+        {
+          "path": "old/.zcode/v2/sessions/abc123",
+          "type": "dir"
+        },
+        {
+          "path": "old/.zcode/v2/sessions/abc123/task.json",
+          "type": "file",
+          "content": "{\"id\":\"task\"}",
+          "mode": 416
+        },
+        {
+          "path": "old/.zcode/v2/sessions/abc123/setting.json",
+          "type": "file",
+          "content": "nested bootstrap name"
+        },
+        {
+          "path": "old/.zcode/v2/empty",
+          "type": "dir",
+          "mode": 457
+        },
+        {
+          "path": "old/.zcode/v2/read-only",
+          "type": "dir",
+          "mode": 365
+        },
+        {
+          "path": "old/.zcode/v2/read-only/frozen.txt",
+          "type": "file",
+          "content": "frozen",
+          "mode": 292
+        },
+        {
+          "path": "old/.zcode/v2/script.sh",
+          "type": "file",
+          "content": "#!/bin/sh\n",
+          "mode": 493
+        },
+        {
+          "path": "old/.zcode/v2/linked-file",
+          "type": "symlink",
+          "target": "<ROOT>/outside/file.txt"
+        },
+        {
+          "path": "old/.zcode/v2/linked-dir",
+          "type": "symlink",
+          "target": "<ROOT>/outside"
+        },
+        {
+          "path": "old/.zcode/v2/dangling",
+          "type": "symlink",
+          "target": "<ROOT>/missing"
+        },
+        {
+          "path": "outside",
+          "type": "dir"
+        },
+        {
+          "path": "outside/file.txt",
+          "type": "file",
+          "content": "outside"
+        },
+        {
+          "path": "home/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\"dataBaseDir\":\"<ROOT>/custom\",\"recentProjects\":[\"/work/a\"],\"closeToTrayOnWindowsMigrationInitialized\":true,\"messageStreamShowReasoningMigrationInitialized\":true}"
+        }
+      ],
+      "current": "old",
+      "newDir": "  <ROOT>/new  ",
+      "dump": ["new", "home/.zcode/v2/setting.json"],
+      "outcome": {
+        "ok": true
+      },
+      "after": [
+        {
+          "path": "new",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode",
+          "type": "dir"
+        },
+        {
+          "path": "new/.zcode/v2",
+          "type": "dir",
+          "mode": 448
+        },
+        {
+          "path": "new/.zcode/v2/empty",
+          "type": "dir",
+          "mode": 457
+        },
+        {
+          "path": "new/.zcode/v2/provider_config.json",
+          "type": "file",
+          "mode": 420,
+          "content": "{\"schemaVersion\":1}"
+        },
+        {
+          "path": "new/.zcode/v2/read-only",
+          "type": "dir",
+          "mode": 365
+        },
+        {
+          "path": "new/.zcode/v2/read-only/frozen.txt",
+          "type": "file",
+          "mode": 292,
+          "content": "frozen"
+        },
+        {
+          "path": "new/.zcode/v2/script.sh",
+          "type": "file",
+          "mode": 493,
+          "content": "#!/bin/sh\n"
+        },
+        {
+          "path": "new/.zcode/v2/sessions",
+          "type": "dir",
+          "mode": 488
+        },
+        {
+          "path": "new/.zcode/v2/sessions/abc123",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "new/.zcode/v2/sessions/abc123/task.json",
+          "type": "file",
+          "mode": 416,
+          "content": "{\"id\":\"task\"}"
+        },
+        {
+          "path": "new/.zcode/v2/setting.jsonx",
+          "type": "file",
+          "mode": 420,
+          "content": "not a bootstrap file"
+        },
+        {
+          "path": "new/.zcode/v2/tasks-index.sqlite",
+          "type": "file",
+          "mode": 384,
+          "content": "sqlite bytes"
+        },
+        {
+          "path": "home/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\n  \"recentProjects\": [\n    \"/work/a\"\n  ],\n  \"locale\": \"zh-CN\",\n  \"localePreference\": \"system\",\n  \"terminalInheritSystemProfile\": true,\n  \"embeddedBrowserAllowInsecureCertificates\": false,\n  \"embeddedBrowserViewportPreference\": {\n    \"mode\": \"normal\",\n    \"viewport\": {\n      \"width\": 393,\n      \"height\": 852\n    },\n    \"zoom\": \"fit\"\n  },\n  \"computerUseComposerEntryHidden\": true,\n  \"taskAutoArchiveEnabled\": false,\n  \"taskAutoArchiveOlderThanDays\": 7,\n  \"closeToTrayOnWindows\": true,\n  \"closeToTrayOnWindowsMigrationInitialized\": true,\n  \"keepAwakeWhileRunning\": false,\n  \"desktopChromiumHardwareAccelerationEnabled\": true,\n  \"messageStreamShowReasoning\": true,\n  \"messageStreamShowReasoningMigrationInitialized\": true,\n  \"messageStreamShowTodos\": false,\n  \"toolGroupingExploreEnabled\": true,\n  \"toolGroupingTerminalEnabled\": true,\n  \"toolGroupingChangesEnabled\": false,\n  \"zcodeInteractionBehavior\": \"queue\",\n  \"askUserQuestionAutoResolutionEnabled\": true,\n  \"modelIoFullRetentionEnabled\": false,\n  \"startPlanRecommendationDismissed\": false,\n  \"providerFamilyConnectionSelections\": {},\n  \"providerFamilyDomainMigrated\": false,\n  \"nativeSearchEnhancementsEnabled\": true,\n  \"memoryEnabled\": false,\n  \"lastWorkspaceSession\": [],\n  \"lastActiveTabIndex\": 0,\n  \"dataBaseDir\": \"<ROOT>/new\",\n  \"receivePreviewUpdates\": false,\n  \"autoDownloadAndInstallUpdates\": false,\n  \"skippedElectronUpdateVersions\": {}\n}"
+        }
+      ]
+    },
+    {
+      "name": "update: reset to home",
+      "kind": "update",
+      "tree": [
+        {
+          "path": "custom/.zcode/v2",
+          "type": "dir"
+        },
+        {
+          "path": "custom/.zcode/v2/tasks-index.sqlite",
+          "type": "file",
+          "content": "custom db",
+          "mode": 384
+        },
+        {
+          "path": "custom/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "stale copy"
+        },
+        {
+          "path": "home/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\"dataBaseDir\":\"<ROOT>/custom\",\"recentProjects\":[\"/work/a\"],\"closeToTrayOnWindowsMigrationInitialized\":true,\"messageStreamShowReasoningMigrationInitialized\":true}"
+        },
+        {
+          "path": "home/.zcode/v2/tasks-index.sqlite",
+          "type": "file",
+          "content": "home db"
+        }
+      ],
+      "current": "custom",
+      "newDir": null,
+      "dump": ["home"],
+      "outcome": {
+        "ok": true
+      },
+      "after": [
+        {
+          "path": "home",
+          "type": "dir"
+        },
+        {
+          "path": "home/.zcode",
+          "type": "dir"
+        },
+        {
+          "path": "home/.zcode/v2",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "home/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\n  \"recentProjects\": [\n    \"/work/a\"\n  ],\n  \"locale\": \"zh-CN\",\n  \"localePreference\": \"system\",\n  \"terminalInheritSystemProfile\": true,\n  \"embeddedBrowserAllowInsecureCertificates\": false,\n  \"embeddedBrowserViewportPreference\": {\n    \"mode\": \"normal\",\n    \"viewport\": {\n      \"width\": 393,\n      \"height\": 852\n    },\n    \"zoom\": \"fit\"\n  },\n  \"computerUseComposerEntryHidden\": true,\n  \"taskAutoArchiveEnabled\": false,\n  \"taskAutoArchiveOlderThanDays\": 7,\n  \"closeToTrayOnWindows\": true,\n  \"closeToTrayOnWindowsMigrationInitialized\": true,\n  \"keepAwakeWhileRunning\": false,\n  \"desktopChromiumHardwareAccelerationEnabled\": true,\n  \"messageStreamShowReasoning\": true,\n  \"messageStreamShowReasoningMigrationInitialized\": true,\n  \"messageStreamShowTodos\": false,\n  \"toolGroupingExploreEnabled\": true,\n  \"toolGroupingTerminalEnabled\": true,\n  \"toolGroupingChangesEnabled\": false,\n  \"zcodeInteractionBehavior\": \"queue\",\n  \"askUserQuestionAutoResolutionEnabled\": true,\n  \"modelIoFullRetentionEnabled\": false,\n  \"startPlanRecommendationDismissed\": false,\n  \"providerFamilyConnectionSelections\": {},\n  \"providerFamilyDomainMigrated\": false,\n  \"nativeSearchEnhancementsEnabled\": true,\n  \"memoryEnabled\": false,\n  \"lastWorkspaceSession\": [],\n  \"lastActiveTabIndex\": 0,\n  \"receivePreviewUpdates\": false,\n  \"autoDownloadAndInstallUpdates\": false,\n  \"skippedElectronUpdateVersions\": {}\n}"
+        },
+        {
+          "path": "home/.zcode/v2/tasks-index.sqlite",
+          "type": "file",
+          "mode": 420,
+          "content": "home db"
+        }
+      ]
+    },
+    {
+      "name": "update: target equals current root",
+      "kind": "update",
+      "tree": [
+        {
+          "path": "home/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\"dataBaseDir\":\"<ROOT>/custom\",\"recentProjects\":[\"/work/a\"],\"closeToTrayOnWindowsMigrationInitialized\":true,\"messageStreamShowReasoningMigrationInitialized\":true}"
+        }
+      ],
+      "current": "same",
+      "newDir": "<ROOT>/same",
+      "dump": ["same", "home/.zcode/v2/setting.json"],
+      "outcome": {
+        "ok": true
+      },
+      "after": [
+        {
+          "path": "same",
+          "type": "missing"
+        },
+        {
+          "path": "home/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\n  \"recentProjects\": [\n    \"/work/a\"\n  ],\n  \"locale\": \"zh-CN\",\n  \"localePreference\": \"system\",\n  \"terminalInheritSystemProfile\": true,\n  \"embeddedBrowserAllowInsecureCertificates\": false,\n  \"embeddedBrowserViewportPreference\": {\n    \"mode\": \"normal\",\n    \"viewport\": {\n      \"width\": 393,\n      \"height\": 852\n    },\n    \"zoom\": \"fit\"\n  },\n  \"computerUseComposerEntryHidden\": true,\n  \"taskAutoArchiveEnabled\": false,\n  \"taskAutoArchiveOlderThanDays\": 7,\n  \"closeToTrayOnWindows\": true,\n  \"closeToTrayOnWindowsMigrationInitialized\": true,\n  \"keepAwakeWhileRunning\": false,\n  \"desktopChromiumHardwareAccelerationEnabled\": true,\n  \"messageStreamShowReasoning\": true,\n  \"messageStreamShowReasoningMigrationInitialized\": true,\n  \"messageStreamShowTodos\": false,\n  \"toolGroupingExploreEnabled\": true,\n  \"toolGroupingTerminalEnabled\": true,\n  \"toolGroupingChangesEnabled\": false,\n  \"zcodeInteractionBehavior\": \"queue\",\n  \"askUserQuestionAutoResolutionEnabled\": true,\n  \"modelIoFullRetentionEnabled\": false,\n  \"startPlanRecommendationDismissed\": false,\n  \"providerFamilyConnectionSelections\": {},\n  \"providerFamilyDomainMigrated\": false,\n  \"nativeSearchEnhancementsEnabled\": true,\n  \"memoryEnabled\": false,\n  \"lastWorkspaceSession\": [],\n  \"lastActiveTabIndex\": 0,\n  \"dataBaseDir\": \"<ROOT>/same\",\n  \"receivePreviewUpdates\": false,\n  \"autoDownloadAndInstallUpdates\": false,\n  \"skippedElectronUpdateVersions\": {}\n}"
+        }
+      ]
+    },
+    {
+      "name": "update: blank target copies home then fails validation",
+      "kind": "update",
+      "tree": [
+        {
+          "path": "custom/.zcode/v2",
+          "type": "dir"
+        },
+        {
+          "path": "custom/.zcode/v2/a.txt",
+          "type": "file",
+          "content": "a"
+        },
+        {
+          "path": "home/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\"dataBaseDir\":\"<ROOT>/custom\",\"recentProjects\":[\"/work/a\"],\"closeToTrayOnWindowsMigrationInitialized\":true,\"messageStreamShowReasoningMigrationInitialized\":true}"
+        }
+      ],
+      "current": "custom",
+      "newDir": "   ",
+      "dump": ["home"],
+      "outcome": {
+        "ok": false,
+        "error": {
+          "name": "ZodError",
+          "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"dataBaseDir\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+        }
+      },
+      "after": [
+        {
+          "path": "home",
+          "type": "dir"
+        },
+        {
+          "path": "home/.zcode",
+          "type": "dir"
+        },
+        {
+          "path": "home/.zcode/v2",
+          "type": "dir",
+          "mode": 493
+        },
+        {
+          "path": "home/.zcode/v2/a.txt",
+          "type": "file",
+          "mode": 420,
+          "content": "a"
+        },
+        {
+          "path": "home/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\"dataBaseDir\":\"<ROOT>/custom\",\"recentProjects\":[\"/work/a\"],\"closeToTrayOnWindowsMigrationInitialized\":true,\"messageStreamShowReasoningMigrationInitialized\":true}"
+        }
+      ]
+    },
+    {
+      "name": "update: copy failure leaves settings untouched",
+      "kind": "update",
+      "tree": [
+        {
+          "path": "home/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\"dataBaseDir\":\"<ROOT>/custom\",\"recentProjects\":[\"/work/a\"],\"closeToTrayOnWindowsMigrationInitialized\":true,\"messageStreamShowReasoningMigrationInitialized\":true}"
+        }
+      ],
+      "current": "missing",
+      "newDir": "<ROOT>/new",
+      "dump": ["new", "home/.zcode/v2/setting.json"],
+      "outcome": {
+        "ok": false,
+        "error": {
+          "name": "Error",
+          "code": "ENOENT",
+          "message": "ENOENT: no such file or directory, lstat '<ROOT>/missing/.zcode/v2'"
+        }
+      },
+      "after": [
+        {
+          "path": "new",
+          "type": "missing"
+        },
+        {
+          "path": "home/.zcode/v2/setting.json",
+          "type": "file",
+          "content": "{\"dataBaseDir\":\"<ROOT>/custom\",\"recentProjects\":[\"/work/a\"],\"closeToTrayOnWindowsMigrationInitialized\":true,\"messageStreamShowReasoningMigrationInitialized\":true}"
+        }
+      ]
+    }
+  ]
+}
