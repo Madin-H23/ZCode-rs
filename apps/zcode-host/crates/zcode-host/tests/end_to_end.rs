@@ -60,13 +60,24 @@ impl Host {
         self.stdin.flush().await.unwrap();
     }
 
+    /// 下一条非日志控制消息；结构化日志只校验形状后跳过。
     async fn recv(&mut self) -> Value {
-        let line = tokio::time::timeout(STEP_TIMEOUT, self.stdout.next_line())
-            .await
-            .expect("control message within timeout")
-            .unwrap()
-            .expect("control stdout open");
-        serde_json::from_str(&line).unwrap()
+        loop {
+            let line = tokio::time::timeout(STEP_TIMEOUT, self.stdout.next_line())
+                .await
+                .expect("control message within timeout")
+                .unwrap()
+                .expect("control stdout open");
+            let message: Value = serde_json::from_str(&line).unwrap();
+            if message["type"] != "log" {
+                return message;
+            }
+            assert_eq!(message["source"], "zcode-host");
+            assert!(matches!(
+                message["level"].as_str(),
+                Some("info" | "warn" | "error")
+            ));
+        }
     }
 
     async fn init(&mut self) {

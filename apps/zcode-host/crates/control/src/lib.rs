@@ -100,6 +100,21 @@ pub enum HostToMain {
         #[serde(flatten)]
         result: AttachmentEndpointResult,
     },
+    /// 结构化日志（`hostLogResponseSchema`），由 Main 的 hostLogRelay 实时落盘。
+    #[serde(rename = "log")]
+    Log {
+        level: LogLevel,
+        source: &'static str,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Info,
+    Warn,
+    Error,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -237,5 +252,14 @@ mod tests {
             json!({"type":"database-startup-state","state":{"schemaVersion":1,"startupId":"s1","attemptId":"a1","sequence":0,"startedAt":5,"updatedAt":5,"phase":"ready","disk":[]}})
         );
         assert!(encode_line(&ready).ends_with('\n'));
+        let log = HostToMain::Log {
+            level: LogLevel::Warn,
+            source: "zcode-host",
+            message: "m".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&log).unwrap(),
+            json!({"type":"log","level":"warn","source":"zcode-host","message":"m"})
+        );
     }
 }

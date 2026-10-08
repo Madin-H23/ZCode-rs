@@ -40,7 +40,9 @@
 ### 4.1 Main ↔ Host 控制通道
 
 - **传输**：Rust Host 的 stdin/stdout，每行一个 JSON 对象（NDJSON）。JSON 内部的换行都已转义，按行切分是安全的。
-- **stdout 只放控制消息**：日志一律写 stderr，Main 交给 `hostLogRelay.onStderr`。
+- **stdout 只放控制消息**，日志也作为控制消息发送：
+  - info、warn、error 以结构化的 `log` 消息（`hostLogResponseSchema`，`source: "zcode-host"`）发给 Main，由 `hostLogRelay.onStructuredLog` 实时落盘；panic 由 panic hook 作为 error 日志上报。
+  - hostLogRelay 对原始 stderr 只缓存、等进程退出才输出，而且收到第一条结构化日志后就不再缓存。所以 stderr 只留给结构化出口建立之前的错误，以及 `ZCODE_HOST_LOG=debug` 时的 debug 日志；debug 不进生产日志。
 - **消息就是今天 `parentPort` 上的消息对象**：类型、字段都一样，只是换了传输。
 - **R0 消费的消息**：
 
@@ -53,7 +55,7 @@
 | Host → Main | `attachment-endpoint-issued`（新增） | `requestId`，然后是 `ok:true, url, capability` 或 `ok:false, error`                      | `url` 形如 `ws://127.0.0.1:<port>/rpc` |
 | Main → Host | `dispose`                            | —                                                                                        | Host 关闭监听，退出码 0                |
 
-其他消息：Rust Host 收到时写一条 `debug` 日志后忽略。Host 也不会发出这三类以外的消息。新增消息的 zod schema 放在 `packages/shared/src/validation.ts`，Rust 侧用 serde 定义同名类型。
+其他消息：Rust Host 收到时写一条 `debug` 日志后忽略。Host 发出的只有上表三类消息，再加 `log`。新增消息的 zod schema 放在 `packages/shared/src/validation.ts`，Rust 侧用 serde 定义同名类型。
 
 ### 4.2 Main → Renderer
 

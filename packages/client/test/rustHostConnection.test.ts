@@ -11,6 +11,7 @@ import {
   databaseStartupStateSchema,
   hostAttachmentEndpointIssuedResponseSchema,
   hostEndpointReadyResponseSchema,
+  hostLogResponseSchema,
   serviceEndpointPayloadSchema,
 } from "@zcode/shared";
 
@@ -31,6 +32,11 @@ function startHost(): Host {
   const waiters: ((message: Record<string, unknown>) => void)[] = [];
   createInterface({ input: child.stdout }).on("line", (line) => {
     const message = JSON.parse(line) as Record<string, unknown>;
+    // 结构化日志必须符合 Main 的 hostLogResponseSchema，校验后不交给测试步骤。
+    if (message.type === "log") {
+      hostLogResponseSchema.parse(message);
+      return;
+    }
     const waiter = waiters.shift();
     if (waiter) waiter(message);
     else queued.push(message);

@@ -15,7 +15,7 @@ use anyhow::{Context, Result, bail};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use zcode_host_control::{HostToMain, encode_line, parse_main_to_host};
+use zcode_host_control::{HostToMain, LogLevel, encode_line, parse_main_to_host};
 use zcode_host_core::{ControlOutcome, ControlSink, HostConfig, HostCore, log};
 
 struct Args {
@@ -50,6 +50,16 @@ impl ControlSink for StdoutControl {
     }
 }
 
+impl log::LogSink for StdoutControl {
+    fn log(&self, level: LogLevel, message: String) {
+        let _ = self.0.send(HostToMain::Log {
+            level,
+            source: "zcode-host",
+            message,
+        });
+    }
+}
+
 async fn write_control(mut messages: mpsc::UnboundedReceiver<HostToMain>) {
     let mut stdout = tokio::io::stdout();
     while let Some(message) = messages.recv().await {
@@ -76,6 +86,8 @@ async fn run(args: Args) -> Result<()> {
     let policy = Arc::new(ws::Policy::new(port, args.allowed_origins));
     tokio::spawn(ws::serve(listener, core.clone(), policy));
     let _ = control_tx.send(HostToMain::HostEndpointReady { ws_port: port });
+    // 结构化日志经控制通道交给 Main 实时落盘；Main 收到首条结构化日志后不再缓存 stderr。
+    log::set_sink(Box::new(StdoutControl(control_tx.clone())));
     log::info(format!("listening on 127.0.0.1:{port}"));
 
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
@@ -110,6 +122,12 @@ fn main() -> ExitCode {
         }
     };
     log::set_debug(std::env::var("ZCODE_HOST_LOG").is_ok_and(|value| value == "debug"));
+    // tokio task 里的 panic 不会结束进程，但必须进 Main 的日志，否则只有 stderr 里能看到。
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        log::error(format!("panic: {info}"));
+        default_hook(info);
+    }));
 
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
