@@ -67,11 +67,20 @@ function startHost(): Host {
 
 async function initialize(host: Host): Promise<void> {
   host.send({ type: "init-local", databaseStartupId: "startup-ts" });
-  const state = await host.next();
-  assert.equal(state.type, "database-startup-state");
-  const parsed = databaseStartupStateSchema.parse(state.state);
-  assert.equal(parsed.phase, "ready");
-  assert.equal(parsed.startupId, "startup-ts");
+  // starting → preparing_host_storage（tasks-index 迁移）→ starting_services → ready；
+  // 每一条都必须通过 Main / Renderer 使用的 strict schema。
+  const phases: string[] = [];
+  for (;;) {
+    const state = await host.next();
+    assert.equal(state.type, "database-startup-state");
+    const parsed = databaseStartupStateSchema.parse(state.state);
+    assert.equal(parsed.startupId, "startup-ts");
+    phases.push(parsed.phase);
+    if (parsed.phase === "ready" || parsed.phase === "failed") break;
+  }
+  assert.equal(phases[0], "starting");
+  assert.ok(phases.includes("preparing_host_storage"));
+  assert.deepEqual(phases.slice(-2), ["starting_services", "ready"]);
 }
 
 async function issueEndpoint(host: Host): Promise<{ url: string; capability: string }> {

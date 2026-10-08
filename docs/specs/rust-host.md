@@ -1,6 +1,6 @@
 # Rust Host：原生 Host 重写规划
 
-日期：2026-10-08（第三版）。基线：`main` / `06ba978`。状态：实施中。S0、R0 已完成（细节与验收见 [rust-host-r0.md](rust-host-r0.md)）；R1 的 setting、provider、account、file、system 已实现；R2 的 agent 子系统已实现，侧栏部分进行中（见 [rust-host-r2.md](rust-host-r2.md)）。Renderer 接入方式（D7）已按性能对比选定 C（本机 WebSocket）。性能报告是 `perf/rust-host-abc` 分支（`357e589`）上的 `docs/reports/rust-host-transport-perf-2026-10-08.md`。其余决策见第 10 节。
+日期：2026-10-08（第三版）。基线：`main` / `06ba978`。状态：实施中。S0、R0 已完成（细节与验收见 [rust-host-r0.md](rust-host-r0.md)）；核心能力已完成：R1（setting、provider、account、file、system），R2（agent 子系统、侧栏与 tasks-index），以及 R3 的 git、终端与文件监听，均已在隔离的真实 App 中端到端验证（见 [rust-host-r2.md](rust-host-r2.md)）。下一步是 D2（Host 自动重启）与其余里程碑。Renderer 接入方式（D7）已按性能对比选定 C（本机 WebSocket）。性能报告是 `perf/rust-host-abc` 分支（`357e589`）上的 `docs/reports/rust-host-transport-perf-2026-10-08.md`。其余决策见第 10 节。
 
 版本沿革：
 

@@ -208,8 +208,11 @@ open：checking →（waiting_for_lock）→ checking(facts) →（migrating n/t
   - 5 组操作场景（rowToMeta、合并、unread、右键菜单、分组顺序）每一步的返回值与最终表内容与 TS 相同；
   - 打开 TS 准备的库不重新迁移；篡改 checksum 失败；锁等待与超时；两个句柄并发打开只迁移一次，并发 unread 不撞号，并发首发的分组顺序互不相同。
 
-## 8. 剩余工作（本阶段内）
+## 8. 状态与后续
 
-1. 接入 tasks-index.sqlite 的实现，替换 zcode-task 与 syncer 当前使用的端口。
-2. 异步启动：迁移 tasks-index，然后报 `ready`。
-3. E2E 增加侧栏断言：新会话出现在 Project 列表，未读状态与置顶生效。
+核心能力（R1 启动与主窗口、R2 核心聊天与侧栏、R3 文件树 / Git / 终端）已在隔离的真实 App 中跑通，见第 6 节。下面这些不在本阶段：
+
+1. **D2 Host 自动重启**：Rust Host 退出后，Main 重启它，Renderer 重新连接；迁移失败页的重试控制一并在此实现。
+2. **远程与手机**：`web-remote-replayable`、远端 workspace、Bot 远程运行时、task realtime bridge（R6）。
+3. **账号**：OAuth 登录、Account Config 同步、`requestProviderRuntimeHeaders` 应答（R4）。
+4. **其余 stub 成员**：插件、技能目录、automation、分组视图、全文搜索、媒体预览等，按 rust-host.md 第 5 节的里程碑推进。
