@@ -15,11 +15,18 @@
 //!      └────────── oneshot 结果 ◄──────┘
 //! 其他 Host / Node Host ──────────► 同一文件（WAL；写锁串行）
 //! ```
+mod api;
+mod archive;
+mod grouped_view;
+mod groups;
+#[cfg(test)]
+mod groups_tests;
 mod legacy_selection;
 mod meta;
 mod repo;
 mod schema;
 mod startup;
+mod task_list;
 #[cfg(test)]
 mod tests;
 

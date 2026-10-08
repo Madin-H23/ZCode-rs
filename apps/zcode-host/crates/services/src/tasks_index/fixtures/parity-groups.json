@@ -1,0 +1,2416 @@
+{
+  "source": "scripts/rust-host/tasks-index-groups-fixtures.ts",
+  "baseNow": 1760000000000,
+  "scenarios": [
+    {
+      "name": "groups_crud",
+      "dump": [
+        "task_groups",
+        "task_group_members",
+        "task_group_view_node_orders",
+        "task_group_workspace_bootstraps"
+      ],
+      "ops": [
+        {
+          "op": "createGroup",
+          "params": {
+            "title": "  Alpha ",
+            "color": "red"
+          },
+          "now": 1760000000001
+        },
+        {
+          "op": "createGroup",
+          "params": {},
+          "now": 1760000000002
+        },
+        {
+          "op": "createGroup",
+          "params": {
+            "title": "Odd",
+            "color": "pink"
+          },
+          "now": 1760000000003
+        },
+        {
+          "op": "renameGroup",
+          "group": 0,
+          "title": "   ",
+          "now": 1760000000004
+        },
+        {
+          "op": "renameGroup",
+          "groupId": "missing",
+          "title": "x"
+        },
+        {
+          "op": "updateColor",
+          "group": 1,
+          "color": "blue",
+          "now": 1760000000005
+        },
+        {
+          "op": "updateColor",
+          "group": 1,
+          "color": "pink"
+        },
+        {
+          "op": "updateColor",
+          "groupId": "missing",
+          "color": "red"
+        },
+        {
+          "op": "structure",
+          "scopes": [
+            {
+              "workspacePath": "/work/alpha"
+            }
+          ]
+        },
+        {
+          "op": "deleteGroup",
+          "group": 0
+        },
+        {
+          "op": "deleteGroup",
+          "groupId": "missing"
+        },
+        {
+          "op": "structure",
+          "scopes": []
+        }
+      ],
+      "results": [
+        {
+          "id": "<group-0>",
+          "title": "Alpha",
+          "color": "red",
+          "createdAt": 1760000000001,
+          "updatedAt": 1760000000001
+        },
+        {
+          "id": "<group-1>",
+          "title": "New Group",
+          "color": "gray",
+          "createdAt": 1760000000002,
+          "updatedAt": 1760000000002
+        },
+        {
+          "id": "<group-2>",
+          "title": "Odd",
+          "color": "pink",
+          "createdAt": 1760000000003,
+          "updatedAt": 1760000000003
+        },
+        {
+          "id": "<group-0>",
+          "title": "New Group",
+          "color": "red",
+          "createdAt": 1760000000001,
+          "updatedAt": 1760000000004
+        },
+        {
+          "error": "Task group 不存在，无法重命名"
+        },
+        {
+          "id": "<group-1>",
+          "title": "New Group",
+          "color": "blue",
+          "createdAt": 1760000000002,
+          "updatedAt": 1760000000005
+        },
+        {
+          "error": "Task group 颜色无效"
+        },
+        {
+          "error": "Task group 不存在，无法更新颜色"
+        },
+        {
+          "groups": [
+            {
+              "id": "<group-0>",
+              "title": "New Group",
+              "color": "red",
+              "createdAt": 1760000000001,
+              "updatedAt": 1760000000004
+            },
+            {
+              "id": "<group-1>",
+              "title": "New Group",
+              "color": "blue",
+              "createdAt": 1760000000002,
+              "updatedAt": 1760000000005
+            },
+            {
+              "id": "<group-2>",
+              "title": "Odd",
+              "color": "gray",
+              "createdAt": 1760000000003,
+              "updatedAt": 1760000000003
+            }
+          ],
+          "members": [],
+          "topLevelOrders": [
+            {
+              "type": "group",
+              "groupId": "<group-0>",
+              "sortOrder": 1000
+            },
+            {
+              "type": "group",
+              "groupId": "<group-1>",
+              "sortOrder": 0
+            },
+            {
+              "type": "group",
+              "groupId": "<group-2>",
+              "sortOrder": -1000
+            }
+          ]
+        },
+        null,
+        {
+          "error": "Task group 不存在，无法删除"
+        },
+        {
+          "groups": [
+            {
+              "id": "<group-1>",
+              "title": "New Group",
+              "color": "blue",
+              "createdAt": 1760000000002,
+              "updatedAt": 1760000000005
+            },
+            {
+              "id": "<group-2>",
+              "title": "Odd",
+              "color": "gray",
+              "createdAt": 1760000000003,
+              "updatedAt": 1760000000003
+            }
+          ],
+          "members": [],
+          "topLevelOrders": [
+            {
+              "type": "group",
+              "groupId": "<group-1>",
+              "sortOrder": 0
+            },
+            {
+              "type": "group",
+              "groupId": "<group-2>",
+              "sortOrder": -1000
+            }
+          ]
+        }
+      ],
+      "dumps": [
+        {
+          "table": "task_groups",
+          "sql": "SELECT * FROM task_groups ORDER BY created_at, title",
+          "rows": [
+            {
+              "group_id": "<group-1>",
+              "title": "New Group",
+              "color": "blue",
+              "created_at": 1760000000002,
+              "updated_at": 1760000000005
+            },
+            {
+              "group_id": "<group-2>",
+              "title": "Odd",
+              "color": "pink",
+              "created_at": 1760000000003,
+              "updated_at": 1760000000003
+            }
+          ]
+        },
+        {
+          "table": "task_group_members",
+          "sql": "SELECT * FROM task_group_members ORDER BY workspace_key, task_id",
+          "rows": []
+        },
+        {
+          "table": "task_group_view_node_orders",
+          "sql": "SELECT * FROM task_group_view_node_orders ORDER BY node_type, sort_order, node_key",
+          "rows": [
+            {
+              "node_type": "group",
+              "node_key": "<group-2>",
+              "sort_order": -1000,
+              "created_at": 1760000000003,
+              "updated_at": 1760000000003
+            },
+            {
+              "node_type": "group",
+              "node_key": "<group-1>",
+              "sort_order": 0,
+              "created_at": 1760000000002,
+              "updated_at": 1760000000002
+            }
+          ]
+        },
+        {
+          "table": "task_group_workspace_bootstraps",
+          "sql": "SELECT * FROM task_group_workspace_bootstraps ORDER BY workspace_key",
+          "rows": []
+        }
+      ]
+    },
+    {
+      "name": "grouped_order",
+      "dump": [
+        "task_groups",
+        "task_group_members",
+        "task_group_view_node_orders",
+        "task_group_workspace_bootstraps"
+      ],
+      "ops": [
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "t1",
+            "title": "Title t1",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 101,
+            "updated_at": 200,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"t1\",\"traceId\":\"trace-t1\",\"title\":\"Title t1\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "t2",
+            "title": "Title t2",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 102,
+            "updated_at": 200,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"t2\",\"traceId\":\"trace-t2\",\"title\":\"Title t2\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "t3",
+            "title": "Title t3",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 103,
+            "updated_at": 200,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"t3\",\"traceId\":\"trace-t3\",\"title\":\"Title t3\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "t4",
+            "title": "Title t4",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 104,
+            "updated_at": 200,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"t4\",\"traceId\":\"trace-t4\",\"title\":\"Title t4\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "t5",
+            "title": "Title t5",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 105,
+            "updated_at": 200,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"t5\",\"traceId\":\"trace-t5\",\"title\":\"Title t5\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "t6",
+            "title": "Title t6",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 106,
+            "updated_at": 200,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"t6\",\"traceId\":\"trace-t6\",\"title\":\"Title t6\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "pinned",
+            "title": "Title pinned",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 200,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"pinned\",\"traceId\":\"trace-pinned\",\"title\":\"Title pinned\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+            "pinned": 1
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "archived",
+            "title": "Title archived",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 200,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"archived\",\"traceId\":\"trace-archived\",\"title\":\"Title archived\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+            "archived": 1
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "claude",
+            "title": "Title claude",
+            "task_status": "completed",
+            "provider": "claude",
+            "created_at": 100,
+            "updated_at": 200,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"claude\",\"traceId\":\"trace-claude\",\"title\":\"Title claude\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/beta",
+            "workspace_path": "/work/beta",
+            "task_id": "o1",
+            "title": "Title o1",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 200,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"o1\",\"traceId\":\"trace-o1\",\"title\":\"Title o1\",\"mode\":\"build\",\"workspacePath\":\"/work/beta\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "createGroup",
+          "params": {
+            "title": "A"
+          },
+          "now": 1760000000010
+        },
+        {
+          "op": "createGroup",
+          "params": {
+            "title": "B"
+          },
+          "now": 1760000000011
+        },
+        {
+          "op": "exec",
+          "sql": "INSERT INTO task_groups (group_id, title, color, created_at, updated_at)\n          VALUES ('zcode-default-group-cron', 'Cron', 'gray', 50, 50)"
+        },
+        {
+          "op": "exec",
+          "sql": "INSERT INTO task_group_members (group_id, workspace_key, workspace_path, workspace_identity,\n            task_id, sort_order, added_at, created_at, updated_at)\n          VALUES ('zcode-default-group-cron', '/work/alpha', '/work/alpha', NULL, 't6', NULL, 60, 60, 60)"
+        },
+        {
+          "op": "apply",
+          "now": 1760000000020,
+          "input": {
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ],
+            "topLevelNodes": [
+              {
+                "type": "group",
+                "group": 0
+              },
+              {
+                "type": "task",
+                "task": {
+                  "workspacePath": "/work/alpha",
+                  "taskId": "t3"
+                }
+              },
+              {
+                "type": "group",
+                "group": 1
+              },
+              {
+                "type": "task",
+                "task": {
+                  "workspacePath": "/work/alpha",
+                  "taskId": "claude"
+                }
+              }
+            ],
+            "groups": [
+              {
+                "group": 0,
+                "taskRefs": [
+                  {
+                    "workspacePath": "/work/alpha",
+                    "taskId": "t2"
+                  },
+                  {
+                    "workspacePath": "/work/alpha",
+                    "taskId": "t1"
+                  },
+                  {
+                    "workspacePath": "/work/alpha",
+                    "taskId": "claude"
+                  }
+                ]
+              },
+              {
+                "group": 1,
+                "taskRefs": [
+                  {
+                    "workspacePath": "/work/alpha",
+                    "taskId": "t4"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "structure",
+          "scopes": [
+            {
+              "workspacePath": "/work/alpha"
+            },
+            {
+              "workspacePath": "/work/alpha"
+            }
+          ]
+        },
+        {
+          "op": "exec",
+          "sql": "INSERT INTO task_group_members (group_id, workspace_key, workspace_path, workspace_identity,\n            task_id, sort_order, added_at, created_at, updated_at)\n          SELECT group_id, '/work/alpha', '/work/alpha', NULL, 't5', NULL, 70, 70, 70 FROM task_groups WHERE title = 'B'"
+        },
+        {
+          "op": "apply",
+          "now": 1760000000030,
+          "input": {
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ],
+            "topLevelNodes": [
+              {
+                "type": "task",
+                "task": {
+                  "workspacePath": "/work/alpha",
+                  "taskId": "t3"
+                }
+              },
+              {
+                "type": "group",
+                "group": 0
+              }
+            ],
+            "groups": [
+              {
+                "group": 0,
+                "taskRefs": [
+                  {
+                    "workspacePath": "/work/alpha",
+                    "taskId": "t1"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "apply",
+          "input": {
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ],
+            "topLevelNodes": [
+              {
+                "type": "task",
+                "task": {
+                  "workspacePath": "/work/beta",
+                  "taskId": "o1"
+                }
+              }
+            ],
+            "groups": []
+          }
+        },
+        {
+          "op": "apply",
+          "input": {
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ],
+            "topLevelNodes": [
+              {
+                "type": "task",
+                "task": {
+                  "workspacePath": "/work/alpha",
+                  "taskId": "pinned"
+                }
+              }
+            ],
+            "groups": []
+          }
+        },
+        {
+          "op": "apply",
+          "input": {
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ],
+            "topLevelNodes": [
+              {
+                "type": "group",
+                "groupId": "nope"
+              }
+            ],
+            "groups": []
+          }
+        },
+        {
+          "op": "apply",
+          "input": {
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ],
+            "topLevelNodes": [],
+            "groups": [
+              {
+                "group": 0,
+                "taskRefs": [
+                  {
+                    "workspacePath": "/work/alpha",
+                    "taskId": "t1"
+                  }
+                ]
+              },
+              {
+                "group": 1,
+                "taskRefs": [
+                  {
+                    "workspacePath": "/work/alpha",
+                    "taskId": "t1"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "op": "structure",
+          "scopes": [
+            {
+              "workspacePath": "/work/beta"
+            }
+          ]
+        }
+      ],
+      "results": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        {
+          "id": "<group-0>",
+          "title": "A",
+          "color": "gray",
+          "createdAt": 1760000000010,
+          "updatedAt": 1760000000010
+        },
+        {
+          "id": "<group-1>",
+          "title": "B",
+          "color": "gray",
+          "createdAt": 1760000000011,
+          "updatedAt": 1760000000011
+        },
+        null,
+        null,
+        {
+          "nodes": [
+            {
+              "type": "group",
+              "group": {
+                "id": "<group-0>",
+                "title": "A",
+                "color": "gray",
+                "createdAt": 1760000000010,
+                "updatedAt": 1760000000010
+              },
+              "tasks": [
+                {
+                  "taskId": "t2",
+                  "traceId": "trace-t2",
+                  "title": "Title t2",
+                  "workspacePath": "/work/alpha",
+                  "createdAt": 100,
+                  "updatedAt": 200,
+                  "mode": "build",
+                  "provider": "glm",
+                  "titleOverridden": false
+                },
+                {
+                  "taskId": "t1",
+                  "traceId": "trace-t1",
+                  "title": "Title t1",
+                  "workspacePath": "/work/alpha",
+                  "createdAt": 100,
+                  "updatedAt": 200,
+                  "mode": "build",
+                  "provider": "glm",
+                  "titleOverridden": false
+                }
+              ],
+              "sortOrder": 1000
+            },
+            {
+              "type": "task",
+              "task": {
+                "taskId": "t3",
+                "traceId": "trace-t3",
+                "title": "Title t3",
+                "workspacePath": "/work/alpha",
+                "createdAt": 100,
+                "updatedAt": 200,
+                "mode": "build",
+                "provider": "glm",
+                "titleOverridden": false
+              },
+              "sortOrder": 2000
+            },
+            {
+              "type": "group",
+              "group": {
+                "id": "<group-1>",
+                "title": "B",
+                "color": "gray",
+                "createdAt": 1760000000011,
+                "updatedAt": 1760000000011
+              },
+              "tasks": [
+                {
+                  "taskId": "t4",
+                  "traceId": "trace-t4",
+                  "title": "Title t4",
+                  "workspacePath": "/work/alpha",
+                  "createdAt": 100,
+                  "updatedAt": 200,
+                  "mode": "build",
+                  "provider": "glm",
+                  "titleOverridden": false
+                }
+              ],
+              "sortOrder": 3000
+            },
+            {
+              "type": "task",
+              "task": {
+                "taskId": "t5",
+                "traceId": "trace-t5",
+                "title": "Title t5",
+                "workspacePath": "/work/alpha",
+                "createdAt": 100,
+                "updatedAt": 200,
+                "mode": "build",
+                "provider": "glm",
+                "titleOverridden": false
+              },
+              "sortOrder": 4000
+            },
+            {
+              "type": "group",
+              "group": {
+                "id": "zcode-default-group-cron",
+                "title": "Cron",
+                "color": "gray",
+                "createdAt": 50,
+                "updatedAt": 50
+              },
+              "tasks": [
+                {
+                  "taskId": "t6",
+                  "traceId": "trace-t6",
+                  "title": "Title t6",
+                  "workspacePath": "/work/alpha",
+                  "createdAt": 100,
+                  "updatedAt": 200,
+                  "mode": "build",
+                  "provider": "glm",
+                  "titleOverridden": false
+                }
+              ],
+              "sortOrder": 5000
+            }
+          ]
+        },
+        {
+          "groups": [
+            {
+              "id": "<group-0>",
+              "title": "A",
+              "color": "gray",
+              "createdAt": 1760000000010,
+              "updatedAt": 1760000000010
+            },
+            {
+              "id": "<group-1>",
+              "title": "B",
+              "color": "gray",
+              "createdAt": 1760000000011,
+              "updatedAt": 1760000000011
+            },
+            {
+              "id": "zcode-default-group-cron",
+              "title": "Cron",
+              "color": "gray",
+              "createdAt": 50,
+              "updatedAt": 50
+            }
+          ],
+          "members": [
+            {
+              "groupId": "zcode-default-group-cron",
+              "workspaceKey": "/work/alpha",
+              "workspacePath": "/work/alpha",
+              "taskId": "t6",
+              "sortOrder": null,
+              "addedAt": 60
+            },
+            {
+              "groupId": "<group-0>",
+              "workspaceKey": "/work/alpha",
+              "workspacePath": "/work/alpha",
+              "taskId": "t2",
+              "sortOrder": 1000,
+              "addedAt": 1760000000020
+            },
+            {
+              "groupId": "<group-0>",
+              "workspaceKey": "/work/alpha",
+              "workspacePath": "/work/alpha",
+              "taskId": "t1",
+              "sortOrder": 2000,
+              "addedAt": 1760000000020
+            },
+            {
+              "groupId": "<group-1>",
+              "workspaceKey": "/work/alpha",
+              "workspacePath": "/work/alpha",
+              "taskId": "t4",
+              "sortOrder": 1000,
+              "addedAt": 1760000000020
+            }
+          ],
+          "topLevelOrders": [
+            {
+              "type": "group",
+              "groupId": "<group-0>",
+              "sortOrder": 1000
+            },
+            {
+              "type": "task",
+              "workspaceKey": "/work/alpha",
+              "taskId": "t3",
+              "sortOrder": 2000
+            },
+            {
+              "type": "group",
+              "groupId": "<group-1>",
+              "sortOrder": 3000
+            },
+            {
+              "type": "task",
+              "workspaceKey": "/work/alpha",
+              "taskId": "t5",
+              "sortOrder": 4000
+            },
+            {
+              "type": "group",
+              "groupId": "zcode-default-group-cron",
+              "sortOrder": 5000
+            }
+          ]
+        },
+        null,
+        {
+          "nodes": [
+            {
+              "type": "task",
+              "task": {
+                "taskId": "t3",
+                "traceId": "trace-t3",
+                "title": "Title t3",
+                "workspacePath": "/work/alpha",
+                "createdAt": 100,
+                "updatedAt": 200,
+                "mode": "build",
+                "provider": "glm",
+                "titleOverridden": false
+              },
+              "sortOrder": 1000
+            },
+            {
+              "type": "group",
+              "group": {
+                "id": "<group-0>",
+                "title": "A",
+                "color": "gray",
+                "createdAt": 1760000000010,
+                "updatedAt": 1760000000010
+              },
+              "tasks": [
+                {
+                  "taskId": "t1",
+                  "traceId": "trace-t1",
+                  "title": "Title t1",
+                  "workspacePath": "/work/alpha",
+                  "createdAt": 100,
+                  "updatedAt": 200,
+                  "mode": "build",
+                  "provider": "glm",
+                  "titleOverridden": false
+                },
+                {
+                  "taskId": "t2",
+                  "traceId": "trace-t2",
+                  "title": "Title t2",
+                  "workspacePath": "/work/alpha",
+                  "createdAt": 100,
+                  "updatedAt": 200,
+                  "mode": "build",
+                  "provider": "glm",
+                  "titleOverridden": false
+                }
+              ],
+              "sortOrder": 2000
+            },
+            {
+              "type": "group",
+              "group": {
+                "id": "<group-1>",
+                "title": "B",
+                "color": "gray",
+                "createdAt": 1760000000011,
+                "updatedAt": 1760000000011
+              },
+              "tasks": [
+                {
+                  "taskId": "t4",
+                  "traceId": "trace-t4",
+                  "title": "Title t4",
+                  "workspacePath": "/work/alpha",
+                  "createdAt": 100,
+                  "updatedAt": 200,
+                  "mode": "build",
+                  "provider": "glm",
+                  "titleOverridden": false
+                },
+                {
+                  "taskId": "t5",
+                  "traceId": "trace-t5",
+                  "title": "Title t5",
+                  "workspacePath": "/work/alpha",
+                  "createdAt": 100,
+                  "updatedAt": 200,
+                  "mode": "build",
+                  "provider": "glm",
+                  "titleOverridden": false
+                }
+              ],
+              "sortOrder": 3000
+            },
+            {
+              "type": "group",
+              "group": {
+                "id": "zcode-default-group-cron",
+                "title": "Cron",
+                "color": "gray",
+                "createdAt": 50,
+                "updatedAt": 50
+              },
+              "tasks": [
+                {
+                  "taskId": "t6",
+                  "traceId": "trace-t6",
+                  "title": "Title t6",
+                  "workspacePath": "/work/alpha",
+                  "createdAt": 100,
+                  "updatedAt": 200,
+                  "mode": "build",
+                  "provider": "glm",
+                  "titleOverridden": false
+                }
+              ],
+              "sortOrder": 4000
+            }
+          ]
+        },
+        {
+          "error": "Grouped task order 包含当前 scope 外的 task"
+        },
+        {
+          "error": "Grouped task order 包含不可见 task"
+        },
+        {
+          "error": "Grouped task order 包含不存在的 group"
+        },
+        {
+          "error": "Grouped task order 不能让同一个 task 进入多个 group"
+        },
+        {
+          "groups": [
+            {
+              "id": "<group-0>",
+              "title": "A",
+              "color": "gray",
+              "createdAt": 1760000000010,
+              "updatedAt": 1760000000010
+            },
+            {
+              "id": "<group-1>",
+              "title": "B",
+              "color": "gray",
+              "createdAt": 1760000000011,
+              "updatedAt": 1760000000011
+            },
+            {
+              "id": "zcode-default-group-cron",
+              "title": "Cron",
+              "color": "gray",
+              "createdAt": 50,
+              "updatedAt": 50
+            }
+          ],
+          "members": [
+            {
+              "groupId": "zcode-default-group-cron",
+              "workspaceKey": "/work/alpha",
+              "workspacePath": "/work/alpha",
+              "taskId": "t6",
+              "sortOrder": null,
+              "addedAt": 60
+            },
+            {
+              "groupId": "<group-0>",
+              "workspaceKey": "/work/alpha",
+              "workspacePath": "/work/alpha",
+              "taskId": "t2",
+              "sortOrder": 1000,
+              "addedAt": 1760000000020
+            },
+            {
+              "groupId": "<group-0>",
+              "workspaceKey": "/work/alpha",
+              "workspacePath": "/work/alpha",
+              "taskId": "t1",
+              "sortOrder": 1000,
+              "addedAt": 1760000000020
+            },
+            {
+              "groupId": "<group-1>",
+              "workspaceKey": "/work/alpha",
+              "workspacePath": "/work/alpha",
+              "taskId": "t4",
+              "sortOrder": 1000,
+              "addedAt": 1760000000020
+            },
+            {
+              "groupId": "<group-1>",
+              "workspaceKey": "/work/alpha",
+              "workspacePath": "/work/alpha",
+              "taskId": "t5",
+              "sortOrder": 2000,
+              "addedAt": 70
+            }
+          ],
+          "topLevelOrders": [
+            {
+              "type": "task",
+              "workspaceKey": "/work/alpha",
+              "taskId": "t3",
+              "sortOrder": 1000
+            },
+            {
+              "type": "group",
+              "groupId": "<group-0>",
+              "sortOrder": 2000
+            },
+            {
+              "type": "group",
+              "groupId": "<group-1>",
+              "sortOrder": 3000
+            },
+            {
+              "type": "group",
+              "groupId": "zcode-default-group-cron",
+              "sortOrder": 4000
+            }
+          ]
+        }
+      ],
+      "dumps": [
+        {
+          "table": "task_groups",
+          "sql": "SELECT * FROM task_groups ORDER BY created_at, title",
+          "rows": [
+            {
+              "group_id": "zcode-default-group-cron",
+              "title": "Cron",
+              "color": "gray",
+              "created_at": 50,
+              "updated_at": 50
+            },
+            {
+              "group_id": "<group-0>",
+              "title": "A",
+              "color": "gray",
+              "created_at": 1760000000010,
+              "updated_at": 1760000000010
+            },
+            {
+              "group_id": "<group-1>",
+              "title": "B",
+              "color": "gray",
+              "created_at": 1760000000011,
+              "updated_at": 1760000000011
+            }
+          ]
+        },
+        {
+          "table": "task_group_members",
+          "sql": "SELECT * FROM task_group_members ORDER BY workspace_key, task_id",
+          "rows": [
+            {
+              "group_id": "<group-0>",
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "t1",
+              "sort_order": 1000,
+              "added_at": 1760000000020,
+              "created_at": 1760000000020,
+              "updated_at": 1760000000030
+            },
+            {
+              "group_id": "<group-0>",
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "t2",
+              "sort_order": 1000,
+              "added_at": 1760000000020,
+              "created_at": 1760000000020,
+              "updated_at": 1760000000020
+            },
+            {
+              "group_id": "<group-1>",
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "t4",
+              "sort_order": 1000,
+              "added_at": 1760000000020,
+              "created_at": 1760000000020,
+              "updated_at": 1760000000020
+            },
+            {
+              "group_id": "<group-1>",
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "t5",
+              "sort_order": 2000,
+              "added_at": 70,
+              "created_at": 70,
+              "updated_at": 1760000000030
+            },
+            {
+              "group_id": "zcode-default-group-cron",
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "t6",
+              "sort_order": null,
+              "added_at": 60,
+              "created_at": 60,
+              "updated_at": 60
+            }
+          ]
+        },
+        {
+          "table": "task_group_view_node_orders",
+          "sql": "SELECT * FROM task_group_view_node_orders ORDER BY node_type, sort_order, node_key",
+          "rows": [
+            {
+              "node_type": "group",
+              "node_key": "<group-0>",
+              "sort_order": 2000,
+              "created_at": 1760000000030,
+              "updated_at": 1760000000030
+            },
+            {
+              "node_type": "group",
+              "node_key": "<group-1>",
+              "sort_order": 3000,
+              "created_at": 1760000000030,
+              "updated_at": 1760000000030
+            },
+            {
+              "node_type": "group",
+              "node_key": "zcode-default-group-cron",
+              "sort_order": 4000,
+              "created_at": 1760000000030,
+              "updated_at": 1760000000030
+            },
+            {
+              "node_type": "task",
+              "node_key": "[\"/work/alpha\",\"t3\"]",
+              "sort_order": 1000,
+              "created_at": 1760000000030,
+              "updated_at": 1760000000030
+            }
+          ]
+        },
+        {
+          "table": "task_group_workspace_bootstraps",
+          "sql": "SELECT * FROM task_group_workspace_bootstraps ORDER BY workspace_key",
+          "rows": [
+            {
+              "workspace_key": "__zcode_internal_grouped_workspace_bootstrap_once__",
+              "group_id": null,
+              "created_at": 1760000000020,
+              "updated_at": 1760000000030
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "task_list",
+      "dump": ["tasks"],
+      "ops": [
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "a",
+            "title": "Title a",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 10,
+            "updated_at": 300,
+            "searchable_text": "the quick brown fox jumps",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"a\",\"traceId\":\"trace-a\",\"title\":\"Title a\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "b",
+            "title": "Needle in title",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 30,
+            "updated_at": 200,
+            "searchable_text": "nothing here",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"b\",\"traceId\":\"trace-b\",\"title\":\"Title b\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "c",
+            "title": "Title c",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 20,
+            "updated_at": 100,
+            "searchable_text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx NEEDLE yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy needle tail",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"c\",\"traceId\":\"trace-c\",\"title\":\"Title c\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "p",
+            "title": "Title p",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 200,
+            "searchable_text": "needle pinned",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"p\",\"traceId\":\"trace-p\",\"title\":\"Title p\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+            "pinned": 1
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "ar",
+            "title": "Title ar",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 200,
+            "searchable_text": "needle archived",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"ar\",\"traceId\":\"trace-ar\",\"title\":\"Title ar\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+            "archived": 1
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "d",
+            "title": "Title d",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 200,
+            "searchable_text": "needle deleted",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"d\",\"traceId\":\"trace-d\",\"title\":\"Title d\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+            "deleted": 1
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "g",
+            "title": "Title g",
+            "task_status": "completed",
+            "provider": "claude",
+            "created_at": 100,
+            "updated_at": 200,
+            "searchable_text": "needle claude",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"g\",\"traceId\":\"trace-g\",\"title\":\"Title g\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "ssh:dev@host:/srv/repo",
+            "workspace_path": "/srv/repo",
+            "task_id": "r1",
+            "title": "Title r1",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 200,
+            "searchable_text": "remote needle",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"r1\",\"traceId\":\"trace-r1\",\"title\":\"Title r1\",\"mode\":\"build\",\"workspacePath\":\"/srv/repo\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+            "workspace_identity": "ssh:dev@host:/srv/repo"
+          }
+        },
+        {
+          "op": "list",
+          "query": {
+            "kind": "timeline",
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ]
+          },
+          "provider": "glm"
+        },
+        {
+          "op": "list",
+          "query": {
+            "kind": "timeline",
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ],
+            "sortBy": "created",
+            "limit": 2
+          },
+          "provider": "glm"
+        },
+        {
+          "op": "list",
+          "query": {
+            "kind": "timeline",
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ],
+            "limit": 0
+          }
+        },
+        {
+          "op": "list",
+          "query": {
+            "kind": "pinned",
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ]
+          },
+          "provider": "glm"
+        },
+        {
+          "op": "list",
+          "query": {
+            "kind": "archived",
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ]
+          },
+          "provider": "glm"
+        },
+        {
+          "op": "list",
+          "query": {
+            "kind": "timeline",
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ],
+            "search": "  NeEdle "
+          },
+          "provider": "glm"
+        },
+        {
+          "op": "list",
+          "query": {
+            "kind": "timeline",
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ],
+            "search": "zzz"
+          }
+        },
+        {
+          "op": "list",
+          "query": {
+            "kind": "active",
+            "workspaceScopes": [
+              {
+                "workspacePath": "/work/alpha",
+                "workspacePurpose": "conversation"
+              },
+              {
+                "workspacePath": "/srv/repo",
+                "workspaceIdentity": "ssh:dev@host:/srv/repo"
+              },
+              {
+                "workspacePath": "/work/alpha"
+              }
+            ],
+            "search": "needle"
+          },
+          "provider": "glm"
+        },
+        {
+          "op": "list",
+          "query": {
+            "kind": "timeline",
+            "workspaceScopes": []
+          }
+        },
+        {
+          "op": "list",
+          "query": {
+            "kind": "timeline",
+            "workspaceScopes": [
+              {
+                "workspacePath": "  "
+              }
+            ]
+          }
+        }
+      ],
+      "results": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        {
+          "items": [
+            {
+              "taskId": "a",
+              "traceId": "trace-a",
+              "title": "Title a",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false
+            },
+            {
+              "taskId": "b",
+              "traceId": "trace-b",
+              "title": "Title b",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false
+            },
+            {
+              "taskId": "c",
+              "traceId": "trace-c",
+              "title": "Title c",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false
+            }
+          ],
+          "total": 3,
+          "hasMore": false
+        },
+        {
+          "items": [
+            {
+              "taskId": "b",
+              "traceId": "trace-b",
+              "title": "Title b",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false
+            },
+            {
+              "taskId": "c",
+              "traceId": "trace-c",
+              "title": "Title c",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false
+            }
+          ],
+          "total": 3,
+          "hasMore": true
+        },
+        {
+          "items": [
+            {
+              "taskId": "a",
+              "traceId": "trace-a",
+              "title": "Title a",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false
+            },
+            {
+              "taskId": "g",
+              "traceId": "trace-g",
+              "title": "Title g",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false
+            },
+            {
+              "taskId": "b",
+              "traceId": "trace-b",
+              "title": "Title b",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false
+            },
+            {
+              "taskId": "c",
+              "traceId": "trace-c",
+              "title": "Title c",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false
+            }
+          ],
+          "total": 4,
+          "hasMore": false
+        },
+        {
+          "items": [
+            {
+              "taskId": "p",
+              "traceId": "trace-p",
+              "title": "Title p",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false
+            }
+          ],
+          "total": 1,
+          "hasMore": false
+        },
+        {
+          "items": [
+            {
+              "taskId": "ar",
+              "traceId": "trace-ar",
+              "title": "Title ar",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false
+            }
+          ],
+          "total": 1,
+          "hasMore": false
+        },
+        {
+          "items": [
+            {
+              "taskId": "b",
+              "traceId": "trace-b",
+              "title": "Title b",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false,
+              "searchSnippet": "nothing here",
+              "searchSnippets": ["nothing here"]
+            },
+            {
+              "taskId": "c",
+              "traceId": "trace-c",
+              "title": "Title c",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false,
+              "searchSnippet": "...xxxxxxxxxxxxxxxxxxx NEEDLE yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy...",
+              "searchSnippets": [
+                "...xxxxxxxxxxxxxxxxxxx NEEDLE yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy...",
+                "...yyyyyyyyyyyyyyyyyyy needle tail"
+              ]
+            }
+          ],
+          "total": 2,
+          "hasMore": false
+        },
+        {
+          "items": [],
+          "total": 0,
+          "hasMore": false
+        },
+        {
+          "items": [
+            {
+              "taskId": "r1",
+              "traceId": "trace-r1",
+              "title": "Title r1",
+              "workspacePath": "/srv/repo",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "workspaceIdentity": "ssh:dev@host:/srv/repo",
+              "titleOverridden": false,
+              "searchSnippet": "remote needle",
+              "searchSnippets": ["remote needle"]
+            },
+            {
+              "taskId": "b",
+              "traceId": "trace-b",
+              "title": "Title b",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false,
+              "searchSnippet": "nothing here",
+              "searchSnippets": ["nothing here"],
+              "workspacePurpose": "conversation"
+            },
+            {
+              "taskId": "c",
+              "traceId": "trace-c",
+              "title": "Title c",
+              "workspacePath": "/work/alpha",
+              "createdAt": 100,
+              "updatedAt": 200,
+              "mode": "build",
+              "provider": "glm",
+              "titleOverridden": false,
+              "searchSnippet": "...xxxxxxxxxxxxxxxxxxx NEEDLE yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy...",
+              "searchSnippets": [
+                "...xxxxxxxxxxxxxxxxxxx NEEDLE yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy...",
+                "...yyyyyyyyyyyyyyyyyyy needle tail"
+              ],
+              "workspacePurpose": "conversation"
+            }
+          ],
+          "total": 3,
+          "hasMore": false
+        },
+        {
+          "items": [],
+          "total": 0,
+          "hasMore": false
+        },
+        {
+          "items": [],
+          "total": 0,
+          "hasMore": false
+        }
+      ],
+      "dumps": [
+        {
+          "table": "tasks",
+          "sql": "SELECT * FROM tasks ORDER BY workspace_key, task_id",
+          "rows": [
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "a",
+              "title": "Title a",
+              "task_status": "completed",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 10,
+              "updated_at": 300,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 0,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"a\",\"traceId\":\"trace-a\",\"title\":\"Title a\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "the quick brown fox jumps",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "ar",
+              "title": "Title ar",
+              "task_status": "completed",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 200,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 1,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"ar\",\"traceId\":\"trace-ar\",\"title\":\"Title ar\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "needle archived",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "b",
+              "title": "Needle in title",
+              "task_status": "completed",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 30,
+              "updated_at": 200,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 0,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"b\",\"traceId\":\"trace-b\",\"title\":\"Title b\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "nothing here",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "c",
+              "title": "Title c",
+              "task_status": "completed",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 20,
+              "updated_at": 100,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 0,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"c\",\"traceId\":\"trace-c\",\"title\":\"Title c\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx NEEDLE yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy needle tail",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "d",
+              "title": "Title d",
+              "task_status": "completed",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 200,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 0,
+              "deleted": 1,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"d\",\"traceId\":\"trace-d\",\"title\":\"Title d\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "needle deleted",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "g",
+              "title": "Title g",
+              "task_status": "completed",
+              "provider": "claude",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 200,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 0,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"g\",\"traceId\":\"trace-g\",\"title\":\"Title g\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "needle claude",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "p",
+              "title": "Title p",
+              "task_status": "completed",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 200,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 1,
+              "archived": 0,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"p\",\"traceId\":\"trace-p\",\"title\":\"Title p\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "needle pinned",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "ssh:dev@host:/srv/repo",
+              "workspace_path": "/srv/repo",
+              "workspace_identity": "ssh:dev@host:/srv/repo",
+              "task_id": "r1",
+              "title": "Title r1",
+              "task_status": "completed",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 200,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 0,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"r1\",\"traceId\":\"trace-r1\",\"title\":\"Title r1\",\"mode\":\"build\",\"workspacePath\":\"/srv/repo\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "remote needle",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "archive_delete",
+      "dump": ["tasks", "task_group_members", "task_group_view_node_orders"],
+      "ops": [
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "old",
+            "title": "Title old",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 1759136000000,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"old\",\"traceId\":\"trace-old\",\"title\":\"Title old\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "recent",
+            "title": "Title recent",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 1759827200000,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"recent\",\"traceId\":\"trace-recent\",\"title\":\"Title recent\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "running",
+            "title": "Title running",
+            "task_status": "running",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 1759136000000,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"running\",\"traceId\":\"trace-running\",\"title\":\"Title running\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "pinnedOld",
+            "title": "Title pinnedOld",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 1759136000000,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"pinnedOld\",\"traceId\":\"trace-pinnedOld\",\"title\":\"Title pinnedOld\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+            "pinned": 1
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "unreadOld",
+            "title": "Title unreadOld",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 1759136000000,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"unreadOld\",\"traceId\":\"trace-unreadOld\",\"title\":\"Title unreadOld\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+            "unread_at": 5
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "claudeOld",
+            "title": "Title claudeOld",
+            "task_status": "completed",
+            "provider": "claude",
+            "created_at": 100,
+            "updated_at": 1759222400000,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"claudeOld\",\"traceId\":\"trace-claudeOld\",\"title\":\"Title claudeOld\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}"
+          }
+        },
+        {
+          "op": "insertRow",
+          "row": {
+            "workspace_key": "/work/alpha",
+            "workspace_path": "/work/alpha",
+            "task_id": "gone",
+            "title": "Title gone",
+            "task_status": "completed",
+            "provider": "glm",
+            "created_at": 100,
+            "updated_at": 1759136000000,
+            "searchable_text": "",
+            "mode": "build",
+            "meta_json": "{\"taskId\":\"gone\",\"traceId\":\"trace-gone\",\"title\":\"Title gone\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+            "deleted": 1,
+            "archived": 1
+          }
+        },
+        {
+          "op": "archiveStale",
+          "target": {
+            "workspacePath": "/work/alpha"
+          },
+          "olderThanDays": 7.9,
+          "provider": "glm"
+        },
+        {
+          "op": "archiveStale",
+          "target": {
+            "workspacePath": "/work/alpha"
+          },
+          "olderThanDays": 0
+        },
+        {
+          "op": "archiveStale",
+          "target": {
+            "workspacePath": "/work/alpha"
+          },
+          "olderThanDays": 7
+        },
+        {
+          "op": "exec",
+          "sql": "INSERT INTO task_group_view_node_orders (node_type, node_key, sort_order, created_at, updated_at)\n          VALUES ('task', '[\"/work/alpha\",\"old\"]', 10, 1, 1), ('task', '/work/alpha', 20, 1, 1)"
+        },
+        {
+          "op": "deleteArchived",
+          "target": {
+            "workspacePath": "/work/alpha",
+            "taskId": "old"
+          },
+          "now": 1760000000040
+        },
+        {
+          "op": "deleteArchived",
+          "target": {
+            "workspacePath": "/work/alpha",
+            "taskId": "old"
+          }
+        },
+        {
+          "op": "deleteArchived",
+          "target": {
+            "workspacePath": "/work/alpha",
+            "taskId": "running"
+          }
+        },
+        {
+          "op": "deleteArchived",
+          "target": {
+            "workspacePath": "/work/alpha",
+            "taskId": "missing"
+          }
+        }
+      ],
+      "results": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        [
+          {
+            "taskId": "old",
+            "traceId": "trace-old",
+            "title": "Title old",
+            "workspacePath": "/work/alpha",
+            "createdAt": 100,
+            "updatedAt": 200,
+            "mode": "build",
+            "provider": "glm",
+            "titleOverridden": false
+          }
+        ],
+        [
+          {
+            "taskId": "recent",
+            "traceId": "trace-recent",
+            "title": "Title recent",
+            "workspacePath": "/work/alpha",
+            "createdAt": 100,
+            "updatedAt": 200,
+            "mode": "build",
+            "provider": "glm",
+            "titleOverridden": false
+          },
+          {
+            "taskId": "claudeOld",
+            "traceId": "trace-claudeOld",
+            "title": "Title claudeOld",
+            "workspacePath": "/work/alpha",
+            "createdAt": 100,
+            "updatedAt": 200,
+            "mode": "build",
+            "provider": "glm",
+            "titleOverridden": false
+          }
+        ],
+        [],
+        null,
+        {
+          "taskId": "old",
+          "traceId": "trace-old",
+          "title": "Title old",
+          "titleOverridden": false,
+          "workspacePath": "/work/alpha",
+          "createdAt": 100,
+          "updatedAt": 200,
+          "mode": "build",
+          "provider": "glm"
+        },
+        null,
+        null,
+        null
+      ],
+      "dumps": [
+        {
+          "table": "tasks",
+          "sql": "SELECT * FROM tasks ORDER BY workspace_key, task_id",
+          "rows": [
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "claudeOld",
+              "title": "Title claudeOld",
+              "task_status": "completed",
+              "provider": "claude",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 1759222400000,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 1,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"claudeOld\",\"traceId\":\"trace-claudeOld\",\"title\":\"Title claudeOld\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "gone",
+              "title": "Title gone",
+              "task_status": "completed",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 1759136000000,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 1,
+              "deleted": 1,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"gone\",\"traceId\":\"trace-gone\",\"title\":\"Title gone\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "old",
+              "title": "Title old",
+              "task_status": null,
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 200,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 1,
+              "deleted": 1,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"old\",\"traceId\":\"trace-old\",\"title\":\"Title old\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"mode\":\"build\",\"provider\":\"glm\",\"titleOverridden\":false}",
+              "searchable_text": "",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "pinnedOld",
+              "title": "Title pinnedOld",
+              "task_status": "completed",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 1759136000000,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 1,
+              "archived": 0,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"pinnedOld\",\"traceId\":\"trace-pinnedOld\",\"title\":\"Title pinnedOld\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "recent",
+              "title": "Title recent",
+              "task_status": "completed",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 1759827200000,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 1,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"recent\",\"traceId\":\"trace-recent\",\"title\":\"Title recent\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "running",
+              "title": "Title running",
+              "task_status": "running",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 1759136000000,
+              "unread_at": null,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 0,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"running\",\"traceId\":\"trace-running\",\"title\":\"Title running\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            },
+            {
+              "workspace_key": "/work/alpha",
+              "workspace_path": "/work/alpha",
+              "workspace_identity": null,
+              "task_id": "unreadOld",
+              "title": "Title unreadOld",
+              "task_status": "completed",
+              "provider": "glm",
+              "mode": "build",
+              "model": null,
+              "migration_source": null,
+              "forked_from_task_id": null,
+              "created_at": 100,
+              "updated_at": 1759136000000,
+              "unread_at": 5,
+              "last_unread_at": 0,
+              "pinned": 0,
+              "archived": 0,
+              "deleted": 0,
+              "title_overridden": 0,
+              "meta_json": "{\"taskId\":\"unreadOld\",\"traceId\":\"trace-unreadOld\",\"title\":\"Title unreadOld\",\"mode\":\"build\",\"workspacePath\":\"/work/alpha\",\"createdAt\":100,\"updatedAt\":200,\"provider\":\"glm\"}",
+              "searchable_text": "",
+              "cron_automation_id": null,
+              "off_peak_task_id": null
+            }
+          ]
+        },
+        {
+          "table": "task_group_members",
+          "sql": "SELECT * FROM task_group_members ORDER BY workspace_key, task_id",
+          "rows": []
+        },
+        {
+          "table": "task_group_view_node_orders",
+          "sql": "SELECT * FROM task_group_view_node_orders ORDER BY node_type, sort_order, node_key",
+          "rows": []
+        }
+      ]
+    }
+  ]
+}
