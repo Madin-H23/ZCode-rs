@@ -1,17 +1,27 @@
 //! 飞书 / Lark 通道（providers/feishuProvider.ts 中长连接、消息解析与卡片发送的部分）。
 pub mod api;
+pub mod cards;
 pub mod frame;
+pub mod provider;
 pub mod ws;
 
 use serde_json::{Map, Value, json};
 
-/// `BotInboundMessage` 的 Rust 形状（附件只记录元数据，不下载）。
-#[derive(Debug, Clone, PartialEq)]
+/// `BotInboundMessage` 的 Rust 形状。附件是 `BotInboundAttachment` JSON（只有元数据，处理时下载）。
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Inbound {
     pub bot_id: String,
     pub text: String,
     pub actor: Actor,
-    pub has_attachment: bool,
+    pub attachments: Vec<Value>,
+    /// `BotStructuredElicitationResponse`（Webhook 的结构化问答回执）。
+    pub elicitation_response: Option<Value>,
+}
+
+impl Inbound {
+    pub fn has_attachments(&self) -> bool {
+        !self.attachments.is_empty()
+    }
 }
 
 /// `BotActor`。
@@ -24,6 +34,8 @@ pub struct Actor {
     pub chat_type: String,
     pub chat_id: Option<String>,
     pub provider_message_id: Option<String>,
+    /// 微信 iLink 的 context_token：回复与 typing 都要带上。
+    pub provider_context_token: Option<String>,
 }
 
 impl Actor {
@@ -183,10 +195,52 @@ fn post_text(content: &Value) -> String {
     }
 }
 
-fn has_attachment(content: &Value) -> bool {
-    ["image_key", "file_key", "media_key", "audio_key", "key"]
-        .iter()
-        .any(|key| !read(content, key).is_empty())
+/// `readFeishuAttachment`。
+fn attachment(message_type: &str, content: &Value) -> Option<Value> {
+    if !content.is_object() {
+        return None;
+    }
+    let file_id = first_non_empty(&[
+        read(content, "image_key"),
+        read(content, "file_key"),
+        read(content, "media_key"),
+        read(content, "audio_key"),
+        read(content, "key"),
+    ]);
+    if file_id.is_empty() {
+        return None;
+    }
+    let kind = match message_type {
+        "image" => "image",
+        "audio" => "audio",
+        "media" | "video" => "video",
+        _ => "file",
+    };
+    let short: String = file_id.chars().take(8).collect();
+    let fallback = format!("{message_type}-{short}");
+    let filename = first_non_empty(&[read(content, "file_name"), read(content, "filename"), &fallback])
+        .to_owned();
+    let mime = first_non_empty(&[read(content, "mime_type"), read(content, "mimeType")]);
+    let mime = if mime.is_empty() {
+        match kind {
+            "image" => "image/jpeg",
+            "audio" => "audio/mpeg",
+            "video" => "video/mp4",
+            _ => "application/octet-stream",
+        }
+    } else {
+        mime
+    };
+    let mut out = Map::new();
+    out.insert("id".into(), json!(file_id));
+    out.insert("kind".into(), json!(kind));
+    out.insert("filename".into(), json!(filename));
+    out.insert("mimeType".into(), json!(mime));
+    if content["size"].is_number() {
+        out.insert("sizeBytes".into(), content["size"].clone());
+    }
+    out.insert("providerFileId".into(), json!(file_id));
+    Some(Value::Object(out))
 }
 
 fn provider_of(payload: &Value) -> String {
@@ -207,7 +261,8 @@ fn text_message(bot_id: &str, payload: &Value) -> Option<Inbound> {
     let message = &event["message"];
     let sender_id = &event["sender"]["sender_id"];
     let content = json_record(&message["content"]);
-    let attachment = has_attachment(&content);
+    let message_type = first_non_empty(&[read(message, "message_type"), read(message, "msg_type")]);
+    let attachment = attachment(message_type, &content);
     let post = post_text(&content);
     let raw = first_non_empty(&[
         read(&content, "text"),
@@ -227,7 +282,7 @@ fn text_message(bot_id: &str, payload: &Value) -> Option<Inbound> {
     ]);
     let chat_id = first_non_empty(&[read(message, "chat_id"), read(event, "open_chat_id")]);
     let message_id = read(message, "message_id");
-    if (text.is_empty() && !attachment) || user.is_empty() {
+    if (text.is_empty() && attachment.is_none()) || user.is_empty() {
         return None;
     }
     let kind = chat_type(first_non_empty(&[
@@ -237,7 +292,7 @@ fn text_message(bot_id: &str, payload: &Value) -> Option<Inbound> {
     Some(Inbound {
         bot_id: bot_id.to_owned(),
         text,
-        has_attachment: attachment,
+        attachments: attachment.into_iter().collect(),
         actor: Actor {
             provider: provider_of(payload),
             bot_id: bot_id.to_owned(),
@@ -245,8 +300,9 @@ fn text_message(bot_id: &str, payload: &Value) -> Option<Inbound> {
             chat_id: (kind == "group" && !chat_id.is_empty()).then(|| chat_id.to_owned()),
             chat_type: kind,
             provider_message_id: (!message_id.is_empty()).then(|| message_id.to_owned()),
-            display_name: None,
+            ..Actor::default()
         },
+        ..Inbound::default()
     })
 }
 
@@ -263,12 +319,23 @@ fn card_action(bot_id: &str, payload: &Value) -> Option<Inbound> {
         .and_then(|items| items.iter().find(|item| item.is_object()))
         .map(|item| &item["value"])
         .unwrap_or(&Value::Null);
-    let command = first_non_empty(&[
+    let raw_command = first_non_empty(&[
         read(&action["value"], "command"),
         read(&action["value"], "text"),
         read(behavior_value, "command"),
         read(behavior_value, "text"),
     ]);
+    // 问答表单提交：按钮命令只带 token，答案在 form_value.answer 里（buildFeishuElicitationFormCommand）。
+    let command = if raw_command.contains(cards::ELICITATION_FORM_VALUE_PREFIX) {
+        let token = raw_command.split_whitespace().nth(1).unwrap_or_default();
+        let answer = action["form_value"]
+            .get(cards::ELICITATION_FORM_FIELD_NAME)
+            .filter(|_| action["form_value"].is_object());
+        cards::elicitation_form_command(token, answer)
+    } else {
+        raw_command.to_owned()
+    };
+    let command = command.as_str();
     let operator = &event["operator"];
     let open_id = first_non_empty(&[
         read(&operator["operator_id"], "open_id"),
@@ -301,7 +368,6 @@ fn card_action(bot_id: &str, payload: &Value) -> Option<Inbound> {
     Some(Inbound {
         bot_id: bot_id.to_owned(),
         text: command.to_owned(),
-        has_attachment: false,
         actor: Actor {
             provider: provider_of(payload),
             bot_id: bot_id.to_owned(),
@@ -309,8 +375,9 @@ fn card_action(bot_id: &str, payload: &Value) -> Option<Inbound> {
             chat_id: (kind == "group" && !chat_id.is_empty()).then(|| chat_id.to_owned()),
             chat_type: kind,
             provider_message_id: (!message_id.is_empty()).then(|| message_id.to_owned()),
-            display_name: None,
+            ..Actor::default()
         },
+        ..Inbound::default()
     })
 }
 

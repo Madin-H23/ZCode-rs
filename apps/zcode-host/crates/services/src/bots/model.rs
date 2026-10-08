@@ -21,7 +21,7 @@ const REPLY_GRANULARITIES: [&str; 4] = [
     "streaming_card",
 ];
 /// `DEFAULT_BOT_COMMANDS` 的键序。
-const DEFAULT_COMMANDS: [&str; 7] = [
+pub(crate) const DEFAULT_COMMANDS: [&str; 7] = [
     "status",
     "new",
     "workspace",
@@ -911,7 +911,7 @@ fn decode_component(text: &str) -> String {
 }
 
 /// `decodeCustomModelValue`。
-fn decode_custom_model(value: &str) -> Option<(String, Option<String>)> {
+pub(crate) fn decode_custom_model(value: &str) -> Option<(String, Option<String>)> {
     let body = value.strip_prefix("custom:")?;
     let Some(separator) = body.find(':') else {
         return Some((decode_component(body), None));

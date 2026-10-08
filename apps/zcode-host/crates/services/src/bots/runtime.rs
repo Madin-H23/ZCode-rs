@@ -14,8 +14,9 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use zcode_host_kit::log;
 
+use super::feishu::callback_payload;
+use super::feishu::cards;
 use super::feishu::ws::{Connection, ConnectionState, EventHandler};
-use super::feishu::{callback_payload, interactive_card};
 use super::model::is_feishu;
 use super::runtime_lock;
 use super::service::{Bots, guard, text};
@@ -62,21 +63,18 @@ async fn wait(duration: Duration, stop: &mut watch::Receiver<bool>) -> bool {
 }
 
 impl Bots {
-    /// `scheduleRefresh`：后台对齐长连接，失败只记日志。
-    pub fn schedule_refresh(self: &Arc<Self>) {
-        if !self.background {
-            return;
-        }
+    /// `scheduleRefresh`（飞书）：后台对齐长连接，失败只记日志。
+    pub(crate) fn schedule_feishu_refresh(self: &Arc<Self>) {
         let bots = self.clone();
         tokio::spawn(async move {
-            if let Err(error) = bots.refresh().await {
+            if let Err(error) = bots.refresh_feishu().await {
                 log::warn(format!("refresh Feishu WebSocket failed: {error:#}"));
             }
         });
     }
 
     /// 串行对齐；只有最新一次刷新会走完（`createLatestRuntimeRefreshQueue`）。
-    pub async fn refresh(self: &Arc<Self>) -> anyhow::Result<()> {
+    pub async fn refresh_feishu(self: &Arc<Self>) -> anyhow::Result<()> {
         let generation = self.runtimes.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let _turn = self.runtimes.queue.lock().await;
         let is_latest = || self.runtimes.generation.load(Ordering::SeqCst) == generation;
@@ -193,7 +191,7 @@ impl Bots {
     }
 
     /// 停止全部长连接（Host 退出）。
-    pub async fn dispose(&self) {
+    pub(crate) async fn dispose_feishu(&self) {
         self.runtimes.generation.fetch_add(1, Ordering::SeqCst);
         let entries: Vec<Entry> = guard(&self.runtimes.entries)
             .drain()
@@ -239,8 +237,11 @@ impl Bots {
                         if result["ok"] != true {
                             anyhow::bail!("Feishu callback failed");
                         }
-                        Ok(result["replies"][0]["text"].as_str().map(
-                            |text| json!({"card": {"type": "raw", "data": interactive_card(text)}}),
+                        // 飞书点击后的同步回包才是客户端可靠采用的卡片状态：用业务层推进完成的完整
+                        // 出站消息（含选项与问答状态）生成卡片。
+                        let reply = &result["replies"][0];
+                        Ok(reply.is_object().then(
+                            || json!({"card": {"type": "raw", "data": cards::for_message(reply)}}),
                         ))
                     }
                     other => Ok(Some(json!(format!("no {other} event handle")))),
@@ -336,7 +337,7 @@ impl Bots {
         let status = self.clone();
         let provider_value = json!(provider);
         connection
-            .run(&self.api, handler, stop.clone(), move |state| {
+            .run(&self.providers.feishu, handler, stop.clone(), move |state| {
                 let (message, message_id) = match state {
                     ConnectionState::Connected => (
                         "Feishu WebSocket is running.",
