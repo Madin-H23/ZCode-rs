@@ -91,11 +91,33 @@ impl Host {
     async fn init(&mut self) {
         self.send(json!({"type": "init-local", "databaseStartupId": "startup-1", "zcodeBuiltinProviderConfigFilePath": "/x"}))
             .await;
-        let state = self.recv().await;
-        assert_eq!(state["type"], "database-startup-state");
-        assert_eq!(state["state"]["phase"], "ready");
-        assert_eq!(state["state"]["startupId"], "startup-1");
-        assert_eq!(state["state"]["schemaVersion"], 1);
+        // starting → preparing_host_storage（tasks-index 迁移，带 databasePhase）→ starting_services → ready
+        let mut phases = Vec::new();
+        let mut last_sequence = None;
+        loop {
+            let state = self.recv().await;
+            assert_eq!(state["type"], "database-startup-state");
+            assert_eq!(state["state"]["startupId"], "startup-1");
+            assert_eq!(state["state"]["schemaVersion"], 1);
+            let sequence = state["state"]["sequence"].as_u64().unwrap();
+            assert!(last_sequence.is_none_or(|last| sequence > last));
+            last_sequence = Some(sequence);
+            let phase = state["state"]["phase"].as_str().unwrap().to_owned();
+            if phase == "preparing_host_storage" {
+                assert!(state["state"]["databasePhase"].is_string());
+            }
+            phases.push(phase.clone());
+            if phase == "ready" || phase == "failed" {
+                break;
+            }
+        }
+        assert_eq!(phases.first().map(String::as_str), Some("starting"));
+        assert!(phases.iter().any(|phase| phase == "preparing_host_storage"));
+        assert_eq!(
+            &phases[phases.len() - 2..],
+            ["starting_services", "ready"],
+            "phases: {phases:?}"
+        );
     }
 
     async fn issue(&mut self) -> (String, String) {

@@ -6,7 +6,7 @@
 pub mod attachments;
 mod server;
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use zcode_host_control::{
     AttachmentEndpointResult, AttachmentScope, ClientMode, ControlRouter, DatabaseStartupState,
-    False, HostToMain, MainToHost, True,
+    False, HostToMain, InitLocal, MainToHost, True,
 };
 use zcode_host_kit::{CallContext, ChannelRegistry, contract, log};
 use zcode_host_services::{HostEnvironment, Installed, ServiceContext};
@@ -50,6 +50,54 @@ struct Inner {
     registry: watch::Sender<Option<Arc<ChannelRegistry>>>,
     router: Mutex<ControlRouter>,
     installed: Mutex<Option<Arc<Installed>>>,
+    initializing: AtomicBool,
+}
+
+/// 把启动进度作为 `DatabaseStartupState` 发给 Main；同一次启动的 sequence 严格递增。
+struct StartupReporter {
+    control: Arc<dyn ControlSink>,
+    startup_id: String,
+    attempt_id: String,
+    started_at: u64,
+    sequence: AtomicU64,
+}
+
+impl StartupReporter {
+    fn new(control: Arc<dyn ControlSink>, startup_id: String) -> Self {
+        Self {
+            control,
+            startup_id,
+            attempt_id: random_hex(16),
+            started_at: now_ms(),
+            sequence: AtomicU64::new(0),
+        }
+    }
+
+    fn state(&self, phase: &'static str) -> DatabaseStartupState {
+        DatabaseStartupState::new(
+            self.startup_id.clone(),
+            self.attempt_id.clone(),
+            self.sequence.fetch_add(1, Ordering::SeqCst),
+            self.started_at,
+            now_ms(),
+            phase,
+        )
+    }
+
+    fn send(&self, phase: &'static str, database_phase: Option<&'static str>) {
+        let mut state = self.state(phase);
+        state.database_phase = database_phase;
+        self.control
+            .send(HostToMain::DatabaseStartupState { state });
+    }
+
+    fn fail(&self, failed_phase: &'static str, error_code: &'static str) {
+        let mut state = self.state("failed");
+        state.failed_phase = Some(failed_phase);
+        state.error_code = Some(error_code);
+        self.control
+            .send(HostToMain::DatabaseStartupState { state });
+    }
 }
 
 impl HostCore {
@@ -63,6 +111,7 @@ impl HostCore {
                 registry,
                 router: Mutex::new(ControlRouter::default()),
                 installed: Mutex::new(None),
+                initializing: AtomicBool::new(false),
             }),
         }
     }
@@ -70,36 +119,12 @@ impl HostCore {
     pub fn on_control(&self, message: MainToHost) -> ControlOutcome {
         match message {
             MainToHost::InitLocal(init) => {
-                if self.inner.registry.borrow().is_some() {
+                if self.inner.initializing.swap(true, Ordering::SeqCst) {
                     log::warn("duplicate init-local ignored");
                     return ControlOutcome::Continue;
                 }
-                let startup_id = init
-                    .database_startup_id
-                    .clone()
-                    .filter(|id| !id.trim().is_empty())
-                    .unwrap_or_else(|| "rust-host".to_owned());
-                let context = Arc::new(ServiceContext {
-                    environment: self.inner.config.environment.clone(),
-                    init,
-                    control: self.inner.control.clone(),
-                });
-                let mut registry = ChannelRegistry::from_contract(contract::embedded());
-                let mut router = ControlRouter::default();
-                let installed = zcode_host_services::install(context, &mut registry, &mut router);
-                *self.lock_router() = router;
-                *self
-                    .inner
-                    .installed
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(installed));
-                // tasks-index 等数据库的准备随对应 repo 实现；目前没有阻塞启动的迁移。
-                let state = DatabaseStartupState::ready(startup_id, random_hex(16), now_ms());
-                self.inner
-                    .control
-                    .send(HostToMain::DatabaseStartupState { state });
-                self.inner.registry.send_replace(Some(Arc::new(registry)));
-                log::info("init-local received; services installed");
+                let core = self.clone();
+                tokio::spawn(async move { core.initialize(init).await });
             }
             MainToHost::IssueAttachmentEndpoint(request) => {
                 let result = self.issue_endpoint(AttachmentMeta {
@@ -149,6 +174,51 @@ impl HostCore {
         if let Some(installed) = installed {
             installed.shutdown().await;
         }
+    }
+
+    /// InitLocal 之后的启动顺序（docs/specs/rust-host-r2.md §5.1）：
+    /// starting → preparing_host_storage（tasks-index 迁移）→ starting_services → ready。
+    /// 迁移失败报 failed 并停在这里：已建立的 attachment 继续挂起，Renderer 显示启动失败页。
+    async fn initialize(&self, init: InitLocal) {
+        let startup_id = init
+            .database_startup_id
+            .clone()
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or_else(|| "rust-host".to_owned());
+        let reporter = Arc::new(StartupReporter::new(self.inner.control.clone(), startup_id));
+        reporter.send("starting", None);
+        let progress = reporter.clone();
+        let storage = match zcode_host_services::prepare_storage(
+            &self.inner.config.environment,
+            move |database_phase| progress.send("preparing_host_storage", database_phase),
+        )
+        .await
+        {
+            Ok(storage) => storage,
+            Err(error) => {
+                reporter.fail("preparing_host_storage", error.code().as_str());
+                log::error(format!("tasks-index startup failed: {error:#}"));
+                return;
+            }
+        };
+        reporter.send("starting_services", None);
+        let context = Arc::new(ServiceContext {
+            environment: self.inner.config.environment.clone(),
+            init,
+            control: self.inner.control.clone(),
+        });
+        let mut registry = ChannelRegistry::from_contract(contract::embedded());
+        let mut router = ControlRouter::default();
+        let installed = zcode_host_services::install(context, storage, &mut registry, &mut router);
+        *self.lock_router() = router;
+        *self
+            .inner
+            .installed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(installed));
+        reporter.send("ready", None);
+        self.inner.registry.send_replace(Some(Arc::new(registry)));
+        log::info("init-local received; services installed");
     }
 
     fn lock_router(&self) -> std::sync::MutexGuard<'_, ControlRouter> {

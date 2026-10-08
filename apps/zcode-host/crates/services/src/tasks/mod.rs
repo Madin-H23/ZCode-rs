@@ -7,6 +7,7 @@ pub mod controller;
 pub mod meta;
 pub mod repo;
 pub mod service;
+mod sqlite;
 pub mod syncer;
 
 use std::sync::Arc;

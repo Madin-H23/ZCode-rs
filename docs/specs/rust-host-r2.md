@@ -162,7 +162,53 @@ UI                      Scope                         AgentRuntime / CLI
   - 终端在 workspace 里执行命令；
   - Review 面板列出 git 未暂存改动。
 
-## 7. 剩余工作（本阶段内）
+## 7. tasks-index repo
+
+模块：`apps/zcode-host/crates/services/src/tasks_index/`（`TasksIndex`）。移植自 `packages/services/src/session/taskIndexRepo.ts` 与 `tasksDatabase/`，只覆盖侧栏需要的部分：启动迁移与修复、列表读取、snapshot 合并、agent 补丁、unread、右键菜单操作。分组管理、搜索、归档清理、automation 与闲时任务的业务读写不在本节。
+
+### 7.1 兼容规则
+
+文件 `{dataBaseDir}/.zcode/v2/tasks-index.sqlite` 与 Node Host、其他窗口的 Host 共用，Rust 必须是完全兼容的写者：
+
+1. **账本**：`tasks_schema_migration(id, checksum, time_applied)`，迁移 `0001_adopt_task_schema`、`0002_provider_selection`、`0003_official_glm_selection`。checksum 是 `sha256(JSON.stringify(checksumInput))`，Rust 不另算，取自 TS 生成的 fixture。已应用的 checksum 不一致时以 `Task database migration checksum mismatch: <id>` 失败（`checksum_mismatch`），不修改账本。
+2. **schema**：Rust 执行的 DDL 与 TS 逐字节相同，新库的 `sqlite_master`（type、name、tbl_name、sql）与 TS 准备的库一致；旧库补列、重复闲时绑定时不建唯一索引的规则相同。
+3. **启动**：mkdir -p → `busy_timeout=25`、`foreign_keys=ON` → `journal_mode=WAL` → `synchronous=NORMAL` → 只读预检 → `BEGIN IMMEDIATE` → 迁移 → COMMIT。WAL、预检、BEGIN 遇 `SQLITE_BUSY` 时先报 `waiting_for_lock`，每 100 ms 重试，最长 60 min（`lock_timeout`）。之后执行 TS 启动 Worker 里的一次性修复：闲时标记回填、闲时系统分组归属、已删除 task 的分组引用清理、`awaiting_approval` 回到 `running`。业务连接 `busy_timeout=5000`、`foreign_keys=ON`、WAL、`synchronous=NORMAL`。
+4. **行语义**：`writeRecord` 的 `ON CONFLICT` 语句（含 `unread_at` 的 CASE 与 `last_unread_at` 的 MAX）原样移植；读出的 meta 与 TS `rowToMeta` 相同，包括 zod 的剥离、trim、默认值与键序，meta_json 非法时由列兜底；写入的 meta_json 按 TS 对象展开的键序序列化。
+
+### 7.2 状态所有者与事件顺序
+
+每个 `TasksIndex`（及其 clone）独占一个专用线程和一条连接，请求在该线程上按到达顺序串行执行，覆盖 TS `enqueueWrite` 的同行串行。跨句柄、跨进程靠 SQLite 写锁：每个读改写都在 `BEGIN IMMEDIATE` 内完成。
+
+```text
+async 调用方 ──job──► mpsc ──► tasks-index 线程（rusqlite）
+     ▲                              │ BEGIN IMMEDIATE：读行 → 合并 → 写回 →（分组顺序）→ COMMIT
+     └────────── oneshot 结果 ◄──────┘
+其他窗口 Host / Node Host ─────► 同一文件（WAL，写锁串行）
+
+open：checking →（waiting_for_lock）→ checking(facts) →（migrating n/total）→ committing
+      → maintaining（启动修复）→ ready；任一步失败 → failed，错误带分类码、SQLite 码、迁移 id、迁移事实
+```
+
+### 7.3 有意与 TS 不同之处
+
+| TS 行为                                                                        | Rust                                                         | 理由                                                       |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------ | ---------------------------------------------------------- |
+| seed、`syncTaskMeta`、`applyAgentPatch`、pin/归档/重命名在自动提交模式下读后写 | 全部在 `BEGIN IMMEDIATE` 内                                  | 多个 Host 交错写同一行时不丢更新；结果与串行执行的 TS 相同 |
+| 行缺失或已删除时 `updateTaskState` / `clearTaskUnreadIfMatches` 抛错           | 返回 `None`                                                  | 由调用方决定是否 seed 后重试（同 TS adapter）              |
+| 入参 meta 可以带 `undefined`                                                   | JSON 顶层 `null`（`target` 除外）按 undefined 处理           | JSON 没有 undefined；避免写出 TS 读取时整体判非法的 meta   |
+| `applyAgentPatch` 的 `status` 用 `??`，传 undefined 等于保留                   | `status: null` 清除该字段；`title`、`updatedAt` 传 null 报错 | 补丁统一为“键缺失保留、null 清除”                          |
+| 启动修复多数在自动提交模式下逐条执行                                           | 每项一个 IMMEDIATE 事务                                      | 结果相同，且原子                                           |
+
+### 7.4 验收
+
+- `pnpm exec tsx scripts/rust-host/tasks-index-fixtures.ts [--check]`：用真实 TS 实现（迁移定义、`prepareTasksIndexStorage`、`TaskIndexRepo`）在固定时钟下执行 `tasks-index-scenarios.ts`，生成 `fixtures/migrations.json`（运行时嵌入）与 `fixtures/parity.json`（测试嵌入）。`scripts/rust-host/test.mjs` 先跑 `--check`。
+- `cargo test -p zcode-host-services tasks_index`：
+  - Rust DDL 与 TS checksum 输入逐字节相同，sha256 与 fixture 一致；
+  - 5 个启动场景（新库、旧库升级、0002、0003、启动修复）的进度序列与表内容与 TS 相同；
+  - 5 组操作场景（rowToMeta、合并、unread、右键菜单、分组顺序）每一步的返回值与最终表内容与 TS 相同；
+  - 打开 TS 准备的库不重新迁移；篡改 checksum 失败；锁等待与超时；两个句柄并发打开只迁移一次，并发 unread 不撞号，并发首发的分组顺序互不相同。
+
+## 8. 剩余工作（本阶段内）
 
 1. 接入 tasks-index.sqlite 的实现，替换 zcode-task 与 syncer 当前使用的端口。
 2. 异步启动：迁移 tasks-index，然后报 `ready`。

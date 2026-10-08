@@ -22,6 +22,7 @@ pub mod store;
 pub mod support;
 pub mod system;
 pub mod tasks;
+pub mod tasks_index;
 pub mod terminal;
 #[cfg(test)]
 mod testing;
@@ -78,10 +79,46 @@ pub struct ServiceContext {
 }
 
 /// 需要在 Host 退出时清理的资源。
+/// `InitLocal` 之后、安装服务之前准备好的存储（docs/specs/rust-host-r2.md §5.1）。
+pub struct Storage {
+    tasks_index: tasks_index::TasksIndex,
+}
+
+/// 迁移并打开 tasks-index.sqlite；`progress` 报告数据库阶段（`databasePhase`）。
+pub async fn prepare_storage(
+    environment: &HostEnvironment,
+    progress: impl Fn(Option<&'static str>) + Send + Sync + 'static,
+) -> Result<Storage, tasks_index::TasksIndexError> {
+    let path = environment.app_config_dir().join("tasks-index.sqlite");
+    let tasks_index = tasks_index::TasksIndex::open(path, move |event| {
+        progress(database_phase(event.phase));
+    })
+    .await?;
+    Ok(Storage { tasks_index })
+}
+
+/// StoragePhase → `DatabaseStartupState.databasePhase`（failed 不是数据库阶段）。
+fn database_phase(phase: tasks_index::StoragePhase) -> Option<&'static str> {
+    use tasks_index::StoragePhase;
+    match phase {
+        StoragePhase::Checking => Some("checking"),
+        StoragePhase::WaitingForLock => Some("waiting_for_lock"),
+        StoragePhase::Migrating => Some("migrating"),
+        StoragePhase::Committing => Some("committing"),
+        StoragePhase::Maintaining => Some("maintaining"),
+        StoragePhase::Ready => Some("ready"),
+        StoragePhase::Failed => None,
+    }
+}
+
 pub struct Installed {
     agent: agent::AgentRuntime,
     /// 观察者只被弱引用的生命周期任务持有，必须留在这里才能存活。
     _observer: Arc<agent::sessions_index::SessionsIndexObserver>,
+    _controller: Arc<tasks::controller::Controller>,
+    _syncer: tokio::task::JoinHandle<()>,
+    /// 至少保留一个句柄，否则 tasks-index 线程与连接随之关闭。
+    _storage: Storage,
 }
 
 impl Installed {
@@ -93,6 +130,7 @@ impl Installed {
 
 pub fn install(
     context: Arc<ServiceContext>,
+    storage: Storage,
     registry: &mut ChannelRegistry,
     router: &mut ControlRouter,
 ) -> Installed {
@@ -171,6 +209,23 @@ pub fn install(
     );
     registry.implement(agent::session::service(agent.clone()));
     let observer = agent::sessions_index::SessionsIndexObserver::start(agent.clone());
+
+    // 侧栏：syncer 与 controller 必须先挂上观察者，再预热拉起 CLI，否则会错过首份快照。
+    let workspace_events = tasks::WorkspaceEvents::new();
+    let task_service = tasks::service::TaskService::new(
+        Arc::new(storage.tasks_index.clone()),
+        workspace_events.clone(),
+        agent.clone(),
+    );
+    registry.implement(tasks::service::service(task_service.clone()));
+    let syncer = tasks::syncer::start(&observer, agent.clone(), task_service.clone());
+    let controller = tasks::controller::Controller::start(
+        Arc::new(task_service),
+        observer.clone(),
+        workspace_events,
+    );
+    registry.implement(tasks::controller::service(controller.clone()));
+
     agent::session::warm_up(
         agent.clone(),
         context
@@ -187,6 +242,9 @@ pub fn install(
     Installed {
         agent,
         _observer: observer,
+        _controller: controller,
+        _syncer: syncer,
+        _storage: storage,
     }
 }
 

@@ -66,6 +66,13 @@ const definitions = [
   },
 ] as const;
 
+/**
+ * 冻结迁移定义的只读出口：scripts/rust-host/tasks-index-fixtures.ts 据此生成 Rust Host 的
+ * 账本 fixture（id、checksum 输入与 checksum），两种 Host 共享同一 tasks-index.sqlite。
+ * @public
+ */
+export const TASKS_DATABASE_MIGRATION_DEFINITIONS = definitions;
+
 export function runTasksDatabaseMigrations(
   db: DatabaseSync,
   options: {
