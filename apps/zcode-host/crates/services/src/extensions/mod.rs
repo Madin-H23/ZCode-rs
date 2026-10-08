@@ -8,6 +8,7 @@ pub mod cli_config;
 pub mod commands;
 pub mod fsx;
 pub mod json;
+pub mod mcp_sync;
 pub mod memory;
 pub mod plugin_roots;
 pub mod plugin_sync;
