@@ -29,6 +29,7 @@ import {
 } from "./pluginSyncArchive.js";
 import { normalizePluginSyncRelativePath, resolvePluginSyncPathWithin } from "./pluginSyncPath.js";
 import { checkRemoteSyncDirectoriesWriteAccess } from "../remote-sync/remoteSyncWriteAccess.js";
+import { withFileLock } from "@zcode/shared/node";
 
 interface PluginManifestInfo {
   name: string;
@@ -908,30 +909,34 @@ async function addPluginDirToUserConfig(
   enabledOverride: boolean | undefined,
 ): Promise<void> {
   const filePath = getUserZcodeConfigPath();
-  const parsed = await readJsonFileOrEmpty(filePath);
-  const plugins = isRecord(parsed.plugins) ? parsed.plugins : {};
-  const resolvedPluginPath = resolve(pluginPath);
-  const dirs = readStringArray(plugins.dirs);
-  const nextDirs = dirs.map((item) => resolve(item)).includes(resolvedPluginPath)
-    ? dirs
-    : [...dirs, resolvedPluginPath];
-  const enabledPlugins = isRecord(plugins.enabledPlugins) ? plugins.enabledPlugins : {};
-  await writeJsonFileAtomic(filePath, {
-    ...parsed,
-    plugins: {
-      ...plugins,
-      dirs: nextDirs,
-      ...(enabledOverride !== undefined
-        ? {
-            enabledPlugins: {
-              ...enabledPlugins,
-              [pluginId]: enabledOverride,
-            },
-          }
-        : Object.keys(enabledPlugins).length > 0
-          ? { enabledPlugins }
-          : {}),
-    },
+  // config.json 由 Main、CLI 与 Node / Rust Host 共同写入：读改写整体持跨进程锁，
+  // 修复前锁外读、锁外写会丢掉其他写入方同时写入的字段。
+  await withFileLock(filePath, async () => {
+    const parsed = await readJsonFileOrEmpty(filePath);
+    const plugins = isRecord(parsed.plugins) ? parsed.plugins : {};
+    const resolvedPluginPath = resolve(pluginPath);
+    const dirs = readStringArray(plugins.dirs);
+    const nextDirs = dirs.map((item) => resolve(item)).includes(resolvedPluginPath)
+      ? dirs
+      : [...dirs, resolvedPluginPath];
+    const enabledPlugins = isRecord(plugins.enabledPlugins) ? plugins.enabledPlugins : {};
+    await writeJsonFileAtomic(filePath, {
+      ...parsed,
+      plugins: {
+        ...plugins,
+        dirs: nextDirs,
+        ...(enabledOverride !== undefined
+          ? {
+              enabledPlugins: {
+                ...enabledPlugins,
+                [pluginId]: enabledOverride,
+              },
+            }
+          : Object.keys(enabledPlugins).length > 0
+            ? { enabledPlugins }
+            : {}),
+      },
+    });
   });
 }
 
