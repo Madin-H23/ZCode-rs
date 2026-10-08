@@ -26,16 +26,30 @@ print_stdout = "deny"
 
 [workspace.dependencies]
 anyhow = "1"
+base64 = "0.22"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 getrandom = "0.3"
+# 账号服务的 IANA 时区（X-Client-Timezone，同 CLI 的 net crate）。
+iana-time-zone = "0.1"
 libc = "0.2"
 notify = "8.2"
 portable-pty = "0.9"
 regex = "1"
+# Host ApiClient（账号、额度、反馈）：与 CLI 同一套 reqwest + rustls(ring)，关闭 system-proxy，
+# 代理只按设置页逐请求决定。
+reqwest = { version = "0.13", default-features = false, features = [
+  "json",
+  "stream",
+  "rustls-no-provider",
+] }
+# 凭据 AES-256-GCM 与 sha256（credentials.json 与 Node node:crypto 逐字节兼容）。
+ring = "0.17"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # 与 Node Host 共用 tasks-index.sqlite；bundled 固定 SQLite 版本，不依赖系统库。
 rusqlite = { version = "0.37", features = ["bundled"] }
 url = "2"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
 serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.28"
