@@ -20,6 +20,7 @@ pub mod extensions;
 pub mod file;
 pub mod file_watcher;
 pub mod git;
+pub mod integration;
 pub mod main_bridge;
 pub mod media_preview;
 pub mod off_peak;
@@ -264,7 +265,7 @@ pub fn install(
         storage.tasks_index.clone(),
         context.environment.app_config_dir(),
     );
-    account.register_coding_plan(registry, &providers);
+    let coding_plan = account.register_coding_plan(registry, &providers);
     account.register_provider_writes(registry, &providers, &agent);
     account.register_feedback(registry, &context, bridge.clone(), router);
     registry.implement(settings_sync::service(settings_sync::SettingsSync::new(
@@ -301,7 +302,7 @@ pub fn install(
         agent::service::AgentChannel::new(agent_api.clone(), fallback),
     );
     registry.implement(agent::session::service(
-        agent::session::SessionService::new(agent_api, Some(task_service.clone())),
+        agent::session::SessionService::new(agent_api.clone(), Some(task_service.clone())),
     ));
 
     // ── automation ──（R6：automation、闲时任务、bots、conversation-share、cua-permission）
@@ -331,6 +332,7 @@ pub fn install(
             child_env: &child_env,
             settings: settings.clone(),
             agent: agent.clone(),
+            agent_api: agent_api.clone(),
             providers: providers.clone(),
             bridge: bridge.clone(),
         },
@@ -347,6 +349,14 @@ pub fn install(
             &context.environment.data_base_dir,
         ),
     );
+
+    // ── integration ──（docs/specs/rust-host-integration.md）
+    // 动态工作流门禁的唯一写入方：coding-plan-subscription 的 client config（Node
+    // `resolveDynamicWorkflowClientConfig`）。必须在预热拉起 CLI 之前登记，进程就绪前的
+    // `workspace/updateDynamicWorkflowPolicy` 与会话请求的 flag 都读它。
+    agent
+        .extensions()
+        .set_dynamic_workflow_gate(integration::dynamic_workflow_gate(coding_plan));
 
     agent::session::warm_up(
         agent.clone(),

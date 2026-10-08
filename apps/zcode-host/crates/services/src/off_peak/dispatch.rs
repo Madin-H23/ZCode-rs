@@ -14,7 +14,6 @@ use super::models::request_auth;
 use super::service::OffPeakService;
 use crate::agent::WorkspaceTarget;
 use crate::automation::Area;
-use crate::automation::dispatch::is_remote_workspace_identity;
 use crate::automation::driver::{CreateSession, ResumeSession, SendText, TerminalOutcome, uuid_v7};
 use crate::tasks_index::off_peak_repo::TerminalUpdate;
 
@@ -282,7 +281,7 @@ impl OffPeakDispatcher {
                 &target,
                 &task_id,
                 SendText {
-                    input_id: trace_id,
+                    input_id: trace_id.clone(),
                     text: prompt,
                     model_selection: Some(request.model_selection.clone()),
                     model_execution: Some(json!({
@@ -303,6 +302,19 @@ impl OffPeakDispatcher {
         if let Err(error) = sent {
             self.lock().remove(&key);
             return Err(transient(error.message));
+        }
+        // 只有 init 实际新建；绑定首跑与跨票续跑是原会话的后续输入（hostSessionCreateTelemetry）。
+        if kind == "init" {
+            crate::integration::report_session_create(
+                &self.area.bridge,
+                &self.area.context.environment.vars,
+                crate::integration::SessionCreate {
+                    session_id: &task_id,
+                    message_id: &trace_id,
+                    source: crate::integration::CreateSource::AutomationIdle,
+                    workspace_identity: target.workspace_identity.as_deref(),
+                },
+            );
         }
         Ok(task_id)
     }
@@ -411,19 +423,4 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as i64)
         .unwrap_or_default()
-}
-
-/// `isOffPeakToolSupported`：本地 workspace 才注册 Off-Peak 工具面。
-pub fn tool_supported(target: &WorkspaceTarget) -> bool {
-    if target
-        .remote_session_id
-        .as_deref()
-        .is_some_and(|id| !id.is_empty())
-    {
-        return false;
-    }
-    target
-        .workspace_identity
-        .as_deref()
-        .is_none_or(|identity| identity.is_empty() || !is_remote_workspace_identity(identity))
 }

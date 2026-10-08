@@ -178,6 +178,9 @@ impl TaskLifecycle {
                 if let Some(servers) = &mcp_servers {
                     payload.insert("mcpServers".into(), servers.clone());
                 }
+                // V4 createSession 绕过 legacy 参数构造：工具面参数在信封处同源注入
+                // （buildConversationCommandEnvelope；docs/specs/rust-host-integration.md §2.4）。
+                payload.extend(runtime.extensions().session_tool_flags(&target).await);
                 let ack = send_command(
                     runtime,
                     &target,
@@ -231,6 +234,7 @@ impl TaskLifecycle {
                 if let Some(servers) = &mcp_servers {
                     create.insert("mcpServers".into(), servers.clone());
                 }
+                create.extend(runtime.extensions().session_tool_flags(&target).await);
                 calls::request(runtime, &target, "session/create", Value::Object(create)).await?
             }
         };

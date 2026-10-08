@@ -1,0 +1,951 @@
+{
+  "source": "scripts/rust-host/zod-flatten-fixtures.ts",
+  "cases": [
+    {
+      "schema": "offPeakCreate",
+      "undefined": true,
+      "expected": {
+        "flatten": {
+          "formErrors": ["Invalid input: expected object, received undefined"],
+          "fieldErrors": {}
+        }
+      }
+    },
+    {
+      "schema": "offPeakCreate",
+      "input": [],
+      "expected": {
+        "flatten": {
+          "formErrors": ["Invalid input: expected object, received array"],
+          "fieldErrors": {}
+        }
+      }
+    },
+    {
+      "schema": "offPeakCreate",
+      "input": "x",
+      "expected": {
+        "flatten": {
+          "formErrors": ["Invalid input: expected object, received string"],
+          "fieldErrors": {}
+        }
+      }
+    },
+    {
+      "schema": "offPeakCreate",
+      "input": {},
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "title": ["Invalid input: expected string, received undefined"],
+            "prompt": ["Invalid input: expected string, received undefined"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "offPeakCreate",
+      "input": {
+        "title": " t ",
+        "prompt": "p"
+      },
+      "expected": {
+        "ok": {
+          "title": "t",
+          "prompt": "p"
+        }
+      }
+    },
+    {
+      "schema": "offPeakCreate",
+      "input": {
+        "title": "t",
+        "prompt": "p",
+        "permissionMode": "plan",
+        "model": " GLM ",
+        "thoughtLevel": "high",
+        "boundSessionId": "s"
+      },
+      "expected": {
+        "ok": {
+          "title": "t",
+          "prompt": "p",
+          "permissionMode": "plan",
+          "model": "GLM",
+          "thoughtLevel": "high",
+          "boundSessionId": "s"
+        }
+      }
+    },
+    {
+      "schema": "offPeakCreate",
+      "input": {
+        "title": " ",
+        "prompt": 1,
+        "permissionMode": "auto",
+        "extra": 1,
+        "z": 2
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": ["Unrecognized keys: \"extra\", \"z\""],
+          "fieldErrors": {
+            "title": ["Too small: expected string to have >=1 characters"],
+            "prompt": ["Invalid input: expected string, received number"],
+            "permissionMode": [
+              "Invalid option: expected one of \"build\"|\"edit\"|\"plan\"|\"yolo\""
+            ]
+          }
+        }
+      }
+    },
+    {
+      "schema": "offPeakCreate",
+      "input": {
+        "title": "t",
+        "prompt": "p",
+        "model": "",
+        "thoughtLevel": null,
+        "boundSessionId": 3
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "model": ["Too small: expected string to have >=1 characters"],
+            "thoughtLevel": ["Invalid input: expected string, received null"],
+            "boundSessionId": ["Invalid input: expected string, received number"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "offPeakCreate",
+      "input": {
+        "title": "t",
+        "prompt": "p",
+        "extra": true
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": ["Unrecognized key: \"extra\""],
+          "fieldErrors": {}
+        }
+      }
+    },
+    {
+      "schema": "offPeakList",
+      "undefined": true,
+      "expected": {
+        "ok": {}
+      }
+    },
+    {
+      "schema": "offPeakList",
+      "input": {},
+      "expected": {
+        "ok": {}
+      }
+    },
+    {
+      "schema": "offPeakList",
+      "input": {
+        "a": 1
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": ["Unrecognized key: \"a\""],
+          "fieldErrors": {}
+        }
+      }
+    },
+    {
+      "schema": "offPeakList",
+      "input": [],
+      "expected": {
+        "flatten": {
+          "formErrors": ["Invalid input: expected object, received array"],
+          "fieldErrors": {}
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "undefined": true,
+      "expected": {
+        "flatten": {
+          "formErrors": ["Invalid input: expected object, received undefined"],
+          "fieldErrors": {}
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": " 0 9 * * * ",
+        "prompt": "hi"
+      },
+      "expected": {
+        "ok": {
+          "cronExpr": "0 9 * * *",
+          "prompt": "hi"
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "title": "",
+        "cronExpr": "x",
+        "prompt": "p",
+        "relativeDelayMinutes": 5,
+        "modelSelection": {
+          "providerId": " p ",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": " high "
+          }
+        },
+        "mode": "plan",
+        "targetTaskId": "t",
+        "botDeliveryTarget": {
+          "provider": "feishu",
+          "botId": " b ",
+          "providerUserId": "u",
+          "chatType": "group"
+        },
+        "recurring": false,
+        "maxRuns": 3
+      },
+      "expected": {
+        "ok": {
+          "title": "",
+          "cronExpr": "x",
+          "relativeDelayMinutes": 5,
+          "prompt": "p",
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "mode": "plan",
+          "targetTaskId": "t",
+          "botDeliveryTarget": {
+            "provider": "feishu",
+            "botId": "b",
+            "providerUserId": "u",
+            "chatType": "group"
+          },
+          "recurring": false,
+          "maxRuns": 3
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "interval": 3,
+        "recurring": true
+      },
+      "expected": {
+        "ok": {
+          "cronExpr": "x",
+          "prompt": "p",
+          "recurring": true,
+          "intervalUnit": "daily",
+          "interval": 3
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "relativeDelayMinutes": 1.5,
+        "maxRuns": 0,
+        "interval": 300,
+        "mode": "x",
+        "modelSelection": {
+          "providerId": "",
+          "modelId": 1,
+          "options": {
+            "x": 1
+          }
+        }
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "relativeDelayMinutes": ["Invalid input: expected int, received number"],
+            "modelSelection": [
+              "Too small: expected string to have >=1 characters",
+              "Invalid input: expected string, received number",
+              "Unrecognized key: \"x\""
+            ],
+            "mode": [
+              "Invalid option: expected one of \"yolo\"|\"plan\"|\"edit\"|\"auto\"|\"autoEdit\"|\"build\""
+            ],
+            "maxRuns": ["Too small: expected number to be >0"],
+            "interval": ["Too big: expected number to be <=200"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "recurring": false,
+        "maxRuns": 2
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "interval": ["intervalUnit and interval must be set together"],
+            "recurring": [
+              "intervalUnit is a recurring carrier and cannot combine with recurring=false"
+            ],
+            "maxRuns": ["intervalUnit is a recurring carrier and cannot combine with maxRuns"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "recurring": false
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "cronExpr": ["Too small: expected string to have >=1 characters"],
+            "interval": ["intervalUnit and interval must be set together"],
+            "recurring": [
+              "intervalUnit is a recurring carrier and cannot combine with recurring=false"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "title": 1
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "title": ["Invalid input: expected string, received number"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "extra": 1
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": ["Unrecognized key: \"extra\""],
+          "fieldErrors": {
+            "interval": ["intervalUnit and interval must be set together"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "mode": "zz"
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "mode": [
+              "Invalid option: expected one of \"yolo\"|\"plan\"|\"edit\"|\"auto\"|\"autoEdit\"|\"build\""
+            ]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "maxRuns": 1.5,
+        "recurring": true
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "maxRuns": ["Invalid input: expected int, received number"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "relativeDelayMinutes": 999999
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "relativeDelayMinutes": ["Too big: expected number to be <=525600"],
+            "interval": ["intervalUnit and interval must be set together"],
+            "intervalUnit": ["intervalUnit cannot combine with a relative delayMinutes"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "relativeDelayMinutes": -3
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "relativeDelayMinutes": ["Too small: expected number to be >0"],
+            "interval": ["intervalUnit and interval must be set together"],
+            "intervalUnit": ["intervalUnit cannot combine with a relative delayMinutes"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "relativeDelayMinutes": "x"
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "relativeDelayMinutes": ["Invalid input: expected number, received string"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "modelSelection": {
+          "providerId": "",
+          "modelId": "m"
+        }
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "modelSelection": ["Too small: expected string to have >=1 characters"],
+            "interval": ["intervalUnit and interval must be set together"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "modelSelection": {
+          "providerId": 1,
+          "modelId": "m"
+        }
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "modelSelection": ["Invalid input: expected string, received number"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m",
+          "x": 1
+        }
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "modelSelection": ["Unrecognized key: \"x\""],
+            "interval": ["intervalUnit and interval must be set together"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "bogus"
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "intervalUnit": [
+              "Invalid option: expected one of \"minute\"|\"hourly\"|\"daily\"|\"weekly\"|\"monthly\"|\"yearly\""
+            ]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "interval": "3"
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "interval": ["Invalid input: expected number, received string"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "interval": 0
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "interval": ["Too small: expected number to be >=1"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "interval": 2.5
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "interval": ["Invalid input: expected int, received number"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "intervalUnit": "daily",
+        "maxRuns": null
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "maxRuns": ["Invalid input: expected number, received null"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": 5,
+        "prompt": "p",
+        "extra": 1,
+        "intervalUnit": "daily"
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": ["Unrecognized key: \"extra\""],
+          "fieldErrors": {
+            "cronExpr": ["Invalid input: expected string, received number"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "modelSelection": "s",
+        "botDeliveryTarget": {
+          "provider": "feishu",
+          "botId": " ",
+          "providerUserId": "u",
+          "chatType": "group",
+          "z": 1
+        }
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "modelSelection": ["Invalid input: expected object, received string"],
+            "botDeliveryTarget": [
+              "Too small: expected string to have >=1 characters",
+              "Unrecognized key: \"z\""
+            ]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "botDeliveryTarget": {
+          "provider": "x"
+        }
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "botDeliveryTarget": [
+              "Invalid option: expected one of \"feishu\"|\"lark\"|\"weixin\"",
+              "Invalid input: expected string, received undefined",
+              "Invalid input: expected string, received undefined",
+              "Invalid option: expected one of \"private\"|\"group\""
+            ]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationCreate",
+      "input": {
+        "cronExpr": "x",
+        "prompt": "p",
+        "relativeDelayMinutes": 2,
+        "intervalUnit": "daily",
+        "interval": 4
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "intervalUnit": ["intervalUnit cannot combine with a relative delayMinutes"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationUpdate",
+      "input": {
+        "automationId": "a"
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": ["automation update requires at least one field"],
+          "fieldErrors": {}
+        }
+      }
+    },
+    {
+      "schema": "automationUpdate",
+      "input": {
+        "automationId": " a ",
+        "title": " t "
+      },
+      "expected": {
+        "ok": {
+          "automationId": "a",
+          "title": "t"
+        }
+      }
+    },
+    {
+      "schema": "automationUpdate",
+      "input": {
+        "automationId": "a",
+        "maxRuns": null
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "maxRuns": ["clearing maxRuns requires recurring=true"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationUpdate",
+      "input": {
+        "automationId": "a",
+        "maxRuns": null,
+        "recurring": true
+      },
+      "expected": {
+        "ok": {
+          "automationId": "a",
+          "recurring": true,
+          "maxRuns": null
+        }
+      }
+    },
+    {
+      "schema": "automationUpdate",
+      "input": {
+        "automationId": "a",
+        "maxRuns": 3,
+        "recurring": true
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "maxRuns": ["recurring=true cannot be combined with a numeric maxRuns"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationUpdate",
+      "input": {
+        "automationId": "a",
+        "maxRuns": -1,
+        "relativeDelayMinutes": 2
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": ["Unrecognized key: \"relativeDelayMinutes\""],
+          "fieldErrors": {
+            "maxRuns": ["Too small: expected number to be >0"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationUpdate",
+      "input": {
+        "automationId": " ",
+        "maxRuns": null,
+        "recurring": "y"
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "automationId": ["Too small: expected string to have >=1 characters"],
+            "recurring": ["Invalid input: expected boolean, received string"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationUpdate",
+      "input": {
+        "maxRuns": 2,
+        "recurring": true
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "automationId": ["Invalid input: expected string, received undefined"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationUpdate",
+      "input": {
+        "automationId": "a",
+        "intervalUnit": "weekly",
+        "interval": 2,
+        "maxRuns": 4
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "maxRuns": [
+              "intervalUnit is a recurring carrier and only allows maxRuns=null with recurring=true"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationUpdate",
+      "input": {
+        "automationId": "a",
+        "intervalUnit": "weekly",
+        "interval": 2,
+        "maxRuns": null,
+        "recurring": true
+      },
+      "expected": {
+        "ok": {
+          "automationId": "a",
+          "recurring": true,
+          "maxRuns": null,
+          "intervalUnit": "weekly",
+          "interval": 2
+        }
+      }
+    },
+    {
+      "schema": "automationUpdate",
+      "input": {
+        "automationId": "a",
+        "intervalUnit": "weekly",
+        "recurring": false
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "interval": ["intervalUnit and interval must be set together"],
+            "recurring": [
+              "intervalUnit is a recurring carrier and cannot combine with recurring=false"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationList",
+      "undefined": true,
+      "expected": {
+        "ok": {}
+      }
+    },
+    {
+      "schema": "automationList",
+      "input": {
+        "x": 1,
+        "y": 2
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": ["Unrecognized keys: \"x\", \"y\""],
+          "fieldErrors": {}
+        }
+      }
+    },
+    {
+      "schema": "automationCheckTaskBinding",
+      "input": {
+        "targetTaskId": " t "
+      },
+      "expected": {
+        "ok": {
+          "targetTaskId": "t"
+        }
+      }
+    },
+    {
+      "schema": "automationCheckTaskBinding",
+      "input": {
+        "targetTaskId": ""
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "targetTaskId": ["Too small: expected string to have >=1 characters"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationDelete",
+      "input": {
+        "automationId": 1
+      },
+      "expected": {
+        "flatten": {
+          "formErrors": [],
+          "fieldErrors": {
+            "automationId": ["Invalid input: expected string, received number"]
+          }
+        }
+      }
+    },
+    {
+      "schema": "automationDelete",
+      "undefined": true,
+      "expected": {
+        "flatten": {
+          "formErrors": ["Invalid input: expected object, received undefined"],
+          "fieldErrors": {}
+        }
+      }
+    }
+  ]
+}

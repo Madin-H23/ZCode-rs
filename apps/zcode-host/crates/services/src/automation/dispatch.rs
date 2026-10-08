@@ -379,6 +379,19 @@ impl Dispatcher {
             )
             .await
             .map_err(error)?;
+        // 绑定会话（targetTaskId）只是原会话的后续输入，不计 session_create（hostSessionCreateTelemetry）。
+        if request.target_task_id.is_none() {
+            crate::integration::report_session_create(
+                &self.area.bridge,
+                &self.area.context.environment.vars,
+                crate::integration::SessionCreate {
+                    session_id: &task_id,
+                    message_id: &run.run_id,
+                    source: crate::integration::CreateSource::AutomationScheduled,
+                    workspace_identity: request.workspace_identity.as_deref(),
+                },
+            );
+        }
         Ok(task_id)
     }
 

@@ -1,8 +1,9 @@
 //! 多个 service 共用的系统侧工具：子进程基础环境、Node `path` 语义、Node 风格的错误文案、
-//! `localeCompare` 近似排序和进程信号。
+//! `localeCompare` 近似排序、进程信号和反向请求参数的 zod 校验子集。
 pub mod collate;
 pub mod env;
 pub mod http;
 pub mod node_error;
 pub mod path;
 pub mod signal;
+pub mod zod;

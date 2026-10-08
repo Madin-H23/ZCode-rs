@@ -215,6 +215,7 @@ pub async fn resume_session(
     if let Some(servers) = mcp_servers {
         params.insert("mcpServers".into(), servers.clone());
     }
+    params.extend(runtime.extensions().session_tool_flags(target).await);
     request(runtime, target, "session/resume", Value::Object(params)).await
 }
 
