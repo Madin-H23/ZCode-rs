@@ -28,13 +28,26 @@ const REPLY_OPTIONS: [(&str, &str, &str, &[&str]); 4] = [
         "assistant_changes",
         "标准回复",
         "Standard reply",
-        &["assistant", "assistant_changes", "normal", "default", "standard", "标准回复"],
+        &[
+            "assistant",
+            "assistant_changes",
+            "normal",
+            "default",
+            "standard",
+            "标准回复",
+        ],
     ),
     (
         "assistant_toolcalls_changes",
         "完整回复",
         "Full reply",
-        &["full", "tool", "toolcalls", "assistant_toolcalls_changes", "完整回复"],
+        &[
+            "full",
+            "tool",
+            "toolcalls",
+            "assistant_toolcalls_changes",
+            "完整回复",
+        ],
     ),
     (
         "summary_changes",
@@ -88,8 +101,13 @@ pub fn parse_int(value: &str) -> Option<i64> {
         Some(rest) => (-1, rest),
         None => (1, trimmed.strip_prefix('+').unwrap_or(trimmed)),
     };
-    let end = digits.find(|c: char| !c.is_ascii_digit()).unwrap_or(digits.len());
-    digits[..end].parse::<i64>().ok().map(|number| sign * number)
+    let end = digits
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(digits.len());
+    digits[..end]
+        .parse::<i64>()
+        .ok()
+        .map(|number| sign * number)
 }
 
 /// `Number.parseInt(value, 10) - 1` 作为下标（权限按钮序号）。
@@ -123,7 +141,9 @@ fn resolve_reply(value: &str, locale: Option<&str>, provider: &str) -> Option<Va
                 || normalize_text(en) == normalized
         })
         .map(|(id, ..)| *id)?;
-    options.into_iter().find(|option| text(option, "id") == Some(id))
+    options
+        .into_iter()
+        .find(|option| text(option, "id") == Some(id))
 }
 
 fn reply_label(mode: Option<&str>, locale: Option<&str>, provider: &str) -> String {
@@ -166,7 +186,10 @@ pub fn parse_model_option(value: &str) -> Option<Value> {
     {
         return Some(json!({"providerId": provider, "modelId": model}));
     }
-    if let Some(index) = value.find('/').filter(|index| *index > 0 && *index < value.len() - 1) {
+    if let Some(index) = value
+        .find('/')
+        .filter(|index| *index > 0 && *index < value.len() - 1)
+    {
         return Some(json!({"providerId": &value[..index], "modelId": &value[index + 1..]}));
     }
     let trimmed = value.trim();
@@ -175,7 +198,11 @@ pub fn parse_model_option(value: &str) -> Option<Value> {
 
 /// `completeNewModelSelection`：取模型档位列表的最后一个（最高档）。
 pub fn complete_new_selection(view: &Value, identity: &Value) -> Option<Value> {
-    let model = find_model(view, text(identity, "providerId")?, text(identity, "modelId")?)?;
+    let model = find_model(
+        view,
+        text(identity, "providerId")?,
+        text(identity, "modelId")?,
+    )?;
     let level = model["config"]["optionSpecs"]["reasoningLevel"]["values"]
         .as_array()?
         .last()?
@@ -231,8 +258,7 @@ pub fn select_option<'a>(options: &'a Value, config_id: &str) -> Option<&'a Valu
         config_id
     };
     options.as_array()?.iter().find(|item| {
-        item["type"] == "select"
-            && (item["category"] == category || item["id"] == category)
+        item["type"] == "select" && (item["category"] == category || item["id"] == category)
     })
 }
 
@@ -279,7 +305,12 @@ pub fn select_options(options: &Value, config_id: &str, locale: Option<&str>) ->
         .collect()
 }
 
-fn select_label_for(options: &Value, config_id: &str, value: Option<&str>, locale: Option<&str>) -> Option<String> {
+fn select_label_for(
+    options: &Value,
+    config_id: &str,
+    value: Option<&str>,
+    locale: Option<&str>,
+) -> Option<String> {
     let value = value.filter(|value| !value.is_empty())?;
     Some(
         select_options(options, config_id, locale)
@@ -296,7 +327,11 @@ fn workspace_option_label(workspace: &Value, locale: Option<&str>) -> String {
     if text(workspace, "workspaceIdentity").is_none() {
         return label.to_owned();
     }
-    let remote = if locale == Some("en-US") { "[Remote]" } else { "[远端]" };
+    let remote = if locale == Some("en-US") {
+        "[Remote]"
+    } else {
+        "[远端]"
+    };
     format!("{label} {remote}")
 }
 
@@ -312,7 +347,11 @@ fn selection_fallback(selection: &Value, locale: Option<&str>) -> String {
                 .filter(|d| !d.is_empty())
                 .map(|d| format!(" {d}"))
                 .unwrap_or_default();
-            format!("{}. {}{description}", index + 1, text(option, "label").unwrap_or_default())
+            format!(
+                "{}. {}{description}",
+                index + 1,
+                text(option, "label").unwrap_or_default()
+            )
         })
         .collect();
     let title = text(selection, "title").unwrap_or_default();
@@ -340,7 +379,11 @@ fn mark_current(selection: &Value, locale: Option<&str>) -> Value {
     let Some(current) = text(selection, "currentId").map(str::to_owned) else {
         return marked;
     };
-    let suffix = if locale == Some("en-US") { "current" } else { "当前" };
+    let suffix = if locale == Some("en-US") {
+        "current"
+    } else {
+        "当前"
+    };
     if let Some(options) = marked["options"].as_array_mut() {
         for option in options.iter_mut() {
             if text(option, "id") == Some(current.as_str()) {
@@ -390,11 +433,18 @@ impl Bots {
     }
 
     pub(crate) fn pending_selection(&self, actor: &Actor) -> Option<Value> {
-        guard(&self.pending_selections).get(&self.actor_key(actor)).cloned()
+        guard(&self.pending_selections)
+            .get(&self.actor_key(actor))
+            .cloned()
     }
 
     /// `resolvePendingSelectionOption`：动作一致时按值解析，命中后清掉待选项。
-    pub(crate) fn resolve_pending_option(&self, actor: &Actor, action: &str, value: &str) -> Option<Value> {
+    pub(crate) fn resolve_pending_option(
+        &self,
+        actor: &Actor,
+        action: &str,
+        value: &str,
+    ) -> Option<Value> {
         let key = self.actor_key(actor);
         let selection = guard(&self.pending_selections).get(&key).cloned()?;
         if text(&selection, "action") != Some(action) {
@@ -474,7 +524,12 @@ impl Bots {
     }
 
     /// `createStatusReply`。
-    pub(crate) async fn status_reply(&self, actor: &Actor, context: &Value, locale: Option<&str>) -> Result<Vec<Value>> {
+    pub(crate) async fn status_reply(
+        &self,
+        actor: &Actor,
+        context: &Value,
+        locale: Option<&str>,
+    ) -> Result<Vec<Value>> {
         let body = self.status_text(context, locale).await?;
         Ok(vec![outbound(
             actor,
@@ -487,7 +542,11 @@ impl Bots {
     }
 
     /// `readModelSelectionView`（远端未连接时为空视图）。
-    pub(crate) async fn model_view_for(&self, context: &Value, selection: Option<&Value>) -> Option<Value> {
+    pub(crate) async fn model_view_for(
+        &self,
+        context: &Value,
+        selection: Option<&Value>,
+    ) -> Option<Value> {
         let tasks = self.tasks_for(&context_target(context)).ok()?;
         Some(
             tasks
@@ -526,7 +585,10 @@ impl Bots {
                 (None, _) => model.to_owned(),
             };
         }
-        let Some(index) = model.find('/').filter(|index| *index > 0 && *index < model.len() - 1) else {
+        let Some(index) = model
+            .find('/')
+            .filter(|index| *index > 0 && *index < model.len() - 1)
+        else {
             return model.to_owned();
         };
         let options = self.provider_options_for(context).await;
@@ -562,7 +624,10 @@ impl Bots {
     async fn draft_for_display(&self, context: &Value) -> Result<Value> {
         let original = self.ensure_draft_options(context).await?;
         let view = self
-            .model_view_for(context, original.get("modelSelection").filter(|s| !s.is_null()))
+            .model_view_for(
+                context,
+                original.get("modelSelection").filter(|s| !s.is_null()),
+            )
             .await
             .unwrap_or(Value::Null);
         let key = if original["modelSelection"].is_object() {
@@ -590,12 +655,14 @@ impl Bots {
             "preferredSelection"
         };
         let selection = &view[key];
-        let (Some(provider), Some(model)) = (text(selection, "providerId"), text(selection, "modelId")) else {
+        let (Some(provider), Some(model)) =
+            (text(selection, "providerId"), text(selection, "modelId"))
+        else {
             return json!([]);
         };
-        let Some(values) = find_model(view, provider, model)
-            .and_then(|model| model["config"]["optionSpecs"]["reasoningLevel"]["values"].as_array())
-        else {
+        let Some(values) = find_model(view, provider, model).and_then(|model| {
+            model["config"]["optionSpecs"]["reasoningLevel"]["values"].as_array()
+        }) else {
             return json!([]);
         };
         json!([{
@@ -610,26 +677,44 @@ impl Bots {
 
     // ── 命令 ──
 
-    pub(crate) async fn handle_workspace_list(self: &Arc<Self>, inbound: &Inbound, auth: Auth) -> Result<Vec<Value>> {
+    pub(crate) async fn handle_workspace_list(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        auth: Auth,
+    ) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let locale = auth.locale.as_deref();
         if self.is_active_task_running(&auth.context).await {
-            return Ok(vec![outbound(actor, msg(locale, "taskRunning", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "taskRunning", &[]),
+                OutboundExtras::default(),
+            )]);
         }
         let current = context_ref(&auth.context);
         let (bot, workspaces) = self
             .normalize_workspace_config(&auth.config, &auth.bot, current)
             .await?;
-        let visible = filter_allowed_workspaces(&workspaces, &string_list(&bot["allowedWorkspaces"]));
+        let visible =
+            filter_allowed_workspaces(&workspaces, &string_list(&bot["allowedWorkspaces"]));
         if visible.is_empty() {
             guard(&self.pending_workspaces).remove(&self.actor_key(actor));
-            return Ok(vec![outbound(actor, msg(locale, "workspaceMissing", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "workspaceMissing", &[]),
+                OutboundExtras::default(),
+            )]);
         }
         guard(&self.pending_workspaces).insert(
             self.actor_key(actor),
             visible
                 .iter()
-                .map(|workspace| (text(workspace, "id").unwrap_or_default().to_owned(), workspace.clone()))
+                .map(|workspace| {
+                    (
+                        text(workspace, "id").unwrap_or_default().to_owned(),
+                        workspace.clone(),
+                    )
+                })
                 .collect(),
         );
         let current_id = text(&auth.context, "workspaceId");
@@ -637,7 +722,11 @@ impl Bots {
             .iter()
             .find(|workspace| current_id.is_some() && text(workspace, "id") == current_id)
             .and_then(|workspace| text(workspace, "label").map(str::to_owned))
-            .unwrap_or_else(|| text(&auth.context, "workspacePath").unwrap_or_default().to_owned());
+            .unwrap_or_else(|| {
+                text(&auth.context, "workspacePath")
+                    .unwrap_or_default()
+                    .to_owned()
+            });
         let options: Vec<Value> = visible
             .iter()
             .map(|workspace| json!({"id": workspace["id"], "label": workspace_option_label(workspace, locale)}))
@@ -656,11 +745,20 @@ impl Bots {
         ))
     }
 
-    pub(crate) async fn handle_workspace_set(self: &Arc<Self>, inbound: &Inbound, auth: Auth, value: &str) -> Result<Vec<Value>> {
+    pub(crate) async fn handle_workspace_set(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        auth: Auth,
+        value: &str,
+    ) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let locale = auth.locale.as_deref();
         if self.is_active_task_running(&auth.context).await {
-            return Ok(vec![outbound(actor, msg(locale, "taskRunning", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "taskRunning", &[]),
+                OutboundExtras::default(),
+            )]);
         }
         let (bot, workspaces) = self
             .normalize_workspace_config(&auth.config, &auth.bot, context_ref(&auth.context))
@@ -670,7 +768,11 @@ impl Bots {
             resolve_workspace_by_value(&workspaces, value, &string_list(&bot["allowedWorkspaces"]))
         });
         let Some(workspace) = workspace else {
-            return Ok(vec![outbound(actor, msg(locale, "workspaceMissing", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "workspaceMissing", &[]),
+                OutboundExtras::default(),
+            )]);
         };
         let mut context = auth.context.clone();
         context["workspacePath"] = workspace["workspacePath"].clone();
@@ -701,22 +803,47 @@ impl Bots {
         let option = self.resolve_pending_option(actor, "workspace.set", value)?;
         guard(&self.pending_workspaces)
             .get(&key)
-            .and_then(|entries| entries.get(text(&option, "id").unwrap_or_default()).cloned())
+            .and_then(|entries| {
+                entries
+                    .get(text(&option, "id").unwrap_or_default())
+                    .cloned()
+            })
     }
 
-    pub(crate) async fn handle_model_list(self: &Arc<Self>, inbound: &Inbound, auth: Auth) -> Result<Vec<Value>> {
+    pub(crate) async fn handle_model_list(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        auth: Auth,
+    ) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let locale = auth.locale.as_deref();
         if self.is_active_task_running(&auth.context).await {
-            return Ok(vec![outbound(actor, msg(locale, "taskRunning", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "taskRunning", &[]),
+                OutboundExtras::default(),
+            )]);
         }
-        let missing = || vec![outbound(actor, msg(locale, "modelProviderMissing", &[]), OutboundExtras::default())];
+        let missing = || {
+            vec![outbound(
+                actor,
+                msg(locale, "modelProviderMissing", &[]),
+                OutboundExtras::default(),
+            )]
+        };
         let (current_value, label_context) = if is_draft(&auth.context) {
             let draft = self.draft_for_display(&auth.context).await?;
-            (selection_value(&draft["modelSelection"]), auth.context.clone())
+            (
+                selection_value(&draft["modelSelection"]),
+                auth.context.clone(),
+            )
         } else {
             let Some(active) = self.require_active_task(actor, &auth).await? else {
-                return Ok(vec![outbound(actor, msg(locale, "noActiveTask", &[]), OutboundExtras::default())]);
+                return Ok(vec![outbound(
+                    actor,
+                    msg(locale, "noActiveTask", &[]),
+                    OutboundExtras::default(),
+                )]);
             };
             (active.current_model(), active.context())
         };
@@ -724,8 +851,12 @@ impl Bots {
         if providers.is_empty() {
             return Ok(missing());
         }
-        let current_id = self.current_provider_id(current_value.as_deref(), &label_context).await;
-        let label = self.model_label(current_value.as_deref(), &label_context).await;
+        let current_id = self
+            .current_provider_id(current_value.as_deref(), &label_context)
+            .await;
+        let label = self
+            .model_label(current_value.as_deref(), &label_context)
+            .await;
         Ok(self.selection_reply(
             actor,
             json!({
@@ -740,11 +871,20 @@ impl Bots {
         ))
     }
 
-    pub(crate) async fn handle_model_provider_set(self: &Arc<Self>, inbound: &Inbound, auth: Auth, value: &str) -> Result<Vec<Value>> {
+    pub(crate) async fn handle_model_provider_set(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        auth: Auth,
+        value: &str,
+    ) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let locale = auth.locale.as_deref();
         if self.is_active_task_running(&auth.context).await {
-            return Ok(vec![outbound(actor, msg(locale, "taskRunning", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "taskRunning", &[]),
+                OutboundExtras::default(),
+            )]);
         }
         let (current_value, label_context, title_value) = if is_draft(&auth.context) {
             let draft = self.draft_for_display(&auth.context).await?;
@@ -752,7 +892,11 @@ impl Bots {
             (current.clone(), auth.context.clone(), current)
         } else {
             let Some(active) = self.require_active_task(actor, &auth).await? else {
-                return Ok(vec![outbound(actor, msg(locale, "noActiveTask", &[]), OutboundExtras::default())]);
+                return Ok(vec![outbound(
+                    actor,
+                    msg(locale, "noActiveTask", &[]),
+                    OutboundExtras::default(),
+                )]);
             };
             let current = active.current_model();
             (current.clone(), active.context(), current)
@@ -762,7 +906,11 @@ impl Bots {
             .resolve_pending_option(actor, "model.provider.set", value)
             .or_else(|| resolve_option(&providers, value));
         let Some(provider) = provider.filter(|provider| text(provider, "id").is_some()) else {
-            return Ok(vec![outbound(actor, msg(locale, "modelProviderMissing", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "modelProviderMissing", &[]),
+                OutboundExtras::default(),
+            )]);
         };
         let mut options: Vec<Value> = provider["models"]
             .as_array()
@@ -779,10 +927,17 @@ impl Bots {
                 .unwrap_or_default();
         }
         if options.is_empty() {
-            return Ok(vec![outbound(actor, msg(locale, "modelMissing", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "modelMissing", &[]),
+                OutboundExtras::default(),
+            )]);
         }
-        let current_id = current_value
-            .filter(|current| options.iter().any(|option| text(option, "id") == Some(current.as_str())));
+        let current_id = current_value.filter(|current| {
+            options
+                .iter()
+                .any(|option| text(option, "id") == Some(current.as_str()))
+        });
         Ok(self.selection_reply(
             actor,
             json!({
@@ -797,12 +952,27 @@ impl Bots {
         ))
     }
 
-    pub(crate) async fn handle_model_set(self: &Arc<Self>, inbound: &Inbound, auth: Auth, value: &str) -> Result<Vec<Value>> {
+    pub(crate) async fn handle_model_set(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        auth: Auth,
+        value: &str,
+    ) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let locale = auth.locale.as_deref();
-        let missing = || vec![outbound(actor, msg(locale, "modelMissing", &[]), OutboundExtras::default())];
+        let missing = || {
+            vec![outbound(
+                actor,
+                msg(locale, "modelMissing", &[]),
+                OutboundExtras::default(),
+            )]
+        };
         if self.is_active_task_running(&auth.context).await {
-            return Ok(vec![outbound(actor, msg(locale, "taskRunning", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "taskRunning", &[]),
+                OutboundExtras::default(),
+            )]);
         }
         if is_draft(&auth.context) {
             let draft = self.ensure_draft_options(&auth.context).await?;
@@ -834,7 +1004,11 @@ impl Bots {
             return self.status_reply(actor, &context, locale).await;
         }
         let Some(active) = self.require_active_task(actor, &auth).await? else {
-            return Ok(vec![outbound(actor, msg(locale, "noActiveTask", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "noActiveTask", &[]),
+                OutboundExtras::default(),
+            )]);
         };
         let all: Vec<Value> = self
             .provider_options_for(&active.context())
@@ -850,32 +1024,54 @@ impl Bots {
         };
         let next = text(&model, "id").unwrap_or_default();
         let identity = match decode_custom_model(next) {
-            Some((provider, Some(name))) if !name.is_empty() => json!({"providerId": provider, "modelId": name}),
+            Some((provider, Some(name))) if !name.is_empty() => {
+                json!({"providerId": provider, "modelId": name})
+            }
             Some(_) => return Ok(missing()),
             None => json!({"providerId": ZCODE_AGENT_PROVIDER, "modelId": next}),
         };
         let view = self.model_view_for(&active.context(), None).await;
-        let Some(selection) = view.as_ref().and_then(|view| complete_new_selection(view, &identity)) else {
+        let Some(selection) = view
+            .as_ref()
+            .and_then(|view| complete_new_selection(view, &identity))
+        else {
             return Ok(missing());
         };
-        let tasks = self.tasks_for(&context_target(&auth.context)).map_err(anyhow::Error::msg)?;
+        let tasks = self
+            .tasks_for(&context_target(&auth.context))
+            .map_err(anyhow::Error::msg)?;
         tasks
-            .set_model(context_target(&auth.context), active.task_id.clone(), selection)
+            .set_model(
+                context_target(&auth.context),
+                active.task_id.clone(),
+                selection,
+            )
             .await
             .map_err(anyhow::Error::msg)?;
         self.status_reply(actor, &auth.context, locale).await
     }
 
-    pub(crate) async fn handle_thought_list(self: &Arc<Self>, inbound: &Inbound, auth: Auth) -> Result<Vec<Value>> {
+    pub(crate) async fn handle_thought_list(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        auth: Auth,
+    ) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let locale = auth.locale.as_deref();
         if self.is_active_task_running(&auth.context).await {
-            return Ok(vec![outbound(actor, msg(locale, "taskRunning", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "taskRunning", &[]),
+                OutboundExtras::default(),
+            )]);
         }
         let (source, current, current_label) = if is_draft(&auth.context) {
             let draft = self.ensure_draft_options(&auth.context).await?;
             let view = self
-                .model_view_for(&auth.context, draft.get("modelSelection").filter(|s| s.is_object()))
+                .model_view_for(
+                    &auth.context,
+                    draft.get("modelSelection").filter(|s| s.is_object()),
+                )
                 .await
                 .unwrap_or(Value::Null);
             let source = Self::draft_config_options(&view, &draft);
@@ -884,15 +1080,28 @@ impl Bots {
             (source, current, label)
         } else {
             let Some(active) = self.require_active_task(actor, &auth).await? else {
-                return Ok(vec![outbound(actor, msg(locale, "noActiveTask", &[]), OutboundExtras::default())]);
+                return Ok(vec![outbound(
+                    actor,
+                    msg(locale, "noActiveTask", &[]),
+                    OutboundExtras::default(),
+                )]);
             };
             let current = select_current(&active.config_options, "thoughtLevel");
-            let label = select_label_for(&active.config_options, "thoughtLevel", current.as_deref(), locale);
+            let label = select_label_for(
+                &active.config_options,
+                "thoughtLevel",
+                current.as_deref(),
+                locale,
+            );
             (active.config_options, current, label)
         };
         let options = select_options(&source, "thoughtLevel", locale);
         if options.is_empty() {
-            return Ok(vec![outbound(actor, msg(locale, "thoughtLevelMissing", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "thoughtLevelMissing", &[]),
+                OutboundExtras::default(),
+            )]);
         }
         let id = select_option(&source, "thoughtLevel")
             .and_then(|option| text(option, "id"))
@@ -912,17 +1121,35 @@ impl Bots {
         ))
     }
 
-    pub(crate) async fn handle_thought_set(self: &Arc<Self>, inbound: &Inbound, auth: Auth, value: &str) -> Result<Vec<Value>> {
+    pub(crate) async fn handle_thought_set(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        auth: Auth,
+        value: &str,
+    ) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let locale = auth.locale.as_deref();
-        let missing = || vec![outbound(actor, msg(locale, "thoughtLevelMissing", &[]), OutboundExtras::default())];
+        let missing = || {
+            vec![outbound(
+                actor,
+                msg(locale, "thoughtLevelMissing", &[]),
+                OutboundExtras::default(),
+            )]
+        };
         if self.is_active_task_running(&auth.context).await {
-            return Ok(vec![outbound(actor, msg(locale, "taskRunning", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "taskRunning", &[]),
+                OutboundExtras::default(),
+            )]);
         }
         if is_draft(&auth.context) {
             let original = self.ensure_draft_options(&auth.context).await?;
             let view = self
-                .model_view_for(&auth.context, original.get("modelSelection").filter(|s| s.is_object()))
+                .model_view_for(
+                    &auth.context,
+                    original.get("modelSelection").filter(|s| s.is_object()),
+                )
                 .await
                 .unwrap_or(Value::Null);
             let source = Self::draft_config_options(&view, &original);
@@ -945,7 +1172,11 @@ impl Bots {
             let option = self
                 .resolve_pending_option(actor, "thoughtLevel.set", value)
                 .or_else(|| resolve_option(&display, value));
-            let Some(option) = option.filter(|option| display.iter().any(|candidate| candidate["id"] == option["id"])) else {
+            let Some(option) = option.filter(|option| {
+                display
+                    .iter()
+                    .any(|candidate| candidate["id"] == option["id"])
+            }) else {
                 return Ok(missing());
             };
             if draft["modelSelection"].is_object() {
@@ -955,16 +1186,25 @@ impl Bots {
             return self.status_reply(actor, &context, locale).await;
         }
         let Some(active) = self.require_active_task(actor, &auth).await? else {
-            return Ok(vec![outbound(actor, msg(locale, "noActiveTask", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "noActiveTask", &[]),
+                OutboundExtras::default(),
+            )]);
         };
         let display = select_options(&active.config_options, "thoughtLevel", locale);
         let option = self
             .resolve_pending_option(actor, "thoughtLevel.set", value)
             .or_else(|| resolve_option(&display, value));
-        let (Some(option), Some(_)) = (option, select_option(&active.config_options, "thoughtLevel").and_then(|o| text(o, "id"))) else {
+        let (Some(option), Some(_)) = (
+            option,
+            select_option(&active.config_options, "thoughtLevel").and_then(|o| text(o, "id")),
+        ) else {
             return Ok(missing());
         };
-        let tasks = self.tasks_for(&context_target(&auth.context)).map_err(anyhow::Error::msg)?;
+        let tasks = self
+            .tasks_for(&context_target(&auth.context))
+            .map_err(anyhow::Error::msg)?;
         tasks
             .set_thought_level(
                 context_target(&auth.context),
@@ -982,7 +1222,9 @@ impl Bots {
         let identity = text(context, "workspaceIdentity");
         let current = workspace_ref(path, identity);
         let current_key = workspace_key(path, identity);
-        let refs = self.workspace_refs(&json!({"currentWorkspace": current})).await;
+        let refs = self
+            .workspace_refs(&json!({"currentWorkspace": current}))
+            .await;
         let allowed = filter_allowed_workspaces(&refs, &string_list(&user["allowedWorkspaces"]));
         let candidates: Vec<Value> = allowed
             .into_iter()
@@ -991,20 +1233,31 @@ impl Bots {
                     text(workspace, "workspacePath").unwrap_or_default(),
                     text(workspace, "workspaceIdentity"),
                 );
-                key == current_key || (identity.is_none() && text(workspace, "workspacePath") == Some(path))
+                key == current_key
+                    || (identity.is_none() && text(workspace, "workspacePath") == Some(path))
             })
             .collect();
-        let workspaces = if candidates.is_empty() { vec![current] } else { candidates };
+        let workspaces = if candidates.is_empty() {
+            vec![current]
+        } else {
+            candidates
+        };
         let mut entries: Vec<(String, TaskEntry)> = Vec::new();
         for workspace in workspaces {
-            let workspace_path = text(&workspace, "workspacePath").unwrap_or_default().to_owned();
+            let workspace_path = text(&workspace, "workspacePath")
+                .unwrap_or_default()
+                .to_owned();
             let workspace_identity = text(&workspace, "workspaceIdentity").map(str::to_owned);
             let target = context_target(&workspace);
             let Ok(tasks) = self.tasks_for(&target) else {
                 continue;
             };
             for task in tasks.list(target.key()).await {
-                let key = format!("{}:{}", target.key(), text(&task, "taskId").unwrap_or_default());
+                let key = format!(
+                    "{}:{}",
+                    target.key(),
+                    text(&task, "taskId").unwrap_or_default()
+                );
                 let entry = TaskEntry {
                     task,
                     workspace_path: workspace_path.clone(),
@@ -1019,14 +1272,27 @@ impl Bots {
         entries.into_iter().map(|(_, entry)| entry).collect()
     }
 
-    pub(crate) async fn handle_task_list(self: &Arc<Self>, inbound: &Inbound, auth: Auth) -> Result<Vec<Value>> {
+    pub(crate) async fn handle_task_list(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        auth: Auth,
+    ) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let locale = auth.locale.as_deref();
         if self.is_active_task_running(&auth.context).await {
             // 运行中展示 /task 会让用户继续点选其它任务，留下误导性的待选项。
-            return Ok(vec![outbound(actor, msg(locale, "taskRunning", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "taskRunning", &[]),
+                OutboundExtras::default(),
+            )]);
         }
-        let entries: Vec<TaskEntry> = self.task_entries(&auth.context, &auth.user).await.into_iter().take(10).collect();
+        let entries: Vec<TaskEntry> = self
+            .task_entries(&auth.context, &auth.user)
+            .await
+            .into_iter()
+            .take(10)
+            .collect();
         let active_id = text(&auth.context, "activeTaskId");
         let active = entries
             .iter()
@@ -1043,13 +1309,22 @@ impl Bots {
         let key = self.actor_key(actor);
         if entries.is_empty() {
             guard(&self.pending_tasks).remove(&key);
-            return Ok(vec![outbound(actor, msg(locale, "noHistoryTasks", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "noHistoryTasks", &[]),
+                OutboundExtras::default(),
+            )]);
         }
         guard(&self.pending_tasks).insert(
             key,
             entries
                 .iter()
-                .map(|entry| (text(&entry.task, "taskId").unwrap_or_default().to_owned(), entry.clone()))
+                .map(|entry| {
+                    (
+                        text(&entry.task, "taskId").unwrap_or_default().to_owned(),
+                        entry.clone(),
+                    )
+                })
                 .collect::<HashMap<_, _>>(),
         );
         let options: Vec<Value> = entries
@@ -1073,15 +1348,26 @@ impl Bots {
     }
 
     /// `resolveTaskSelectionEntry`。
-    async fn resolve_task_entry(&self, actor: &Actor, context: &Value, user: &Value, value: &str) -> Option<TaskEntry> {
+    async fn resolve_task_entry(
+        &self,
+        actor: &Actor,
+        context: &Value,
+        user: &Value,
+        value: &str,
+    ) -> Option<TaskEntry> {
         let key = self.actor_key(actor);
-        if let Some(entry) = guard(&self.pending_tasks).get(&key).and_then(|entries| entries.get(value.trim()).cloned()) {
+        if let Some(entry) = guard(&self.pending_tasks)
+            .get(&key)
+            .and_then(|entries| entries.get(value.trim()).cloned())
+        {
             return Some(entry);
         }
         if let Some(option) = self.resolve_pending_option(actor, "task.set", value)
-            && let Some(entry) = guard(&self.pending_tasks)
-                .get(&key)
-                .and_then(|entries| entries.get(text(&option, "id").unwrap_or_default()).cloned())
+            && let Some(entry) = guard(&self.pending_tasks).get(&key).and_then(|entries| {
+                entries
+                    .get(text(&option, "id").unwrap_or_default())
+                    .cloned()
+            })
         {
             return Some(entry);
         }
@@ -1096,24 +1382,47 @@ impl Bots {
         }
         let target = context_target(context);
         let tasks = self.tasks_for(&target).ok()?;
-        let snapshot = tasks.read_session(target, value.trim().to_owned()).await.ok()?;
+        let snapshot = tasks
+            .read_session(target, value.trim().to_owned())
+            .await
+            .ok()?;
         Some(TaskEntry {
             task: crate::tasks::meta::meta_from_snapshot(&snapshot),
-            workspace_path: text(context, "workspacePath").unwrap_or_default().to_owned(),
+            workspace_path: text(context, "workspacePath")
+                .unwrap_or_default()
+                .to_owned(),
             workspace_identity: text(context, "workspaceIdentity").map(str::to_owned),
         })
     }
 
-    pub(crate) async fn handle_task_set(self: &Arc<Self>, inbound: &Inbound, auth: Auth, value: &str) -> Result<Vec<Value>> {
+    pub(crate) async fn handle_task_set(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        auth: Auth,
+        value: &str,
+    ) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let locale = auth.locale.as_deref();
-        let Some(entry) = self.resolve_task_entry(actor, &auth.context, &auth.user, value).await else {
-            return Ok(vec![outbound(actor, msg(locale, "taskMissing", &[]), OutboundExtras::default())]);
+        let Some(entry) = self
+            .resolve_task_entry(actor, &auth.context, &auth.user, value)
+            .await
+        else {
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "taskMissing", &[]),
+                OutboundExtras::default(),
+            )]);
         };
         let task_id = text(&entry.task, "taskId").unwrap_or_default().to_owned();
-        if text(&auth.context, "activeTaskId") != Some(task_id.as_str()) && self.is_active_task_running(&auth.context).await {
+        if text(&auth.context, "activeTaskId") != Some(task_id.as_str())
+            && self.is_active_task_running(&auth.context).await
+        {
             // 运行中的旧任务已经订阅了回复流：此时改写 activeTaskId 会让两个任务的输出串线。
-            return Ok(vec![outbound(actor, msg(locale, "taskRunning", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "taskRunning", &[]),
+                OutboundExtras::default(),
+            )]);
         }
         let mut context = auth.context.clone();
         context["workspacePath"] = json!(entry.workspace_path);
@@ -1125,7 +1434,10 @@ impl Bots {
                 }
             }
         }
-        context["workspaceId"] = json!(workspace_key(&entry.workspace_path, entry.workspace_identity.as_deref()));
+        context["workspaceId"] = json!(workspace_key(
+            &entry.workspace_path,
+            entry.workspace_identity.as_deref()
+        ));
         context["mode"] = json!("task");
         context["activeTaskId"] = json!(task_id);
         self.write_context(&context).await?;
@@ -1133,7 +1445,11 @@ impl Bots {
         self.status_reply(actor, &context, locale).await
     }
 
-    pub(crate) async fn handle_reply_list(&self, inbound: &Inbound, auth: Auth) -> Result<Vec<Value>> {
+    pub(crate) async fn handle_reply_list(
+        &self,
+        inbound: &Inbound,
+        auth: Auth,
+    ) -> Result<Vec<Value>> {
         let locale = auth.locale.as_deref();
         let provider = text(&auth.bot, "provider").unwrap_or_default();
         let label = reply_label(text(&auth.bot, "replyMode"), locale, provider);
@@ -1151,12 +1467,21 @@ impl Bots {
         ))
     }
 
-    pub(crate) async fn handle_reply_set(self: &Arc<Self>, inbound: &Inbound, auth: Auth, value: &str) -> Result<Vec<Value>> {
+    pub(crate) async fn handle_reply_set(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        auth: Auth,
+        value: &str,
+    ) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let locale = auth.locale.as_deref();
         let provider = text(&auth.bot, "provider").unwrap_or_default();
         let Some(option) = resolve_reply(value, locale, provider) else {
-            return Ok(vec![outbound(actor, msg(locale, "replyMissing", &[]), OutboundExtras::default())]);
+            return Ok(vec![outbound(
+                actor,
+                msg(locale, "replyMissing", &[]),
+                OutboundExtras::default(),
+            )]);
         };
         let mut bot = auth.bot.clone();
         bot["replyMode"] = option["id"].clone();
@@ -1184,7 +1509,11 @@ pub fn context_ref(context: &Value) -> Value {
 }
 
 /// `resolveWorkspaceByValue`：序号（`parseInt`）、id / label（忽略大小写）、路径或身份 key。
-pub fn resolve_workspace_by_value(workspaces: &[Value], value: &str, allowed: &[String]) -> Option<Value> {
+pub fn resolve_workspace_by_value(
+    workspaces: &[Value],
+    value: &str,
+    allowed: &[String],
+) -> Option<Value> {
     let trimmed = value.trim();
     let visible = filter_allowed_workspaces(workspaces, allowed);
     if let Some(index) = parse_int(trimmed).filter(|index| *index > 0) {
@@ -1208,7 +1537,10 @@ mod tests {
 
     #[test]
     fn selection_helpers_match_node() {
-        let items = vec![json!({"id": "a", "label": "Alpha"}), json!({"id": "b", "label": "Beta"})];
+        let items = vec![
+            json!({"id": "a", "label": "Alpha"}),
+            json!({"id": "b", "label": "Beta"}),
+        ];
         assert_eq!(resolve_option(&items, "2").unwrap()["id"], "b");
         assert_eq!(resolve_option(&items, " alpha ").unwrap()["id"], "a");
         assert!(resolve_option(&items, "0").is_none());
@@ -1216,28 +1548,55 @@ mod tests {
         assert!(is_index_value("12") && !is_index_value("01") && !is_index_value("1a"));
         assert_eq!(parse_int("2abc"), Some(2));
         assert_eq!(parse_int("abc"), None);
-        assert_eq!(selection_value(&json!({"providerId": "glm", "modelId": "GLM-5"})).as_deref(), Some("GLM-5"));
+        assert_eq!(
+            selection_value(&json!({"providerId": "glm", "modelId": "GLM-5"})).as_deref(),
+            Some("GLM-5")
+        );
         assert_eq!(
             selection_value(&json!({"providerId": "my p", "modelId": "m/1"})).as_deref(),
             Some("custom:my%20p:m%2F1")
         );
-        assert_eq!(parse_model_option("custom:my%20p:m%2F1"), Some(json!({"providerId": "my p", "modelId": "m/1"})));
-        assert_eq!(parse_model_option("zai/GLM-5"), Some(json!({"providerId": "zai", "modelId": "GLM-5"})));
-        assert_eq!(parse_model_option(" x "), Some(json!({"providerId": "glm", "modelId": "x"})));
+        assert_eq!(
+            parse_model_option("custom:my%20p:m%2F1"),
+            Some(json!({"providerId": "my p", "modelId": "m/1"}))
+        );
+        assert_eq!(
+            parse_model_option("zai/GLM-5"),
+            Some(json!({"providerId": "zai", "modelId": "GLM-5"}))
+        );
+        assert_eq!(
+            parse_model_option(" x "),
+            Some(json!({"providerId": "glm", "modelId": "x"}))
+        );
         let reply = reply_options(None, "telegram");
         assert_eq!(reply.len(), 3);
-        assert_eq!(resolve_reply("2", None, "telegram").unwrap()["id"], "assistant_toolcalls_changes");
-        assert_eq!(resolve_reply("summary", None, "telegram").unwrap()["id"], "summary_changes");
+        assert_eq!(
+            resolve_reply("2", None, "telegram").unwrap()["id"],
+            "assistant_toolcalls_changes"
+        );
+        assert_eq!(
+            resolve_reply("summary", None, "telegram").unwrap()["id"],
+            "summary_changes"
+        );
         assert!(resolve_reply("stream", None, "telegram").is_none());
-        assert_eq!(reply_options(Some("en-US"), "feishu"), vec![json!({"id": "streaming_card", "label": "Streaming card"})]);
+        assert_eq!(
+            reply_options(Some("en-US"), "feishu"),
+            vec![json!({"id": "streaming_card", "label": "Streaming card"})]
+        );
         let marked = mark_current(&json!({"currentId": "b", "options": items}), None);
         assert_eq!(marked["options"][1]["label"], "Beta · 当前");
         assert_eq!(marked["cancelLabel"], "取消");
-        let fallback = selection_fallback(&json!({"title": "T", "cancelLabel": "取消", "options": [{"id": "a", "label": "A", "description": "d"}]}), None);
+        let fallback = selection_fallback(
+            &json!({"title": "T", "cancelLabel": "取消", "options": [{"id": "a", "label": "A", "description": "d"}]}),
+            None,
+        );
         assert_eq!(fallback, "T\n0. 取消\n1. A d\n\n回复数字选择，0 取消。");
         let view = json!({"providers": [{"providerId": "p", "providerName": " P ", "models": [{"modelId": "m",
             "config": {"optionSpecs": {"reasoningLevel": {"values": ["low", "high"]}}}}]}, {"providerId": "empty", "models": []}]});
-        assert_eq!(provider_options(&view), vec![json!({"id": "p", "label": "P", "models": [{"id": "custom:p:m", "label": "m"}]})]);
+        assert_eq!(
+            provider_options(&view),
+            vec![json!({"id": "p", "label": "P", "models": [{"id": "custom:p:m", "label": "m"}]})]
+        );
         assert_eq!(
             complete_new_selection(&view, &json!({"providerId": "p", "modelId": "m"})),
             Some(json!({"providerId": "p", "modelId": "m", "options": {"reasoningLevel": "high"}}))

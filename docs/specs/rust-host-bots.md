@@ -6,18 +6,19 @@
 
 R6 首版只做了飞书 / Lark 长连接、20 个成员和终态摘要回推。本规格把 `bots` channel 补齐到与 Node Host（`packages/services/src/bots/**`）一致：
 
-| 部分                    | Node 来源                                                                       | Rust 模块（`apps/zcode-host/crates/services/src/bots/`）    |
-| ----------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| 微信扫码注册（2 个成员） | `providers/weixinRegistration.ts`                                               | `weixin.rs`                                                 |
-| Telegram                | `providers/telegramProvider.ts`、`telegramChannelRuntime.ts`                    | `telegram.rs`、`channel.rs`                                 |
-| Webhook                 | `providers/webhookProvider.ts`                                                  | `webhook.rs`                                                |
-| 微信 iLink              | `providers/weixinProvider.ts`、`weixinChannelRuntime.ts`                        | `weixin.rs`、`channel.rs`                                   |
-| 通道适配与重试          | `providers/types.ts`、`providerRequest.ts`、`channelRuntime.ts`                 | `providers.rs`、`channel.rs`、`runtime_lock.rs`             |
-| 飞书卡片                | `feishuProvider.ts`（交互卡片、流式卡片、分段、typing reaction、card/update）   | `feishu/cards.rs`、`feishu/api.rs`                          |
-| 回复流水线              | `botsService.ts` `watchTaskStream`、`replyFormatter.ts`、`statusFormatting.ts` | `watch.rs`、`reply.rs`、`status.rs`                         |
-| 会话读取                | `getTaskSnapshot`、`onDynamicTaskEvent`（legacy）                               | `stream.rs`（V4 帧适配，见第 4 节）                         |
-| 选择命令                | `botsService.ts` `handleInboundMessage` 的 workspace/model/mode/think/task/reply | `selection.rs`                                              |
-| 问答与权限              | `botsService.ts` elicitation / permission 分支、飞书问答卡片                    | `interaction.rs`、`feishu/cards.rs`                         |
+| 部分                     | Node 来源                                                                        | Rust 模块（`apps/zcode-host/crates/services/src/bots/`） |
+| ------------------------ | -------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| 微信扫码注册（2 个成员） | `providers/weixinRegistration.ts`                                                | `weixin.rs`                                              |
+| Telegram                 | `providers/telegramProvider.ts`、`telegramChannelRuntime.ts`                     | `telegram.rs`、`channel.rs`                              |
+| Webhook                  | `providers/webhookProvider.ts`                                                   | `webhook.rs`                                             |
+| 微信 iLink               | `providers/weixinProvider.ts`、`weixinChannelRuntime.ts`                         | `weixin.rs`、`channel.rs`                                |
+| 通道适配与重试           | `providers/types.ts`、`providerRequest.ts`、`channelRuntime.ts`                  | `providers.rs`、`channel.rs`、`runtime_lock.rs`          |
+| 飞书卡片                 | `feishuProvider.ts`（交互卡片、流式卡片、分段、typing reaction、card/update）    | `feishu/cards.rs`、`feishu/provider.rs`、`feishu/api.rs` |
+| 回复流水线               | `botsService.ts` `watchTaskStream`、`replyFormatter.ts`、`statusFormatting.ts`   | `watch.rs`、`reply.rs`、`status.rs`                      |
+| 会话读取                 | `getTaskSnapshot`、`onDynamicTaskEvent`（legacy）                                | `stream.rs`（V4 帧适配，见第 4 节）                      |
+| 选择命令                 | `botsService.ts` `handleInboundMessage` 的 workspace/model/mode/think/task/reply | `selection.rs`                                           |
+| 问答与权限               | `botsService.ts` elicitation / permission 分支、飞书问答卡片                     | `interaction.rs`、`feishu/cards.rs`                      |
+| 入站、授权、上下文、附件 | `botsService.ts` `processProviderCallback`、`withAuthorizedContext` 等           | `inbound.rs`、`aes.rs`（微信 CDN 解密）                  |
 
 不在本规格：远端 workspace 的 Bot 运行时与 `/reconnect` 实连（见第 7 节，留接缝）。
 
@@ -30,7 +31,7 @@ R6 首版只做了飞书 / Lark 长连接、20 个成员和终态摘要回推。
 1. `beginWeixinRegistration()`：`GET <iLink>/ilink/bot/get_bot_qrcode?bot_type=3`，头 `iLink-App-ClientVersion: 1`，30 s 超时。响应先把 `data` 摊平到顶层（`{...payload, ...payload.data}`），`ret` / `errcode` 非 0 时报 `errmsg` 或 `ret=<r> errcode=<e>`；HTTP 非 2xx 报 `Weixin login /get_bot_qrcode?bot_type=3 failed: HTTP <status>`。返回 `{qrCode, qrUrl, interval: 3, expiresAt: now + (expires_in ?? 120) s}`；`qrcode`/`qr_code` 缺失报 `Weixin login did not return a QR code.`。
 2. `pollWeixinRegistration({qrCode})`：`GET .../get_qrcode_status?qrcode=<encodeURIComponent>`。`status`（或 `qrcode_status`、`qr_status`）按 Node `normalizeQrStatus` 归一（数字 0/1/2/3|4 与字符串别名）。成功时取 `bot_token`/`token`，缺失回 `{status:"error", message:"Weixin login succeeded but did not return bot_token."}`；`botId` 取 `ilink_bot_id`/`bot_id`。请求超时回 `{status:"pending", interval:3}`。
 3. `testBot`：按通道分派（第 2.3 节），discord / wecom 仍回 `reserved for a future version`。
-4. `handleProviderCallback(Response)`：所有已实现通道（含 Webhook、Telegram、微信）走同一条 `processProviderCallback`；未知通道（discord / wecom）回 `{ok:false, replies:[], status:400}`。
+4. `handleProviderCallback(Response)`：所有已实现通道（含 Webhook、Telegram、微信）走同一条 `processProviderCallback`；未知通道（discord / wecom）回 `{ok:false, replies:[], status:400}`。payload 必须自带 `botId`（Webhook 的 HTTP 入口按路由补上，同 Node）；R6 首版在缺 botId 时补“该通道第一个启用的 Bot”，已去掉。
 5. `saveBot` 的名称回填：飞书 0/800/1800 ms 重试，其余通道只试一次（Telegram 读 `getMe` 的 `first_name || username`）。`saveConfig` / `saveBot` / `removeBotSecret` / `deleteBot` 之后三个运行时一起对齐；删除或摘密钥时，Telegram 先 `deleteMyCommands`，飞书与微信先停连接。
 
 ### 2.2 出站消息与重试
@@ -83,7 +84,7 @@ R6 首版只做了飞书 / Lark 长连接、20 个成员和终态摘要回推。
 
 1. **assistant_changes**（Telegram / Webhook / 微信默认）：正文 chunk 累积在缓冲区，遇到工具调用或终态时整段发出（超过 3500 字符按换行 / 空格切分）。
 2. **assistant_toolcalls_changes**：同上，另外每个工具进入终态时发一条 `工具调用：\n- <状态> · <工具名> · \`<命令或路径>\` · 🟢 \`+n\` 🔴 \`-m\``。
-3. **summary_changes**：终态时只发最后一段正文（latestPart）；automation 回推固定用它。
+3. **summary_changes**：终态时只发最后一段正文（latestPart）。automation 回推把颗粒度设为它；飞书 / Lark 只支持流式卡片，归一化后 automation 回推仍是流式卡片（Node 同样如此）。
 4. **streaming_card**（飞书 / Lark 唯一模式）：一张卡片随流更新。
    - 时间线块：连续正文合并成一个 message 块；工具按出现顺序归入 tools 块（同一工具只出现一次），渲染为可折叠面板 `🛠️ 工具摘要 (n)`，只有运行中的最后一个面板展开；没有任何块时显示 `正在处理...`；非 sealed 状态末尾加 `_⏳ 运行中_` / `_✅ 已完成_` / `_失败_`。
    - 节流：首次创建立即发送；之后正文 chunk 至少间隔 1 s 才 PATCH，工具出现与终态、工具进入终态时强制更新。
@@ -108,13 +109,13 @@ Telegram（`getFile` + 文件下载）、飞书（`im/v1/messages/<id>/resources
 
 ## 3. 状态所有者
 
-| 状态                                                            | 唯一所有者                                                    |
-| --------------------------------------------------------------- | ------------------------------------------------------------- |
-| Bot 配置、聊天上下文（草稿 / 任务 / 待答问答 / 待答权限 / 游标） | `bot-config.v3.json`、`bot-state.v3.json`（与 Node 同文件同锁） |
-| 通道凭据                                                        | account 的 `CredentialStore`（`credentials.json`）            |
-| 某个 token / 应用的连接归属                                     | `bots-runtime-locks/<telegram-polling|weixin-polling|feishu-websocket|lark-websocket>/` 目录锁 |
-| 待选项、task / workspace 候选、绑定码、入站去重、typing 句柄、流式卡片句柄、运行中任务、/status 进展 | `Bots`（内存，Host 退出即丢，同 Node）                        |
-| 会话行、交互、终态                                              | CLI；Bot 只读 V4 帧与 `session/read`                          |
+| 状态                                                                                                 | 唯一所有者                                                      |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | -------------- | ---------------- | ------------------------ |
+| Bot 配置、聊天上下文（草稿 / 任务 / 待答问答 / 待答权限 / 游标）                                     | `bot-config.v3.json`、`bot-state.v3.json`（与 Node 同文件同锁） |
+| 通道凭据                                                                                             | account 的 `CredentialStore`（`credentials.json`）              |
+| 某个 token / 应用的连接归属                                                                          | `bots-runtime-locks/<telegram-polling                           | weixin-polling | feishu-websocket | lark-websocket>/` 目录锁 |
+| 待选项、task / workspace 候选、绑定码、入站去重、typing 句柄、流式卡片句柄、运行中任务、/status 进展 | `Bots`（内存，Host 退出即丢，同 Node）                          |
+| 会话行、交互、终态                                                                                   | CLI；Bot 只读 V4 帧与 `session/read`                            |
 
 ## 4. 会话读取（有意的偏差）
 
@@ -127,22 +128,27 @@ Node Bot 通过 legacy 任务快照与事件流（`getTaskSnapshot`、`onDynamic
 
 基线：初始快照里已有的行与交互只记录、不产生事件；之后到达的快照（resync）按行 id 与已知状态求差。
 
-| V4 帧                                                                      | Bot 事件（Node 名）                    | Bot 消息                                                       |
-| -------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------- |
-| `row.appended` / `row.upserted` `assistantText`（新行，text 非空）         | `agent_message_chunk(text)`            | 流式卡片 message 块 / 正文缓冲                                 |
-| `row.delta {path:"text", append}` 落在 assistantText 行                    | `agent_message_chunk(append)`          | 同上（卡片节流 1 s）                                           |
-| 已知 assistantText 行被 upsert 且 text 变长                                | `agent_message_chunk(新增后缀)`        | 同上                                                           |
-| `reasoning` 行新增 / `row.delta` 落在 reasoning 行                         | `agent_thought_chunk`                  | 只进 /status 进展与 latestPart 边界，不发送                    |
-| `toolCall` 行首次出现                                                      | `tool_call(toolName, input)`           | 正文缓冲先发出；卡片 tools 块；强制更新卡片                    |
-| `toolCall` 行 status / input / output 变化                                 | `tool_call_update(status, …)`          | 卡片工具摘要；完整颗粒度在工具终态时发工具卡                   |
-| `state.updated` / 快照 `pendingInteractions` 新增 `userInput`              | `elicitation_request`                  | 封存卡片 → 问答选择 / 飞书问答卡                               |
-| 新增 `permission`                                                          | `permission_request`                   | 封存卡片 → 权限选择                                            |
-| 交互从列表消失                                                             | `elicitation_response`                 | 清掉待答状态                                                   |
-| `control.phase`：非终态 → `completedSuccess` / `completedInterrupted`      | `task_complete`                        | 卡片完成 / 缓冲发出 / 摘要 / `任务已完成。`                    |
-| `control.phase`：非终态 → `error`                                          | `task_error(lastError.message)`        | 卡片失败 / `任务失败：<msg>`                                   |
-| 订阅失败或进程换代（帧流结束）                                             | sessions-index 终态（TaskDriver）兜底  | 读 `v4/conversation/rowsRange` 最后一段正文（R6 行为）          |
+| V4 帧                                                                 | Bot 事件（Node 名）                   | Bot 消息                                               |
+| --------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------ |
+| `row.appended` / `row.upserted` `assistantText`（新行，text 非空）    | `agent_message_chunk(text)`           | 流式卡片 message 块 / 正文缓冲                         |
+| `row.delta {path:"text", append}` 落在 assistantText 行               | `agent_message_chunk(append)`         | 同上（卡片节流 1 s）                                   |
+| 已知 assistantText 行被 upsert 且 text 变长                           | `agent_message_chunk(新增后缀)`       | 同上                                                   |
+| `reasoning` 行新增 / `row.delta` 落在 reasoning 行                    | `agent_thought_chunk`                 | 只进 /status 进展与 latestPart 边界，不发送            |
+| `toolCall` 行首次出现                                                 | `tool_call(toolName, input)`          | 正文缓冲先发出；卡片 tools 块；强制更新卡片            |
+| `toolCall` 行 status / input / output 变化                            | `tool_call_update(status, …)`         | 卡片工具摘要；完整颗粒度在工具终态时发工具卡           |
+| `state.updated` / 快照 `pendingInteractions` 新增 `userInput`         | `elicitation_request`                 | 封存卡片 → 问答选择 / 飞书问答卡                       |
+| 新增 `permission`                                                     | `permission_request`                  | 封存卡片 → 权限选择                                    |
+| 交互从列表消失                                                        | `elicitation_response`                | 清掉待答状态                                           |
+| `control.phase`：非终态 → `completedSuccess` / `completedInterrupted` | `task_complete`                       | 卡片完成 / 缓冲发出 / 摘要 / `任务已完成。`            |
+| `control.phase`：非终态 → `error`                                     | `task_error(lastError.message)`       | 卡片失败 / `任务失败：<msg>`                           |
+| 订阅失败或进程换代（帧流结束）                                        | sessions-index 终态（TaskDriver）兜底 | 读 `v4/conversation/rowsRange` 最后一段正文（R6 行为） |
 
 工具状态：`inputStreaming`/`pendingApproval` → pending，`running` → in_progress，`success` → completed，`error` → failed（带 `error.message`），`cancelled` → stopped。工具标题与 kind 都取 `toolName`（同 Node legacy 映射）。
+
+- 工具行在 `inputStreaming`（输入还在流式生成）时不投影；离开该状态时带完整输入发 `tool_call`（legacy 的 tool_call 在工具调度时带 input）。
+- 工具输入优先取行上的 `input`，没有时解析 `inputText`（Rust CLI 只下发 JSON 文本）。
+- Rust CLI 在 desktop-continuous 下常用 `row.upserted` 携带完整文本而不是 `row.delta`；投影器对已知行按“新文本以旧文本开头”求差，两种写法得到相同的 chunk。
+- 轮次收口以基线之后新出现的 `turnHeader` 进入终态为准（同一帧里先处理完全部增量，再取 `control.lastError`）；没有新轮次行时，以观察到运行（`prewarming`/`running`）后 phase 进入终态为准。
 
 ## 5. 事件顺序
 
@@ -165,29 +171,34 @@ Node Bot 通过 legacy 任务快照与事件流（`getTaskSnapshot`、`onDynamic
 
 ## 6. 有意与 Node 不同之处
 
-| Node 行为                                                       | Rust Host                                                         | 理由                                                                 |
-| --------------------------------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------- |
-| 读 legacy 任务快照与事件流                                       | `session/read` + V4 帧适配（第 4 节）                             | Rust Host 不提供 legacy 快照成员；V4 是 CLI 的权威投影               |
-| `bots:task`、`bots:task-stream` 广播                             | 不发                                                              | Renderer 直接订阅 V4 会话，侧栏由 tasks syncer 的任务事件驱动        |
-| 权限请求摘要用 `getPermissionRequestPreview`                     | 用 V4 交互的 `summary` 与 detail 里的 command / path              | V4 交互已带 CLI 生成的摘要；Bot 会话硬锁 yolo，正常不出现权限请求    |
-| `/status` 的已工作时长读任务快照消息                              | 读 `session/read` 消息（不做可见性过滤与连续助手消息合并）        | 只影响少数边界上的时长与进展取值                                     |
-| 首发配置失败时删除临时任务（`applyDraftConfigOptions`）          | 建会话时直接带 `mode: yolo`，没有单独的配置步骤                   | 结果相同（任务硬锁 yolo），没有中间态                                |
-| 远端 workspace 的 Bot 运行时、`/reconnect`                       | 远端上下文视为未连接（第 7 节）                                   | 远端在另一个区域                                                     |
-| 开放平台 / Telegram / iLink 基址固定                              | `ZCODE_FEISHU_OPEN_BASE_URL`、`ZCODE_TELEGRAM_API_BASE_URL`、`ZCODE_WEIXIN_ILINK_BASE_URL` 等可覆盖 | 只供测试与 E2E 指向 127.0.0.1 mock                                   |
+| Node 行为                                                                                            | Rust Host                                                                                           | 理由                                                                       |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 读 legacy 任务快照与事件流                                                                           | `session/read` + V4 帧适配（第 4 节）                                                               | Rust Host 不提供 legacy 快照成员；V4 是 CLI 的权威投影                     |
+| `bots:task`、`bots:task-stream` 广播                                                                 | 不发                                                                                                | Renderer 直接订阅 V4 会话，侧栏由 tasks syncer 的任务事件驱动              |
+| 权限请求摘要用 `getPermissionRequestPreview`                                                         | 用 V4 交互的 `summary` 与 detail 里的 command / path                                                | V4 交互已带 CLI 生成的摘要；Bot 会话硬锁 yolo，正常不出现权限请求          |
+| `/status` 的已工作时长读任务快照消息                                                                 | 读 `session/read` 消息（不做可见性过滤与连续助手消息合并）                                          | 只影响少数边界上的时长与进展取值                                           |
+| 首发配置失败时删除临时任务（`applyDraftConfigOptions`）                                              | 建会话时直接带 `mode: yolo`，没有单独的配置步骤                                                     | 结果相同（任务硬锁 yolo），没有中间态                                      |
+| 远端 workspace 的 Bot 运行时、`/reconnect`                                                           | 远端上下文视为未连接（第 7 节）                                                                     | 远端在另一个区域                                                           |
+| 开放平台 / Telegram / iLink 基址固定                                                                 | `ZCODE_FEISHU_OPEN_BASE_URL`、`ZCODE_TELEGRAM_API_BASE_URL`、`ZCODE_WEIXIN_ILINK_BASE_URL` 等可覆盖 | 只供测试与 E2E 指向 127.0.0.1 mock                                         |
+| `/new` 继承模型时用 `parseBotModelOptionValue` 解析 `provider/model$level`，`$level` 留在 modelId 里 | 先去掉 `$level` 后缀（档位另由思考档位带上）                                                        | Node 的写法让 `/new` 之后的下一条消息必然解析模型失败（Node 缺陷，已报告） |
+| `listWorkspaceRefs` 5 s 缓存                                                                         | 每次读设置                                                                                          | 设置读取本身已缓存                                                         |
+| 微信 CDN 附件用 Node `crypto` 的 AES-128-ECB 解密                                                    | `bots/aes.rs` 按 FIPS-197 自实现解密                                                                | 依赖树里没有可用的分组密码实现；用标准测试向量校验                         |
+| 入站去重、待选项、typing 等内存状态在 Host 退出前 `disposeAllAndWait`                                | Host 退出时进程结束，运行锁靠 30 s 租约与进程存活检查回收（同 R6）                                  | Host 关闭路径没有 Bot 的异步收尾钩子；锁的跨进程语义不变                   |
 
 ## 7. 远端 workspace 接缝
 
 `RemoteBots` trait（`bots/mod.rs`）对应 Node `BotRemoteWorkspaceService`：`is_connected`、`ensure_connected`、`task_port(target)`。当前安装的是 `NoRemote`：`is_connected` 恒为 false、`ensure_connected` 回 `remote reconnect service unavailable`。因此：
 
 - 带 `workspaceIdentity` 的上下文：`help`、`status`、`workspace`、`reconnect`、`reply` 照常处理，其余回 `remoteDisconnected`；`/status` 显示远端未连接；`/reconnect` 回 `remoteReconnectUnavailable`。
-- 远端区域合并后只需提供实现并在 `bots::install` 注入，入站、选择与回复流水线不用改。
+- `syncAppRuntimePreferences` 转给 `RemoteBots::sync_app_runtime_preferences`（缺省空操作）。
+- 远端区域合并后只需提供实现并在 `bots::install` 注入，入站、选择与回复流水线不用改。Node 对 `/reconnect` 的两层幂等（同一 provider 消息 2 分钟内只执行一次、同一聊天与 workspace 3 秒内只重连一次）只在远端可用时才有意义，随远端实现一起补。
 
 ## 8. 验收
 
-- `cargo test -p zcode-host-services bots`：
-  - 对拍：命令解析、归一化、旧版导入（`bots-fixtures.ts`）；
-  - 127.0.0.1 mock：Telegram（getMe、setMyCommands、deleteWebhook、getUpdates、sendMessage 与 Markdown 回退、answerCallbackQuery、409 退避、offset 只在成功后提交）、Webhook（重试 0/500/1500、4xx 不重试、secret 校验）、微信（扫码注册两成员、getupdates/sendmessage/typing、buf 提交、首条消息激活）、飞书（长连接绑定与命令、流式卡片的创建 / 节流 / 退避 / 熔断 / 分段、选择卡片）；
-  - V4 投影器：快照基线、row.delta、工具状态、交互出现与消失、终态与失败、resync 求差；
-  - 选择命令：workspace / model 两级 / think / task / reply / cancel 与微信数字回复；问答推进与提交。
-- `cargo test -p zcode-host-services --test bots_cli`：真实 Rust CLI + mock 模型 + mock Telegram，Bot 消息建会话，流式回复经 V4 帧送达 mock。
-- E2E `automation-bots`：隔离 App 预置一个已绑定的 Telegram Bot（mock 在 127.0.0.1），mock 投递一条消息，断言 mock 收到流式回复、侧栏出现 Bot 创建的任务。
+- `cargo test -p zcode-host-services --lib bots`（`bots/tests.rs`、`tests_channels.rs`、`tests_commands.rs` 与各模块单测）：
+  - 对拍：命令解析、归一化、旧版导入、文案表（`bots-fixtures.ts`）；
+  - 127.0.0.1 mock：Telegram（getMe 回填名称、setMyCommands、deleteWebhook、getUpdates、sendMessage 与 Markdown 回退、inline 按钮与 answerCallbackQuery、409 退避、业务失败不提交 offset）、Webhook（0/500/1500 重试、secret 校验、选择正文、结构化问答回执）、微信（扫码注册两成员、激活、纯文本编号菜单与数字回复、typing ticket、buf 提交）、飞书（长连接绑定、通讯录昵称、Typing reaction、流式卡片创建与 PATCH、模型选择卡与同步回包、流式卡片的退避与熔断、按元素预算分段）；
+  - V4 投影器：快照基线、row.delta 与 upsert 求差、工具状态与 inputStreaming、交互出现与消失、终态与失败、resync；
+  - 选择命令：workspace / model 两级 / think / mode / task / reply / cancel / stop / `/new` 继承；问答按钮推进与提交、过期 token；automation 回推与订阅失败时的终态兜底。
+- `cargo test -p zcode-host-services --test bots_cli`（`ZCODE_TEST_CLI_RUST_BINARY`）：真实 Rust CLI + mock 模型，Bot 的订阅与投影器从真实帧得到正文 chunk、Bash 工具调用与完成、轮次收口，第二轮不重放上一轮。
+- E2E `automation-bots`：隔离 App 预置一个已绑定的 Telegram Bot（Bot API mock 在 127.0.0.1），Host 启动即同步菜单并长轮询；mock 投递一条消息，Host 建会话（yolo）、Rust CLI 跑 mock 模型，断言 mock 的 sendMessage 收到回复、typing 已发、offset 提交为 2，侧栏出现 Bot 创建的任务并能打开看到同一段回复。

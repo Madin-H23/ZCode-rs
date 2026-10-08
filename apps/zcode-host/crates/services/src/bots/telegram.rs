@@ -29,7 +29,13 @@ fn url(base: &str, token: &str, method: &str) -> String {
     format!("{base}/bot{token}/{method}")
 }
 
-fn post(http: &Http, base: &str, token: &str, method: &str, body: &Value) -> reqwest::RequestBuilder {
+fn post(
+    http: &Http,
+    base: &str,
+    token: &str,
+    method: &str,
+    body: &Value,
+) -> reqwest::RequestBuilder {
     http.client()
         .post(url(base, token, method))
         .header("content-type", "application/json")
@@ -83,7 +89,7 @@ fn file_attachment(value: &Value, kind: &str, fallback: &str) -> Option<Value> {
 fn attachments(message: &Value) -> Vec<Value> {
     let photo = message["photo"]
         .as_array()
-        .and_then(|photos| photos.iter().filter(|p| p.is_object()).next_back())
+        .and_then(|photos| photos.iter().rfind(|p| p.is_object()))
         .and_then(|photo| file_attachment(photo, "image", "telegram-photo.jpg"));
     [
         photo,
@@ -251,7 +257,11 @@ pub fn menu_commands(bot: &Value) -> Vec<Value> {
 }
 
 async fn get_me(bots: &Bots, bot: &Value) -> Result<Option<Value>> {
-    let Some(token) = bots.load_bot_secret(bot).await.filter(|t| !t.trim().is_empty()) else {
+    let Some(token) = bots
+        .load_bot_secret(bot)
+        .await
+        .filter(|t| !t.trim().is_empty())
+    else {
         return Ok(None);
     };
     let base = &bots.providers.endpoints.telegram;
@@ -315,7 +325,10 @@ pub async fn resolve_name(bots: &Bots, bot: &Value) -> Result<Option<String>> {
 pub async fn sync_commands(http: &Http, base: &str, token: &str, bot: &Value) -> Result<()> {
     if bot["enabled"] != true {
         let _ = http
-            .status(post(http, base, token, "deleteMyCommands", &json!({})), REQUEST_TIMEOUT)
+            .status(
+                post(http, base, token, "deleteMyCommands", &json!({})),
+                REQUEST_TIMEOUT,
+            )
             .await;
         return Ok(());
     }
@@ -352,7 +365,13 @@ pub async fn send(http: &Http, base: &str, token: &str, message: &Value) -> Resu
         }
         let (ok, _) = http
             .status(
-                post(http, base, token, "sendMessage", &Value::Object(body.clone())),
+                post(
+                    http,
+                    base,
+                    token,
+                    "sendMessage",
+                    &Value::Object(body.clone()),
+                ),
                 REQUEST_TIMEOUT,
             )
             .await?;
@@ -369,7 +388,12 @@ pub async fn send(http: &Http, base: &str, token: &str, message: &Value) -> Resu
     Ok(())
 }
 
-pub async fn send_typing(http: &Http, base: &str, token: &str, target: &TypingTarget) -> Result<()> {
+pub async fn send_typing(
+    http: &Http,
+    base: &str,
+    token: &str,
+    target: &TypingTarget,
+) -> Result<()> {
     http.status(
         post(
             http,
@@ -416,7 +440,13 @@ pub async fn acknowledge(
         body.insert("text".into(), json!(toast(text_value)));
     }
     http.status(
-        post(http, base, token, "answerCallbackQuery", &Value::Object(body)),
+        post(
+            http,
+            base,
+            token,
+            "answerCallbackQuery",
+            &Value::Object(body),
+        ),
         REQUEST_TIMEOUT,
     )
     .await?;
@@ -441,7 +471,11 @@ pub async fn acknowledge(
 
 /// `downloadAttachment`：getFile 取 file_path，再下载 `<base>/file/bot<token>/<path>`。
 pub async fn download(bots: &Bots, bot: &Value, attachment: &Value) -> Result<Option<Downloaded>> {
-    let Some(token) = bots.load_bot_secret(bot).await.filter(|t| !t.trim().is_empty()) else {
+    let Some(token) = bots
+        .load_bot_secret(bot)
+        .await
+        .filter(|t| !t.trim().is_empty())
+    else {
         return Ok(None);
     };
     let Some(file_id) = text(attachment, "providerFileId") else {
@@ -465,11 +499,13 @@ pub async fn download(bots: &Bots, bot: &Value, attachment: &Value) -> Result<Op
     if !response.ok {
         return Err(anyhow!("Telegram getFile failed: HTTP {}", response.status));
     }
-    let path = text(&response.payload["result"], "file_path").filter(|_| response.payload["ok"] == true);
+    let path =
+        text(&response.payload["result"], "file_path").filter(|_| response.payload["ok"] == true);
     let Some(path) = path else {
         return Err(anyhow!(
             "{}",
-            text(&response.payload, "description").unwrap_or("Telegram getFile did not return file_path.")
+            text(&response.payload, "description")
+                .unwrap_or("Telegram getFile did not return file_path.")
         ));
     };
     let data = http
@@ -498,7 +534,10 @@ mod tests {
         assert_eq!(decode_callback_data("zc:cancel"), "/cancel");
         assert_eq!(decode_callback_data("zc:e:abc:2"), "/elicitation abc 2");
         assert_eq!(decode_callback_data("zc:e:abc"), "/elicitation");
-        assert_eq!(decode_callback_data("zc:cmd:/model provider 2"), "/model provider 2");
+        assert_eq!(
+            decode_callback_data("zc:cmd:/model provider 2"),
+            "/model provider 2"
+        );
         assert_eq!(decode_callback_data("zc:thoughtLevel:3"), "/thoughtLevel 3");
         let markup = reply_markup(&json!({"action": "model.set", "cancelLabel": "取消",
             "options": [{"id": "m", "label": "M"}]}));
@@ -514,7 +553,9 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            ["help", "status", "new", "project", "mode", "think", "reply", "bind"]
+            [
+                "help", "status", "new", "project", "mode", "think", "reply", "bind"
+            ]
         );
         assert_eq!(toast(&"字".repeat(200)).chars().count(), 180);
     }

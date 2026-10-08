@@ -11,12 +11,14 @@ use futures_util::StreamExt;
 use serde_json::Value;
 use zcode_host_kit::log;
 
-use super::feishu::cards::{self, StreamBlock, StreamState, StreamStatus};
 use super::feishu::Actor;
+use super::feishu::cards::{self, StreamBlock, StreamState, StreamStatus};
 use super::model::{is_feishu, message as msg, normalize_reply_mode, workspace_key};
 use super::now_ms;
 use super::providers::{OutboundExtras, TypingTarget, outbound, typing_is_reaction};
-use super::reply::{extract_messages, is_tool_terminal, split_long_reply, tool_reply, tool_summary_line};
+use super::reply::{
+    extract_messages, is_tool_terminal, split_long_reply, tool_reply, tool_summary_line,
+};
 use super::service::{Bots, Typing, guard};
 use super::stream::{Projector, StreamEvent, ToolState};
 use super::util::{collapse_whitespace, js_len, js_slice, text};
@@ -104,10 +106,9 @@ impl Card {
     }
 
     fn append_tool(&mut self, tool_id: &str) {
-        let known = self
-            .blocks
-            .iter()
-            .any(|block| matches!(block, Timeline::Tools(ids) if ids.iter().any(|id| id == tool_id)));
+        let known = self.blocks.iter().any(
+            |block| matches!(block, Timeline::Tools(ids) if ids.iter().any(|id| id == tool_id)),
+        );
         if known {
             return;
         }
@@ -140,7 +141,9 @@ fn task_id(context: &Value) -> String {
 
 pub(crate) fn context_target(context: &Value) -> WorkspaceTarget {
     WorkspaceTarget {
-        workspace_path: text(context, "workspacePath").unwrap_or_default().to_owned(),
+        workspace_path: text(context, "workspacePath")
+            .unwrap_or_default()
+            .to_owned(),
         workspace_identity: text(context, "workspaceIdentity").map(str::to_owned),
         remote_session_id: None,
     }
@@ -165,7 +168,11 @@ fn tool_progress(tool: &ToolState, update: bool) -> String {
             .find(|text| !text.is_empty())
     };
     let detail = read(&tool.input).or_else(|| if update { read(&tool.output) } else { None });
-    let status = if update { format!(" [{}]", tool.status) } else { String::new() };
+    let status = if update {
+        format!(" [{}]", tool.status)
+    } else {
+        String::new()
+    };
     match detail {
         Some(detail) => format!("{title}{status}: {detail}"),
         None => format!("{title}{status}"),
@@ -208,7 +215,8 @@ impl Watch {
 
     /// `supportsStreamingCardReply`。
     fn streaming_card(&self) -> bool {
-        self.mode() == "streaming_card" && is_feishu(text(&self.bot, "provider").unwrap_or_default())
+        self.mode() == "streaming_card"
+            && is_feishu(text(&self.bot, "provider").unwrap_or_default())
     }
 
     fn workspace_path(&self) -> &str {
@@ -260,7 +268,8 @@ impl Watch {
                         summaries,
                         title: Some(title.clone()),
                         expanded: Some(
-                            self.card.status == StreamStatus::Running && Some(index) == latest_tools,
+                            self.card.status == StreamStatus::Running
+                                && Some(index) == latest_tools,
                         ),
                     });
                 }
@@ -318,7 +327,9 @@ impl Bots {
                 }
             }
             Err(error) => {
-                log::warn(format!("bots subscribe conversation failed task={task}: {error}"));
+                log::warn(format!(
+                    "bots subscribe conversation failed task={task}: {error}"
+                ));
                 None
             }
         };
@@ -353,7 +364,9 @@ impl Bots {
             for event in projector.apply(&frame) {
                 let terminal = matches!(event, StreamEvent::Complete | StreamEvent::Failed(_));
                 if let Err(error) = self.handle_stream_event(&mut watch, event).await {
-                    log::warn(format!("bot task stream event failed task={task}: {error:#}"));
+                    log::warn(format!(
+                        "bot task stream event failed task={task}: {error:#}"
+                    ));
                 }
                 if terminal {
                     return;
@@ -366,8 +379,11 @@ impl Bots {
     }
 
     async fn send_watch_text(&self, watch: &Watch, body: String) -> anyhow::Result<()> {
-        self.send_outbound(&watch.bot, &outbound(&watch.actor, body, OutboundExtras::default()))
-            .await
+        self.send_outbound(
+            &watch.bot,
+            &outbound(&watch.actor, body, OutboundExtras::default()),
+        )
+        .await
     }
 
     /// `flushAssistantReplyBuffer`。
@@ -480,7 +496,10 @@ impl Bots {
                 } else {
                     tool.output.clone()
                 },
-                error: tool.error.clone().or_else(|| previous.and_then(|p| p.error.clone())),
+                error: tool
+                    .error
+                    .clone()
+                    .or_else(|| previous.and_then(|p| p.error.clone())),
                 ..tool.clone()
             }
         } else {
@@ -496,7 +515,11 @@ impl Bots {
             let force = !update || is_tool_terminal(state.status);
             self.sync_card(
                 watch,
-                if update { "tool_call_update" } else { "tool_call" },
+                if update {
+                    "tool_call_update"
+                } else {
+                    "tool_call"
+                },
                 force,
             )
             .await;
@@ -536,7 +559,11 @@ impl Bots {
         };
         let states = cards::split_streaming(&state);
         let receive_id = watch.actor.provider_user_id.clone();
-        let operation = if watch.card.handle.is_some() { "update" } else { "create" };
+        let operation = if watch.card.handle.is_some() {
+            "update"
+        } else {
+            "create"
+        };
         let bot = watch.bot.clone();
         let card = &mut watch.card;
         let work = async {
@@ -762,10 +789,12 @@ impl Bots {
     /// `sendTyping`（入站命令）：飞书等 reaction 建好再返回，其余通道后台发送。
     pub(crate) async fn send_inbound_typing(self: &Arc<Self>, bot: &Value, actor: &Actor) {
         let target_id = actor.reply_target();
-        if target_id.is_empty() || !matches!(
-            text(bot, "provider").unwrap_or_default(),
-            "telegram" | "weixin" | "feishu" | "lark"
-        ) {
+        if target_id.is_empty()
+            || !matches!(
+                text(bot, "provider").unwrap_or_default(),
+                "telegram" | "weixin" | "feishu" | "lark"
+            )
+        {
             return;
         }
         let target = TypingTarget {
@@ -788,7 +817,8 @@ impl Bots {
         let Some(message_id) = actor.provider_message_id.as_deref() else {
             return;
         };
-        if !is_feishu(text(bot, "provider").unwrap_or_default()) || actor.reply_target().is_empty() {
+        if !is_feishu(text(bot, "provider").unwrap_or_default()) || actor.reply_target().is_empty()
+        {
             return;
         }
         let long_running = guard(&self.typing).values().any(|typing| {
@@ -820,13 +850,18 @@ impl Bots {
         };
         let mut outcomes = tasks.terminal_outcomes();
         let bots = self.clone();
-        let key = workspace_key(&workspace.workspace_path, workspace.workspace_identity.as_deref());
+        let key = workspace_key(
+            &workspace.workspace_path,
+            workspace.workspace_identity.as_deref(),
+        );
         tokio::spawn(async move {
             let wait = async {
                 while let Some(outcome) = outcomes.next().await {
                     if outcome.workspace_key == key
                         && outcome.session_id == task
-                        && input_id.as_ref().is_none_or(|id| outcome.input_id.as_ref() == Some(id))
+                        && input_id
+                            .as_ref()
+                            .is_none_or(|id| outcome.input_id.as_ref() == Some(id))
                     {
                         return Some(outcome);
                     }
@@ -871,12 +906,11 @@ pub(crate) fn strip_pending(context: &Value) -> Value {
     let mut next = context.clone();
     super::model::strip_nulls(
         &mut next,
-        &["pendingElicitation", "pendingPermissionOptions", "draftOptions"],
+        &[
+            "pendingElicitation",
+            "pendingPermissionOptions",
+            "draftOptions",
+        ],
     );
     next
-}
-
-#[cfg(test)]
-pub(crate) fn tool_progress_for_tests(tool: &ToolState, update: bool) -> String {
-    tool_progress(tool, update)
 }

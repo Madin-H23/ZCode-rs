@@ -337,23 +337,28 @@ impl Bots {
         let status = self.clone();
         let provider_value = json!(provider);
         connection
-            .run(&self.providers.feishu, handler, stop.clone(), move |state| {
-                let (message, message_id) = match state {
-                    ConnectionState::Connected => (
-                        "Feishu WebSocket is running.",
-                        "bots.runtime.feishuWebSocketRunning",
-                    ),
-                    ConnectionState::Reconnecting => (
-                        "Feishu WebSocket is reconnecting.",
-                        "bots.runtime.feishuWebSocketConnecting",
-                    ),
-                };
-                status.set_runtime_status(
-                    &id,
-                    json!({"provider": provider_value, "status": "connected",
+            .run(
+                &self.providers.feishu,
+                handler,
+                stop.clone(),
+                move |state| {
+                    let (message, message_id) = match state {
+                        ConnectionState::Connected => (
+                            "Feishu WebSocket is running.",
+                            "bots.runtime.feishuWebSocketRunning",
+                        ),
+                        ConnectionState::Reconnecting => (
+                            "Feishu WebSocket is reconnecting.",
+                            "bots.runtime.feishuWebSocketConnecting",
+                        ),
+                    };
+                    status.set_runtime_status(
+                        &id,
+                        json!({"provider": provider_value, "status": "connected",
                            "message": message, "messageId": message_id}),
-                );
-            })
+                    );
+                },
+            )
             .await
     }
 }

@@ -234,9 +234,13 @@ fn sent_cards(server: &MockServer) -> Vec<(String, Value)> {
         .lock()
         .unwrap()
         .iter()
-        .filter(|request| request.path.starts_with("/open-apis/im/v1/messages") && !request.path.contains("/reactions"))
+        .filter(|request| {
+            request.path.starts_with("/open-apis/im/v1/messages")
+                && !request.path.contains("/reactions")
+        })
         .map(|request| {
-            let card: Value = serde_json::from_str(request.body["content"].as_str().unwrap_or("null")).unwrap();
+            let card: Value =
+                serde_json::from_str(request.body["content"].as_str().unwrap_or("null")).unwrap();
             (request.method.clone(), card)
         })
         .collect()
@@ -397,7 +401,10 @@ async fn feishu_registration_polls_until_success() {
     );
     let params = json!({"deviceCode": "dev-1", "domain": "feishu"});
     assert_eq!(api.poll_registration(&params).await.unwrap()["interval"], 5);
-    assert_eq!(api.poll_registration(&params).await.unwrap()["interval"], 10);
+    assert_eq!(
+        api.poll_registration(&params).await.unwrap()["interval"],
+        10
+    );
     let done = api.poll_registration(&params).await.unwrap();
     assert_eq!(
         done,
@@ -432,11 +439,17 @@ async fn management_members_round_trip_through_the_files() {
         test,
         json!({"ok": true, "message": "Feishu app credentials are valid.", "provider": "feishu"})
     );
-    assert_eq!(bots.test_bot("nope").await.unwrap()["message"], "Bot not found.");
+    assert_eq!(
+        bots.test_bot("nope").await.unwrap()["message"],
+        "Bot not found."
+    );
     let status = bots.get_status().await.unwrap();
     assert_eq!(status["botsCount"], 1);
     assert_eq!(status["botRuntime"][0]["message"], "Bot is configured.");
-    let code = bots.create_bind_code(&json!({"botId": "feishu-1"})).await.unwrap();
+    let code = bots
+        .create_bind_code(&json!({"botId": "feishu-1"}))
+        .await
+        .unwrap();
     assert_eq!(code["code"].as_str().unwrap().len(), 6);
     assert!(
         bots.create_bind_code(&json!({"botId": "x"}))
@@ -453,18 +466,24 @@ async fn management_members_round_trip_through_the_files() {
         )
         .await
         .unwrap_err();
-    assert_eq!(duplicate.message, "Enabled polling bots cannot share the same credential.");
+    assert_eq!(
+        duplicate.message,
+        "Enabled polling bots cannot share the same credential."
+    );
     let removed = bots.remove_bot_secret("feishu-1").await.unwrap();
     assert!(removed.get("credentialRef").is_none() && removed.get("feishuAppId").is_none());
-    let credentials = std::fs::read_to_string(dir.path().join(".zcode/v2/credentials.json")).unwrap();
+    let credentials =
+        std::fs::read_to_string(dir.path().join(".zcode/v2/credentials.json")).unwrap();
     assert!(!credentials.contains("bot:feishu-1:credential"));
     bots.delete_bot("feishu-1").await.unwrap();
     assert_eq!(bots.get_status().await.unwrap()["botsCount"], 0);
     // discord / wecom 没有适配器。
-    bots.save_bot(&json!({"bot": {"id": "d1", "name": "D", "provider": "discord", "enabled": true,
-        "allowedWorkspaces": ["*"], "allowedCommands": {}, "currentOptions": {}}}))
-        .await
-        .unwrap();
+    bots.save_bot(
+        &json!({"bot": {"id": "d1", "name": "D", "provider": "discord", "enabled": true,
+        "allowedWorkspaces": ["*"], "allowedCommands": {}, "currentOptions": {}}}),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         bots.test_bot("d1").await.unwrap(),
         json!({"ok": false, "message": "discord is reserved for a future version.", "provider": "discord"})
@@ -513,13 +532,24 @@ async fn feishu_long_connection_binds_then_streams_a_card_reply() {
     let ack = wait_ack(&mut from_client, "m0").await;
     assert!(ack.header("biz_rt").is_some());
     assert_eq!(ack.payload.as_deref(), Some(br#"{"code":200}"#.as_slice()));
-    eventually("botDisabled reply", || (sent_cards(&server).len() == 1).then_some(())).await;
+    eventually("botDisabled reply", || {
+        (sent_cards(&server).len() == 1).then_some(())
+    })
+    .await;
     assert_eq!(card_text(&sent_cards(&server)[0].1), "当前 bot 未启用。");
 
-    let code = bots.create_bind_code(&json!({"botId": "feishu-1"})).await.unwrap();
+    let code = bots
+        .create_bind_code(&json!({"botId": "feishu-1"}))
+        .await
+        .unwrap();
     let code = code["code"].as_str().unwrap().to_lowercase();
-    to_client.send(event_frame("m1", &format!("/bind {code}"))).unwrap();
-    eventually("bind reply", || (sent_cards(&server).len() == 2).then_some(())).await;
+    to_client
+        .send(event_frame("m1", &format!("/bind {code}")))
+        .unwrap();
+    eventually("bind reply", || {
+        (sent_cards(&server).len() == 2).then_some(())
+    })
+    .await;
     let bind = card_text(&sent_cards(&server)[1].1);
     assert!(bind.starts_with("绑定成功。"), "{bind}");
     assert!(!bind.contains("/回复"), "reply command is disabled: {bind}");
@@ -529,7 +559,10 @@ async fn feishu_long_connection_binds_then_streams_a_card_reply() {
     assert_eq!(config["bots"][0]["displayName"], "Ann");
 
     to_client.send(event_frame("m2", "/status")).unwrap();
-    eventually("status reply", || (sent_cards(&server).len() == 3).then_some(())).await;
+    eventually("status reply", || {
+        (sent_cards(&server).len() == 3).then_some(())
+    })
+    .await;
     assert_eq!(
         card_text(&sent_cards(&server)[2].1),
         "工作区: ws-bot  \n模型: Z.ai/GLM-5\n\n---\n\n任务: 草稿  \n状态: 草稿"
@@ -559,13 +592,20 @@ async fn feishu_long_connection_binds_then_streams_a_card_reply() {
     .await;
     assert!(final_card.contains("Hi from the agent"), "{final_card}");
     let cards_after = sent_cards(&server).into_iter().skip(3).collect::<Vec<_>>();
-    assert_eq!(cards_after[0].0, "POST", "the streaming card is created once");
+    assert_eq!(
+        cards_after[0].0, "POST",
+        "the streaming card is created once"
+    );
     assert!(cards_after[1..].iter().all(|(method, _)| method == "PATCH"));
     let with_tools = cards_after
         .iter()
         .find(|(_, card)| card.to_string().contains("collapsible_panel"))
         .expect("tool panel");
-    assert!(with_tools.1.to_string().contains("Bash"), "{}", with_tools.1);
+    assert!(
+        with_tools.1.to_string().contains("Bash"),
+        "{}",
+        with_tools.1
+    );
     let created = tasks.created.lock().unwrap().clone();
     assert_eq!(created.len(), 1);
     assert_eq!(created[0].0, "/tmp/ws-bot");
@@ -575,7 +615,9 @@ async fn feishu_long_connection_binds_then_streams_a_card_reply() {
     assert_eq!(sent[0].1.text, "hello agent");
     assert_eq!(
         sent[0].1.bot_delivery_target,
-        Some(json!({"provider": "feishu", "botId": "feishu-1", "providerUserId": "ou_user", "chatType": "private"}))
+        Some(
+            json!({"provider": "feishu", "botId": "feishu-1", "providerUserId": "ou_user", "chatType": "private"})
+        )
     );
     let state_file = bots.repo.read_state().await.unwrap();
     assert_eq!(state_file["bots"]["feishu-1"]["mode"], "task");
@@ -584,24 +626,45 @@ async fn feishu_long_connection_binds_then_streams_a_card_reply() {
     // 选择命令：/model 回供应商选择卡片，点击按钮经长连接同步回包返回模型卡片。
     let before = sent_cards(&server).len();
     to_client.send(event_frame("m4", "/model")).unwrap();
-    eventually("model card", || (sent_cards(&server).len() > before).then_some(())).await;
+    eventually("model card", || {
+        (sent_cards(&server).len() > before).then_some(())
+    })
+    .await;
     let model_card = sent_cards(&server)[before].1.clone();
-    assert!(card_text(&model_card).starts_with("当前模型 Z.ai/GLM-5$high"), "{model_card}");
-    assert!(model_card.to_string().contains("/model provider zai"), "{model_card}");
-    to_client.send(card_action_frame("c1", "/model provider mock")).unwrap();
+    assert!(
+        card_text(&model_card).starts_with("当前模型 Z.ai/GLM-5$high"),
+        "{model_card}"
+    );
+    assert!(
+        model_card.to_string().contains("/model provider zai"),
+        "{model_card}"
+    );
+    to_client
+        .send(card_action_frame("c1", "/model provider mock"))
+        .unwrap();
     let ack = wait_ack(&mut from_client, "c1").await;
     let body: Value = serde_json::from_slice(ack.payload.as_deref().unwrap()).unwrap();
     assert_eq!(body["code"], 200);
     let data: Value = serde_json::from_slice(
-        &base64::Engine::decode(&base64::engine::general_purpose::STANDARD, body["data"].as_str().unwrap()).unwrap(),
+        &base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            body["data"].as_str().unwrap(),
+        )
+        .unwrap(),
     )
     .unwrap();
     let card = &data["card"]["data"];
     assert!(card_text(card).contains("选择模型"), "{card}");
-    assert!(card.to_string().contains("/model model custom:mock:m1"), "{card}");
+    assert!(
+        card.to_string().contains("/model model custom:mock:m1"),
+        "{card}"
+    );
 
     bots.dispose().await;
-    assert_eq!(bots.runtime_status("feishu-1").unwrap()["message"], "Feishu WebSocket is stopped.");
+    assert_eq!(
+        bots.runtime_status("feishu-1").unwrap()["message"],
+        "Feishu WebSocket is stopped."
+    );
 }
 
 #[tokio::test]
@@ -686,7 +749,10 @@ async fn subscription_failure_falls_back_to_terminal_outcomes() {
         outcome: "succeeded",
         input_id: Some("run-1".into()),
     });
-    eventually("fallback reply", || (sent_cards(&server).len() == 1).then_some(())).await;
+    eventually("fallback reply", || {
+        (sent_cards(&server).len() == 1).then_some(())
+    })
+    .await;
     assert_eq!(card_text(&sent_cards(&server)[0].1), "Fallback reply");
 }
 
@@ -717,11 +783,23 @@ fn streaming_cards_split_by_element_budget() {
     let last = segments.last().unwrap();
     assert_eq!(last.status, StreamStatus::Completed);
     assert!(cards::streaming(last).to_string().contains("✅ 已完成"));
-    let empty = cards::streaming(&StreamState { locale: Some("en-US".into()), blocks: Vec::new(), status: StreamStatus::Running });
+    let empty = cards::streaming(&StreamState {
+        locale: Some("en-US".into()),
+        blocks: Vec::new(),
+        status: StreamStatus::Running,
+    });
     assert_eq!(empty["body"]["elements"][1]["content"], "_Running_");
-    let selection = cards::interactive(&json!({"text": "Pick", "selection": {"action": "task.set", "cancelLabel": "取消",
-        "options": [{"id": "t1", "label": ""}]}}));
+    let selection = cards::interactive(
+        &json!({"text": "Pick", "selection": {"action": "task.set", "cancelLabel": "取消",
+        "options": [{"id": "t1", "label": ""}]}}),
+    );
     assert_eq!(selection["body"]["elements"][1]["text"]["content"], "1");
-    assert_eq!(selection["body"]["elements"][1]["behaviors"][0]["value"]["command"], "/task t1");
-    assert_eq!(selection["body"]["elements"][2]["behaviors"][0]["value"]["command"], "/cancel");
+    assert_eq!(
+        selection["body"]["elements"][1]["behaviors"][0]["value"]["command"],
+        "/task t1"
+    );
+    assert_eq!(
+        selection["body"]["elements"][2]["behaviors"][0]["value"]["command"],
+        "/cancel"
+    );
 }

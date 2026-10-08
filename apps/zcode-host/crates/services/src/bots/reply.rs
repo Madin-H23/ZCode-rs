@@ -20,13 +20,55 @@ fn english(locale: Option<&str>) -> bool {
 fn t(locale: Option<&str>, key: &str) -> &'static str {
     let en = english(locale);
     match key {
-        "toolCalls" => if en { "Tool calls:" } else { "工具调用：" },
-        "completed" => if en { "Completed" } else { "完成" },
-        "failed" => if en { "Failed" } else { "失败" },
-        "denied" => if en { "Denied" } else { "已拒绝" },
-        "inProgress" => if en { "Running" } else { "⏳ 运行中" },
-        "permissionRequired" => if en { "Permission required:" } else { "需要权限：" },
-        _ => if en { "Pending" } else { "等待中" },
+        "toolCalls" => {
+            if en {
+                "Tool calls:"
+            } else {
+                "工具调用："
+            }
+        }
+        "completed" => {
+            if en {
+                "Completed"
+            } else {
+                "完成"
+            }
+        }
+        "failed" => {
+            if en {
+                "Failed"
+            } else {
+                "失败"
+            }
+        }
+        "denied" => {
+            if en {
+                "Denied"
+            } else {
+                "已拒绝"
+            }
+        }
+        "inProgress" => {
+            if en {
+                "Running"
+            } else {
+                "⏳ 运行中"
+            }
+        }
+        "permissionRequired" => {
+            if en {
+                "Permission required:"
+            } else {
+                "需要权限："
+            }
+        }
+        _ => {
+            if en {
+                "Pending"
+            } else {
+                "等待中"
+            }
+        }
     }
 }
 
@@ -38,7 +80,11 @@ fn truncate_middle(value: &str, max: usize) -> String {
     }
     let head = ((max - 5) as f64 * 0.65).ceil() as usize;
     let tail = (max - 5).saturating_sub(head);
-    format!("{} ... {}", js_slice(value, 0, head), js_slice(value, len - tail, len))
+    format!(
+        "{} ... {}",
+        js_slice(value, 0, head),
+        js_slice(value, len - tail, len)
+    )
 }
 
 /// `formatMarkdownInlineCode`。
@@ -58,7 +104,8 @@ fn count_lines(value: &str) -> usize {
 }
 
 fn first_string<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
-    keys.iter().find_map(|key| value.get(*key).and_then(Value::as_str))
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
 }
 
 /// `extractBeforeAfterText`。
@@ -123,10 +170,16 @@ fn input_summary(input: &Value) -> Option<String> {
 pub fn diff_count(added: usize, removed: usize) -> String {
     let mut parts = Vec::new();
     if added > 0 {
-        parts.push(format!("{DIFF_ADDED_MARKER} {}", inline_code(&format!("+{added}"))));
+        parts.push(format!(
+            "{DIFF_ADDED_MARKER} {}",
+            inline_code(&format!("+{added}"))
+        ));
     }
     if removed > 0 {
-        parts.push(format!("{DIFF_REMOVED_MARKER} {}", inline_code(&format!("-{removed}"))));
+        parts.push(format!(
+            "{DIFF_REMOVED_MARKER} {}",
+            inline_code(&format!("-{removed}"))
+        ));
     }
     parts.join(" ")
 }
@@ -154,7 +207,11 @@ fn workspace_relative(path: &str, workspace: &str) -> String {
         return ".".into();
     }
     if comparable_path.starts_with(&format!("{comparable_workspace}/")) {
-        return js_slice(&normalized_path, js_len(normalized_workspace) + 1, usize::MAX);
+        return js_slice(
+            &normalized_path,
+            js_len(normalized_workspace) + 1,
+            usize::MAX,
+        );
     }
     normalized_path
 }
@@ -181,7 +238,12 @@ fn status_label(tool: &ToolState, locale: Option<&str>) -> String {
                 .error
                 .as_deref()
                 .filter(|error| !error.is_empty())
-                .map(|error| format!(": {}", truncate_ellipsis(&collapse_whitespace(error), MAX_FIELD_LENGTH)))
+                .map(|error| {
+                    format!(
+                        ": {}",
+                        truncate_ellipsis(&collapse_whitespace(error), MAX_FIELD_LENGTH)
+                    )
+                })
                 .unwrap_or_default();
             format!("{}{detail}", t(locale, "failed"))
         }
@@ -194,14 +256,25 @@ fn status_label(tool: &ToolState, locale: Option<&str>) -> String {
 /// `formatBotToolCallSummaryLine`：`- <状态> · <工具名>[ · \`<命令或路径>\`][ · 🟢 \`+n\` 🔴 \`-m\`]`。
 pub fn tool_summary_line(tool: &ToolState, workspace: &str, locale: Option<&str>) -> String {
     let input = summary_input(tool, workspace);
-    let kind = if tool.tool_name.is_empty() { "tool" } else { tool.tool_name.as_str() };
+    let kind = if tool.tool_name.is_empty() {
+        "tool"
+    } else {
+        tool.tool_name.as_str()
+    };
     let primary = {
         let title = collapse_whitespace(&tool.tool_name);
-        if title.is_empty() { "tool".to_owned() } else { title }
+        if title.is_empty() {
+            "tool".to_owned()
+        } else {
+            title
+        }
     };
     let mut detail = Vec::new();
     if let Some(secondary) = input_summary(&input) {
-        detail.push(inline_code(&truncate_middle(&collapse_whitespace(&secondary), MAX_COMMAND_FIELD_LENGTH)));
+        detail.push(inline_code(&truncate_middle(
+            &collapse_whitespace(&secondary),
+            MAX_COMMAND_FIELD_LENGTH,
+        )));
     }
     if let Some((added, removed)) = change_stat(kind, &input, &tool.output) {
         let stat = diff_count(added, removed);
@@ -219,7 +292,11 @@ pub fn tool_summary_line(tool: &ToolState, workspace: &str, locale: Option<&str>
 
 /// `formatBotToolCallReply`。
 pub fn tool_reply(tool: &ToolState, workspace: &str, locale: Option<&str>) -> String {
-    format!("{}\n{}", t(locale, "toolCalls"), tool_summary_line(tool, workspace, locale))
+    format!(
+        "{}\n{}",
+        t(locale, "toolCalls"),
+        tool_summary_line(tool, workspace, locale)
+    )
 }
 
 /// `isBotToolCallReplyTerminal`。
@@ -239,11 +316,23 @@ pub fn split_long_reply(text: &str) -> Vec<String> {
     while remaining.len() > MAX_REPLY_MESSAGE_LENGTH {
         let breakpoint = last_index_of(&remaining, u16::from(b'\n'), MAX_REPLY_MESSAGE_LENGTH)
             .into_iter()
-            .chain(last_index_of(&remaining, u16::from(b' '), MAX_REPLY_MESSAGE_LENGTH))
+            .chain(last_index_of(
+                &remaining,
+                u16::from(b' '),
+                MAX_REPLY_MESSAGE_LENGTH,
+            ))
             .max()
             .unwrap_or(0);
-        let end = if breakpoint > 0 { breakpoint } else { MAX_REPLY_MESSAGE_LENGTH };
-        chunks.push(String::from_utf16_lossy(&remaining[..end]).trim().to_owned());
+        let end = if breakpoint > 0 {
+            breakpoint
+        } else {
+            MAX_REPLY_MESSAGE_LENGTH
+        };
+        chunks.push(
+            String::from_utf16_lossy(&remaining[..end])
+                .trim()
+                .to_owned(),
+        );
         remaining = String::from_utf16_lossy(&remaining[end..])
             .trim()
             .encode_utf16()
@@ -275,7 +364,10 @@ pub fn permission_summary(payload: &Value, workspace: &str, locale: Option<&str>
     let header = format!("{}\n{title}", t(locale, "permissionRequired"));
     let detail = &payload["detail"];
     if let Some(command) = first_string(detail, &["command"]) {
-        return format!("{header}\n{}", inline_code(&truncate_middle(command, MAX_COMMAND_FIELD_LENGTH)));
+        return format!(
+            "{header}\n{}",
+            inline_code(&truncate_middle(command, MAX_COMMAND_FIELD_LENGTH))
+        );
     }
     let paths: Vec<String> = ["path", "file_path", "filePath"]
         .iter()
@@ -284,7 +376,10 @@ pub fn permission_summary(payload: &Value, workspace: &str, locale: Option<&str>
         .map(|path| inline_code(&workspace_relative(path, workspace)))
         .collect();
     if !paths.is_empty() {
-        return format!("{header}\n{}", truncate_ellipsis(&paths.join(", "), MAX_FIELD_LENGTH));
+        return format!(
+            "{header}\n{}",
+            truncate_ellipsis(&paths.join(", "), MAX_FIELD_LENGTH)
+        );
     }
     header
 }
@@ -308,12 +403,20 @@ mod tests {
     #[test]
     fn tool_lines_match_the_ts_formatter() {
         assert_eq!(
-            tool_summary_line(&tool("Bash", "completed", json!({"command": "ls  -la"})), "/w", None),
+            tool_summary_line(
+                &tool("Bash", "completed", json!({"command": "ls  -la"})),
+                "/w",
+                None
+            ),
             "- 完成 · Bash · `ls -la`"
         );
         assert_eq!(
             tool_summary_line(
-                &tool("Edit", "in_progress", json!({"file_path": "/w/a.rs", "old_string": "a\nb", "new_string": "c"})),
+                &tool(
+                    "Edit",
+                    "in_progress",
+                    json!({"file_path": "/w/a.rs", "old_string": "a\nb", "new_string": "c"})
+                ),
                 "/w",
                 Some("en-US")
             ),
@@ -321,14 +424,28 @@ mod tests {
         );
         let mut failed = tool("Read", "failed", json!({}));
         failed.error = Some("boom\n now".into());
-        assert_eq!(tool_summary_line(&failed, "/w", None), "- 失败: boom now · Read");
-        assert_eq!(tool_summary_line(&tool("", "stopped", Value::Null), "/w", None), "- 等待中 · tool");
         assert_eq!(
-            tool_reply(&tool("Bash", "completed", json!({"command": "pwd"})), "/w", None),
+            tool_summary_line(&failed, "/w", None),
+            "- 失败: boom now · Read"
+        );
+        assert_eq!(
+            tool_summary_line(&tool("", "stopped", Value::Null), "/w", None),
+            "- 等待中 · tool"
+        );
+        assert_eq!(
+            tool_reply(
+                &tool("Bash", "completed", json!({"command": "pwd"})),
+                "/w",
+                None
+            ),
             "工具调用：\n- 完成 · Bash · `pwd`"
         );
         let long = "x".repeat(200);
-        let line = tool_summary_line(&tool("Bash", "completed", json!({"command": long})), "/w", None);
+        let line = tool_summary_line(
+            &tool("Bash", "completed", json!({"command": long})),
+            "/w",
+            None,
+        );
         assert!(line.contains(" ... "), "{line}");
         assert_eq!(inline_code("a`b\\c"), "`a\\`b\\\\c`");
     }
@@ -342,7 +459,13 @@ mod tests {
         assert_eq!(chunks[1].len(), 1000);
         assert_eq!(split_long_reply("  hi  "), vec!["hi"]);
         assert!(split_long_reply("   ").is_empty());
-        assert_eq!(extract_messages("a\r\nb", false), (Vec::new(), "a\nb".to_owned()));
-        assert_eq!(extract_messages("a\r\nb", true), (vec!["a\nb".to_owned()], String::new()));
+        assert_eq!(
+            extract_messages("a\r\nb", false),
+            (Vec::new(), "a\nb".to_owned())
+        );
+        assert_eq!(
+            extract_messages("a\r\nb", true),
+            (vec!["a\nb".to_owned()], String::new())
+        );
     }
 }

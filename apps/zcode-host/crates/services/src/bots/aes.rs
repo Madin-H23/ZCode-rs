@@ -124,7 +124,12 @@ pub fn decrypt_ecb_pkcs7(data: &[u8], key: &[u8; 16]) -> anyhow::Result<Vec<u8>>
         out.extend_from_slice(&block);
     }
     let pad = *out.last().unwrap_or(&0) as usize;
-    if pad == 0 || pad > 16 || out[out.len() - pad..].iter().any(|byte| *byte as usize != pad) {
+    if pad == 0
+        || pad > 16
+        || out[out.len() - pad..]
+            .iter()
+            .any(|byte| *byte as usize != pad)
+    {
         anyhow::bail!("bad decrypt");
     }
     out.truncate(out.len() - pad);

@@ -41,7 +41,11 @@ impl Endpoints {
     pub fn from_vars(vars: &BTreeMap<String, String>) -> Self {
         Self {
             feishu: feishu::api::Endpoints::from_vars(vars),
-            telegram: pick(vars, "ZCODE_TELEGRAM_API_BASE_URL", "https://api.telegram.org"),
+            telegram: pick(
+                vars,
+                "ZCODE_TELEGRAM_API_BASE_URL",
+                "https://api.telegram.org",
+            ),
             weixin: pick(
                 vars,
                 "ZCODE_WEIXIN_ILINK_BASE_URL",
@@ -121,7 +125,11 @@ impl Http {
     }
 
     /// `fetchBotProvider`：只关心状态码，响应体在同一截止时间内读完丢弃。
-    pub async fn status(&self, request: reqwest::RequestBuilder, timeout: Duration) -> Result<(bool, u16)> {
+    pub async fn status(
+        &self,
+        request: reqwest::RequestBuilder,
+        timeout: Duration,
+    ) -> Result<(bool, u16)> {
         let work = async {
             let response = request.timeout(timeout).send().await?;
             let status = response.status();
@@ -232,11 +240,20 @@ impl Bots {
     pub(crate) async fn send_outbound(&self, bot: &Value, message: &Value) -> Result<()> {
         match text(bot, "provider").unwrap_or_default() {
             "telegram" => {
-                let Some(token) = self.load_bot_secret(bot).await.filter(|t| !t.trim().is_empty())
+                let Some(token) = self
+                    .load_bot_secret(bot)
+                    .await
+                    .filter(|t| !t.trim().is_empty())
                 else {
                     return Ok(());
                 };
-                telegram::send(&self.providers.http, &self.providers.endpoints.telegram, &token, message).await
+                telegram::send(
+                    &self.providers.http,
+                    &self.providers.endpoints.telegram,
+                    &token,
+                    message,
+                )
+                .await
             }
             "webhook" => webhook::send(self, bot, message).await,
             "weixin" => weixin::send(self, bot, message).await,
@@ -248,10 +265,19 @@ impl Bots {
     /// `adapter.sendTyping`：一次性 typing（短命令与 Telegram / 微信的周期重发）。失败静默。
     pub(crate) async fn send_typing(&self, bot: &Value, target: &TypingTarget) {
         let result = match text(bot, "provider").unwrap_or_default() {
-            "telegram" => match self.load_bot_secret(bot).await.filter(|t| !t.trim().is_empty()) {
+            "telegram" => match self
+                .load_bot_secret(bot)
+                .await
+                .filter(|t| !t.trim().is_empty())
+            {
                 Some(token) => {
-                    telegram::send_typing(&self.providers.http, &self.providers.endpoints.telegram, &token, target)
-                        .await
+                    telegram::send_typing(
+                        &self.providers.http,
+                        &self.providers.endpoints.telegram,
+                        &token,
+                        target,
+                    )
+                    .await
                 }
                 None => Ok(()),
             },
@@ -322,7 +348,10 @@ impl Bots {
     ) -> Result<bool> {
         match text(bot, "provider").unwrap_or_default() {
             "telegram" => {
-                let Some(token) = self.load_bot_secret(bot).await.filter(|t| !t.trim().is_empty())
+                let Some(token) = self
+                    .load_bot_secret(bot)
+                    .await
+                    .filter(|t| !t.trim().is_empty())
                 else {
                     return Ok(false);
                 };
@@ -336,7 +365,10 @@ impl Bots {
                 .await
                 .map(|()| false)
             }
-            "feishu" | "lark" => self.feishu_acknowledge(bot, payload, text_value, message).await,
+            "feishu" | "lark" => {
+                self.feishu_acknowledge(bot, payload, text_value, message)
+                    .await
+            }
             _ => Ok(false),
         }
     }
@@ -414,15 +446,30 @@ mod tests {
     #[test]
     fn selection_commands_match_node() {
         let base = |action: &str| json!({"action": action, "token": "abc"});
-        assert_eq!(selection_command(&base("workspace.set"), "w1"), "/workspace w1");
-        assert_eq!(selection_command(&base("model.provider.set"), "p"), "/model provider p");
+        assert_eq!(
+            selection_command(&base("workspace.set"), "w1"),
+            "/workspace w1"
+        );
+        assert_eq!(
+            selection_command(&base("model.provider.set"), "p"),
+            "/model provider p"
+        );
         assert_eq!(selection_command(&base("model.set"), "m"), "/model model m");
-        assert_eq!(selection_command(&base("permission.respond"), "/approve r o"), "/approve r o");
-        assert_eq!(selection_command(&base("elicitation.respond"), "v"), "/elicitation abc v");
+        assert_eq!(
+            selection_command(&base("permission.respond"), "/approve r o"),
+            "/approve r o"
+        );
+        assert_eq!(
+            selection_command(&base("elicitation.respond"), "v"),
+            "/elicitation abc v"
+        );
         assert_eq!(
             selection_command(&json!({"action": "elicitation.respond"}), "v"),
             "/elicitation v"
         );
-        assert_eq!(selection_command(&base("thoughtLevel.set"), "high"), "/thoughtLevel high");
+        assert_eq!(
+            selection_command(&base("thoughtLevel.set"), "high"),
+            "/thoughtLevel high"
+        );
     }
 }

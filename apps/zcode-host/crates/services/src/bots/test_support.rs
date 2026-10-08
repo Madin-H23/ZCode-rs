@@ -47,14 +47,6 @@ impl Answer {
             delay: Duration::ZERO,
         }
     }
-
-    pub fn bytes(body: Vec<u8>) -> Self {
-        Self {
-            status: 200,
-            body,
-            delay: Duration::ZERO,
-        }
-    }
 }
 
 type Responder = Arc<dyn Fn(&Recorded) -> Option<Answer> + Send + Sync>;
@@ -278,7 +270,9 @@ fn emit(sessions: &Mutex<HashMap<String, Session>>, task: &str, deltas: Vec<Valu
     session.seq += 1;
     let frame = json!({"topic": format!("conversation/{task}"), "subscriptionId": "s", "fromSeq": from,
         "toSeq": session.seq, "payload": {"kind": "deltas", "deltas": deltas}});
-    session.sinks.retain(|sink| sink.send(frame.clone()).is_ok());
+    session
+        .sinks
+        .retain(|sink| sink.send(frame.clone()).is_ok());
 }
 
 fn append_row(sessions: &Mutex<HashMap<String, Session>>, task: &str, mut row: Value) -> i64 {
@@ -294,56 +288,85 @@ fn append_row(sessions: &Mutex<HashMap<String, Session>>, task: &str, mut row: V
 /// 按脚本播放一轮回复（工具 → 正文 → 收口）。
 async fn play(sessions: Arc<Mutex<HashMap<String, Session>>>, task: String, script: Script) {
     tokio::time::sleep(Duration::from_millis(20) + script.delay).await;
-    let turn = json!({"kind": "turnHeader", "turnId": "t", "state": "running", "origin": "userInput"});
+    let turn =
+        json!({"kind": "turnHeader", "turnId": "t", "state": "running", "origin": "userInput"});
     let turn_id = append_row(&sessions, &task, turn.clone());
     let mut turn_row = turn;
     turn_row["rowId"] = json!(turn_id);
-    emit(&sessions, &task, vec![
-        json!({"op": "row.appended", "row": turn_row}),
-        json!({"op": "state.updated", "patch": {"control": {"phase": "running"}}}),
-    ]);
+    emit(
+        &sessions,
+        &task,
+        vec![
+            json!({"op": "row.appended", "row": turn_row}),
+            json!({"op": "state.updated", "patch": {"control": {"phase": "running"}}}),
+        ],
+    );
     for (index, (name, input)) in script.tools.iter().enumerate() {
         let tool = json!({"kind": "toolCall", "turnId": "t", "toolCallId": format!("tool-{index}"),
             "toolName": name, "status": "running", "inputText": "", "input": input});
         let id = append_row(&sessions, &task, tool.clone());
         let mut row = tool;
         row["rowId"] = json!(id);
-        emit(&sessions, &task, vec![json!({"op": "row.appended", "row": row.clone()})]);
+        emit(
+            &sessions,
+            &task,
+            vec![json!({"op": "row.appended", "row": row.clone()})],
+        );
         row["status"] = json!("success");
-        emit(&sessions, &task, vec![json!({"op": "row.upserted", "row": row})]);
+        emit(
+            &sessions,
+            &task,
+            vec![json!({"op": "row.upserted", "row": row})],
+        );
     }
     if !script.chunks.is_empty() {
-        let text = json!({"kind": "assistantText", "turnId": "t", "text": "", "state": "streaming"});
+        let text =
+            json!({"kind": "assistantText", "turnId": "t", "text": "", "state": "streaming"});
         let id = append_row(&sessions, &task, text.clone());
         let mut row = text;
         row["rowId"] = json!(id);
-        emit(&sessions, &task, vec![json!({"op": "row.appended", "row": row})]);
+        emit(
+            &sessions,
+            &task,
+            vec![json!({"op": "row.appended", "row": row})],
+        );
         for chunk in &script.chunks {
-            emit(&sessions, &task, vec![json!({"op": "row.delta", "rowId": id, "path": "text", "append": chunk})]);
+            emit(
+                &sessions,
+                &task,
+                vec![json!({"op": "row.delta", "rowId": id, "path": "text", "append": chunk})],
+            );
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }
-    let state = if script.fail.is_some() { "failed" } else { "completedSuccess" };
-    let mut deltas = vec![json!({"op": "row.upserted", "row": {"kind": "turnHeader", "rowId": turn_id,
-        "turnId": "t", "state": state, "origin": "userInput"}})];
-    let mut control = json!({"phase": if script.fail.is_some() { "error" } else { "completedSuccess" }});
+    let state = if script.fail.is_some() {
+        "failed"
+    } else {
+        "completedSuccess"
+    };
+    let mut deltas = vec![
+        json!({"op": "row.upserted", "row": {"kind": "turnHeader", "rowId": turn_id,
+        "turnId": "t", "state": state, "origin": "userInput"}}),
+    ];
+    let mut control =
+        json!({"phase": if script.fail.is_some() { "error" } else { "completedSuccess" }});
     if let Some(error) = &script.fail {
         control["lastError"] = json!({"message": error});
     }
     deltas.push(json!({"op": "state.updated", "patch": {"control": control}}));
     emit(&sessions, &task, deltas);
     if let Some(session) = sessions.lock().unwrap().get_mut(&task) {
-        session.status = if script.fail.is_some() { "error".into() } else { "completed".into() };
+        session.status = if script.fail.is_some() {
+            "error".into()
+        } else {
+            "completed".into()
+        };
     }
 }
 
 impl FakeTasks {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
-    }
-
-    pub fn sent_texts(&self) -> Vec<String> {
-        self.sent.lock().unwrap().iter().map(|(_, input, _)| input.text.clone()).collect()
     }
 
     fn ensure_session(&self, task: &str) {
@@ -356,7 +379,12 @@ impl FakeTasks {
 }
 
 impl TaskPort for FakeTasks {
-    fn create(&self, target: WorkspaceTarget, selection: Value, mode: Option<String>) -> BoxFuture<'static, Result<String, String>> {
+    fn create(
+        &self,
+        target: WorkspaceTarget,
+        selection: Value,
+        mode: Option<String>,
+    ) -> BoxFuture<'static, Result<String, String>> {
         if let Some(error) = self.create_fails.lock().unwrap().clone() {
             return async move { Err(error) }.boxed();
         }
@@ -371,13 +399,22 @@ impl TaskPort for FakeTasks {
         async move { Ok(id) }.boxed()
     }
 
-    fn resume(&self, _: WorkspaceTarget, task: String) -> BoxFuture<'static, Result<Option<Value>, String>> {
+    fn resume(
+        &self,
+        _: WorkspaceTarget,
+        task: String,
+    ) -> BoxFuture<'static, Result<Option<Value>, String>> {
         self.ensure_session(&task);
         let model = self.sessions.lock().unwrap()[&task].model.clone();
         async move { Ok(Some(model)) }.boxed()
     }
 
-    fn send(&self, target: WorkspaceTarget, task: String, input: SendText) -> BoxFuture<'static, Result<(), String>> {
+    fn send(
+        &self,
+        target: WorkspaceTarget,
+        task: String,
+        input: SendText,
+    ) -> BoxFuture<'static, Result<(), String>> {
         self.send_with_attachments(target, task, input, Vec::new())
     }
 
@@ -388,7 +425,10 @@ impl TaskPort for FakeTasks {
         input: SendText,
         attachments: Vec<Value>,
     ) -> BoxFuture<'static, Result<(), String>> {
-        self.sent.lock().unwrap().push((task.clone(), input, attachments.len()));
+        self.sent
+            .lock()
+            .unwrap()
+            .push((task.clone(), input, attachments.len()));
         self.ensure_session(&task);
         if let Some(session) = self.sessions.lock().unwrap().get_mut(&task) {
             session.status = "running".into();
@@ -471,8 +511,17 @@ impl TaskPort for FakeTasks {
         async move { view }.boxed()
     }
 
-    fn read_session(&self, _: WorkspaceTarget, task: String) -> BoxFuture<'static, Result<Value, String>> {
-        let session = self.sessions.lock().unwrap().get(&task).map(|s| (s.status.clone(), s.model.clone()));
+    fn read_session(
+        &self,
+        _: WorkspaceTarget,
+        task: String,
+    ) -> BoxFuture<'static, Result<Value, String>> {
+        let session = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&task)
+            .map(|s| (s.status.clone(), s.model.clone()));
         async move {
             let Some((status, model)) = session else {
                 return Err(format!("Session not found: {task}"));
@@ -483,17 +532,31 @@ impl TaskPort for FakeTasks {
         .boxed()
     }
 
-    fn config_options(&self, _: WorkspaceTarget, _: String) -> BoxFuture<'static, Result<Value, String>> {
+    fn config_options(
+        &self,
+        _: WorkspaceTarget,
+        _: String,
+    ) -> BoxFuture<'static, Result<Value, String>> {
         let options = self.config_options.lock().unwrap().clone();
         async move { Ok(options) }.boxed()
     }
 
-    fn set_model(&self, _: WorkspaceTarget, task: String, selection: Value) -> BoxFuture<'static, Result<(), String>> {
+    fn set_model(
+        &self,
+        _: WorkspaceTarget,
+        task: String,
+        selection: Value,
+    ) -> BoxFuture<'static, Result<(), String>> {
         self.set_models.lock().unwrap().push((task, selection));
         async { Ok(()) }.boxed()
     }
 
-    fn set_thought_level(&self, _: WorkspaceTarget, task: String, level: String) -> BoxFuture<'static, Result<(), String>> {
+    fn set_thought_level(
+        &self,
+        _: WorkspaceTarget,
+        task: String,
+        level: String,
+    ) -> BoxFuture<'static, Result<(), String>> {
         self.thought_levels.lock().unwrap().push((task, level));
         async { Ok(()) }.boxed()
     }
@@ -505,12 +568,19 @@ impl TaskPort for FakeTasks {
         interaction: String,
         answer: Value,
     ) -> BoxFuture<'static, Result<(), String>> {
-        self.resolved.lock().unwrap().push((task.clone(), interaction, answer));
+        self.resolved
+            .lock()
+            .unwrap()
+            .push((task.clone(), interaction, answer));
         let rest = self.pending_resume.lock().unwrap().remove(&task);
         let sessions = self.sessions.clone();
         async move {
             if let Some(rest) = rest {
-                emit(&sessions, &task, vec![json!({"op": "state.updated", "patch": {"pendingInteractions": []}})]);
+                emit(
+                    &sessions,
+                    &task,
+                    vec![json!({"op": "state.updated", "patch": {"pendingInteractions": []}})],
+                );
                 tokio::spawn(play(sessions, task, rest));
             }
             Ok(())
@@ -518,7 +588,11 @@ impl TaskPort for FakeTasks {
         .boxed()
     }
 
-    fn subscribe(&self, _: WorkspaceTarget, task: String) -> BoxFuture<'static, Result<BoxStream<'static, Value>, String>> {
+    fn subscribe(
+        &self,
+        _: WorkspaceTarget,
+        task: String,
+    ) -> BoxFuture<'static, Result<BoxStream<'static, Value>, String>> {
         if *self.subscribe_fails.lock().unwrap() {
             return async { Err("subscribe unavailable".to_owned()) }.boxed();
         }
@@ -547,7 +621,12 @@ pub fn bots_with(dir: &std::path::Path, origin: &str, tasks: Arc<dyn TaskPort>) 
 }
 
 /// 同 [`bots_with`]；`background` 为 true 时配置变更会自动对齐通道运行时（轮询 / 长连接）。
-pub fn bots_in(dir: &std::path::Path, origin: &str, tasks: Arc<dyn TaskPort>, background: bool) -> Arc<Bots> {
+pub fn bots_in(
+    dir: &std::path::Path,
+    origin: &str,
+    tasks: Arc<dyn TaskPort>,
+    background: bool,
+) -> Arc<Bots> {
     let config_dir = dir.join(".zcode").join("v2");
     std::fs::create_dir_all(&config_dir).unwrap();
     if !config_dir.join("setting.json").exists() {

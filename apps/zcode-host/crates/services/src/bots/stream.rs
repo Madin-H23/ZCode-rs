@@ -43,9 +43,20 @@ pub struct ToolState {
 
 #[derive(Debug, Clone)]
 enum Row {
-    Text { reasoning: bool, text: String },
-    Tool(ToolState),
-    Turn { terminal: bool },
+    Text {
+        reasoning: bool,
+        text: String,
+    },
+    /// `announced`：已经投影过 `tool_call`。输入还在流式生成（`inputStreaming`）的工具先不投影，
+    /// 等它带着完整输入进入调度态时再发（legacy 的 tool_call 在工具调度时带 input 发出）。
+    Tool {
+        state: Box<ToolState>,
+        ready: bool,
+        announced: bool,
+    },
+    Turn {
+        terminal: bool,
+    },
     Other,
 }
 
@@ -64,11 +75,22 @@ fn is_terminal_phase(phase: &str) -> bool {
     matches!(phase, "completedSuccess" | "completedInterrupted" | "error")
 }
 
+/// 工具输入：行上有结构化 `input` 时用它，否则解析 `inputText`（Rust CLI 只下发 JSON 文本）。
+fn tool_input(row: &Value) -> Value {
+    match row.get("input").filter(|input| !input.is_null()) {
+        Some(input) => input.clone(),
+        None => row["inputText"]
+            .as_str()
+            .and_then(|text| serde_json::from_str(text).ok())
+            .unwrap_or(Value::Null),
+    }
+}
+
 fn tool_state(row: &Value) -> ToolState {
     ToolState {
         tool_id: row["toolCallId"].as_str().unwrap_or_default().to_owned(),
         tool_name: row["toolName"].as_str().unwrap_or_default().to_owned(),
-        input: row.get("input").cloned().unwrap_or(Value::Null),
+        input: tool_input(row),
         output: row.get("output").cloned().unwrap_or(Value::Null),
         status: tool_status(row["status"].as_str().unwrap_or_default()),
         error: row["error"]["message"].as_str().map(str::to_owned),
@@ -81,7 +103,11 @@ fn parse_row(row: &Value) -> Row {
             reasoning: kind == "reasoning",
             text: row["text"].as_str().unwrap_or_default().to_owned(),
         },
-        Some("toolCall") => Row::Tool(tool_state(row)),
+        Some("toolCall") => Row::Tool {
+            state: Box::new(tool_state(row)),
+            ready: row["status"] != "inputStreaming",
+            announced: false,
+        },
         Some("turnHeader") => Row::Turn {
             terminal: matches!(
                 row["state"].as_str(),
@@ -149,7 +175,10 @@ impl Projector {
     }
 
     fn apply_snapshot(&mut self, snapshot: &Value, events: &mut Vec<StreamEvent>) {
-        let rows = snapshot["rows"]["window"].as_array().cloned().unwrap_or_default();
+        let rows = snapshot["rows"]["window"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         let interactions = snapshot["pendingInteractions"]
             .as_array()
             .cloned()
@@ -157,7 +186,11 @@ impl Projector {
         if !self.initialized {
             for row in &rows {
                 if let Some(id) = row["rowId"].as_i64() {
-                    self.rows.insert(id, parse_row(row));
+                    let mut parsed = parse_row(row);
+                    if let Row::Tool { announced, .. } = &mut parsed {
+                        *announced = true;
+                    }
+                    self.rows.insert(id, parsed);
                     self.max_row = Some(self.max_row.map_or(id, |max| max.max(id)));
                 }
             }
@@ -224,10 +257,8 @@ impl Projector {
         let next = parse_row(row);
         let is_new_row = self.max_row.is_none_or(|max| id > max);
         match (self.rows.get(&id), &next) {
-            (None, Row::Text { reasoning, text }) => {
-                if is_new_row && !text.is_empty() {
-                    events.push(chunk(*reasoning, text.clone()));
-                }
+            (None, Row::Text { reasoning, text }) if is_new_row && !text.is_empty() => {
+                events.push(chunk(*reasoning, text.clone()));
             }
             (Some(Row::Text { text: previous, .. }), Row::Text { reasoning, text }) => {
                 if let Some(suffix) = text.strip_prefix(previous.as_str())
@@ -236,32 +267,49 @@ impl Projector {
                     events.push(chunk(*reasoning, suffix.to_owned()));
                 }
             }
-            (None, Row::Tool(tool)) => {
-                if is_new_row {
-                    events.push(StreamEvent::ToolCall(tool.clone()));
-                    if tool.status != "pending" {
-                        events.push(StreamEvent::ToolUpdate(tool.clone()));
+            (previous @ (None | Some(Row::Tool { .. })), Row::Tool { state, ready, .. }) => {
+                let (known, announced) = match previous {
+                    Some(Row::Tool {
+                        state, announced, ..
+                    }) => (Some(state.as_ref().clone()), *announced),
+                    // 窗口外的旧行（resync 时才看到）不补发事件。
+                    _ => (None, !is_new_row),
+                };
+                let current = state.as_ref();
+                let announced = if !announced && *ready {
+                    events.push(StreamEvent::ToolCall(current.clone()));
+                    if current.status != "pending" {
+                        events.push(StreamEvent::ToolUpdate(current.clone()));
                     }
-                }
-            }
-            (Some(Row::Tool(previous)), Row::Tool(tool)) => {
-                if previous != tool {
-                    events.push(StreamEvent::ToolUpdate(tool.clone()));
-                }
-            }
-            (None, Row::Turn { terminal }) => {
-                if is_new_row {
-                    self.active = true;
-                    if *terminal {
-                        self.finish_turn(row);
+                    true
+                } else {
+                    if announced && known.as_ref() != Some(current) {
+                        events.push(StreamEvent::ToolUpdate(current.clone()));
                     }
-                }
+                    announced
+                };
+                self.max_row = Some(self.max_row.map_or(id, |max| max.max(id)));
+                self.rows.insert(
+                    id,
+                    Row::Tool {
+                        state: state.clone(),
+                        ready: *ready,
+                        announced,
+                    },
+                );
+                return;
             }
-            (Some(Row::Turn { terminal: false }), Row::Turn { terminal: true }) => {
-                if self.active || is_new_row {
-                    self.active = true;
+            (None, Row::Turn { terminal }) if is_new_row => {
+                self.active = true;
+                if *terminal {
                     self.finish_turn(row);
                 }
+            }
+            (Some(Row::Turn { terminal: false }), Row::Turn { terminal: true })
+                if self.active || is_new_row =>
+            {
+                self.active = true;
+                self.finish_turn(row);
             }
             _ => {}
         }
@@ -355,12 +403,22 @@ mod tests {
     fn projects_v4_frames_into_bot_events() {
         let mut projector = Projector::new();
         // 没有基线时丢弃 delta。
-        assert!(projector.apply(&deltas(json!([{"op": "row.delta", "rowId": 1, "path": "text", "append": "x"}]))).is_empty());
+        assert!(
+            projector
+                .apply(&deltas(
+                    json!([{"op": "row.delta", "rowId": 1, "path": "text", "append": "x"}])
+                ))
+                .is_empty()
+        );
         let baseline = json!([
             {"rowId": 1, "kind": "turnHeader", "state": "completedSuccess"},
             {"rowId": 2, "kind": "assistantText", "text": "old answer", "state": "complete"},
         ]);
-        assert!(projector.apply(&snapshot(baseline, "completedSuccess", json!([]))).is_empty());
+        assert!(
+            projector
+                .apply(&snapshot(baseline, "completedSuccess", json!([])))
+                .is_empty()
+        );
         assert!(projector.is_initialized());
         let events = projector.apply(&deltas(json!([
             {"op": "row.appended", "row": {"rowId": 3, "kind": "turnHeader", "state": "running"}},
@@ -396,9 +454,13 @@ mod tests {
         // 交互出现与消失。
         let interaction = json!({"interactionId": "i1", "kind": "userInput", "anchorRowId": null, "createdAt": 1,
             "payload": {"kind": "userInput", "prompt": "Q?", "freeText": true}});
-        let events = projector.apply(&deltas(json!([{"op": "state.updated", "patch": {"pendingInteractions": [interaction]}}])));
+        let events = projector.apply(&deltas(
+            json!([{"op": "state.updated", "patch": {"pendingInteractions": [interaction]}}]),
+        ));
         assert_eq!(events, vec![StreamEvent::Interaction(interaction.clone())]);
-        let events = projector.apply(&deltas(json!([{"op": "state.updated", "patch": {"pendingInteractions": []}}])));
+        let events = projector.apply(&deltas(
+            json!([{"op": "state.updated", "patch": {"pendingInteractions": []}}]),
+        ));
         assert_eq!(events, vec![StreamEvent::InteractionResolved("i1".into())]);
         // resync 快照：已知行求差，新行产生事件。
         let resync = snapshot(
@@ -411,7 +473,10 @@ mod tests {
         );
         assert_eq!(
             projector.apply(&resync),
-            vec![StreamEvent::MessageChunk(" world".into()), StreamEvent::MessageChunk("!".into())]
+            vec![
+                StreamEvent::MessageChunk(" world".into()),
+                StreamEvent::MessageChunk("!".into())
+            ]
         );
         // 终态：轮次收口与 lastError 在同一帧，帧处理完才发事件。
         let events = projector.apply(&deltas(json!([
@@ -420,7 +485,13 @@ mod tests {
         ])));
         assert_eq!(events, vec![StreamEvent::Failed("quota".into())]);
         assert!(projector.is_finished());
-        assert!(projector.apply(&deltas(json!([{"op": "row.delta", "rowId": 6, "path": "text", "append": "x"}]))).is_empty());
+        assert!(
+            projector
+                .apply(&deltas(
+                    json!([{"op": "row.delta", "rowId": 6, "path": "text", "append": "x"}])
+                ))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -429,10 +500,28 @@ mod tests {
         projector.apply(&snapshot(json!([]), "draft", json!([])));
         assert!(projector.apply(&deltas(json!([{"op": "state.updated", "patch": {"control": {"phase": "completedSuccess"}}}]))).is_empty(),
             "a terminal phase without observed activity is not this turn's end");
-        projector.apply(&deltas(json!([{"op": "state.updated", "patch": {"control": {"phase": "running"}}}])));
+        projector.apply(&deltas(
+            json!([{"op": "state.updated", "patch": {"control": {"phase": "running"}}}]),
+        ));
         let events = projector.apply(&deltas(json!([{"op": "state.updated", "patch": {"control": {"phase": "completedInterrupted"}}}])));
         assert_eq!(events, vec![StreamEvent::Complete]);
         assert_eq!(tool_status("inputStreaming"), "pending");
+        // 输入还在流式生成的工具先不投影，进入调度态时带完整输入发 tool_call。
+        let mut projector = Projector::new();
+        projector.apply(&snapshot(json!([]), "running", json!([])));
+        let streaming = json!({"rowId": 1, "kind": "toolCall", "toolCallId": "c", "toolName": "Bash",
+            "status": "inputStreaming", "inputText": "{\"comm"});
+        assert!(
+            projector
+                .apply(&deltas(json!([{"op": "row.appended", "row": streaming}])))
+                .is_empty()
+        );
+        let events = projector.apply(&deltas(json!([{"op": "row.upserted", "row": {"rowId": 1, "kind": "toolCall",
+            "toolCallId": "c", "toolName": "Bash", "status": "running", "inputText": "", "input": {"command": "ls"}}}])));
+        assert!(
+            matches!(&events[..], [StreamEvent::ToolCall(tool), StreamEvent::ToolUpdate(_)] if tool.input["command"] == "ls"),
+            "{events:?}"
+        );
         assert_eq!(tool_status("cancelled"), "stopped");
     }
 }

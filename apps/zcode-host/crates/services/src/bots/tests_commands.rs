@@ -6,7 +6,9 @@ use serde_json::{Value, json};
 
 use super::feishu::{Actor, Inbound};
 use super::interaction::selection_token;
-use super::test_support::{Answer, FakeTasks, MockServer, Script, bots_with, bound_bot, eventually};
+use super::test_support::{
+    Answer, FakeTasks, MockServer, Script, bots_with, bound_bot, eventually,
+};
 
 fn inbound(text: &str) -> Inbound {
     Inbound {
@@ -57,9 +59,16 @@ async fn draft_selection_commands_follow_node() {
     assert_eq!(reply[0]["selection"]["cancelLabel"], "取消");
     let reply = ask(&bots, "/model provider 2").await;
     assert_eq!(reply[0]["text"], "当前模型 custom:zai:GLM-5\n选择模型");
-    assert_eq!(reply[0]["selection"]["options"], json!([{"id": "custom:mock:m1", "label": "m1"}]));
+    assert_eq!(
+        reply[0]["selection"]["options"],
+        json!([{"id": "custom:mock:m1", "label": "m1"}])
+    );
     let reply = ask(&bots, "/model model 1").await;
-    assert!(reply[0]["text"].as_str().unwrap().contains("模型: Mock/m1"), "{}", reply[0]);
+    assert!(
+        reply[0]["text"].as_str().unwrap().contains("模型: Mock/m1"),
+        "{}",
+        reply[0]
+    );
     let state = bots.repo.read_state().await.unwrap();
     assert_eq!(
         state["bots"]["tg-1"]["draftOptions"],
@@ -70,25 +79,52 @@ async fn draft_selection_commands_follow_node() {
     assert_eq!(labels(&reply), ["off", "on · 当前"]);
     ask(&bots, "/think 1").await;
     let state = bots.repo.read_state().await.unwrap();
-    assert_eq!(state["bots"]["tg-1"]["draftOptions"]["modelSelection"]["options"]["reasoningLevel"], "off");
-    assert_eq!(ask(&bots, "/mode plan").await[0]["text"], "机器人已锁定 **yolo** 运行模式，无法切换。");
+    assert_eq!(
+        state["bots"]["tg-1"]["draftOptions"]["modelSelection"]["options"]["reasoningLevel"],
+        "off"
+    );
+    assert_eq!(
+        ask(&bots, "/mode plan").await[0]["text"],
+        "机器人已锁定 **yolo** 运行模式，无法切换。"
+    );
     let reply = ask(&bots, "/reply").await;
     assert_eq!(labels(&reply), ["标准回复 · 当前", "完整回复", "摘要回复"]);
     ask(&bots, "/reply 3").await;
-    assert_eq!(bots.repo.read_config().await.unwrap()["bots"][0]["replyMode"], "summary_changes");
-    assert_eq!(ask(&bots, "/task").await[0]["text"], "当前 workspace 没有历史任务。");
+    assert_eq!(
+        bots.repo.read_config().await.unwrap()["bots"][0]["replyMode"],
+        "summary_changes"
+    );
+    assert_eq!(
+        ask(&bots, "/task").await[0]["text"],
+        "当前 workspace 没有历史任务。"
+    );
     let reply = ask(&bots, "/workspace").await;
     assert_eq!(labels(&reply), ["ws-bot · 当前", "ws-other"]);
     let reply = ask(&bots, "/workspace ws-other").await;
-    assert!(reply[0]["text"].as_str().unwrap().starts_with("工作区: ws-other"), "{}", reply[0]);
+    assert!(
+        reply[0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("工作区: ws-other"),
+        "{}",
+        reply[0]
+    );
     // 切换 workspace 进入新草稿，原草稿模型不保留。
     let state = bots.repo.read_state().await.unwrap();
-    assert_eq!(state["bots"]["tg-1"]["draftOptions"], json!({"provider": "glm", "mode": "yolo"}));
+    assert_eq!(
+        state["bots"]["tg-1"]["draftOptions"],
+        json!({"provider": "glm", "mode": "yolo"})
+    );
     // 没有待选项时取消回未知命令 0；待选项被普通文本清掉。
     assert_eq!(ask(&bots, "/cancel").await[0]["text"], "未知命令：**/0**");
     ask(&bots, "/reply").await;
     let reply = ask(&bots, "/cancel").await;
-    assert!(reply[0]["text"].as_str().unwrap().starts_with("工作区: ws-other"));
+    assert!(
+        reply[0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("工作区: ws-other")
+    );
     assert_eq!(ask(&bots, "/nope").await[0]["text"], "未知命令：**/nope**");
 }
 
@@ -99,29 +135,53 @@ async fn task_commands_inherit_and_guard_running_tasks() {
     let (_dir, bots) = setup(tasks.clone()).await;
     assert!(ask(&bots, "hello").await.is_empty());
     // 运行中：切换上下文的命令都回 taskRunning。
-    assert_eq!(ask(&bots, "/model").await[0]["text"], "当前任务正在运行，稍后再试，或使用 **/停止** 停止当前任务。");
-    assert_eq!(ask(&bots, "/new").await[0]["text"], ask(&bots, "/task").await[0]["text"]);
-    assert_eq!(ask(&bots, "hello again").await[0]["text"], "当前任务正在运行，稍后再试，或使用 **/停止** 停止当前任务。");
-    eventually("task finished", || bots.running.lock().unwrap().is_empty().then_some(())).await;
-    let status = ask(&bots, "/status").await[0]["text"].as_str().unwrap().to_owned();
+    assert_eq!(
+        ask(&bots, "/model").await[0]["text"],
+        "当前任务正在运行，稍后再试，或使用 **/停止** 停止当前任务。"
+    );
+    assert_eq!(
+        ask(&bots, "/new").await[0]["text"],
+        ask(&bots, "/task").await[0]["text"]
+    );
+    assert_eq!(
+        ask(&bots, "hello again").await[0]["text"],
+        "当前任务正在运行，稍后再试，或使用 **/停止** 停止当前任务。"
+    );
+    eventually("task finished", || {
+        bots.running.lock().unwrap().is_empty().then_some(())
+    })
+    .await;
+    let status = ask(&bots, "/status").await[0]["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     assert!(status.contains("模型: Z.ai/GLM-5$high"), "{status}");
     assert!(status.contains("任务: Task 1 (task-1)"), "{status}");
     assert!(status.contains("状态: ✅ 已完成"), "{status}");
     let reply = ask(&bots, "/task").await;
     assert_eq!(reply[0]["text"], "当前任务 Task 1 (task-1)\n选择任务");
     assert_eq!(labels(&reply), ["Task 1 · 当前"]);
-    assert_eq!(reply[0]["selection"]["options"][0]["description"], "completed");
+    assert_eq!(
+        reply[0]["selection"]["options"][0]["description"],
+        "completed"
+    );
     // /think 在任务态读会话 configOptions，选中后 V4 switchModelConfig。
     let reply = ask(&bots, "/think").await;
     assert_eq!(labels(&reply), ["Low", "High · 当前"]);
     ask(&bots, "/think low").await;
-    assert_eq!(tasks.thought_levels.lock().unwrap().clone(), vec![("task-1".to_owned(), "low".to_owned())]);
+    assert_eq!(
+        tasks.thought_levels.lock().unwrap().clone(),
+        vec![("task-1".to_owned(), "low".to_owned())]
+    );
     // 任务态 /model 两级选择后 setModel（补成目标模型最高档）。
     ask(&bots, "/model provider zai").await;
     ask(&bots, "/model model GLM-4.7").await;
     assert_eq!(
         tasks.set_models.lock().unwrap().clone(),
-        vec![("task-1".to_owned(), json!({"providerId": "zai", "modelId": "GLM-4.7", "options": {"reasoningLevel": "medium"}}))]
+        vec![(
+            "task-1".to_owned(),
+            json!({"providerId": "zai", "modelId": "GLM-4.7", "options": {"reasoningLevel": "medium"}})
+        )]
     );
     // /new 继承当前任务的模型与档位（去掉 `$level` 后缀），模式硬锁 yolo。
     let reply = ask(&bots, "/new").await;
@@ -145,8 +205,16 @@ async fn task_commands_inherit_and_guard_running_tasks() {
     assert_eq!(sent.last().unwrap().1.text, "continue");
     // /stop 停当前任务并回状态。
     let reply = ask(&bots, "/stop").await;
-    assert!(reply[0]["text"].as_str().unwrap().starts_with("工作区: ws-bot"));
-    assert_eq!(tasks.stopped.lock().unwrap().clone(), vec!["task-1".to_owned()]);
+    assert!(
+        reply[0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("工作区: ws-bot")
+    );
+    assert_eq!(
+        tasks.stopped.lock().unwrap().clone(),
+        vec!["task-1".to_owned()]
+    );
 }
 
 #[tokio::test]
@@ -154,11 +222,13 @@ async fn elicitation_buttons_advance_and_submit() {
     let tasks = FakeTasks::new();
     *tasks.script.lock().unwrap() = Script {
         chunks: vec!["done".into()],
-        interaction: Some(json!({"interactionId": "ask-1", "kind": "userInput", "anchorRowId": null, "createdAt": 1,
+        interaction: Some(
+            json!({"interactionId": "ask-1", "kind": "userInput", "anchorRowId": null, "createdAt": 1,
             "payload": {"kind": "userInput", "prompt": "Q", "freeText": true, "traceId": "run-1", "questions": [
                 {"question": "Size?", "header": "Size", "options": [{"value": "s", "label": "S"}, {"value": "l", "label": "L"}]},
                 {"question": "Extras?", "header": "Extras", "multiSelect": true,
-                 "options": [{"value": "x", "label": "X"}, {"value": "y", "label": "Y"}]}]}})),
+                 "options": [{"value": "x", "label": "X"}, {"value": "y", "label": "Y"}]}]}}),
+        ),
         ..Script::default()
     };
     let (_dir, bots) = setup(tasks.clone()).await;
@@ -166,7 +236,10 @@ async fn elicitation_buttons_advance_and_submit() {
     let pending = eventually("pending elicitation", || {
         let state = std::fs::read_to_string(bots.repo.dir().join("bot-state.v3.json")).ok()?;
         let state: Value = serde_json::from_str(&state).ok()?;
-        state["bots"]["tg-1"]["pendingElicitation"].as_object().cloned().map(Value::Object)
+        state["bots"]["tg-1"]["pendingElicitation"]
+            .as_object()
+            .cloned()
+            .map(Value::Object)
     })
     .await;
     assert_eq!(pending["requestId"], "ask-1");
@@ -174,7 +247,10 @@ async fn elicitation_buttons_advance_and_submit() {
     assert_eq!(pending["actorKey"], "tg-1::telegram::42");
     let token = selection_token(&pending);
     // 不带本轮 token 的按钮过期。
-    assert_eq!(ask(&bots, "/elicitation 2").await[0]["text"], "问答请求已过期，请在 zcode UI 中处理。");
+    assert_eq!(
+        ask(&bots, "/elicitation 2").await[0]["text"],
+        "问答请求已过期，请在 zcode UI 中处理。"
+    );
     let reply = ask(&bots, &format!("/elicitation {token} 2")).await;
     assert_eq!(reply[0]["elicitation"]["currentQuestionIndex"], 1);
     assert_eq!(reply[0]["elicitation"]["answers"], json!({"0": ["l"]}));
@@ -190,10 +266,17 @@ async fn elicitation_buttons_advance_and_submit() {
     let resolved = tasks.resolved.lock().unwrap().clone();
     assert_eq!(
         resolved,
-        vec![("task-1".to_owned(), "ask-1".to_owned(), json!({"action": "accept", "content": {
-            "answers": {"Size?": "l", "Extras?": "x"}, "answer_0": "l", "answer_1": ["x"]}}))]
+        vec![(
+            "task-1".to_owned(),
+            "ask-1".to_owned(),
+            json!({"action": "accept", "content": {
+            "answers": {"Size?": "l", "Extras?": "x"}, "answer_0": "l", "answer_1": ["x"]}})
+        )]
     );
-    eventually("task finished", || bots.running.lock().unwrap().is_empty().then_some(())).await;
+    eventually("task finished", || {
+        bots.running.lock().unwrap().is_empty().then_some(())
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -205,7 +288,9 @@ async fn streaming_card_failures_back_off_then_open_the_circuit() {
             (_, "/open-apis/auth/v3/tenant_access_token/internal") => {
                 Answer::json(200, json!({"code": 0, "tenant_access_token": "t-1"}))
             }
-            ("POST", "/open-apis/im/v1/messages") => Answer::json(200, json!({"code": 0, "data": {"message_id": "om_1"}})),
+            ("POST", "/open-apis/im/v1/messages") => {
+                Answer::json(200, json!({"code": 0, "data": {"message_id": "om_1"}}))
+            }
             ("PATCH", _) => Answer::json(400, json!({"code": 230001, "msg": "bad card"})),
             _ => Answer::json(200, json!({"code": 0})),
         })
@@ -232,10 +317,28 @@ async fn streaming_card_failures_back_off_then_open_the_circuit() {
         ..Inbound::default()
     };
     bots.handle_inbound(&message).await.unwrap();
-    eventually("task finished", || bots.running.lock().unwrap().is_empty().then_some(())).await;
+    eventually("task finished", || {
+        bots.running.lock().unwrap().is_empty().then_some(())
+    })
+    .await;
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let patches = server.requests.lock().unwrap().iter().filter(|request| request.method == "PATCH").count();
-    assert_eq!(patches, 3, "three failures open the circuit; later updates (including the final one) are skipped");
+    let patches = server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| request.method == "PATCH")
+        .count();
+    assert_eq!(
+        patches, 3,
+        "three failures open the circuit; later updates (including the final one) are skipped"
+    );
     let status = bots.runtime_status("fs-1").unwrap();
-    assert!(status["deliveryError"].as_str().unwrap().contains("code=230001"), "{status:?}");
+    assert!(
+        status["deliveryError"]
+            .as_str()
+            .unwrap()
+            .contains("code=230001"),
+        "{status:?}"
+    );
 }

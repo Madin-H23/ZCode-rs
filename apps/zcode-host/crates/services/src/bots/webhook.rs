@@ -35,7 +35,10 @@ fn selection_text(message: &Value) -> String {
                 "{}. {}{description}\n{}",
                 index + 1,
                 text(option, "label").unwrap_or_default(),
-                super::providers::selection_command(selection, text(option, "id").unwrap_or_default())
+                super::providers::selection_command(
+                    selection,
+                    text(option, "id").unwrap_or_default()
+                )
             )
         })
         .collect();
@@ -44,7 +47,8 @@ fn selection_text(message: &Value) -> String {
 
 /// `parseWebhookAttachment`。
 fn attachment(value: &Value, index: usize) -> Option<Value> {
-    let kind = text(value, "kind").filter(|k| matches!(*k, "image" | "audio" | "video" | "file"))?;
+    let kind =
+        text(value, "kind").filter(|k| matches!(*k, "image" | "audio" | "video" | "file"))?;
     let id = non_empty(value, "id")
         .map(str::to_owned)
         .unwrap_or_else(|| format!("webhook-{}", index + 1));
@@ -74,7 +78,8 @@ fn elicitation_response(payload: &Value) -> Option<Value> {
         return None;
     }
     let request_id = non_empty(payload, "requestId")?;
-    let action = text(payload, "action").filter(|a| matches!(*a, "accept" | "decline" | "cancel"))?;
+    let action =
+        text(payload, "action").filter(|a| matches!(*a, "accept" | "decline" | "cancel"))?;
     let mut out = Map::new();
     out.insert("requestId".into(), json!(request_id));
     out.insert("action".into(), json!(action));
@@ -100,7 +105,10 @@ pub fn parse_callback(payload: &Value) -> Vec<Inbound> {
         .filter_map(|(index, item)| attachment(item, index))
         .collect();
     let response = elicitation_response(payload);
-    if bot_id.is_empty() || (body.is_empty() && files.is_empty() && response.is_none()) || user.is_empty() {
+    if bot_id.is_empty()
+        || (body.is_empty() && files.is_empty() && response.is_none())
+        || user.is_empty()
+    {
         return Vec::new();
     }
     vec![Inbound {
@@ -129,7 +137,12 @@ pub fn parse_callback(payload: &Value) -> Vec<Inbound> {
 }
 
 /// `postWebhookWithRetry`：2xx 与 4xx 立即返回；5xx 与网络错误按间隔重试，最后一次的结果作数。
-async fn post_with_retry(bots: &Bots, url: &str, headers: &[(String, String)], body: &Value) -> Result<(bool, u16)> {
+async fn post_with_retry(
+    bots: &Bots,
+    url: &str,
+    headers: &[(String, String)],
+    body: &Value,
+) -> Result<(bool, u16)> {
     let delays = guard(&bots.webhook_retry_ms).clone();
     let mut last_status: Option<(bool, u16)> = None;
     let mut last_error: Option<anyhow::Error> = None;
@@ -177,7 +190,10 @@ pub async fn test(bots: &Bots, bot: &Value) -> Result<Value> {
     let Some(url) = non_empty(bot, "webhookUrl") else {
         return Ok(json!({"ok": true, "message": "Webhook bot is enabled for inbound callbacks."}));
     };
-    let secret = bots.load_credential(Some(secret_ref)).await.unwrap_or_default();
+    let secret = bots
+        .load_credential(Some(secret_ref))
+        .await
+        .unwrap_or_default();
     let body = json!({"type": "zcode.bot.test", "botId": bot["id"], "provider": "webhook", "sentAt": now_ms()});
     let (ok, status) = post_with_retry(bots, url, &[(secret_header(bot), secret)], &body).await?;
     Ok(json!({
@@ -247,7 +263,10 @@ mod tests {
         let answer = json!({"botId": "w1", "userId": "u1", "type": "zcode.bot.elicitation_response",
             "requestId": "r1", "action": "accept", "content": {"a": 1}});
         let inbound = parse_callback(&answer).pop().unwrap();
-        assert_eq!(inbound.elicitation_response, Some(json!({"requestId": "r1", "action": "accept", "content": {"a": 1}})));
+        assert_eq!(
+            inbound.elicitation_response,
+            Some(json!({"requestId": "r1", "action": "accept", "content": {"a": 1}}))
+        );
         assert!(parse_callback(&json!({"botId": "w1", "userId": "u1"})).is_empty());
         let text = selection_text(&json!({"text": "Pick", "selection": {"action": "task.set",
             "options": [{"id": "t1", "label": "One", "description": "running"}]}}));

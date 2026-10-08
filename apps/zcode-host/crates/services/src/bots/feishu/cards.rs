@@ -46,7 +46,12 @@ pub fn interactive(message: &Value) -> Value {
     let mut elements = vec![markdown(body)];
     let selection = &message["selection"];
     if selection.is_object() {
-        for (index, option) in selection["options"].as_array().into_iter().flatten().enumerate() {
+        for (index, option) in selection["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
             let label = text(option, "label")
                 .filter(|label| !label.is_empty())
                 .map(str::to_owned)
@@ -88,7 +93,12 @@ pub fn elicitation_form_command(token: &str, value: Option<&Value>) -> String {
 fn answer_values(message: &Value, index: usize) -> Vec<String> {
     message["elicitation"]["answers"][index.to_string()]
         .as_array()
-        .map(|values| values.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -208,7 +218,10 @@ fn elicitation_form(message: &Value, question: &Value, index: usize) -> Option<V
 
 fn answered_elements(message: &Value) -> Vec<Value> {
     let elicitation = &message["elicitation"];
-    let questions = elicitation["questions"].as_array().cloned().unwrap_or_default();
+    let questions = elicitation["questions"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let total = questions.len();
     let completed = matches!(text(elicitation, "status"), Some("completed" | "cancelled"));
     let current = elicitation["currentQuestionIndex"].as_u64().unwrap_or(0) as usize;
@@ -241,7 +254,10 @@ pub fn elicitation(message: &Value) -> Value {
     let locale = locale(message);
     let body_text = text(message, "text").unwrap_or_default();
     let current_index = elicitation["currentQuestionIndex"].as_u64().unwrap_or(0) as usize;
-    let questions = elicitation["questions"].as_array().cloned().unwrap_or_default();
+    let questions = elicitation["questions"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let current = questions.get(current_index).or_else(|| questions.first());
     let completed = matches!(text(elicitation, "status"), Some("completed" | "cancelled"));
     let answers = answered_elements(message);
@@ -287,7 +303,10 @@ pub fn elicitation(message: &Value) -> Value {
         elements.push(markdown(&content));
         if plan.is_some() {
             elements.push(json!({"tag": "hr"}));
-            elements.push(markdown(&format!("**{}**", msg(locale, "planApprovalTitle", &[]))));
+            elements.push(markdown(&format!(
+                "**{}**",
+                msg(locale, "planApprovalTitle", &[])
+            )));
         }
         let multi = question["multiSelect"] == true;
         let selected = answer_values(message, current_index);
@@ -307,14 +326,19 @@ pub fn elicitation(message: &Value) -> Value {
             ));
         }
         let expanded = custom_expanded(message, current_index);
-        let custom_selected = expanded || !custom_values(message, question, current_index).is_empty();
+        let custom_selected =
+            expanded || !custom_values(message, question, current_index).is_empty();
         elements.push(button(
             &format!(
                 "{} {}",
                 marker(multi, custom_selected),
                 msg(locale, "elicitationCustomOption", &[])
             ),
-            if custom_selected { "primary" } else { "default" },
+            if custom_selected {
+                "primary"
+            } else {
+                "default"
+            },
             &option_command(message, ELICITATION_CUSTOM_OPTION_ID),
             body_text,
         ));

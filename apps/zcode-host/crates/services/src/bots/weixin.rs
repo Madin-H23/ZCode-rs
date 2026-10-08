@@ -24,7 +24,8 @@ pub const GET_UPDATES_TIMEOUT: Duration = Duration::from_secs(90);
 const LOGIN_INTERVAL_SECONDS: i64 = 3;
 const LOGIN_EXPIRE_SECONDS: i64 = 120;
 const LOGIN_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const TOKEN_MISSING: &str = "Weixin iLink bot token is missing. Scan the Weixin login QR code first.";
+const TOKEN_MISSING: &str =
+    "Weixin iLink bot token is missing. Scan the Weixin login QR code first.";
 
 fn read<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or_default()
@@ -72,12 +73,20 @@ fn item_text(item: &Value) -> String {
     if !item.is_object() {
         return String::new();
     }
-    first(&[read(&item["text_item"], "text"), read(item, "text"), read(item, "content")])
+    first(&[
+        read(&item["text_item"], "text"),
+        read(item, "text"),
+        read(item, "content"),
+    ])
 }
 
 /// `readWeixinText`。
 fn message_text(message: &Value) -> String {
-    let direct = first(&[read(message, "text"), read(message, "content"), read(message, "message")]);
+    let direct = first(&[
+        read(message, "text"),
+        read(message, "content"),
+        read(message, "message"),
+    ]);
     if !direct.is_empty() {
         return direct;
     }
@@ -89,7 +98,10 @@ fn message_text(message: &Value) -> String {
     if !joined.is_empty() {
         return joined.join("\n");
     }
-    first(&[read(inner(message), "text"), read(inner(message), "content")])
+    first(&[
+        read(inner(message), "text"),
+        read(inner(message), "content"),
+    ])
 }
 
 fn mime_from_filename(filename: &str) -> &'static str {
@@ -129,11 +141,17 @@ fn infer_kind(item: &Value, merged: &Value) -> &'static str {
         read(merged, "type_name"),
     ]);
     let mime = first(&[read(merged, "mime_type"), read(merged, "mimeType")]);
-    let filename = first(&[read(merged, "filename"), read(merged, "file_name"), read(merged, "name")]);
+    let filename = first(&[
+        read(merged, "filename"),
+        read(merged, "file_name"),
+        read(merged, "name"),
+    ]);
     let normalized = format!("{explicit} {mime} {filename}").to_lowercase();
-    let image_ext = [".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".bmp"]
-        .iter()
-        .any(|ext| filename.to_lowercase().ends_with(ext));
+    let image_ext = [
+        ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".bmp",
+    ]
+    .iter()
+    .any(|ext| filename.to_lowercase().ends_with(ext));
     if normalized.contains("image")
         || normalized.contains("photo")
         || normalized.contains("picture")
@@ -154,11 +172,17 @@ fn item_attachment(item: &Value, index: usize) -> Option<Value> {
     if !item.is_object() || !item_text(item).is_empty() {
         return None;
     }
-    let media = ["image_item", "file_item", "video_item", "audio_item", "media_item"]
-        .iter()
-        .map(|key| &item[*key])
-        .find(|value| value.is_object())
-        .unwrap_or(item);
+    let media = [
+        "image_item",
+        "file_item",
+        "video_item",
+        "audio_item",
+        "media_item",
+    ]
+    .iter()
+    .map(|key| &item[*key])
+    .find(|value| value.is_object())
+    .unwrap_or(item);
     let mut source = media.as_object().cloned().unwrap_or_default();
     if let Some(nested) = media["media"].as_object() {
         source.extend(nested.clone());
@@ -186,7 +210,11 @@ fn item_attachment(item: &Value, index: usize) -> Option<Value> {
         read(&source, "full_url"),
         read(&source, "fullUrl"),
     ]);
-    let data = first(&[read(&source, "data_base64"), read(&source, "dataBase64"), read(&source, "base64")]);
+    let data = first(&[
+        read(&source, "data_base64"),
+        read(&source, "dataBase64"),
+        read(&source, "base64"),
+    ]);
     if file_id.is_empty() && download.is_empty() && data.is_empty() {
         return None;
     }
@@ -194,7 +222,11 @@ fn item_attachment(item: &Value, index: usize) -> Option<Value> {
     merged.extend(source.as_object().cloned().unwrap_or_default());
     let kind = infer_kind(item, &Value::Object(merged));
     let filename = {
-        let named = first(&[read(&source, "filename"), read(&source, "file_name"), read(&source, "name")]);
+        let named = first(&[
+            read(&source, "filename"),
+            read(&source, "file_name"),
+            read(&source, "name"),
+        ]);
         if !named.is_empty() {
             named
         } else if kind == "image" {
@@ -218,7 +250,11 @@ fn item_attachment(item: &Value, index: usize) -> Option<Value> {
         .map(|key| &source[*key])
         .find(|value| value.is_number())
         .cloned();
-    let aes = first(&[read(&source, "aes_key"), read(&source, "aesKey"), read(&source, "aeskey")]);
+    let aes = first(&[
+        read(&source, "aes_key"),
+        read(&source, "aesKey"),
+        read(&source, "aeskey"),
+    ]);
     let mut out = Map::new();
     let id = first(&[&file_id, &download]);
     out.insert(
@@ -258,7 +294,11 @@ fn direct_attachment(item: &Value, index: usize) -> Option<Value> {
     }
     let id = first(&[read(item, "id"), &format!("weixin-{}", index + 1)]);
     let filename = first(&[read(item, "filename"), &format!("{id}.{kind}")]);
-    let mime = first(&[read(item, "mimeType"), read(item, "mime_type"), default_mime(kind)]);
+    let mime = first(&[
+        read(item, "mimeType"),
+        read(item, "mime_type"),
+        default_mime(kind),
+    ]);
     let mut out = Map::new();
     out.insert("id".into(), json!(id));
     out.insert("kind".into(), json!(kind));
@@ -372,7 +412,11 @@ fn message_id(message: &Value) -> Option<String> {
     }
     ["id", "msgid", "msgId"]
         .iter()
-        .find_map(|key| message[*key].as_number().or_else(|| inner[*key].as_number()))
+        .find_map(|key| {
+            message[*key]
+                .as_number()
+                .or_else(|| inner[*key].as_number())
+        })
         .map(ToString::to_string)
 }
 
@@ -403,7 +447,11 @@ fn raw_messages(payload: &Value) -> Vec<Value> {
         .find(|value| !value.is_null())
         .unwrap_or(&Value::Null);
     match raw {
-        Value::Array(items) => items.iter().filter(|item| item.is_object()).cloned().collect(),
+        Value::Array(items) => items
+            .iter()
+            .filter(|item| item.is_object())
+            .cloned()
+            .collect(),
         Value::Object(_) => vec![raw.clone()],
         _ => Vec::new(),
     }
@@ -493,7 +541,10 @@ async fn request(
     timeout: Duration,
 ) -> Result<Value> {
     let mut object = Map::new();
-    object.insert("base_info".into(), json!({"channel_version": CHANNEL_VERSION}));
+    object.insert(
+        "base_info".into(),
+        json!({"channel_version": CHANNEL_VERSION}),
+    );
     object.extend(body.as_object().cloned().unwrap_or_default());
     let url = format!("{}{API_PREFIX}{path}", bots.providers.endpoints.weixin);
     let response = bots
@@ -506,7 +557,10 @@ async fn request(
         )
         .await?;
     if !response.ok {
-        return Err(anyhow!("Weixin iLink {path} failed: HTTP {}", response.status));
+        return Err(anyhow!(
+            "Weixin iLink {path} failed: HTTP {}",
+            response.status
+        ));
     }
     let payload = response.payload;
     let ret = number(&payload, "ret");
@@ -544,7 +598,10 @@ pub async fn get_updates(bots: &Bots, bot: &Value, buf: Option<&str>) -> Result<
     let bot_id = read(bot, "id");
     Ok(Updates {
         raw_count: raw.len(),
-        messages: raw.iter().filter_map(|message| inbound(bot_id, message)).collect(),
+        messages: raw
+            .iter()
+            .filter_map(|message| inbound(bot_id, message))
+            .collect(),
         buf: next_buf(&payload).or_else(|| buf.map(str::to_owned)),
     })
 }
@@ -571,7 +628,10 @@ pub async fn send(bots: &Bots, bot: &Value, message: &Value) -> Result<()> {
     let mut msg = Map::new();
     msg.insert("from_user_id".into(), json!(read(bot, "providerUserId")));
     msg.insert("to_user_id".into(), message["providerUserId"].clone());
-    msg.insert("client_id".into(), json!(format!("zcode-weixin-{}", uuid_v4())));
+    msg.insert(
+        "client_id".into(),
+        json!(format!("zcode-weixin-{}", uuid_v4())),
+    );
     msg.insert("message_type".into(), json!(MESSAGE_TYPE_BOT));
     msg.insert("message_state".into(), json!(MESSAGE_STATE_FINISH));
     if let Some(context) = text(message, "providerContextToken") {
@@ -581,9 +641,15 @@ pub async fn send(bots: &Bots, bot: &Value, message: &Value) -> Result<()> {
         "item_list".into(),
         json!([{"type": 1, "text_item": {"text": body_text}}]),
     );
-    request(bots, &token, "/sendmessage", json!({"msg": msg}), REQUEST_TIMEOUT)
-        .await
-        .map(|_| ())
+    request(
+        bots,
+        &token,
+        "/sendmessage",
+        json!({"msg": msg}),
+        REQUEST_TIMEOUT,
+    )
+    .await
+    .map(|_| ())
 }
 
 /// `sendTyping`：先 getconfig 取 typing_ticket，再 sendtyping。
@@ -594,7 +660,14 @@ pub async fn send_typing(bots: &Bots, bot: &Value, target: &TypingTarget) -> Res
     if let Some(context) = &target.provider_context_token {
         body.insert("context_token".into(), json!(context));
     }
-    let config = request(bots, &token, "/getconfig", Value::Object(body), REQUEST_TIMEOUT).await?;
+    let config = request(
+        bots,
+        &token,
+        "/getconfig",
+        Value::Object(body),
+        REQUEST_TIMEOUT,
+    )
+    .await?;
     let Some(ticket) = text(&config, "typing_ticket").filter(|ticket| !ticket.is_empty()) else {
         return Ok(());
     };
@@ -745,7 +818,10 @@ pub async fn begin_registration(bots: &Bots) -> Result<Value> {
 /// `pollWeixinRegistration`：请求超时视为仍在等待手机确认。
 pub async fn poll_registration(bots: &Bots, params: &Value) -> Result<Value> {
     let qr_code = read(params, "qrCode");
-    let path = format!("/get_qrcode_status?qrcode={}", encode_uri_component(qr_code));
+    let path = format!(
+        "/get_qrcode_status?qrcode={}",
+        encode_uri_component(qr_code)
+    );
     let payload = match registration_json(bots, &path).await {
         Ok(payload) => payload,
         Err(error)
@@ -807,7 +883,10 @@ mod tests {
         assert_eq!(message.attachments[0]["kind"], "image");
         assert_eq!(message.attachments[0]["filename"], "weixin-image-2.jpg");
         assert_eq!(message.attachments[0]["downloadUrl"], "http://x/img");
-        assert_eq!(message.attachments[0]["providerMetadata"]["weixinAesKey"], "k");
+        assert_eq!(
+            message.attachments[0]["providerMetadata"]["weixinAesKey"],
+            "k"
+        );
         assert_eq!(message.attachments[0]["sizeBytes"], 12);
         assert_eq!(next_buf(&payload).as_deref(), Some("buf-2"));
         assert_eq!(qr_status(&json!(1)), "scanned");

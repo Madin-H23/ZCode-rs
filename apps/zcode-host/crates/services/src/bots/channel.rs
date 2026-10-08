@@ -121,7 +121,10 @@ impl Bots {
             let bots = self.clone();
             tokio::spawn(async move {
                 if let Err(error) = bots.refresh_polling(kind).await {
-                    log::warn(format!("refresh {} polling failed: {error:#}", kind.label()));
+                    log::warn(format!(
+                        "refresh {} polling failed: {error:#}",
+                        kind.label()
+                    ));
                 }
             });
         }
@@ -336,23 +339,27 @@ impl Bots {
                 match find_bot(&config, bot_id) {
                     Some(bot) => {
                         let workspaces = self.workspace_refs(&Value::Null).await;
-                        filter_allowed_workspaces(&workspaces, &string_list(&bot["allowedWorkspaces"]))
-                            .into_iter()
-                            .next()
-                            .map(|workspace| {
-                                let mut context = Map::new();
-                                context.insert("botId".into(), json!(bot_id));
-                                context.insert("workspacePath".into(), workspace["workspacePath"].clone());
-                                if let Some(identity) = text(&workspace, "workspaceIdentity") {
-                                    context.insert("workspaceIdentity".into(), json!(identity));
-                                }
-                                context.insert("workspaceId".into(), workspace["id"].clone());
-                                context.insert("mode".into(), json!("draft"));
-                                context.insert("activeTaskId".into(), Value::Null);
-                                context.insert(key.into(), value);
-                                context.insert("updatedAt".into(), json!(now));
-                                Value::Object(context)
-                            })
+                        filter_allowed_workspaces(
+                            &workspaces,
+                            &string_list(&bot["allowedWorkspaces"]),
+                        )
+                        .into_iter()
+                        .next()
+                        .map(|workspace| {
+                            let mut context = Map::new();
+                            context.insert("botId".into(), json!(bot_id));
+                            context
+                                .insert("workspacePath".into(), workspace["workspacePath"].clone());
+                            if let Some(identity) = text(&workspace, "workspaceIdentity") {
+                                context.insert("workspaceIdentity".into(), json!(identity));
+                            }
+                            context.insert("workspaceId".into(), workspace["id"].clone());
+                            context.insert("mode".into(), json!("draft"));
+                            context.insert("activeTaskId".into(), Value::Null);
+                            context.insert(key.into(), value);
+                            context.insert("updatedAt".into(), json!(now));
+                            Value::Object(context)
+                        })
                     }
                     None => None,
                 }
@@ -390,7 +397,9 @@ impl Bots {
         };
         let base = self.providers.endpoints.telegram.clone();
         while !*stop.borrow() {
-            let lock = match runtime_lock::acquire(self.repo.dir(), "telegram-polling", &token, &id).await {
+            let lock = match runtime_lock::acquire(self.repo.dir(), "telegram-polling", &token, &id)
+                .await
+            {
                 Ok(Some(lock)) => lock,
                 Ok(None) => {
                     self.telegram_status(
@@ -420,7 +429,9 @@ impl Bots {
                     continue;
                 }
             };
-            let result = self.telegram_loop(&bot, &id, &token, &base, &mut stop).await;
+            let result = self
+                .telegram_loop(&bot, &id, &token, &base, &mut stop)
+                .await;
             lock.release().await;
             match result {
                 Ok(()) => return,
@@ -477,7 +488,10 @@ impl Bots {
             if !offset.is_null() {
                 body.insert("offset".into(), offset.clone());
             }
-            body.insert("allowed_updates".into(), json!(["message", "callback_query"]));
+            body.insert(
+                "allowed_updates".into(),
+                json!(["message", "callback_query"]),
+            );
             let request = http.json(
                 http.client()
                     .post(format!("{base}/bot{token}/getUpdates"))
@@ -497,14 +511,21 @@ impl Bots {
                 };
                 self.telegram_status(id, json!({"status": "error", "message": message}))
                     .await;
-                let delay = if response.status == 409 { CONFLICT_RETRY } else { RETRY };
+                let delay = if response.status == 409 {
+                    CONFLICT_RETRY
+                } else {
+                    RETRY
+                };
                 if wait(delay, stop).await {
                     return Ok(());
                 }
                 continue;
             }
             let payload = response.payload;
-            let Some(updates) = payload["result"].as_array().filter(|_| payload["ok"] == true) else {
+            let Some(updates) = payload["result"]
+                .as_array()
+                .filter(|_| payload["ok"] == true)
+            else {
                 let message = text(&payload, "description")
                     .unwrap_or("Telegram getUpdates returned an invalid response.");
                 self.telegram_status(id, json!({"status": "error", "message": message}))
@@ -519,7 +540,11 @@ impl Bots {
                     return Ok(());
                 }
                 let result = self
-                    .process_callback("telegram", json!({"botId": bot["id"], "update": update}), false)
+                    .process_callback(
+                        "telegram",
+                        json!({"botId": bot["id"], "update": update}),
+                        false,
+                    )
                     .await;
                 if result["ok"] != true {
                     // 业务失败时不提交 offset：同一条 update 下一轮重投，避免永久丢消息。
@@ -560,7 +585,9 @@ impl Bots {
             return;
         };
         while !*stop.borrow() {
-            let lock = match runtime_lock::acquire(self.repo.dir(), "weixin-polling", &token, &id).await {
+            let lock = match runtime_lock::acquire(self.repo.dir(), "weixin-polling", &token, &id)
+                .await
+            {
                 Ok(Some(lock)) => lock,
                 Ok(None) => {
                     self.set_runtime_status(
@@ -623,7 +650,8 @@ impl Bots {
             let buf = self.repo.read_state().await?["bots"][id]["weixinGetUpdatesBuf"]
                 .as_str()
                 .map(str::to_owned);
-            let Some(updates) = until_stopped(weixin::get_updates(self, bot, buf.as_deref()), stop).await
+            let Some(updates) =
+                until_stopped(weixin::get_updates(self, bot, buf.as_deref()), stop).await
             else {
                 return Ok(());
             };
@@ -651,7 +679,10 @@ impl Bots {
                 put("from", Some(&inbound.actor.provider_user_id));
                 put("chatId", inbound.actor.chat_id.as_ref());
                 put("displayName", inbound.actor.display_name.as_ref());
-                put("context_token", inbound.actor.provider_context_token.as_ref());
+                put(
+                    "context_token",
+                    inbound.actor.provider_context_token.as_ref(),
+                );
                 if !inbound.attachments.is_empty() {
                     // 已解析出的附件重新包装进回调时不能丢，否则纯图片消息会被静默吞掉。
                     wrapped.insert("attachments".into(), json!(inbound.attachments));
@@ -676,7 +707,8 @@ impl Bots {
             }
             if let Some(buf) = &updates.buf {
                 // buf 是服务端游标：本批全部进入业务处理后才持久化。
-                self.write_cursor(id, "weixinGetUpdatesBuf", json!(buf)).await?;
+                self.write_cursor(id, "weixinGetUpdatesBuf", json!(buf))
+                    .await?;
             }
             self.set_runtime_status(id, running.clone());
         }

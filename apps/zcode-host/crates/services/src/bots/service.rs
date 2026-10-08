@@ -682,9 +682,14 @@ type Handler = fn(Arc<Bots>, Args) -> BoxFuture<'static, Result<Reply, RpcError>
 
 pub fn channel(bots: Arc<Bots>) -> ServiceBuilder {
     let members: [(&str, Handler); 22] = [
-        ("syncAppRuntimePreferences", |_, _| {
+        ("syncAppRuntimePreferences", |bots, args| {
             // 只服务远端 Bot 运行时（Node 转给 remoteWorkspaceService）；本地无事可做。
-            Box::pin(async { Ok(Reply::Undefined) })
+            Box::pin(async move {
+                bots.remote
+                    .sync_app_runtime_preferences(arg(&args, 0))
+                    .await;
+                Ok(Reply::Undefined)
+            })
         }),
         ("getStatus", |bots, _| {
             Box::pin(async move { bots.get_status().await.map(Reply::Value) })

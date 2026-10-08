@@ -35,7 +35,10 @@ pub fn format_duration(duration_ms: i64) -> String {
 }
 
 fn messages(snapshot: &Value) -> &[Value] {
-    snapshot["messages"].as_array().map(Vec::as_slice).unwrap_or_default()
+    snapshot["messages"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
 }
 
 fn role(message: &Value) -> &str {
@@ -125,7 +128,10 @@ pub fn latest_progress(snapshot: &Value) -> Option<String> {
         if role(message) != "assistant" {
             continue;
         }
-        let parts = message["parts"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let parts = message["parts"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         for part in parts.iter().rev() {
             match part["type"].as_str() {
                 Some("text" | "reasoning") => {
@@ -164,10 +170,16 @@ mod tests {
                 {"type": "text", "text": "  done  now "}]},
         ]});
         assert_eq!(latest_progress(&snapshot).as_deref(), Some("done now"));
-        assert_eq!(worked_duration(&snapshot, &json!({"status": "completed"}), 0), Some(1_000));
+        assert_eq!(
+            worked_duration(&snapshot, &json!({"status": "completed"}), 0),
+            Some(1_000)
+        );
         assert_eq!(worked_duration(&snapshot, &json!({}), 5_200), Some(5_000));
         let tool_only = json!({"messages": [{"info": {"role": "assistant", "time": {"created": 1}},
             "parts": [{"type": "tool", "tool": "Bash", "state": {"status": "running", "input": {"command": "make"}}}]}]});
-        assert_eq!(latest_progress(&tool_only).as_deref(), Some("Bash [running]: make"));
+        assert_eq!(
+            latest_progress(&tool_only).as_deref(),
+            Some("Bash [running]: make")
+        );
     }
 }

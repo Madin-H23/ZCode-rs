@@ -218,8 +218,12 @@ fn attachment(message_type: &str, content: &Value) -> Option<Value> {
     };
     let short: String = file_id.chars().take(8).collect();
     let fallback = format!("{message_type}-{short}");
-    let filename = first_non_empty(&[read(content, "file_name"), read(content, "filename"), &fallback])
-        .to_owned();
+    let filename = first_non_empty(&[
+        read(content, "file_name"),
+        read(content, "filename"),
+        &fallback,
+    ])
+    .to_owned();
     let mime = first_non_empty(&[read(content, "mime_type"), read(content, "mimeType")]);
     let mime = if mime.is_empty() {
         match kind {

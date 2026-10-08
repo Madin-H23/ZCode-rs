@@ -144,7 +144,8 @@ impl Bots {
             plain.insert("text".into(), json!(chunk));
             plain.remove("selection");
             let card = cards::interactive(&Value::Object(plain));
-            self.feishu_send_card(bot, &token, receive_id, &card).await?;
+            self.feishu_send_card(bot, &token, receive_id, &card)
+                .await?;
         }
         Ok(())
     }

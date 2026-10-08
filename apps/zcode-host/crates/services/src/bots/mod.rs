@@ -20,10 +20,6 @@ pub mod status;
 pub mod store;
 pub mod stream;
 pub mod telegram;
-pub mod util;
-pub mod watch;
-pub mod webhook;
-pub mod weixin;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
@@ -32,6 +28,10 @@ mod tests;
 mod tests_channels;
 #[cfg(test)]
 mod tests_commands;
+pub mod util;
+pub mod watch;
+pub mod webhook;
+pub mod weixin;
 
 use std::sync::Arc;
 
@@ -165,6 +165,10 @@ pub trait RemoteBots: Send + Sync {
     fn ensure_connected(&self, target: WorkspaceTarget) -> BoxFuture<'static, Result<(), String>>;
     /// 已连接的远端 workspace 的任务能力；None 时远端请求不能落到本地。
     fn tasks(&self, target: &WorkspaceTarget) -> Option<Arc<dyn TaskPort>>;
+    /// `syncAppRuntimePreferences`：把 App 运行时偏好转给远端 Bot 运行时（本地无事可做）。
+    fn sync_app_runtime_preferences(&self, _preferences: Value) -> BoxFuture<'static, ()> {
+        async {}.boxed()
+    }
 }
 
 /// 远端区域合并之前的实现：没有远端运行时，远端上下文一律视为未连接。
@@ -202,14 +206,23 @@ fn reasoning_level(selection: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-async fn ready_client(agent: &AgentRuntime, target: &WorkspaceTarget) -> Result<Arc<AgentProcess>, String> {
-    agent.get_ready_client(target).await.map_err(|error| error.message)
+async fn ready_client(
+    agent: &AgentRuntime,
+    target: &WorkspaceTarget,
+) -> Result<Arc<AgentProcess>, String> {
+    agent
+        .get_ready_client(target)
+        .await
+        .map_err(|error| error.message)
 }
 
 impl AreaPort {
     fn command_envelope(&self, kind: &str, session_id: &str, payload: Value) -> Value {
         let mut envelope = Map::new();
-        envelope.insert("commandId".into(), json!(crate::automation::driver::uuid_v7()));
+        envelope.insert(
+            "commandId".into(),
+            json!(crate::automation::driver::uuid_v7()),
+        );
         envelope.insert("clientId".into(), json!(self.client_id));
         envelope.insert("sessionId".into(), json!(session_id));
         envelope.insert("type".into(), json!(kind));
@@ -533,7 +546,7 @@ impl TaskPort for AreaPort {
 /// 订阅 `conversation/<taskId>`（Bot 自己的连接，desktop-continuous）：后台任务从 runtime 的 V4 帧总线
 /// 取本订阅的帧，重组成逻辑帧交给消费者；seq 缺口或重组失败时 forceSnapshot resync。消费者丢弃流、
 /// 或 CLI 进程换代时结束并尽力退订。
-async fn subscribe_conversation(
+pub async fn subscribe_conversation(
     agent: AgentRuntime,
     target: WorkspaceTarget,
     task_id: String,
@@ -593,7 +606,9 @@ async fn subscribe_conversation(
                 Assembled::Pending => continue,
                 Assembled::Frame { frame, .. } => Some(frame),
                 Assembled::Fault(code) => {
-                    log::warn(format!("bots conversation frame fault task={task_id}: {code}"));
+                    log::warn(format!(
+                        "bots conversation frame fault task={task_id}: {code}"
+                    ));
                     None
                 }
             };
@@ -666,13 +681,14 @@ pub fn install(
 ) -> Option<Keepalive> {
     let environment = &area.context.environment;
     let dir = environment.app_config_dir();
-    let providers = match providers::Providers::new(providers::Endpoints::from_vars(&environment.vars)) {
-        Ok(providers) => Arc::new(providers),
-        Err(error) => {
-            log::error(format!("bots http client unavailable: {error:#}"));
-            return None;
-        }
-    };
+    let providers =
+        match providers::Providers::new(providers::Endpoints::from_vars(&environment.vars)) {
+            Ok(providers) => Arc::new(providers),
+            Err(error) => {
+                log::error(format!("bots http client unavailable: {error:#}"));
+                return None;
+            }
+        };
     let bots = service::Bots::new(service::BotsDeps {
         repo: store::BotsRepo::new(dir.clone()),
         // 合并 account 区域后统一走它的凭据存储：同一文件只有一个写入方，写入也会广播凭据变更。
