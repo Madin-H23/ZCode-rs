@@ -50,22 +50,36 @@ fn finite(value: &Value) -> Option<f64> {
 /// `Number(string)` 的常见子集：去空白后的十进制 / 十六进制 / 科学计数。
 fn js_number_from_str(text: &str) -> Option<f64> {
     let trimmed = text.trim();
-    if let Some(hex) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+    if let Some(hex) = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
         return i64::from_str_radix(hex, 16).ok().map(|v| v as f64);
     }
-    if trimmed.contains(['_', ',']) || trimmed.eq_ignore_ascii_case("inf") || trimmed.eq_ignore_ascii_case("nan") {
+    if trimmed.contains(['_', ','])
+        || trimmed.eq_ignore_ascii_case("inf")
+        || trimmed.eq_ignore_ascii_case("nan")
+    {
         return None;
     }
     trimmed.parse::<f64>().ok()
 }
 
 fn trimmed(value: &Value) -> Option<String> {
-    value.as_str().map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned)
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
 }
 
 /// `value ?? fallback`（只在字段缺失或为 null 时回落）。
 fn or(value: &Value, fallback: Value) -> Value {
-    if value.is_null() { fallback } else { value.clone() }
+    if value.is_null() {
+        fallback
+    } else {
+        value.clone()
+    }
 }
 
 fn array(value: &Value) -> &[Value] {
@@ -73,7 +87,10 @@ fn array(value: &Value) -> &[Value] {
 }
 
 fn strings(value: &Value) -> Vec<String> {
-    array(value).iter().map(|v| v.as_str().unwrap_or("").to_owned()).collect()
+    array(value)
+        .iter()
+        .map(|v| v.as_str().unwrap_or("").to_owned())
+        .collect()
 }
 
 fn invalid_time_zone(zone: &str) -> RpcError {
@@ -85,7 +102,8 @@ pub fn today_in_time_zone(time_zone: Option<&str>) -> Result<String, RpcError> {
     match time_zone.filter(|zone| !zone.is_empty()) {
         None => Ok(Local::now().format("%Y-%m-%d").to_string()),
         Some(zone) => {
-            let tz: chrono_tz::Tz = resolve_time_zone(zone).ok_or_else(|| invalid_time_zone(zone))?;
+            let tz: chrono_tz::Tz =
+                resolve_time_zone(zone).ok_or_else(|| invalid_time_zone(zone))?;
             Ok(Utc::now().with_timezone(&tz).format("%Y-%m-%d").to_string())
         }
     }
@@ -104,7 +122,12 @@ fn resolve_time_zone(zone: &str) -> Option<chrono_tz::Tz> {
 
 fn parse_date_key(key: &str) -> NaiveDate {
     let mut parts = key.split('-');
-    let mut next = |default: i64| parts.next().and_then(|p| p.parse::<i64>().ok()).unwrap_or(default);
+    let mut next = |default: i64| {
+        parts
+            .next()
+            .and_then(|p| p.parse::<i64>().ok())
+            .unwrap_or(default)
+    };
     let (year, month, day) = (next(1970), next(1), next(1));
     // Date.UTC 会把越界的月 / 日顺延；用天数偏移复现。
     let base = NaiveDate::from_ymd_opt(year as i32, 1, 1).unwrap_or_default();
@@ -116,7 +139,9 @@ fn parse_date_key(key: &str) -> NaiveDate {
 
 /// `addDaysToDateKey`。
 pub fn add_days(key: &str, days: i64) -> String {
-    (parse_date_key(key) + Duration::days(days)).format("%Y-%m-%d").to_string()
+    (parse_date_key(key) + Duration::days(days))
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 /// `resolveUsageTimeRange`：本机时区，`YYYY-MM-DD HH:mm:ss`。
@@ -134,9 +159,17 @@ pub fn usage_time_range(range: &str) -> (String, String) {
         .unwrap_or(now);
     let start_date = end.date_naive() - Duration::days(days - 1);
     let format = |date: NaiveDate, h: u32, m: u32, s: u32| {
-        format!("{:04}-{:02}-{:02} {h:02}:{m:02}:{s:02}", date.year(), date.month(), date.day())
+        format!(
+            "{:04}-{:02}-{:02} {h:02}:{m:02}:{s:02}",
+            date.year(),
+            date.month(),
+            date.day()
+        )
     };
-    (format(start_date, 0, 0, 0), format(end.date_naive(), 23, 59, 59))
+    (
+        format(start_date, 0, 0, 0),
+        format(end.date_naive(), 23, 59, 59),
+    )
 }
 
 #[derive(Debug)]
@@ -182,28 +215,46 @@ pub fn coding_plan_range(request: &Value) -> Result<CodingPlanRange, RpcError> {
                 if re(&DATE_KEY, r"^\d{4}-\d{2}-\d{2}$").is_match(text) {
                     Ok(text.to_owned())
                 } else {
-                    Err(RpcError::new("Error", format!("coding_plan_usage_custom_{label}_date_invalid")))
+                    Err(RpcError::new(
+                        "Error",
+                        format!("coding_plan_usage_custom_{label}_date_invalid"),
+                    ))
                 }
             };
             let start = normalize(&request["customStartDate"], "start")?;
             let end = normalize(&request["customEndDate"], "end")?;
             let days = (parse_date_key(&end) - parse_date_key(&start)).num_days() + 1;
             if days <= 0 {
-                return Err(RpcError::new("Error", "coding_plan_usage_custom_range_invalid_order"));
+                return Err(RpcError::new(
+                    "Error",
+                    "coding_plan_usage_custom_range_invalid_order",
+                ));
             }
             if days > MONITOR_MAX_RANGE_DAYS {
-                return Err(RpcError::new("Error", "coding_plan_usage_custom_range_too_long"));
+                return Err(RpcError::new(
+                    "Error",
+                    "coding_plan_usage_custom_range_too_long",
+                ));
             }
             Ok(day_range(start, days, end))
         }
-        other => Err(RpcError::new("Error", format!("unsupported coding plan usage range: {other}"))),
+        other => Err(RpcError::new(
+            "Error",
+            format!("unsupported coding plan usage range: {other}"),
+        )),
     }
 }
 
 /// `resolveCreditUsageActivityTimeRange` / `resolveModelPerformanceTimeRange`。
-pub fn trailing_range(time_zone: Option<&str>, days_back: i64) -> Result<(String, String), RpcError> {
+pub fn trailing_range(
+    time_zone: Option<&str>,
+    days_back: i64,
+) -> Result<(String, String), RpcError> {
     let end = today_in_time_zone(time_zone)?;
-    Ok((format!("{} 00:00:00", add_days(&end, -days_back)), format!("{end} 23:59:59")))
+    Ok((
+        format!("{} 00:00:00", add_days(&end, -days_back)),
+        format!("{end} 23:59:59"),
+    ))
 }
 
 // ── 用量统计（设置页） ──
@@ -229,8 +280,12 @@ pub fn usage_stats_snapshot(request: &Value, model: &Value, tool: &Value, now_ms
         })
         .collect();
     let tokens_of = |day: &Value| day["totalEstimatedTokens"].as_f64().unwrap_or(0.0);
-    let total_tokens = model["totalUsage"]["totalTokensUsage"].as_f64().unwrap_or(0.0);
-    let total_calls = model["totalUsage"]["totalModelCallCount"].as_f64().unwrap_or(0.0);
+    let total_tokens = model["totalUsage"]["totalTokensUsage"]
+        .as_f64()
+        .unwrap_or(0.0);
+    let total_calls = model["totalUsage"]["totalModelCallCount"]
+        .as_f64()
+        .unwrap_or(0.0);
     let active_days = daily.iter().filter(|day| tokens_of(day) > 0.0).count();
     let most_active = daily.iter().fold(None::<&Value>, |best, day| match best {
         Some(best) if tokens_of(day) <= tokens_of(best) => Some(best),
@@ -245,7 +300,11 @@ pub fn usage_stats_snapshot(request: &Value, model: &Value, tool: &Value, now_ms
     };
     let mut models: Vec<Value> = array(summary_list)
         .iter()
-        .filter(|entry| entry["modelName"].as_str().is_some_and(|name| !name.is_empty()))
+        .filter(|entry| {
+            entry["modelName"]
+                .as_str()
+                .is_some_and(|name| !name.is_empty())
+        })
         .map(|entry| {
             let total = entry["totalTokens"].as_f64().unwrap_or(0.0);
             json!({
@@ -259,7 +318,11 @@ pub fn usage_stats_snapshot(request: &Value, model: &Value, tool: &Value, now_ms
             })
         })
         .collect();
-    models.sort_by(|a, b| tokens_of(b).partial_cmp(&tokens_of(a)).unwrap_or(std::cmp::Ordering::Equal));
+    models.sort_by(|a, b| {
+        tokens_of(b)
+            .partial_cmp(&tokens_of(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let favorite = models.first().map(|top| {
         json!({"modelId": top["modelId"], "totalCharacters": top["totalCharacters"],
             "totalEstimatedTokens": top["totalEstimatedTokens"], "share": top["share"]})
@@ -302,9 +365,24 @@ pub fn usage_stats_snapshot(request: &Value, model: &Value, tool: &Value, now_ms
 
 fn tool_usages(tool: &Value) -> Vec<Value> {
     let mut tools: Vec<Value> = [
-        ("network-search", "联网搜索 MCP", "networkSearchCount", "totalNetworkSearchCount"),
-        ("web-reader", "网页读取 MCP", "webReadMcpCount", "totalWebReadMcpCount"),
-        ("zread", "开源仓库 MCP", "zreadMcpCount", "totalZreadMcpCount"),
+        (
+            "network-search",
+            "联网搜索 MCP",
+            "networkSearchCount",
+            "totalNetworkSearchCount",
+        ),
+        (
+            "web-reader",
+            "网页读取 MCP",
+            "webReadMcpCount",
+            "totalWebReadMcpCount",
+        ),
+        (
+            "zread",
+            "开源仓库 MCP",
+            "zreadMcpCount",
+            "totalZreadMcpCount",
+        ),
     ]
     .into_iter()
     .map(|(code, name, daily_key, total_key)| {
@@ -316,7 +394,9 @@ fn tool_usages(tool: &Value) -> Vec<Value> {
         json!({"toolCode": code, "displayName": name, "totalCalls": total, "dailyCalls": daily})
     })
     .collect();
-    let search = tool["totalUsage"]["totalSearchMcpCount"].as_f64().unwrap_or(0.0);
+    let search = tool["totalUsage"]["totalSearchMcpCount"]
+        .as_f64()
+        .unwrap_or(0.0);
     if search > 0.0 {
         tools.push(json!({"toolCode": "search-mcp", "displayName": "Search MCP", "totalCalls": num(search), "dailyCalls": []}));
     }
@@ -326,7 +406,10 @@ fn tool_usages(tool: &Value) -> Vec<Value> {
 // ── Coding Plan 用量面板 ──
 
 fn number_series(values: &Value) -> Vec<f64> {
-    array(values).iter().map(|v| finite(v).unwrap_or(0.0)).collect()
+    array(values)
+        .iter()
+        .map(|v| finite(v).unwrap_or(0.0))
+        .collect()
 }
 
 fn sum(values: &[f64]) -> f64 {
@@ -340,7 +423,11 @@ fn sum_series(list: &[&Value]) -> Option<Vec<f64>> {
     }
     Some(
         (0..max)
-            .map(|index| list.iter().map(|s| array(s).get(index).and_then(finite).unwrap_or(0.0)).sum())
+            .map(|index| {
+                list.iter()
+                    .map(|s| array(s).get(index).and_then(finite).unwrap_or(0.0))
+                    .sum()
+            })
             .collect(),
     )
 }
@@ -372,21 +459,36 @@ fn axis_value(value: &str, granularity: &str) -> String {
 }
 
 /// `alignUsageSeries`。
-fn align(source_x: &[String], target_x: &[String], values: &[f64], granularity: &str) -> Vec<Value> {
+fn align(
+    source_x: &[String],
+    target_x: &[String],
+    values: &[f64],
+    granularity: &str,
+) -> Vec<Value> {
     if source_x.is_empty() && values.len() == target_x.len() {
         return values.iter().map(|v| num(*v)).collect();
     }
     let mut by_time = HashMap::new();
     for (index, time) in source_x.iter().enumerate() {
-        by_time.insert(axis_value(time, granularity), values.get(index).copied().unwrap_or(0.0));
+        by_time.insert(
+            axis_value(time, granularity),
+            values.get(index).copied().unwrap_or(0.0),
+        );
     }
     target_x
         .iter()
         .enumerate()
         .map(|(index, time)| {
-            let value = by_time.get(&axis_value(time, granularity)).copied().unwrap_or_else(|| {
-                if source_x.is_empty() { values.get(index).copied().unwrap_or(0.0) } else { 0.0 }
-            });
+            let value = by_time
+                .get(&axis_value(time, granularity))
+                .copied()
+                .unwrap_or_else(|| {
+                    if source_x.is_empty() {
+                        values.get(index).copied().unwrap_or(0.0)
+                    } else {
+                        0.0
+                    }
+                });
             num(value)
         })
         .collect()
@@ -394,7 +496,10 @@ fn align(source_x: &[String], target_x: &[String], values: &[f64], granularity: 
 
 fn sort_by_order(items: &mut [Value]) {
     items.sort_by(|a, b| {
-        let (a, b) = (a["sortOrder"].as_f64().unwrap_or(0.0), b["sortOrder"].as_f64().unwrap_or(0.0));
+        let (a, b) = (
+            a["sortOrder"].as_f64().unwrap_or(0.0),
+            b["sortOrder"].as_f64().unwrap_or(0.0),
+        );
         a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal)
     });
 }
@@ -415,9 +520,14 @@ fn is_breakdown_bucket(item: &Value) -> bool {
 
 fn token_series(item: &Value) -> Vec<f64> {
     first_non_empty(vec![
-        Some(number_series(&item["totalTokensUsage"])).filter(|_| item["totalTokensUsage"].is_array()),
+        Some(number_series(&item["totalTokensUsage"]))
+            .filter(|_| item["totalTokensUsage"].is_array()),
         Some(number_series(&item["tokensUsage"])).filter(|_| item["tokensUsage"].is_array()),
-        sum_series(&[&item["cachedInputTokensUsage"], &item["uncachedInputTokensUsage"], &item["outputTokensUsage"]]),
+        sum_series(&[
+            &item["cachedInputTokensUsage"],
+            &item["uncachedInputTokensUsage"],
+            &item["outputTokensUsage"],
+        ]),
     ])
 }
 
@@ -425,17 +535,27 @@ fn credit_model_data(usage: &Value, x_time: &[String], granularity: &str) -> Vec
     let source_x = strings(&usage["xTime"]);
     let mut items: Vec<Value> = array(&usage["modelDataList"])
         .iter()
-        .filter(|item| trimmed(&item["modelName"]).is_some() || trimmed(&item["modelCode"]).is_some())
+        .filter(|item| {
+            trimmed(&item["modelName"]).is_some() || trimmed(&item["modelCode"]).is_some()
+        })
         .filter(|item| !is_breakdown_bucket(item))
         .enumerate()
         .map(|(index, item)| {
-            let aligned = |key: &str| align(&source_x, x_time, &number_series(&item[key]), granularity);
+            let aligned =
+                |key: &str| align(&source_x, x_time, &number_series(&item[key]), granularity);
             let tokens = token_series(item);
             let credits = first_non_empty(vec![
-                Some(number_series(&item["totalCreditsUsage"])).filter(|_| item["totalCreditsUsage"].is_array()),
-                sum_series(&[&item["cachedInputCreditsUsage"], &item["uncachedInputCreditsUsage"], &item["outputCreditsUsage"]]),
+                Some(number_series(&item["totalCreditsUsage"]))
+                    .filter(|_| item["totalCreditsUsage"].is_array()),
+                sum_series(&[
+                    &item["cachedInputCreditsUsage"],
+                    &item["uncachedInputCreditsUsage"],
+                    &item["outputCreditsUsage"],
+                ]),
             ]);
-            let name = trimmed(&item["modelName"]).or_else(|| trimmed(&item["modelCode"])).unwrap_or_else(|| "unknown".into());
+            let name = trimmed(&item["modelName"])
+                .or_else(|| trimmed(&item["modelCode"]))
+                .unwrap_or_else(|| "unknown".into());
             json!({
                 "modelName": name,
                 "sortOrder": sort_order(item, index),
@@ -493,7 +613,10 @@ fn credit_tool_data(usage: &Value, x_time: &[String], granularity: &str) -> Vec<
 
 fn guess_granularity(usage: &Value) -> &'static str {
     static HOUR: OnceLock<Regex> = OnceLock::new();
-    if strings(&usage["xTime"]).iter().any(|v| re(&HOUR, r"\d{2}:\d{2}").is_match(v)) {
+    if strings(&usage["xTime"])
+        .iter()
+        .any(|v| re(&HOUR, r"\d{2}:\d{2}").is_match(v))
+    {
         "hour"
     } else {
         "day"
@@ -519,7 +642,11 @@ fn level_for(value: f64, max: f64) -> i64 {
 
 fn day_index(key: &str) -> Option<i64> {
     let date = NaiveDate::parse_from_str(key, "%Y-%m-%d").ok()?;
-    Some(Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0)?).timestamp_millis().div_euclid(DAY_MS))
+    Some(
+        Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0)?)
+            .timestamp_millis()
+            .div_euclid(DAY_MS),
+    )
 }
 
 fn day_key(index: i64) -> String {
@@ -534,7 +661,11 @@ fn activity(payload: &Value) -> Value {
     let mut cells: Vec<Value> = array(&payload["series"])
         .iter()
         .filter_map(|item| {
-            let date = item["date"].as_str().map(str::trim).unwrap_or("").to_owned();
+            let date = item["date"]
+                .as_str()
+                .map(str::trim)
+                .unwrap_or("")
+                .to_owned();
             if !re(&DATE, r"^\d{4}-\d{2}-\d{2}$").is_match(&date) {
                 return None;
             }
@@ -549,10 +680,15 @@ fn activity(payload: &Value) -> Value {
     cells.sort_by(|a, b| a["date"].as_str().cmp(&b["date"].as_str()));
     let tokens = |cell: &Value| cell["totalTokens"].as_f64().unwrap_or(0.0);
     let max = cells.iter().map(tokens).fold(0.0, f64::max);
-    let by_date: HashMap<String, &Value> = cells.iter().map(|c| (c["date"].as_str().unwrap_or("").to_owned(), c)).collect();
+    let by_date: HashMap<String, &Value> = cells
+        .iter()
+        .map(|c| (c["date"].as_str().unwrap_or("").to_owned(), c))
+        .collect();
     let mut weeks: Vec<(i64, Value)> = Vec::new();
     for cell in &cells {
-        let Some(index) = day_index(cell["date"].as_str().unwrap_or("")) else { continue };
+        let Some(index) = day_index(cell["date"].as_str().unwrap_or("")) else {
+            continue;
+        };
         let weekday = Utc
             .timestamp_millis_opt(index * DAY_MS)
             .single()
@@ -604,7 +740,8 @@ fn activity(payload: &Value) -> Value {
 }
 
 fn detail_summary(summary: &Value) -> Value {
-    let metric = |key: &str, field: &str| finite(&summary[key][field]).map(num).unwrap_or(Value::Null);
+    let metric =
+        |key: &str, field: &str| finite(&summary[key][field]).map(num).unwrap_or(Value::Null);
     json!({
         "cacheHitRate": metric("cacheHitRate", "value"),
         "cacheHitRateTrend": metric("cacheHitRate", "trend"),
@@ -661,10 +798,16 @@ pub fn coding_plan_snapshot(inputs: CodingPlanInputs<'_>) -> Value {
     } else {
         credit_tool_data(tool_usage, x_time, granularity)
     };
-    let total_tokens = if model_usage.is_null() { 0.0 } else { credit_tokens_total(model_usage) };
+    let total_tokens = if model_usage.is_null() {
+        0.0
+    } else {
+        credit_tokens_total(model_usage)
+    };
     let mut activity = activity(inputs.activity);
-    activity["summary"]["favoriteModelName"] =
-        model_summary.first().map(|m| m["modelName"].clone()).unwrap_or(Value::Null);
+    activity["summary"]["favoriteModelName"] = model_summary
+        .first()
+        .map(|m| m["modelName"].clone())
+        .unwrap_or(Value::Null);
     let health = inputs.health;
     json!({
         "range": inputs.request["range"],
@@ -709,7 +852,10 @@ mod tests {
         assert_eq!(add_days("2026-03-01", -1), "2026-02-28");
         assert_eq!(add_days("2024-12-31", 1), "2025-01-01");
         let range = coding_plan_range(&json!({"range": "custom", "customStartDate": "2026-01-30", "customEndDate": "2026-02-02"})).unwrap();
-        assert_eq!(range.x_time, ["2026-01-30", "2026-01-31", "2026-02-01", "2026-02-02"]);
+        assert_eq!(
+            range.x_time,
+            ["2026-01-30", "2026-01-31", "2026-02-01", "2026-02-02"]
+        );
         assert_eq!(range.start_time, "2026-01-30 00:00:00");
         assert_eq!(
             coding_plan_range(&json!({"range": "custom", "customStartDate": "2026-02-02", "customEndDate": "2026-01-01"})).unwrap_err().message,
@@ -719,11 +865,28 @@ mod tests {
             coding_plan_range(&json!({"range": "custom", "customStartDate": "2026-01-01", "customEndDate": "2026-03-01"})).unwrap_err().message,
             "coding_plan_usage_custom_range_too_long"
         );
-        assert_eq!(coding_plan_range(&json!({"range": "today", "timeZone": "Asia/Shanghai"})).unwrap().x_time.len(), 24);
-        assert_eq!(coding_plan_range(&json!({"range": "7d", "timeZone": "Nope/Zone"})).unwrap_err().message, "Invalid time zone specified: Nope/Zone");
+        assert_eq!(
+            coding_plan_range(&json!({"range": "today", "timeZone": "Asia/Shanghai"}))
+                .unwrap()
+                .x_time
+                .len(),
+            24
+        );
+        assert_eq!(
+            coding_plan_range(&json!({"range": "7d", "timeZone": "Nope/Zone"}))
+                .unwrap_err()
+                .message,
+            "Invalid time zone specified: Nope/Zone"
+        );
         let x = vec!["2026-01-01".to_owned(), "2026-01-02".to_owned()];
-        assert_eq!(align(&["2026-01-02 00:00".to_owned()], &x, &[5.0], "day"), vec![json!(0), json!(5)]);
-        assert_eq!(align(&[], &x, &[1.0, 2.5], "day"), vec![json!(1), json!(2.5)]);
+        assert_eq!(
+            align(&["2026-01-02 00:00".to_owned()], &x, &[5.0], "day"),
+            vec![json!(0), json!(5)]
+        );
+        assert_eq!(
+            align(&[], &x, &[1.0, 2.5], "day"),
+            vec![json!(1), json!(2.5)]
+        );
         assert_eq!(axis_value("2026-01-01 03:04", "hour"), "03:04:00");
     }
 
@@ -765,10 +928,22 @@ mod tests {
         assert_eq!(models[1]["totalTokens"], 30);
         assert_eq!(snapshot["modelUsage"]["totalTokensUsage"], 37);
         assert_eq!(snapshot["modelUsage"]["totalModelCallCount"], 3);
-        assert_eq!(snapshot["toolUsage"]["toolDataList"][0]["usageCount"], json!([0, 4]));
-        assert_eq!(snapshot["toolUsage"]["toolDataList"][0]["toolCode"], "search");
-        assert_eq!(snapshot["activity"]["summary"]["favoriteModelName"], "glm-4");
-        assert_eq!(snapshot["activity"]["heatmap"]["weeks"][0]["days"][5]["level"], 4);
+        assert_eq!(
+            snapshot["toolUsage"]["toolDataList"][0]["usageCount"],
+            json!([0, 4])
+        );
+        assert_eq!(
+            snapshot["toolUsage"]["toolDataList"][0]["toolCode"],
+            "search"
+        );
+        assert_eq!(
+            snapshot["activity"]["summary"]["favoriteModelName"],
+            "glm-4"
+        );
+        assert_eq!(
+            snapshot["activity"]["heatmap"]["weeks"][0]["days"][5]["level"],
+            4
+        );
         assert_eq!(snapshot["detail"]["model"]["cacheHitRate"], json!(0.5));
         assert_eq!(snapshot["detail"]["tool"]["totalCredits"], 0);
         assert_eq!(snapshot["health"]["liteDecodeSpeed"], json!([1.5, 0]));

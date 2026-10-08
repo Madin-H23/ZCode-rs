@@ -245,7 +245,10 @@ mod tests {
 
     #[test]
     fn env_origin_priority_and_validation() {
-        assert_eq!(endpoints(&[]).env_origin().unwrap(), DEFAULT_ZCODE_ENDPOINT_ORIGIN);
+        assert_eq!(
+            endpoints(&[]).env_origin().unwrap(),
+            DEFAULT_ZCODE_ENDPOINT_ORIGIN
+        );
         let env = endpoints(&[
             ("ZCODE_BASE_URL", " http://127.0.0.1:9/x/y "),
             ("ZCODE_ENDPOINT_ORIGIN", "https://other"),
@@ -271,10 +274,7 @@ mod tests {
     #[test]
     fn rewrite_only_default_origin() {
         assert_eq!(
-            rewrite_url(
-                "https://zcode.z.ai/api/v1/x?a=1#f",
-                "http://127.0.0.1:8080"
-            ),
+            rewrite_url("https://zcode.z.ai/api/v1/x?a=1#f", "http://127.0.0.1:8080"),
             "http://127.0.0.1:8080/api/v1/x?a=1#f"
         );
         assert_eq!(

@@ -261,10 +261,14 @@ impl ProviderRuntime {
                 .map(|byte| format!("{byte:02x}"))
                 .collect::<String>()
         };
-        let (builtin, personal) = (Arc::new(config_of(&builtin)), Arc::new(config_of(&personal)));
+        let (builtin, personal) = (
+            Arc::new(config_of(&builtin)),
+            Arc::new(config_of(&personal)),
+        );
         let builtin_changed = {
             let mut state = self.lock_write();
-            let changed = state.revision > 0 && state.builtin_signature != builtin_bytes_signature(&signature);
+            let changed = state.revision > 0
+                && state.builtin_signature != builtin_bytes_signature(&signature);
             state.builtin_signature = builtin_bytes_signature(&signature);
             state.builtin = builtin;
             state.personal = personal;
@@ -284,7 +288,11 @@ impl ProviderRuntime {
     async fn re_resolve(&self) -> (u64, Arc<Resolved>) {
         let (builtin, personal, account) = {
             let state = self.lock_read();
-            (state.builtin.clone(), state.personal.clone(), state.account.clone())
+            (
+                state.builtin.clone(),
+                state.personal.clone(),
+                state.account.clone(),
+            )
         };
         let resolved = tokio::task::spawn_blocking(move || {
             resolve::resolve(&builtin, &personal, account.as_deref())
@@ -347,7 +355,11 @@ impl ProviderRuntime {
         if state.revision == revision {
             return (revision, resolved, state.personal_revision.clone());
         }
-        (state.revision, state.resolved.clone(), state.personal_revision.clone())
+        (
+            state.revision,
+            state.resolved.clone(),
+            state.personal_revision.clone(),
+        )
     }
 
     pub fn builtin_changes(&self) -> EventHub<()> {

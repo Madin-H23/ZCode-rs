@@ -579,9 +579,18 @@ pub fn effective_model_config(
         {
             continue;
         }
-        if rule_entry.model.as_ref().is_some_and(|re| !re.is_match(model_id))
-            || rule_entry.api.as_ref().is_some_and(|re| !re.is_match(api_type))
-            || rule_entry.url.as_ref().is_some_and(|re| !re.is_match(base_url))
+        if rule_entry
+            .model
+            .as_ref()
+            .is_some_and(|re| !re.is_match(model_id))
+            || rule_entry
+                .api
+                .as_ref()
+                .is_some_and(|re| !re.is_match(api_type))
+            || rule_entry
+                .url
+                .as_ref()
+                .is_some_and(|re| !re.is_match(base_url))
         {
             continue;
         }

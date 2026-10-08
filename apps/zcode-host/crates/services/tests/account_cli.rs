@@ -13,7 +13,9 @@ use zcode_host_control::{ControlSink, HostToMain, InitLocal};
 use zcode_host_services::account::AccountStack;
 use zcode_host_services::account::credential::{CredentialStore, credential_secret};
 use zcode_host_services::agent::extensions::{ReverseContext, ReverseReply, UseReason};
-use zcode_host_services::agent::{AgentRuntime, AgentRuntimeConfig, RuntimePolicy, WorkspaceTarget};
+use zcode_host_services::agent::{
+    AgentRuntime, AgentRuntimeConfig, RuntimePolicy, WorkspaceTarget,
+};
 use zcode_host_services::providers::ProviderRuntime;
 use zcode_host_services::settings::SettingStore;
 use zcode_host_services::{HostEnvironment, ServiceContext};
@@ -35,10 +37,13 @@ fn cli_binary() -> Option<PathBuf> {
 }
 
 fn jwt(exp: i64) -> String {
-    let encode = |value: Value| {
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.to_string())
-    };
-    format!("{}.{}.sig", encode(json!({"alg": "none"})), encode(json!({"exp": exp})))
+    let encode =
+        |value: Value| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.to_string());
+    format!(
+        "{}.{}.sig",
+        encode(json!({"alg": "none"})),
+        encode(json!({"exp": exp}))
+    )
 }
 
 fn now_seconds() -> i64 {
@@ -90,9 +95,11 @@ async fn serve_backend(listener: TcpListener, log: Arc<Mutex<Vec<(String, String
                     "plans": [{"user_plan_id": "up1", "plan_id": "zcode-v3-start-plan", "status": "active", "ends_at": now_seconds() + 86400}],
                     "balances": [{"user_plan_id": "up1", "plan_id": "zcode-v3-start-plan", "capabilities": ["model:glm-5.3-flash"], "total_units": 100, "used_units": 10, "remaining_units": 90}],
                 }}),
-                "/api/biz/customer/getCustomerInfo" => json!({"code": 200, "data": {"organizations": [
-                    {"organizationId": "org-1", "organizationName": "默认机构", "projects": [{"projectId": "proj-1", "projectName": "默认项目"}]},
-                ]}}),
+                "/api/biz/customer/getCustomerInfo" => {
+                    json!({"code": 200, "data": {"organizations": [
+                        {"organizationId": "org-1", "organizationName": "默认机构", "projects": [{"projectId": "proj-1", "projectName": "默认项目"}]},
+                    ]}})
+                }
                 "/api/biz/v1/organization/org-1/projects/proj-1/api_keys" => {
                     json!({"code": 200, "data": [{"name": "zcode-api-key", "apiKey": "key-abc"}]})
                 }
@@ -102,9 +109,11 @@ async fn serve_backend(listener: TcpListener, log: Arc<Mutex<Vec<(String, String
                 "/api/biz/subscription/list" => json!({"code": 200, "data": [
                     {"productId": "pro", "productName": "GLM Coding Pro", "status": "VALID", "inCurrentPeriod": true, "billingCycle": "monthly"},
                 ]}),
-                "/api/monitor/usage/quota/limit" => json!({"code": 200, "data": {"level": "pro", "limits": [
-                    {"type": "TIME_LIMIT", "remaining": 7, "percentage": 30, "nextResetTime": 123},
-                ]}}),
+                "/api/monitor/usage/quota/limit" => {
+                    json!({"code": 200, "data": {"level": "pro", "limits": [
+                        {"type": "TIME_LIMIT", "remaining": 7, "percentage": 30, "nextResetTime": 123},
+                    ]}})
+                }
                 "/api/monitor/credit-usage/activity" => json!({"code": 200, "data": {
                     "summary": {"totalTokens": 5}, "series": [{"date": "2026-01-01", "totalTokens": 5}],
                 }}),
@@ -142,7 +151,10 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         ("USERPROFILE".to_owned(), home_text.clone()),
         ("ZCODE_DATA_BASE_DIR".to_owned(), home_text.clone()),
         ("ZCODE_DESKTOP_HOME_DIR".to_owned(), home_text.clone()),
-        ("ZCODE_CREDENTIAL_SECRET".to_owned(), "account-cli-test".to_owned()),
+        (
+            "ZCODE_CREDENTIAL_SECRET".to_owned(),
+            "account-cli-test".to_owned(),
+        ),
         ("ZCODE_BASE_URL".to_owned(), origin.clone()),
         ("ZAI_BUSINESS_BASE_URL".to_owned(), origin.clone()),
         ("ZAI_OAUTH_ORIGIN".to_owned(), origin.clone()),
@@ -157,7 +169,10 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
 
     // 已登录的 Z.ai 账号：与 Node 相同的凭据键与加密格式。
     let credentials = CredentialStore::new(&config_dir, &credential_secret(&vars));
-    credentials.save("oauth:active_provider", "zai").await.unwrap();
+    credentials
+        .save("oauth:active_provider", "zai")
+        .await
+        .unwrap();
     credentials
         .save("oauth:zai:access_token", "zai-business-token")
         .await
@@ -234,7 +249,10 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         .collect();
     assert_eq!(
         ids,
-        ["account:zai-individual-coding-plan", "account:zai-start-plan"],
+        [
+            "account:zai-individual-coding-plan",
+            "account:zai-start-plan"
+        ],
         "{view}"
     );
     let start = view["providers"][1]["models"].as_array().unwrap();
@@ -255,7 +273,10 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
     assert_eq!(individual["entitled"], true);
     assert_eq!(individual["current"], true);
     assert_eq!(individual["connectionKey"].as_str().unwrap().len(), 64);
-    assert_eq!(state_of("account:zai-team-coding-plan")["availability"], "unknown");
+    assert_eq!(
+        state_of("account:zai-team-coding-plan")["availability"],
+        "unknown"
+    );
     assert_eq!(
         state_of("account:bigmodel-start-plan")["unavailableReason"],
         "not-connected"
@@ -299,10 +320,16 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         }))
         .await
         .unwrap();
-    assert_eq!(individual["subscription"]["details"][0]["productName"], "GLM Coding Pro");
+    assert_eq!(
+        individual["subscription"]["details"][0]["productName"],
+        "GLM Coding Pro"
+    );
     assert_eq!(individual["remaining"]["count"], 7);
     assert_eq!(individual["quota"]["level"], "pro");
-    assert_eq!(individual["context"], json!({"scope": "personal", "productId": "pro", "displayName": "GLM Coding Pro"}));
+    assert_eq!(
+        individual["context"],
+        json!({"scope": "personal", "productId": "pro", "displayName": "GLM Coding Pro"})
+    );
     assert!(individual.get("unavailableReason").is_none());
     let start = usage
         .entitlement_snapshot(&json!({
@@ -313,7 +340,10 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         .unwrap();
     assert_eq!(start["provider"]["name"], "Z.ai - Coding Plan");
     assert_eq!(start["quota"]["level"], "Start");
-    assert_eq!(start["subscription"]["details"][0]["productId"], "zcode-v3-start-plan");
+    assert_eq!(
+        start["subscription"]["details"][0]["productId"],
+        "zcode-v3-start-plan"
+    );
 
     // Coding Plan 用量面板：quota + credit-usage + 模型性能，按个人套餐 key 鉴权。
     let panel = usage
@@ -329,7 +359,10 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
     assert_eq!(panel["modelUsage"]["xTime"].as_array().unwrap().len(), 7);
     assert_eq!(panel["activity"]["summary"]["favoriteModelName"], "GLM-5");
     assert_eq!(panel["health"]["liteDecodeSpeed"], json!([42]));
-    assert_eq!(panel["sourceProvider"]["id"], "account:zai-individual-coding-plan");
+    assert_eq!(
+        panel["sourceProvider"]["id"],
+        "account:zai-individual-coding-plan"
+    );
     {
         let log = requests.lock().unwrap();
         let detail = log
@@ -359,7 +392,11 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         }),
     };
     assert_eq!(
-        handler(request("account:zai-individual-coding-plan", "individual-coding-plan")).await,
+        handler(request(
+            "account:zai-individual-coding-plan",
+            "individual-coding-plan"
+        ))
+        .await,
         ReverseReply::Result(
             json!({"headersApplied": true, "requestAuth": {"apiKey": "key-abc.secret-xyz"}})
         )

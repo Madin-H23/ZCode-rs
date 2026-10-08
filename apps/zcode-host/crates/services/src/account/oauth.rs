@@ -133,6 +133,9 @@ struct State {
     next_completion_seq: u64,
 }
 
+/// 退出时被清理的会话：(active provider, 账号身份)。
+type LogoutTarget = (Option<String>, Option<String>);
+
 #[derive(Clone)]
 pub struct OAuthService {
     inner: Arc<Inner>,
@@ -242,7 +245,10 @@ impl OAuthService {
             .filter(|adapter| adapter.config.enabled)
             .collect();
         enabled.sort_by_key(|adapter| adapter.config.order);
-        enabled.iter().map(|adapter| adapter.config.meta()).collect()
+        enabled
+            .iter()
+            .map(|adapter| adapter.config.meta())
+            .collect()
     }
 
     pub async fn active_provider(&self) -> Result<Option<String>, RpcError> {
@@ -290,7 +296,9 @@ impl OAuthService {
                 .map_err(credential_error)?
                 .map(|jwt| jwt.trim().to_owned())
                 .unwrap_or_default();
-            if !jwt.is_empty() && matches!(jwt_expiration(&jwt, self.now()), JwtExpiration::Expired(_)) {
+            if !jwt.is_empty()
+                && matches!(jwt_expiration(&jwt, self.now()), JwtExpiration::Expired(_))
+            {
                 log::info(format!(
                     "[oauthService] cached session invalidated because zcode JWT expired provider={active}"
                 ));
@@ -481,9 +489,10 @@ impl OAuthService {
             rollback().await?;
             return Err(cancelled());
         }
-        cred(repo
-            .save_user_profile(provider, &with_profile_schema(provider, profile))
-            .await)?;
+        cred(
+            repo.save_user_profile(provider, &with_profile_schema(provider, profile))
+                .await,
+        )?;
         if !self.pending_is(pending_id) {
             rollback().await?;
             return Err(cancelled());
@@ -540,7 +549,9 @@ impl OAuthService {
                                 .await
                                 .map_err(credential_error)?;
                         }
-                        return Ok(Some(json!({"kind": "duplicate", "provider": pending.provider})));
+                        return Ok(Some(
+                            json!({"kind": "duplicate", "provider": pending.provider}),
+                        ));
                     }
                     return Ok(None);
                 }
@@ -583,7 +594,9 @@ impl OAuthService {
         let fallback = {
             let mut state = self.state();
             let fallback = match &state.latest_completion {
-                Some((pending_id, latest, receiver)) if *pending_id == pending.id && *latest != seq => {
+                Some((pending_id, latest, receiver))
+                    if *pending_id == pending.id && *latest != seq =>
+                {
                     Some(receiver.clone())
                 }
                 _ => None,
@@ -614,7 +627,9 @@ impl OAuthService {
                 return Err(failure);
             }
             if self.recently_completed_matches(&pending.state).is_some() {
-                return Ok(Some(json!({"kind": "duplicate", "provider": pending.provider})));
+                return Ok(Some(
+                    json!({"kind": "duplicate", "provider": pending.provider}),
+                ));
             }
             if !self.pending_is(pending.id) {
                 return Ok(None);
@@ -845,7 +860,9 @@ impl OAuthService {
         log::info(format!(
             "[oauthService] OAuth polling flow started provider={provider} expiresInMs={timeout} pollIntervalMs={poll_interval_ms}"
         ));
-        Ok(json!({"provider": provider, "authorizeUrl": authorize_url.to_string(), "state": flow_state}))
+        Ok(
+            json!({"provider": provider, "authorizeUrl": authorize_url.to_string(), "state": flow_state}),
+        )
     }
 
     pub async fn poll_pending_oauth(&self) -> Result<Value, RpcError> {
@@ -1064,7 +1081,9 @@ impl OAuthService {
                 self.set_phase(pending.id, Phase::AwaitingAttributionOrCode);
                 return Err(credential_error(failure));
             }
-            return Ok(json!({"kind": "attribution", "provider": pending.provider, "attribution": attribution}));
+            return Ok(
+                json!({"kind": "attribution", "provider": pending.provider, "attribution": attribution}),
+            );
         }
         let adapter = self.adapter(&pending.provider)?;
         let result = self
@@ -1132,7 +1151,7 @@ impl OAuthService {
         let conditional = is_current.is_some();
         let repo = self.inner.repo.clone();
         let result = self
-            .mutate(async || -> Result<Option<(Option<String>, Option<String>)>, RpcError> {
+            .mutate(async || -> Result<Option<LogoutTarget>, RpcError> {
                 if let Some(check) = is_current
                     && !check().await
                 {
@@ -1148,7 +1167,9 @@ impl OAuthService {
                     None => None,
                 };
                 self.state().session_generation += 1;
-                repo.clear_active_session().await.map_err(credential_error)?;
+                repo.clear_active_session()
+                    .await
+                    .map_err(credential_error)?;
                 Ok(Some((active, identity)))
             })
             .await?;
@@ -1187,7 +1208,9 @@ impl OAuthService {
                     .map_err(credential_error)?
                     .map(|profile| profile.id);
                 self.state().session_generation += 1;
-                repo.clear_active_session().await.map_err(credential_error)?;
+                repo.clear_active_session()
+                    .await
+                    .map_err(credential_error)?;
                 Ok(Some(identity))
             })
             .await?;
@@ -1209,27 +1232,27 @@ impl OAuthService {
             .collect();
         let repo = self.inner.repo.clone();
         let identities = self
-            .mutate(async || -> Result<Vec<(String, Option<String>)>, RpcError> {
-                let mut identities = Vec::new();
-                for provider in &providers {
-                    let identity = repo
-                        .user_profile(provider)
-                        .await
-                        .map_err(credential_error)?
-                        .map(|profile| profile.id);
-                    identities.push((provider.clone(), identity));
-                }
-                self.state().session_generation += 1;
-                repo.clear_all(&providers).await.map_err(credential_error)?;
-                Ok(identities)
-            })
+            .mutate(
+                async || -> Result<Vec<(String, Option<String>)>, RpcError> {
+                    let mut identities = Vec::new();
+                    for provider in &providers {
+                        let identity = repo
+                            .user_profile(provider)
+                            .await
+                            .map_err(credential_error)?
+                            .map(|profile| profile.id);
+                        identities.push((provider.clone(), identity));
+                    }
+                    self.state().session_generation += 1;
+                    repo.clear_all(&providers).await.map_err(credential_error)?;
+                    Ok(identities)
+                },
+            )
             .await?;
         self.cancel_pending(None).await;
-        let results = futures_util::future::join_all(
-            identities
-                .into_iter()
-                .map(|(provider, identity)| async move { self.notify_logout(&provider, identity).await }),
-        )
+        let results = futures_util::future::join_all(identities.into_iter().map(
+            |(provider, identity)| async move { self.notify_logout(&provider, identity).await },
+        ))
         .await;
         for result in results {
             result.map_err(error)?;
@@ -1304,9 +1327,15 @@ impl OAuthService {
         let endpoints = &self.inner.endpoints;
         let path = "/api/biz/customer/getCustomerInfo";
         let candidates = if provider == BIGMODEL {
-            vec![endpoints.bigmodel_api_url(path), bigmodel_userinfo_url(endpoints)]
+            vec![
+                endpoints.bigmodel_api_url(path),
+                bigmodel_userinfo_url(endpoints),
+            ]
         } else {
-            vec![endpoints.zai_business_url(path), zai_userinfo_url(endpoints)]
+            vec![
+                endpoints.zai_business_url(path),
+                zai_userinfo_url(endpoints),
+            ]
         };
         let matches = candidates.iter().any(|candidate| {
             Url::parse(candidate)

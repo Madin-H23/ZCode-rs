@@ -88,12 +88,15 @@ struct Identity {
     fingerprint: String,
 }
 
+/// 进行中的凭据解析（并发调用共享同一结果）。
+type InFlight = Shared<BoxFuture<'static, Result<Map<String, Value>, &'static str>>>;
+
 #[derive(Clone)]
 pub struct OfficialMcpCredentials {
     providers: ProviderRuntime,
     auth: AccountRequestAuth,
     credentials: CredentialStore,
-    in_flight: Arc<Mutex<Option<Shared<BoxFuture<'static, Result<Map<String, Value>, &'static str>>>>>>,
+    in_flight: Arc<Mutex<Option<InFlight>>>,
     last_log_key: Arc<Mutex<Option<String>>>,
 }
 
@@ -107,13 +110,18 @@ fn jwt_expires_in_seconds(token: &str) -> Option<i64> {
             .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent)
             .with_decode_allow_trailing_bits(true),
     );
-    let decoded: Value = serde_json::from_slice(&engine.decode(normalized.trim_end_matches('=')).ok()?).ok()?;
+    let decoded: Value =
+        serde_json::from_slice(&engine.decode(normalized.trim_end_matches('=')).ok()?).ok()?;
     let exp = decoded["exp"].as_f64().filter(|exp| exp.is_finite())?;
     Some((exp - super::oauth_adapters::now_ms() as f64 / 1000.0).round() as i64)
 }
 
 impl OfficialMcpCredentials {
-    pub fn new(providers: ProviderRuntime, auth: AccountRequestAuth, credentials: CredentialStore) -> Self {
+    pub fn new(
+        providers: ProviderRuntime,
+        auth: AccountRequestAuth,
+        credentials: CredentialStore,
+    ) -> Self {
         Self {
             providers,
             auth,
@@ -141,7 +149,8 @@ impl OfficialMcpCredentials {
         if (active != "zai" && active != "bigmodel") || jwt.is_empty() {
             return Err("official_auth_unavailable");
         }
-        let fingerprint = json!({"revision": view["revision"], "providers": view["providers"]}).to_string();
+        let fingerprint =
+            json!({"revision": view["revision"], "providers": view["providers"]}).to_string();
         Ok(Identity {
             active_provider: active,
             jwt,
@@ -166,9 +175,9 @@ impl OfficialMcpCredentials {
                 let access = &provider["config"]["access"];
                 // zcodeProviderAccountAccessSchema 是 strict：只有这四个键，entitled 必须是布尔。
                 let strict = access.as_object().is_some_and(|object| {
-                    object
-                        .keys()
-                        .all(|key| ["type", "accountType", "mode", "entitled"].contains(&key.as_str()))
+                    object.keys().all(|key| {
+                        ["type", "accountType", "mode", "entitled"].contains(&key.as_str())
+                    })
                 });
                 let valid = strict
                     && access["type"] == "zhipu-account"
@@ -224,9 +233,10 @@ impl OfficialMcpCredentials {
             } else {
                 "individual-coding-plan"
             };
-            let Some(access_value) = access.clone().filter(|access| {
-                access["family"] == family && access["planKind"] == expected_kind
-            }) else {
+            let Some(access_value) = access
+                .clone()
+                .filter(|access| access["family"] == family && access["planKind"] == expected_kind)
+            else {
                 return Err("official_auth_plan_required");
             };
             let (plan_scope, wire_scope) = if expected_kind == "team-coding-plan" {
@@ -262,7 +272,9 @@ impl OfficialMcpCredentials {
                 Some((_, latest_static)) => self.auth.resolve_access_current(latest_static).await,
                 None => None,
             };
-            let stable = latest.as_ref().is_ok_and(|latest| Self::same(&identity, latest))
+            let stable = latest
+                .as_ref()
+                .is_ok_and(|latest| Self::same(&identity, latest))
                 && latest_selected.is_some()
                 && access == latest_access
                 && coding_plan == latest_maas;
@@ -311,8 +323,15 @@ impl OfficialMcpCredentials {
     /// `buildOfficialMcpAuthHeaders`。
     pub fn headers(snapshot: &CredentialSnapshot) -> Map<String, Value> {
         let mut headers = Map::new();
-        headers.insert("Authorization".into(), json!(format!("Bearer {}", snapshot.jwt)));
-        if let Some(coding_plan) = snapshot.coding_plan_authorization.as_deref().filter(|v| !v.is_empty()) {
+        headers.insert(
+            "Authorization".into(),
+            json!(format!("Bearer {}", snapshot.jwt)),
+        );
+        if let Some(coding_plan) = snapshot
+            .coding_plan_authorization
+            .as_deref()
+            .filter(|v| !v.is_empty())
+        {
             headers.insert(
                 "X-Bigmodel-Authorization".into(),
                 json!(format!("Bearer {coding_plan}")),
@@ -321,7 +340,10 @@ impl OfficialMcpCredentials {
         if let Some(scope) = &snapshot.wire_scope {
             headers.insert("Bigmodel-Target-Type".into(), scope["targetType"].clone());
             if scope["targetType"] == "TEAM" {
-                headers.insert("Bigmodel-Organization".into(), scope["organizationId"].clone());
+                headers.insert(
+                    "Bigmodel-Organization".into(),
+                    scope["organizationId"].clone(),
+                );
                 headers.insert("Bigmodel-Project".into(), scope["projectId"].clone());
             }
         }
@@ -337,7 +359,10 @@ impl OfficialMcpCredentials {
                 None => {
                     let this = self.clone();
                     let future = async move {
-                        let outcome = this.resolve().await.map(|snapshot| Self::headers(&snapshot));
+                        let outcome = this
+                            .resolve()
+                            .await
+                            .map(|snapshot| Self::headers(&snapshot));
                         *this.in_flight.lock().unwrap_or_else(|p| p.into_inner()) = None;
                         outcome
                     }
@@ -381,7 +406,9 @@ mod tests {
             coding_plan_authorization: Some("m".into()),
             provider_family: "bigmodel".into(),
             plan_scope: None,
-            wire_scope: Some(json!({"targetType": "TEAM", "organizationId": "o", "projectId": "p"})),
+            wire_scope: Some(
+                json!({"targetType": "TEAM", "organizationId": "o", "projectId": "p"}),
+            ),
         };
         assert_eq!(
             Value::Object(OfficialMcpCredentials::headers(&snapshot)),

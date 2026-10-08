@@ -71,7 +71,9 @@ impl std::fmt::Display for CredentialError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CredentialError::Decrypt(reason) => write!(f, "{DECRYPT_ERROR_PREFIX}{reason}"),
-            CredentialError::Corrupt(message) | CredentialError::Io(message) => f.write_str(message),
+            CredentialError::Corrupt(message) | CredentialError::Io(message) => {
+                f.write_str(message)
+            }
             CredentialError::InvalidKey => f.write_str("credential key must not be empty"),
         }
     }
@@ -494,10 +496,16 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(store.file()).unwrap().permissions().mode();
+            let mode = std::fs::metadata(store.file())
+                .unwrap()
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o600);
         }
-        assert_eq!(store.load("").await.unwrap_err(), CredentialError::InvalidKey);
+        assert_eq!(
+            store.load("").await.unwrap_err(),
+            CredentialError::InvalidKey
+        );
     }
 
     #[tokio::test]
@@ -560,11 +568,12 @@ mod tests {
         vars.insert("HOME".to_owned(), "/home/u".to_owned());
         vars.insert("USERPROFILE".to_owned(), "C:\\Users\\u".to_owned());
         let secret = credential_secret(&vars);
-        assert!(secret.starts_with(&format!(
-            "zcode-credential-fallback:{}:",
-            node_platform()
-        )));
-        let home = if cfg!(windows) { "C:\\Users\\u" } else { "/home/u" };
+        assert!(secret.starts_with(&format!("zcode-credential-fallback:{}:", node_platform())));
+        let home = if cfg!(windows) {
+            "C:\\Users\\u"
+        } else {
+            "/home/u"
+        };
         assert!(secret.contains(&format!(":{home}:")));
     }
 }

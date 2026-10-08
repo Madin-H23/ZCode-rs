@@ -13,14 +13,13 @@ use super::net::{ApiClient, HeaderList, NetworkOptions};
 use super::oauth::OAuthService;
 use super::oauth_adapters::now_ms;
 use super::oauth_repo::{
-    ACTIVE_PROVIDER_KEY, BIGMODEL, OAuthCredentialRepo, ZAI, ZCODE_JWT_TOKEN_KEY,
-    access_token_key, user_info_key,
+    ACTIVE_PROVIDER_KEY, BIGMODEL, OAuthCredentialRepo, ZAI, ZCODE_JWT_TOKEN_KEY, access_token_key,
+    user_info_key,
 };
 
 pub fn jwt(exp_seconds: i64) -> String {
-    let encode = |value: Value| {
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.to_string())
-    };
+    let encode =
+        |value: Value| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.to_string());
     format!(
         "{}.{}.sig",
         encode(json!({"alg": "none"})),
@@ -28,12 +27,15 @@ pub fn jwt(exp_seconds: i64) -> String {
     )
 }
 
+/// 退出钩子收到的 (provider, 账号身份)。
+pub type RecordedLogout = (String, Option<String>);
+
 pub struct Harness {
     pub server: MockServer,
     pub service: OAuthService,
     pub credentials: CredentialStore,
     pub clock: Arc<AtomicI64>,
-    pub logouts: Arc<Mutex<Vec<(String, Option<String>)>>>,
+    pub logouts: Arc<Mutex<Vec<RecordedLogout>>>,
     _dir: tempfile::TempDir,
 }
 
@@ -102,7 +104,10 @@ fn zai_backend(poll_ready_after: usize) -> super::net::testing::Route {
             "/api/v1/oauth/cli/poll/flow%201" => {
                 let count = polls.fetch_add(1, Ordering::SeqCst);
                 if count < poll_ready_after {
-                    return (200, json!({"code": 0, "data": {"status": "pending"}}).to_string());
+                    return (
+                        200,
+                        json!({"code": 0, "data": {"status": "pending"}}).to_string(),
+                    );
                 }
                 (
                     200,
@@ -162,16 +167,29 @@ async fn polling_login_persists_session_and_restores_it() {
         json!({"kind": "session", "provider": "zai", "userInfo": {"id": "u1", "username": "Alice", "displayName": "Alice"}})
     );
     assert_eq!(
-        h.credentials.load(&access_token_key(ZAI)).await.unwrap().as_deref(),
+        h.credentials
+            .load(&access_token_key(ZAI))
+            .await
+            .unwrap()
+            .as_deref(),
         Some("zai-business")
     );
     assert_eq!(
-        h.credentials.load(ACTIVE_PROVIDER_KEY).await.unwrap().as_deref(),
+        h.credentials
+            .load(ACTIVE_PROVIDER_KEY)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("zai")
     );
-    let stored_user: Value =
-        serde_json::from_str(&h.credentials.load(&user_info_key(ZAI)).await.unwrap().unwrap())
-            .unwrap();
+    let stored_user: Value = serde_json::from_str(
+        &h.credentials
+            .load(&user_info_key(ZAI))
+            .await
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(stored_user["user_id"], "u1");
     let restored = h.service.restore_cached_session_state().await.unwrap();
     assert_eq!(restored["status"], "authenticated");
@@ -188,7 +206,12 @@ async fn polling_login_persists_session_and_restores_it() {
         h.service.repo().login_attribution().await.unwrap().unwrap()["utm_source"],
         "web"
     );
-    assert!(h.service.handle_callback("zcode://oauth/callback?state=other&code=c").await.is_err());
+    assert!(
+        h.service
+            .handle_callback("zcode://oauth/callback?state=other&code=c")
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -199,13 +222,24 @@ async fn switching_provider_clears_the_other_identity_and_logout_notifies() {
     h.service.start_oauth_with_polling(BIGMODEL).await.unwrap();
     let result = h.service.poll_pending_oauth().await.unwrap();
     assert_eq!(result["provider"], "bigmodel");
-    assert_eq!(h.credentials.load(&access_token_key(ZAI)).await.unwrap(), None);
     assert_eq!(
-        h.credentials.load(&access_token_key(BIGMODEL)).await.unwrap().as_deref(),
+        h.credentials.load(&access_token_key(ZAI)).await.unwrap(),
+        None
+    );
+    assert_eq!(
+        h.credentials
+            .load(&access_token_key(BIGMODEL))
+            .await
+            .unwrap()
+            .as_deref(),
         Some("bm-access")
     );
     let stored: Value = serde_json::from_str(
-        &h.credentials.load(&user_info_key(BIGMODEL)).await.unwrap().unwrap(),
+        &h.credentials
+            .load(&user_info_key(BIGMODEL))
+            .await
+            .unwrap()
+            .unwrap(),
     )
     .unwrap();
     assert_eq!(stored["rawProfile"]["zcodeProfileSchemaVersion"], 2);
@@ -240,19 +274,25 @@ async fn deep_link_callback_exchanges_code_and_cancel_discards_late_results() {
     // 纯归因回调推进 phase，不清 state；同一 state 的第二次纯归因被拒。
     let attribution = h
         .service
-        .handle_callback(&format!("zcode://oauth/callback?state={state}&channel_id=c1"))
+        .handle_callback(&format!(
+            "zcode://oauth/callback?state={state}&channel_id=c1"
+        ))
         .await
         .unwrap();
     assert_eq!(attribution["kind"], "attribution");
     assert!(
         h.service
-            .handle_callback(&format!("zcode://oauth/callback?state={state}&channel_id=c1"))
+            .handle_callback(&format!(
+                "zcode://oauth/callback?state={state}&channel_id=c1"
+            ))
             .await
             .is_err()
     );
     let session = h
         .service
-        .handle_callback(&format!("zcode://oauth/callback?state={state}&authCode=abc"))
+        .handle_callback(&format!(
+            "zcode://oauth/callback?state={state}&authCode=abc"
+        ))
         .await
         .unwrap();
     assert_eq!(session["kind"], "session");
@@ -281,7 +321,11 @@ async fn deep_link_callback_exchanges_code_and_cancel_discards_late_results() {
     h.service.cancel_pending(None).await;
     assert_eq!(h.service.poll_pending_oauth().await.unwrap(), Value::Null);
     assert_eq!(
-        h.credentials.load(ACTIVE_PROVIDER_KEY).await.unwrap().as_deref(),
+        h.credentials
+            .load(ACTIVE_PROVIDER_KEY)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("bigmodel")
     );
 }
@@ -291,7 +335,12 @@ async fn expired_jwt_requires_reauthentication_and_401_logout_is_conditional() {
     let h = harness(zai_backend(0)).await;
     h.service.start_oauth_with_polling(ZAI).await.unwrap();
     h.service.poll_pending_oauth().await.unwrap();
-    let current_jwt = h.credentials.load(ZCODE_JWT_TOKEN_KEY).await.unwrap().unwrap();
+    let current_jwt = h
+        .credentials
+        .load(ZCODE_JWT_TOKEN_KEY)
+        .await
+        .unwrap()
+        .unwrap();
 
     // 别的 token 的 401 不退出。
     let mut headers = HeaderList::default();

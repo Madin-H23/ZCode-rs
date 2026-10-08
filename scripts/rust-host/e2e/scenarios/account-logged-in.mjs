@@ -141,15 +141,19 @@ export async function seed({ home }) {
 
 export async function run({ page, shots, home }) {
   try {
-    // 已登录但本设备还没有 onboarding 记录：先出现引导（与 Node Host 相同），像用户一样跳过。
+    // 已登录身份还没有 onboarding 记录：先出现引导（与 Node Host 相同），像用户一样逐步跳过；
     // 跳过会经 Rust Host 的 onboarding-record.dismissOnboarding 写入记录。
     const skip = page.getByText("Skip", { exact: true }).first();
-    await skip.waitFor({ state: "visible", timeout: 60_000 });
-    await page.screenshot({ path: join(shots, "00-onboarding.png") });
-    // 引导有多步，每步都可以跳过；直到出现 composer。
-    for (let step = 0; step < 6 && (await skip.isVisible().catch(() => false)); step += 1) {
-      await skip.click();
-      await page.waitForTimeout(800);
+    const input = page.locator('textarea[placeholder*="Ask ZCode"]').first();
+    let sawOnboarding = false;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      if (await input.isVisible().catch(() => false)) break;
+      if (await skip.isVisible().catch(() => false)) {
+        if (!sawOnboarding) await page.screenshot({ path: join(shots, "00-onboarding.png") });
+        sawOnboarding = true;
+        await skip.click();
+      }
+      await page.waitForTimeout(500);
     }
     await composer(page);
     // 侧栏账号区：OAuth 恢复出的用户名与个人套餐（订阅查询）徽标。

@@ -75,7 +75,12 @@ fn round_metric(value: f64) -> f64 {
 }
 
 /// 由两次读数算出样本（`createNodeSelfResourceSampler.sample`）。
-fn sample(previous: (u64, Instant), next: (u64, Instant), rss: u64, cpus: usize) -> Option<serde_json::Value> {
+fn sample(
+    previous: (u64, Instant),
+    next: (u64, Instant),
+    rss: u64,
+    cpus: usize,
+) -> Option<serde_json::Value> {
     let elapsed_us = next.1.checked_duration_since(previous.1)?.as_micros() as f64;
     let cpu_delta = next.0.checked_sub(previous.0)? as f64;
     if elapsed_us <= 0.0 {
@@ -90,7 +95,10 @@ fn sample(previous: (u64, Instant), next: (u64, Instant), rss: u64, cpus: usize)
 }
 
 pub fn start_host_resource_samples(control: Arc<dyn ControlSink>) {
-    let cpus = std::thread::available_parallelism().map(usize::from).unwrap_or(1).clamp(1, 4096);
+    let cpus = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .clamp(1, 4096);
     tokio::spawn(async move {
         let mut baseline = cpu_time_us().map(|cpu| (cpu, Instant::now()));
         loop {
@@ -101,7 +109,9 @@ pub fn start_host_resource_samples(control: Arc<dyn ControlSink>) {
                 continue;
             };
             if let Some(sample) = sample(previous, next, rss, cpus) {
-                control.send(HostToMain::Raw(json!({"type": "host-resource-sample", "sample": sample})));
+                control.send(HostToMain::Raw(
+                    json!({"type": "host-resource-sample", "sample": sample}),
+                ));
             }
         }
     });
@@ -116,7 +126,10 @@ mod tests {
         let start = Instant::now();
         let later = start + Duration::from_secs(60);
         let value = sample((0, start), (30_000_000, later), 2048 * 1024, 4).unwrap();
-        assert_eq!(value, json!({"cpuPercent": 12.5, "rssKb": 2048, "heapUsedKb": 0}));
+        assert_eq!(
+            value,
+            json!({"cpuPercent": 12.5, "rssKb": 2048, "heapUsedKb": 0})
+        );
         assert!(sample((5, start), (1, later), 0, 1).is_none());
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {

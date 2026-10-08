@@ -12,7 +12,10 @@ use crate::settings::SettingStore;
 use crate::settings::schema::parse_patch;
 
 /// `resolveUserHomeDir`：HOME / USERPROFILE（trim 后非空），否则 os.homedir()。
-fn user_home(vars: &std::collections::BTreeMap<String, String>, fallback: &std::path::Path) -> PathBuf {
+fn user_home(
+    vars: &std::collections::BTreeMap<String, String>,
+    fallback: &std::path::Path,
+) -> PathBuf {
     ["HOME", "USERPROFILE"]
         .iter()
         .find_map(|key| vars.get(*key).map(|v| v.trim()).filter(|v| !v.is_empty()))
@@ -80,11 +83,17 @@ impl SettingsSync {
             value
         };
         if !exists(&source).await {
-            return Ok(with(base, json!({"status": "skipped", "overwritten": false, "skippedReason": "missingSource"})));
+            return Ok(with(
+                base,
+                json!({"status": "skipped", "overwritten": false, "skippedReason": "missingSource"}),
+            ));
         }
         let target_exists = exists(&target).await;
         if target_exists && !overwrite {
-            return Ok(with(base, json!({"status": "skipped", "overwritten": false, "skippedReason": "targetExists"})));
+            return Ok(with(
+                base,
+                json!({"status": "skipped", "overwritten": false, "skippedReason": "targetExists"}),
+            ));
         }
         if let Some(parent) = target.parent() {
             tokio::fs::create_dir_all(parent)
@@ -94,7 +103,10 @@ impl SettingsSync {
         tokio::fs::copy(&source, &target)
             .await
             .map_err(|error| RpcError::new("Error", error.to_string()))?;
-        Ok(with(base, json!({"status": "copied", "overwritten": target_exists})))
+        Ok(with(
+            base,
+            json!({"status": "copied", "overwritten": target_exists}),
+        ))
     }
 
     pub async fn first_run_prompt_state(&self) -> Value {
@@ -154,7 +166,11 @@ pub fn service(sync: SettingsSync) -> ServiceBuilder {
         })
         .method("markFirstRunPromptHandled", move |_, _| {
             let sync = mark.clone();
-            async move { sync.mark_first_run_prompt_handled().await.map(|()| Reply::Undefined) }
+            async move {
+                sync.mark_first_run_prompt_handled()
+                    .await
+                    .map(|()| Reply::Undefined)
+            }
         })
 }
 
@@ -171,15 +187,24 @@ mod tests {
             home.path().display().to_string(),
         )]);
         let sync = SettingsSync::new(settings, &vars, home.path());
-        assert_eq!(sync.first_run_prompt_state().await, json!({"handled": false}));
+        assert_eq!(
+            sync.first_run_prompt_state().await,
+            json!({"handled": false})
+        );
         sync.mark_first_run_prompt_handled().await.unwrap();
-        assert_eq!(sync.first_run_prompt_state().await, json!({"handled": true}));
+        assert_eq!(
+            sync.first_run_prompt_state().await,
+            json!({"handled": true})
+        );
         let status = sync.migration_status().await;
         assert_eq!(status["supported"], false);
         assert_eq!(status["unavailableReason"], "missingSource");
         std::fs::create_dir_all(home.path().join(".claude")).unwrap();
         std::fs::write(home.path().join(".claude/CLAUDE.md"), "rules").unwrap();
-        assert_eq!(sync.copy_agents_file(false).await.unwrap()["status"], "copied");
+        assert_eq!(
+            sync.copy_agents_file(false).await.unwrap()["status"],
+            "copied"
+        );
         let skipped = sync.copy_agents_file(false).await.unwrap();
         assert_eq!(skipped["skippedReason"], "targetExists");
         let overwritten = sync.copy_agents_file(true).await.unwrap();

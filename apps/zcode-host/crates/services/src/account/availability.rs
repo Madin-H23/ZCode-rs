@@ -79,10 +79,13 @@ pub fn normalize_api_key_for_header(value: &str) -> String {
             while end < chars.len() && is_key_char(chars[end].1) {
                 end += 1;
             }
-            if end - index - 1 >= 8 {
+            if end - index > 8 {
                 // 贪婪匹配可能从更靠后的位置开始；正则的第一个匹配起点是最左的合法起点。
                 let begin = chars[start].0;
-                let finish = chars.get(end).map(|(offset, _)| *offset).unwrap_or(without_bearer.len());
+                let finish = chars
+                    .get(end)
+                    .map(|(offset, _)| *offset)
+                    .unwrap_or(without_bearer.len());
                 return without_bearer[begin..finish].to_owned();
             }
         }
@@ -96,8 +99,13 @@ pub fn normalize_api_key_for_header(value: &str) -> String {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Availability {
-    Available { models: Option<Vec<String>> },
-    Pending { effective_at: f64, models: Vec<String> },
+    Available {
+        models: Option<Vec<String>>,
+    },
+    Pending {
+        effective_at: f64,
+        models: Vec<String>,
+    },
     Unavailable(&'static str),
     Unknown,
 }
@@ -152,13 +160,21 @@ fn is_coding_product(value: &Value) -> bool {
 
 /// `personalSchema` 的 safeParse：只校验采用的字段。
 fn parse_personal(item: &Value) -> Option<Value> {
-    let optional_string =
-        |key: &str| item.get(key).is_none_or(|value| value.is_null() || value.is_string());
+    let optional_string = |key: &str| {
+        item.get(key)
+            .is_none_or(|value| value.is_null() || value.is_string())
+    };
     if !item["status"].is_string()
         || !item["inCurrentPeriod"].is_boolean()
-        || !["productId", "productName", "nextRenewTime", "valid", "billingCycle"]
-            .iter()
-            .all(|key| optional_string(key) && !item.get(*key).is_some_and(Value::is_null))
+        || ![
+            "productId",
+            "productName",
+            "nextRenewTime",
+            "valid",
+            "billingCycle",
+        ]
+        .iter()
+        .all(|key| optional_string(key) && !item.get(*key).is_some_and(Value::is_null))
         || item
             .get("autoRenew")
             .is_some_and(|value| !(value.is_number() || value.is_boolean()))
@@ -326,10 +342,9 @@ impl StartPlanBilling {
     /// `buildZaiStartPlanBalanceUrl`：环境 origin 的 balance 地址带 `app_version`。
     pub fn balance_url(&self) -> String {
         let endpoints = self.api.endpoints();
-        let mut url = url::Url::parse(
-            &endpoints.zcode_api_url("/api/v1/zcode-plan/billing/balance"),
-        )
-        .expect("balance url");
+        let mut url =
+            url::Url::parse(&endpoints.zcode_api_url("/api/v1/zcode-plan/billing/balance"))
+                .expect("balance url");
         let pairs: Vec<(String, String)> = url
             .query_pairs()
             .filter(|(key, _)| key != "app_version")
@@ -391,9 +406,7 @@ impl StartPlanBilling {
                     .header("Authorization", authorization.to_owned()),
             )
             .await?;
-        let response_time = response
-            .header("date")
-            .and_then(|date| httpdate_seconds(date));
+        let response_time = response.header("date").and_then(httpdate_seconds);
         let status = response.status;
         let ok = response.ok();
         let method = response.method.clone();
@@ -614,7 +627,10 @@ fn start_plan_availability(payload: &Value) -> Availability {
         .flat_map(|plan| {
             let entitlements = plan["entitlements"].as_array().filter(|e| !e.is_empty());
             match entitlements {
-                Some(entries) => entries.iter().map(|entry| entry["effective_at"].clone()).collect(),
+                Some(entries) => entries
+                    .iter()
+                    .map(|entry| entry["effective_at"].clone())
+                    .collect(),
                 None => vec![plan["starts_at"].clone()],
             }
         })
@@ -626,7 +642,9 @@ fn start_plan_availability(payload: &Value) -> Availability {
         .collect();
     if models.is_empty()
         && !effective.is_empty()
-        && effective.iter().all(|value| value.is_finite() && *value > now)
+        && effective
+            .iter()
+            .all(|value| value.is_finite() && *value > now)
     {
         return Availability::Pending {
             effective_at: effective.iter().cloned().fold(f64::INFINITY, f64::min),
@@ -715,7 +733,8 @@ impl AvailabilityResolver {
     async fn start_plan(&self, provider: &AvailabilityProvider) -> Availability {
         let authorization = if provider.family == "bigmodel" {
             let jwt =
-                bigmodel_start_plan_jwt(&self.credentials, provider.api_key.as_deref(), false).await;
+                bigmodel_start_plan_jwt(&self.credentials, provider.api_key.as_deref(), false)
+                    .await;
             if jwt.is_empty() {
                 String::new()
             } else {
@@ -723,7 +742,8 @@ impl AvailabilityResolver {
             }
         } else {
             let credential_jwt = self.load_trimmed(ZCODE_JWT_TOKEN_KEY).await;
-            let provider_jwt = normalize_api_key_for_header(provider.api_key.as_deref().unwrap_or(""));
+            let provider_jwt =
+                normalize_api_key_for_header(provider.api_key.as_deref().unwrap_or(""));
             let jwt = if credential_jwt.is_empty() {
                 provider_jwt
             } else {
@@ -770,8 +790,11 @@ impl AvailabilityResolver {
         if authorization.is_empty() {
             return Availability::Unknown;
         }
-        match fetch_personal_entitlement(&self.api, &authorization, &url, REQUEST_TIMEOUT_MS).await {
-            Ok(Entitlement::Unavailable(_)) => Availability::Unavailable("coding_plan_not_entitled"),
+        match fetch_personal_entitlement(&self.api, &authorization, &url, REQUEST_TIMEOUT_MS).await
+        {
+            Ok(Entitlement::Unavailable(_)) => {
+                Availability::Unavailable("coding_plan_not_entitled")
+            }
             Ok(Entitlement::Available(_)) => Availability::Available { models: None },
             Ok(Entitlement::Unknown) => Availability::Unknown,
             Err(error) => classify_error(&error),
@@ -783,7 +806,9 @@ impl AvailabilityResolver {
         if selection["kind"] != "team-coding-plan" {
             return Availability::Unknown;
         }
-        let selected_org = selection["organizationId"].as_str().filter(|s| !s.is_empty());
+        let selected_org = selection["organizationId"]
+            .as_str()
+            .filter(|s| !s.is_empty());
         let project_id = selection["projectId"].as_str().unwrap_or("");
         let provider = super::auth::oauth_provider_of(family);
         let token = self.load_trimmed(&access_token_key(provider)).await;
@@ -823,7 +848,11 @@ impl AvailabilityResolver {
             return Availability::Unknown;
         }
         let mut resolved = None;
-        'outer: for organization in payload["data"]["organizations"].as_array().into_iter().flatten() {
+        'outer: for organization in payload["data"]["organizations"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
             let organization_id = organization["organizationId"]
                 .as_str()
                 .map(str::trim)
@@ -862,7 +891,9 @@ impl AvailabilityResolver {
         )
         .await
         {
-            Ok(Entitlement::Unavailable(_)) => Availability::Unavailable("coding_plan_not_entitled"),
+            Ok(Entitlement::Unavailable(_)) => {
+                Availability::Unavailable("coding_plan_not_entitled")
+            }
             Ok(Entitlement::Available(_)) => Availability::Available { models: None },
             Ok(Entitlement::Unknown) => Availability::Unknown,
             Err(error) => classify_error(&error),
@@ -892,7 +923,10 @@ impl AvailabilityResolver {
             result.insert(start.provider_id.clone(), self.start_plan(start).await);
         }
         if let Some(individual) = individual {
-            result.insert(individual.provider_id.clone(), self.individual(individual).await);
+            result.insert(
+                individual.provider_id.clone(),
+                self.individual(individual).await,
+            );
         }
         if let Some(team) = team {
             let availability = if selections[family]["kind"] == "team-coding-plan" {
@@ -912,11 +946,20 @@ mod tests {
 
     #[test]
     fn api_key_header_normalization_matches_node() {
-        assert_eq!(normalize_api_key_for_header("Bearer abcdefgh.ijklmnop"), "abcdefgh.ijklmnop");
+        assert_eq!(
+            normalize_api_key_for_header("Bearer abcdefgh.ijklmnop"),
+            "abcdefgh.ijklmnop"
+        );
         assert_eq!(normalize_api_key_for_header("  key-123 备注"), "key-123");
-        assert_eq!(normalize_api_key_for_header("中文 abcdefgh.ijklmnop 尾巴"), "abcdefgh.ijklmnop");
+        assert_eq!(
+            normalize_api_key_for_header("中文 abcdefgh.ijklmnop 尾巴"),
+            "abcdefgh.ijklmnop"
+        );
         assert_eq!(normalize_api_key_for_header("中文"), "");
-        assert_eq!(normalize_official_glm_model_id("glm-5.3-flash"), "GLM-5.3-Flash");
+        assert_eq!(
+            normalize_official_glm_model_id("glm-5.3-flash"),
+            "GLM-5.3-Flash"
+        );
         assert_eq!(normalize_official_glm_model_id("custom"), "custom");
     }
 
@@ -937,24 +980,37 @@ mod tests {
         let normalized = normalize_start_plan_expiry(payload, None);
         assert_eq!(normalized["data"]["plans"][0]["status"], "expired");
         assert_eq!(normalized["data"]["balances"].as_array().unwrap().len(), 2);
-        assert_eq!(start_plan_model_ids(&normalized), vec!["GLM-5.3-Flash", "GLM-5-Turbo"]);
+        assert_eq!(
+            start_plan_model_ids(&normalized),
+            vec!["GLM-5.3-Flash", "GLM-5-Turbo"]
+        );
         assert_eq!(
             start_plan_availability(&normalized),
-            Availability::Available { models: Some(vec!["GLM-5.3-Flash".into(), "GLM-5-Turbo".into()]) }
+            Availability::Available {
+                models: Some(vec!["GLM-5.3-Flash".into(), "GLM-5-Turbo".into()])
+            }
         );
         let pending = json!({"data": {"server_time": 10, "plans": [{"status": "active", "name": "Start Plan", "entitlements": [{"effective_at": "20"}, {"effective_at": 30}]}]}});
         assert_eq!(
             start_plan_availability(&pending),
-            Availability::Pending { effective_at: 20.0, models: vec![] }
+            Availability::Pending {
+                effective_at: 20.0,
+                models: vec![]
+            }
         );
         assert_eq!(
             start_plan_availability(&json!({"code": 401})),
             Availability::Unavailable("coding_plan_auth_failed")
         );
         assert_eq!(
-            start_plan_availability(&json!({"data": {"plans": [{"status": "active", "name": "Pro"}]}})),
+            start_plan_availability(
+                &json!({"data": {"plans": [{"status": "active", "name": "Pro"}]}})
+            ),
             Availability::Unavailable("coding_plan_not_entitled")
         );
-        assert_eq!(httpdate_seconds("Thu, 01 Jan 1970 00:01:40 GMT"), Some(100.0));
+        assert_eq!(
+            httpdate_seconds("Thu, 01 Jan 1970 00:01:40 GMT"),
+            Some(100.0)
+        );
     }
 }

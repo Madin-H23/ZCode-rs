@@ -18,8 +18,8 @@ use zcode_host_kit::{RpcError, log};
 use super::account_providers::AccountProviderSource;
 use super::auth::AccountRequestAuth;
 use super::endpoint::Endpoints;
-use super::official_mcp::{DEV_TRUSTED_ORIGINS_ENV, OfficialMcpCredentials, is_origin_trusted};
 use super::oauth_repo::OAuthCredentialRepo;
+use super::official_mcp::{DEV_TRUSTED_ORIGINS_ENV, OfficialMcpCredentials, is_origin_trusted};
 use crate::agent::extensions::{NotificationContext, ReverseContext, ReverseReply};
 use crate::agent::{AgentProcess, AgentRuntime};
 
@@ -63,7 +63,10 @@ pub fn telemetry_spawn_env(
     }
     match user_id.map(str::trim).filter(|v| !v.is_empty()) {
         Some(user) => {
-            env.insert("ZCODE_TELEMETRY_IDENTITY_STATE".into(), "authenticated".into());
+            env.insert(
+                "ZCODE_TELEMETRY_IDENTITY_STATE".into(),
+                "authenticated".into(),
+            );
             let digest = sha2::Sha256::digest(user.as_bytes());
             env.insert(
                 "ZCODE_TELEMETRY_USER_SUBJECT_ID".into(),
@@ -73,11 +76,19 @@ pub fn telemetry_spawn_env(
         None => {
             env.insert(
                 "ZCODE_TELEMETRY_IDENTITY_STATE".into(),
-                if device.is_some() { "anonymous" } else { "unknown" }.into(),
+                if device.is_some() {
+                    "anonymous"
+                } else {
+                    "unknown"
+                }
+                .into(),
             );
         }
     }
-    env.insert("ZCODE_TELEMETRY_RUNTIME_SURFACE".into(), runtime_surface.into());
+    env.insert(
+        "ZCODE_TELEMETRY_RUNTIME_SURFACE".into(),
+        runtime_surface.into(),
+    );
     env
 }
 
@@ -217,12 +228,18 @@ type PendingKey = (String, u64, String, String);
 /// 进行中的 `requestProviderRuntimeHeaders`：键为 (workspaceKey, 进程代, sessionId, requestId)，
 /// 值为本次请求的序号，取消或换新请求后旧解析的结果不再应答。
 #[derive(Clone, Default)]
-struct PendingHeaders(Arc<Mutex<HashMap<PendingKey, u64>>>, Arc<std::sync::atomic::AtomicU64>);
+struct PendingHeaders(
+    Arc<Mutex<HashMap<PendingKey, u64>>>,
+    Arc<std::sync::atomic::AtomicU64>,
+);
 
 impl PendingHeaders {
     fn begin(&self, key: PendingKey) -> u64 {
         let id = self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-        self.0.lock().unwrap_or_else(|p| p.into_inner()).insert(key, id);
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key, id);
         id
     }
 
@@ -360,7 +377,11 @@ pub fn register(
                 let configured = telemetry.contains_key("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
                     || telemetry.contains_key("OTEL_EXPORTER_OTLP_ENDPOINT");
                 let user = if configured {
-                    repo.active_user_profile().await.ok().flatten().map(|p| p.id)
+                    repo.active_user_profile()
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|p| p.id)
                 } else {
                     None
                 };
@@ -426,13 +447,17 @@ async fn provider_runtime_headers(
                 "[zcode-agent] ZCode provider runtime headers 已应用 providerId={provider_id} requestId={}",
                 key.3
             ));
-            ReverseReply::Result(json!({"headersApplied": true, "requestAuth": {"apiKey": api_key}}))
+            ReverseReply::Result(
+                json!({"headersApplied": true, "requestAuth": {"apiKey": api_key}}),
+            )
         }
         Err(error) => {
             log::warn(format!(
                 "[zcode-agent] ZCode provider runtime headers 应用失败 providerId={provider_id}: {error}"
             ));
-            ReverseReply::Result(json!({"headersApplied": false, "errorMessage": error.to_string()}))
+            ReverseReply::Result(
+                json!({"headersApplied": false, "errorMessage": error.to_string()}),
+            )
         }
     }
 }
@@ -457,7 +482,10 @@ async fn official_mcp_headers(
     let origin = endpoints.current_origin().await.ok();
     let (trusted, detail) = is_origin_trusted(
         params["targetOrigin"].as_str().unwrap_or(""),
-        endpoints.vars().get(DEV_TRUSTED_ORIGINS_ENV).map(String::as_str),
+        endpoints
+            .vars()
+            .get(DEV_TRUSTED_ORIGINS_ENV)
+            .map(String::as_str),
         origin.as_deref(),
     );
     if !trusted {
@@ -465,13 +493,17 @@ async fn official_mcp_headers(
             "[zcode-agent] 官方 MCP 身份头请求未通过 host 侧可信校验 detail={detail} pluginId={} mcpKey={}",
             params["pluginId"], params["mcpKey"]
         ));
-        return ReverseReply::Result(json!({"ok": false, "reason": "official_mcp_origin_untrusted"}));
+        return ReverseReply::Result(
+            json!({"ok": false, "reason": "official_mcp_origin_untrusted"}),
+        );
     }
     match official.resolve_headers().await {
         Ok(headers) => {
             let mut names: Vec<String> = headers.keys().map(|name| name.to_lowercase()).collect();
             names.sort();
-            log::debug(format!("[zcode-agent] 官方 MCP 身份头已解析 headers={names:?}"));
+            log::debug(format!(
+                "[zcode-agent] 官方 MCP 身份头已解析 headers={names:?}"
+            ));
             ReverseReply::Result(json!({"ok": true, "headers": headers}))
         }
         Err(reason) => {
@@ -493,8 +525,13 @@ mod tests {
         let mut vars = BTreeMap::new();
         vars.insert("OTEL_TRACES_SAMPLER".to_owned(), "x".to_owned());
         let captured = captured_telemetry_env(&vars);
-        assert!(telemetry_spawn_env(&captured, Some("m"), Some("u"), "desktop_local_host").is_empty());
-        vars.insert("OTEL_EXPORTER_OTLP_ENDPOINT".to_owned(), " http://127.0.0.1:4318 ".to_owned());
+        assert!(
+            telemetry_spawn_env(&captured, Some("m"), Some("u"), "desktop_local_host").is_empty()
+        );
+        vars.insert(
+            "OTEL_EXPORTER_OTLP_ENDPOINT".to_owned(),
+            " http://127.0.0.1:4318 ".to_owned(),
+        );
         let captured = captured_telemetry_env(&vars);
         let env = telemetry_spawn_env(&captured, Some("m"), Some("u"), "desktop_local_host");
         assert_eq!(env["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://127.0.0.1:4318");

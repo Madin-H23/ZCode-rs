@@ -62,7 +62,8 @@ fn account_reason(reason: &str) -> &'static str {
 }
 
 fn is_credential_refresh_reason(reason: &str) -> bool {
-    reason.contains("oauth-callback") || reason.rsplit(':').next() == Some("oauth-login-entitlement")
+    reason.contains("oauth-callback")
+        || reason.rsplit(':').next() == Some("oauth-login-entitlement")
 }
 
 /// 内置层里 `access.type = zhipu-account` 的 provider：(id, access)。
@@ -94,15 +95,28 @@ fn sha256_hex(text: &str) -> String {
 fn fail_closed(builtin_revision: &str, builtin: &Value) -> AccountLayer {
     let providers: Map<String, Value> = configured_account_providers(builtin)
         .into_iter()
-        .map(|(id, _)| (id, json!({"access": {"type": "zhipu-account", "entitled": false}})))
+        .map(|(id, _)| {
+            (
+                id,
+                json!({"access": {"type": "zhipu-account", "entitled": false}}),
+            )
+        })
         .collect();
     layer(builtin_revision, providers, None)
 }
 
-fn layer(based_on: &str, providers: Map<String, Value>, states: Option<Map<String, Value>>) -> AccountLayer {
+fn layer(
+    based_on: &str,
+    providers: Map<String, Value>,
+    states: Option<Map<String, Value>>,
+) -> AccountLayer {
     let revision = format!(
         "account:{}",
-        json!([based_on, providers, states.clone().map(Value::Object).unwrap_or(Value::Null)])
+        json!([
+            based_on,
+            providers,
+            states.clone().map(Value::Object).unwrap_or(Value::Null)
+        ])
     );
     AccountLayer {
         revision,
@@ -196,7 +210,10 @@ impl AccountProviderSource {
                 if !keys.is_empty() {
                     let reason = format!(
                         "settings:{}",
-                        keys.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(",")
+                        keys.iter()
+                            .map(|k| k.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
                     );
                     let _ = source.refresh(&reason).await;
                 }
@@ -276,13 +293,22 @@ impl AccountProviderSource {
                         || current_revision != builtin_revision;
                     if superseded {
                         let mut state = self.state();
-                        if !state.pending_reasons.iter().any(|r| r == "superseded-resolution") {
-                            state.pending_reasons.push("superseded-resolution".to_owned());
+                        if !state
+                            .pending_reasons
+                            .iter()
+                            .any(|r| r == "superseded-resolution")
+                        {
+                            state
+                                .pending_reasons
+                                .push("superseded-resolution".to_owned());
                         }
                         continue;
                     }
                     let next = layer(&builtin_revision, providers, Some(states));
-                    if latest.as_ref().is_some_and(|latest| latest.revision == next.revision) {
+                    if latest
+                        .as_ref()
+                        .is_some_and(|latest| latest.revision == next.revision)
+                    {
                         self.settle(generation, Ok(latest.clone().expect("checked")));
                         continue;
                     }
@@ -330,7 +356,8 @@ impl AccountProviderSource {
         for (id, access) in &configured {
             let fallback = Connection::new(id, "unknown");
             let connection = by_id.get(id.as_str()).copied().unwrap_or(&fallback);
-            let entitlement = |entitled: bool| json!({"access": {"type": "zhipu-account", "entitled": entitled}});
+            let entitlement =
+                |entitled: bool| json!({"access": {"type": "zhipu-account", "entitled": entitled}});
             let config = match connection.status {
                 "available" | "pending" => {
                     let entitled = connection.status == "available";
@@ -418,7 +445,9 @@ impl AccountProviderSource {
         reasons: &[String],
     ) -> Result<Vec<Connection>, String> {
         let settings = read_account_settings(&self.inner.settings).await;
-        let force_refresh = reasons.iter().any(|reason| is_credential_refresh_reason(reason));
+        let force_refresh = reasons
+            .iter()
+            .any(|reason| is_credential_refresh_reason(reason));
         let mut identities: HashMap<String, Option<String>> = HashMap::new();
         let mut availability: HashMap<String, Availability> = HashMap::new();
         for family in ["zai", "bigmodel"] {
@@ -426,7 +455,9 @@ impl AccountProviderSource {
                 .iter()
                 .filter(|(_, access)| {
                     access["accountType"] == family
-                        && access["mode"].as_str().is_some_and(|mode| mode != "off-peak")
+                        && access["mode"]
+                            .as_str()
+                            .is_some_and(|mode| mode != "off-peak")
                 })
                 .map(|(id, access)| (id, access["mode"].as_str().unwrap_or("").to_owned()))
                 .collect();
@@ -436,7 +467,9 @@ impl AccountProviderSource {
             let queryable: Vec<&(&String, String)> = family_providers
                 .iter()
                 .filter(|(id, kind)| {
-                    if settings.unresolved_families.iter().any(|f| f == family) && kind != "start-plan" {
+                    if settings.unresolved_families.iter().any(|f| f == family)
+                        && kind != "start-plan"
+                    {
                         availability.insert((*id).clone(), Availability::Unknown);
                         return false;
                     }
@@ -459,7 +492,10 @@ impl AccountProviderSource {
             let mut providers = Vec::new();
             for (id, kind) in &queryable {
                 let api_key = if kind != "team-coding-plan" {
-                    self.inner.keys.load(id, family, &identity, force_refresh).await
+                    self.inner
+                        .keys
+                        .load(id, family, &identity, force_refresh)
+                        .await
                 } else {
                     None
                 };
@@ -487,29 +523,43 @@ impl AccountProviderSource {
         let mut scopes = HashMap::new();
         let previous_scopes = self.state().previous_scopes.clone();
         for (id, access) in configured {
-            let (Some(family), Some(mode)) = (access["accountType"].as_str(), access["mode"].as_str())
+            let (Some(family), Some(mode)) =
+                (access["accountType"].as_str(), access["mode"].as_str())
             else {
                 connections.push(Connection::new(id, "unavailable"));
                 continue;
             };
             let selection = settings.selection(family);
             let identity = self.identity(&mut identities, family).await;
-            let team_scope = if mode == "team-coding-plan" && selection["kind"] == "team-coding-plan" {
-                json!([selection["organizationId"], selection["projectId"], selection["productId"]])
-            } else {
-                Value::Null
-            };
+            let team_scope =
+                if mode == "team-coding-plan" && selection["kind"] == "team-coding-plan" {
+                    json!([
+                        selection["organizationId"],
+                        selection["projectId"],
+                        selection["productId"]
+                    ])
+                } else {
+                    Value::Null
+                };
             let scope = json!([identity, team_scope]).to_string();
-            let reset_previous = previous_scopes.get(id).is_some_and(|previous| *previous != scope);
+            let reset_previous = previous_scopes
+                .get(id)
+                .is_some_and(|previous| *previous != scope);
             scopes.insert(id.clone(), scope);
             if mode == "off-peak" {
                 let selected = selection["kind"].as_str();
                 let matching = settings.domain.as_deref() == Some(family)
-                    && matches!(selected, Some("individual-coding-plan" | "team-coding-plan"))
+                    && matches!(
+                        selected,
+                        Some("individual-coding-plan" | "team-coding-plan")
+                    )
                     && configured.iter().any(|(candidate, candidate_access)| {
                         candidate_access["accountType"] == family
                             && candidate_access["mode"].as_str() == selected
-                            && matches!(availability.get(candidate), Some(Availability::Available { .. }))
+                            && matches!(
+                                availability.get(candidate),
+                                Some(Availability::Available { .. })
+                            )
                     });
                 connections.push(Connection::new(
                     id,
@@ -517,14 +567,20 @@ impl AccountProviderSource {
                 ));
                 continue;
             }
-            let result = availability.get(id).cloned().unwrap_or(Availability::Unknown);
+            let result = availability
+                .get(id)
+                .cloned()
+                .unwrap_or(Availability::Unknown);
             let mut connection = match &result {
                 Availability::Available { models } => {
                     let mut connection = Connection::new(id, "available");
                     connection.models = models.clone();
                     connection
                 }
-                Availability::Pending { effective_at, models } => {
+                Availability::Pending {
+                    effective_at,
+                    models,
+                } => {
                     let mut connection = Connection::new(id, "pending");
                     connection.models = Some(models.clone());
                     connection.effective_at = Some(*effective_at);
@@ -552,8 +608,9 @@ impl AccountProviderSource {
             } else {
                 selection.clone()
             };
-            connection.connection_key =
-                Some(sha256_hex(&json!([identity, family, key_selection]).to_string()));
+            connection.connection_key = Some(sha256_hex(
+                &json!([identity, family, key_selection]).to_string(),
+            ));
             connection.reset_previous = reset_previous;
             connections.push(connection);
         }

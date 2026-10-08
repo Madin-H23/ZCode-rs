@@ -35,7 +35,8 @@ fn normalize_key(key: &str) -> String {
 
 fn should_redact_key(key: &str, diagnostic: bool) -> bool {
     let normalized = normalize_key(key);
-    sensitive_key().is_match(&normalized) || (diagnostic && diagnostic_body_key().is_match(&normalized))
+    sensitive_key().is_match(&normalized)
+        || (diagnostic && diagnostic_body_key().is_match(&normalized))
 }
 
 struct FieldKey {
@@ -58,7 +59,8 @@ fn field_keys(text: &str) -> Vec<FieldKey> {
             let (key, quoted) = match (captures.get(1), captures.get(2), captures.get(3)) {
                 (Some(double), _, _) => {
                     let raw = double.as_str();
-                    let decoded = serde_json::from_str::<String>(&format!("\"{raw}\"")).unwrap_or_else(|_| raw.to_owned());
+                    let decoded = serde_json::from_str::<String>(&format!("\"{raw}\""))
+                        .unwrap_or_else(|_| raw.to_owned());
                     (decoded, true)
                 }
                 (_, Some(single), _) => (single.as_str().to_owned(), true),
@@ -93,7 +95,11 @@ fn decode_uri_component(text: &str) -> Option<String> {
 }
 
 fn should_redact_url_path(url: &url::Url, diagnostic: bool) -> bool {
-    if diagnostic || !url.username().is_empty() || url.password().is_some() || url.host_str() == Some("hooks.slack.com") {
+    if diagnostic
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.host_str() == Some("hooks.slack.com")
+    {
         return true;
     }
     static SIG: OnceLock<Regex> = OnceLock::new();
@@ -114,7 +120,8 @@ fn should_redact_url_path(url: &url::Url, diagnostic: bool) -> bool {
         None => true,
         Some(path) => path.split('/').any(|segment| {
             let normalized = normalize_key(segment);
-            sensitive_key().is_match(&normalized) || segment_pattern.is_match(&normalized.to_lowercase())
+            sensitive_key().is_match(&normalized)
+                || segment_pattern.is_match(&normalized.to_lowercase())
         }),
     }
 }
@@ -127,9 +134,12 @@ fn redact_values(text: &str, diagnostic: bool) -> String {
     static URL: OnceLock<Regex> = OnceLock::new();
     static USER_PATH: OnceLock<Regex> = OnceLock::new();
     static EMAIL: OnceLock<Regex> = OnceLock::new();
-    let result = regex(&HEADER, r"(?i)\b((?:Proxy-)?Authorization|Cookie|Set-Cookie)\s*:\s*[^\r\n]+")
-        .replace_all(text, format!("$1: {REDACTED}").as_str())
-        .into_owned();
+    let result = regex(
+        &HEADER,
+        r"(?i)\b((?:Proxy-)?Authorization|Cookie|Set-Cookie)\s*:\s*[^\r\n]+",
+    )
+    .replace_all(text, format!("$1: {REDACTED}").as_str())
+    .into_owned();
     let result = regex(
         &PRIVATE_KEY,
         r"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)",
@@ -158,7 +168,10 @@ fn redact_values(text: &str, diagnostic: bool) -> String {
                 return REDACTED.to_owned();
             };
             // URL 凭据不只在 userinfo / query 里：webhook 与重置链接常把秘密放在路径。
-            if should_redact_url_path(&url, diagnostic) && !url.path().is_empty() && url.path() != "/" {
+            if should_redact_url_path(&url, diagnostic)
+                && !url.path().is_empty()
+                && url.path() != "/"
+            {
                 url.set_path(&format!("/{REDACTED}"));
             }
             let _ = url.set_username("");
@@ -168,9 +181,12 @@ fn redact_values(text: &str, diagnostic: bool) -> String {
             url.to_string()
         })
         .into_owned();
-    let mut result = regex(&USER_PATH, r#"(?i)(?:/(?:Users|home)/|[a-z]:\\Users\\)[^\s"'<>]+"#)
-        .replace_all(&result, "[USER_PATH]")
-        .into_owned();
+    let mut result = regex(
+        &USER_PATH,
+        r#"(?i)(?:/(?:Users|home)/|[a-z]:\\Users\\)[^\s"'<>]+"#,
+    )
+    .replace_all(&result, "[USER_PATH]")
+    .into_owned();
     if diagnostic {
         result = regex(&EMAIL, r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
             .replace_all(&result, "[EMAIL]")
@@ -185,7 +201,12 @@ fn scrub_value(value: &Value, diagnostic: bool, depth: usize) -> Value {
     }
     match value {
         Value::String(text) => Value::String(redact_text(text, diagnostic, depth + 1)),
-        Value::Array(items) => Value::Array(items.iter().map(|item| scrub_value(item, diagnostic, depth + 1)).collect()),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| scrub_value(item, diagnostic, depth + 1))
+                .collect(),
+        ),
         Value::Object(object) => Value::Object(
             object
                 .iter()
@@ -281,7 +302,9 @@ fn redact_text(text: &str, diagnostic: bool, depth: usize) -> String {
             .any(|field| should_redact_key(&field.key, diagnostic));
         if sensitive_value {
             // 字段值可能由文本和对象混合组成：不能只删对象而留下同行尾部。
-            end = source[end..].find('\n').map_or(source.len(), |offset| end + offset);
+            end = source[end..]
+                .find('\n')
+                .map_or(source.len(), |offset| end + offset);
         }
         let fragment = &source[index..end];
         chunks.push(redact_plain_text(prefix, diagnostic));
@@ -292,7 +315,9 @@ fn redact_text(text: &str, diagnostic: bool, depth: usize) -> String {
                 Ok(parsed) => chunks.push(scrub_value(&parsed, diagnostic, depth + 1).to_string()),
                 Err(_) => {
                     // 多行或截断对象不能只丢弃键名所在行，否则下一行的值仍会泄露。
-                    let sensitive = field_keys(fragment).iter().any(|field| should_redact_key(&field.key, diagnostic));
+                    let sensitive = field_keys(fragment)
+                        .iter()
+                        .any(|field| should_redact_key(&field.key, diagnostic));
                     chunks.push(if sensitive {
                         REDACTED.to_owned()
                     } else {
@@ -323,7 +348,10 @@ mod tests {
             redact_feedback_text("Authorization: Bearer abc.def\nok line", false),
             "Authorization: [REDACTED]\nok line"
         );
-        assert_eq!(redact_feedback_text("token=abc123 rest", false), "token=[REDACTED] rest");
+        assert_eq!(
+            redact_feedback_text("token=abc123 rest", false),
+            "token=[REDACTED] rest"
+        );
         assert_eq!(
             redact_feedback_text("see https://user:pw@example.com/a/b?x=1#h now", false),
             "see https://example.com/[REDACTED] now"
@@ -336,10 +364,7 @@ mod tests {
             redact_feedback_text(r#"{"apiKey":"sk","nested":{"name":"x"}}"#, false),
             r#"{"apiKey":"[REDACTED]","nested":{"name":"x"}}"#
         );
-        assert_eq!(
-            redact_feedback_text("mail a@b.com", true),
-            "mail [EMAIL]"
-        );
+        assert_eq!(redact_feedback_text("mail a@b.com", true), "mail [EMAIL]");
         assert_eq!(
             redact_feedback_text(r#"log {"prompt":"secret stuff"} done"#, true),
             r#"log {"prompt":"[REDACTED]"} done"#

@@ -110,11 +110,14 @@ struct Membership {
 
 impl Personal {
     fn rule_index(&self, id: &str) -> Option<usize> {
-        self.providers.iter().position(|rule| rule["providerId"] == id)
+        self.providers
+            .iter()
+            .position(|rule| rule["providerId"] == id)
     }
 
     fn config(&self, id: &str) -> Option<&Value> {
-        self.rule_index(id).map(|index| &self.providers[index]["config"])
+        self.rule_index(id)
+            .map(|index| &self.providers[index]["config"])
     }
 
     fn rule(&self, id: &str) -> Option<&Value> {
@@ -162,7 +165,9 @@ impl Personal {
         use_recommended: Option<bool>,
     ) -> Result<(), RpcError> {
         let manual = match use_recommended {
-            None => self.exact_rule(provider, model).is_some_and(|rule| rule.manual),
+            None => self
+                .exact_rule(provider, model)
+                .is_some_and(|rule| rule.manual),
             Some(recommended) => !recommended,
         };
         let config = canonical_model_config(config);
@@ -232,7 +237,9 @@ fn normalize_provider_order(personal: &Personal, requested: &[String]) -> Vec<St
 
 fn template_baseline<'a>(builtin: &'a Builtin, personal: &Personal, id: &str) -> Option<&'a Value> {
     let template_id = personal.rule(id)?["templateId"].as_str()?;
-    builtin.template(template_id).map(|template| &template["config"])
+    builtin
+        .template(template_id)
+        .map(|template| &template["config"])
 }
 
 fn writable_overlay(builtin: &Builtin, personal: &Personal, id: &str) -> Result<Value, RpcError> {
@@ -252,18 +259,21 @@ fn normalized_membership(
     inherited: Option<&[String]>,
 ) -> Option<Value> {
     let personal_config = personal_config?;
-    let builtin_ids = unique_in_order(
-        &inherited
-            .map(<[String]>::to_vec)
-            .unwrap_or_else(|| baseline.map(|config| strings(&config["builtinModelIds"])).unwrap_or_default()),
-    );
+    let builtin_ids = unique_in_order(&inherited.map(<[String]>::to_vec).unwrap_or_else(|| {
+        baseline
+            .map(|config| strings(&config["builtinModelIds"]))
+            .unwrap_or_default()
+    }));
     let personal_ids: Vec<String> = unique_in_order(&strings(&personal_config["personalModelIds"]))
         .into_iter()
         .filter(|id| !builtin_ids.contains(id))
         .collect();
     let mut normalized = personal_config.clone();
     normalized["personalModelIds"] = json!(personal_ids);
-    if let Some(order) = personal_config.get("modelOrder").filter(|order| !order.is_null()) {
+    if let Some(order) = personal_config
+        .get("modelOrder")
+        .filter(|order| !order.is_null())
+    {
         normalized["modelOrder"] = json!(owned_order(&builtin_ids, &personal_ids, &strings(order)));
     }
     Some(normalized)
@@ -297,7 +307,10 @@ fn effective_rules(builtin: &Builtin, personal: &Personal) -> Vec<Value> {
         .cloned()
         .unwrap_or_default();
     for rule in &personal.providers {
-        match rules.iter_mut().find(|existing| existing["providerId"] == rule["providerId"]) {
+        match rules
+            .iter_mut()
+            .find(|existing| existing["providerId"] == rule["providerId"])
+        {
             Some(existing) => {
                 if rule.get("providerName").is_some() {
                     existing["providerName"] = rule["providerName"].clone();
@@ -415,7 +428,9 @@ impl PersonalWriter {
                 } else {
                     let value: Value = match serde_json::from_slice(&bytes) {
                         Ok(value) => value,
-                        Err(error) => return Ok(Err(RpcError::new("SyntaxError", error.to_string()))),
+                        Err(error) => {
+                            return Ok(Err(RpcError::new("SyntaxError", error.to_string())));
+                        }
                     };
                     match decode(&value) {
                         Ok(personal) => personal,
@@ -465,8 +480,15 @@ impl PersonalWriter {
     }
 
     pub async fn create_provider(&self, input: &Value) -> Result<Value, RpcError> {
-        let template_id = input["templateId"].as_str().map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned);
-        let provider_name = input["providerName"].as_str().filter(|n| !n.is_empty()).map(str::to_owned);
+        let template_id = input["templateId"]
+            .as_str()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_owned);
+        let provider_name = input["providerName"]
+            .as_str()
+            .filter(|n| !n.is_empty())
+            .map(str::to_owned);
         let locale = input["locale"].as_str().unwrap_or("en-US").to_owned();
         let initial = match input.get("initialConfig").filter(|v| !v.is_null()) {
             Some(config) => {
@@ -501,19 +523,27 @@ impl PersonalWriter {
                         .filter_map(|rule| rule["providerId"].as_str().map(str::to_owned)),
                 );
                 let provider_id = next_provider_id(&occupied, template_id.as_deref());
-                let seed = provider_name.clone().unwrap_or_else(|| match (&template, &template_id) {
-                    (Some(template), Some(id)) => {
-                        let names = &template["templateNameMap"];
-                        names[locale.as_str()]
-                            .as_str()
-                            .map(str::trim)
-                            .filter(|n| !n.is_empty())
-                            .or_else(|| names["en-US"].as_str().map(str::trim).filter(|n| !n.is_empty()))
-                            .unwrap_or(id)
-                            .to_owned()
-                    }
-                    _ => "new-provider".to_owned(),
-                });
+                let seed =
+                    provider_name
+                        .clone()
+                        .unwrap_or_else(|| match (&template, &template_id) {
+                            (Some(template), Some(id)) => {
+                                let names = &template["templateNameMap"];
+                                names[locale.as_str()]
+                                    .as_str()
+                                    .map(str::trim)
+                                    .filter(|n| !n.is_empty())
+                                    .or_else(|| {
+                                        names["en-US"]
+                                            .as_str()
+                                            .map(str::trim)
+                                            .filter(|n| !n.is_empty())
+                                    })
+                                    .unwrap_or(id)
+                                    .to_owned()
+                            }
+                            _ => "new-provider".to_owned(),
+                        });
                 let label = next_provider_label(&seed, &effective_rules(builtin, personal));
                 let mut config = json!({"group": "standard-personal"});
                 if template_id.is_none() {
@@ -531,9 +561,15 @@ impl PersonalWriter {
                 rule["providerName"] = json!(label);
                 rule["config"] = canonical_provider_config(&config);
                 personal.providers.push(rule);
-                let current = normalize_provider_order(personal, personal.provider_order.as_deref().unwrap_or(&[]));
+                let current = normalize_provider_order(
+                    personal,
+                    personal.provider_order.as_deref().unwrap_or(&[]),
+                );
                 // 先排除再把新 provider 加到末尾。
-                let mut requested: Vec<String> = current.into_iter().filter(|id| *id != provider_id).collect();
+                let mut requested: Vec<String> = current
+                    .into_iter()
+                    .filter(|id| *id != provider_id)
+                    .collect();
                 requested.push(provider_id.clone());
                 personal.provider_order = Some(normalize_provider_order(personal, &requested));
                 Ok(provider_id)
@@ -561,7 +597,8 @@ impl PersonalWriter {
             self.update(move |personal, revision, builtin| {
                 check_membership(&membership, &id, revision)?;
                 let builtin_config = builtin.provider(&id);
-                let account = builtin_config.is_some_and(|c| c["access"]["type"] == "zhipu-account");
+                let account =
+                    builtin_config.is_some_and(|c| c["access"]["type"] == "zhipu-account");
                 if account && metadata["enabled"] == false {
                     return Err(error(format!("Account Provider 不允许禁用: {id}")));
                 }
@@ -576,8 +613,12 @@ impl PersonalWriter {
                 }
                 let mut normalized = config.clone();
                 if let Some(builtin_config) = builtin_config {
-                    if normalized.get("group").is_some_and(|g| !g.is_null()) && normalized["group"] != builtin_config["group"] {
-                        return Err(error(format!("Personal Overlay 不能改写 Built-in Provider group: {id}")));
+                    if normalized.get("group").is_some_and(|g| !g.is_null())
+                        && normalized["group"] != builtin_config["group"]
+                    {
+                        return Err(error(format!(
+                            "Personal Overlay 不能改写 Built-in Provider group: {id}"
+                        )));
                     }
                     if let Some(object) = normalized.as_object_mut() {
                         object.remove("group");
@@ -585,22 +626,36 @@ impl PersonalWriter {
                 } else {
                     let group = match normalized.get("group").filter(|g| !g.is_null()) {
                         Some(group) => group.clone(),
-                        None => current_personal.as_ref().map(|c| c["group"].clone()).unwrap_or(Value::Null),
+                        None => current_personal
+                            .as_ref()
+                            .map(|c| c["group"].clone())
+                            .unwrap_or(Value::Null),
                     };
                     if group != "standard-personal" {
-                        return Err(error(format!("Personal-only Provider 必须使用 standard-personal group: {id}")));
+                        return Err(error(format!(
+                            "Personal-only Provider 必须使用 standard-personal group: {id}"
+                        )));
                     }
                     normalized["group"] = group;
                 }
-                let baseline = builtin_config.or_else(|| template_baseline(builtin, personal, &id)).cloned();
+                let baseline = builtin_config
+                    .or_else(|| template_baseline(builtin, personal, &id))
+                    .cloned();
                 let next = with_membership_from(
                     &normalized,
-                    normalized_membership(current_personal.as_ref(), baseline.as_ref(), Some(&membership.inherited)).as_ref(),
+                    normalized_membership(
+                        current_personal.as_ref(),
+                        baseline.as_ref(),
+                        Some(&membership.inherited),
+                    )
+                    .as_ref(),
                 );
                 let previous_label = personal.rule(&id).and_then(label_of);
                 let before_rules = effective_rules(builtin, personal);
                 let index = personal.rule_index(&id);
-                let mut rule = index.map(|i| personal.providers[i].clone()).unwrap_or_else(|| json!({"providerId": id}));
+                let mut rule = index
+                    .map(|i| personal.providers[i].clone())
+                    .unwrap_or_else(|| json!({"providerId": id}));
                 if let Some(template) = metadata.get("templateId") {
                     rule["templateId"] = template.clone();
                 }
@@ -608,10 +663,11 @@ impl PersonalWriter {
                     rule["enabled"] = enabled.clone();
                 }
                 if let Some(name) = metadata.get("providerName") {
-                    rule["providerName"] = match name.as_str().map(str::trim).filter(|n| !n.is_empty()) {
-                        Some(name) => json!(name),
-                        None => Value::Null,
-                    };
+                    rule["providerName"] =
+                        match name.as_str().map(str::trim).filter(|n| !n.is_empty()) {
+                            Some(name) => json!(name),
+                            None => Value::Null,
+                        };
                 }
                 rule["config"] = next;
                 match index {
@@ -629,10 +685,16 @@ impl PersonalWriter {
                     && Some(&label) != previous_label.as_ref()
                 {
                     let clash = effective_rules(builtin, personal).iter().any(|rule| {
-                        rule["providerId"] != id.as_str() && label_of(rule).as_deref() == Some(label.as_str())
+                        rule["providerId"] != id.as_str()
+                            && label_of(rule).as_deref() == Some(label.as_str())
                     });
                     if clash {
-                        let display = personal.rule(&id).and_then(|r| r["providerName"].as_str().map(str::trim).map(str::to_owned)).unwrap_or(label);
+                        let display = personal
+                            .rule(&id)
+                            .and_then(|r| {
+                                r["providerName"].as_str().map(str::trim).map(str::to_owned)
+                            })
+                            .unwrap_or(label);
                         return Err(error(format!("Provider 名称已存在: {display}")));
                     }
                 }
@@ -651,7 +713,9 @@ impl PersonalWriter {
         let id = provider_id.to_owned();
         self.per_provider(provider_id, async || {
             self.update(move |personal, _, _| {
-                personal.providers.retain(|rule| rule["providerId"] != id.as_str());
+                personal
+                    .providers
+                    .retain(|rule| rule["providerId"] != id.as_str());
                 personal.models.retain(|rule| rule.provider_id != id);
                 if let Some(order) = &mut personal.provider_order {
                     order.retain(|candidate| *candidate != id);
@@ -673,7 +737,11 @@ impl PersonalWriter {
         Ok(self.view().await)
     }
 
-    pub async fn reorder_models(&self, provider_id: &str, model_ids: Vec<String>) -> Result<Value, RpcError> {
+    pub async fn reorder_models(
+        &self,
+        provider_id: &str,
+        model_ids: Vec<String>,
+    ) -> Result<Value, RpcError> {
         if provider_id.trim().is_empty() {
             return Err(error("providerId 不能为空"));
         }
@@ -683,7 +751,11 @@ impl PersonalWriter {
             self.update(move |personal, revision, builtin| {
                 check_membership(&membership, &id, revision)?;
                 let provider = writable_overlay(builtin, personal, &id)?;
-                let order = owned_order(&membership.inherited, &strings(&provider["personalModelIds"]), &model_ids);
+                let order = owned_order(
+                    &membership.inherited,
+                    &strings(&provider["personalModelIds"]),
+                    &model_ids,
+                );
                 let mut next = provider;
                 next["modelOrder"] = json!(order);
                 personal.set_config(&id, canonical_provider_config(&next));
@@ -704,7 +776,8 @@ impl PersonalWriter {
     ) -> Result<Value, RpcError> {
         let id = normalize_id("providerId", provider_id)?;
         let model = normalize_id("modelId", model_id)?;
-        validate_model_config(config, "config").map_err(|message| RpcError::new("ZodError", message))?;
+        validate_model_config(config, "config")
+            .map_err(|message| RpcError::new("ZodError", message))?;
         let config = config.clone();
         self.per_provider(&id.clone(), async || {
             let membership = self.membership(&id).await?;
@@ -719,7 +792,11 @@ impl PersonalWriter {
                     return Err(error(format!("Model 已存在: {id}/{model}")));
                 }
                 personal_ids.push(model.clone());
-                let order = owned_order(&membership.inherited, &personal_ids, &strings(&provider["modelOrder"]));
+                let order = owned_order(
+                    &membership.inherited,
+                    &personal_ids,
+                    &strings(&provider["modelOrder"]),
+                );
                 let mut next = provider;
                 next["personalModelIds"] = json!(personal_ids);
                 next["modelOrder"] = json!(order);
@@ -734,7 +811,12 @@ impl PersonalWriter {
         .await
     }
 
-    pub async fn rename_model(&self, provider_id: &str, current: &str, next_id: &str) -> Result<Value, RpcError> {
+    pub async fn rename_model(
+        &self,
+        provider_id: &str,
+        current: &str,
+        next_id: &str,
+    ) -> Result<Value, RpcError> {
         let id = normalize_id("providerId", provider_id)?;
         let current = normalize_id("modelId", current)?;
         let next_model = normalize_id("modelId", next_id)?;
@@ -760,7 +842,9 @@ impl PersonalWriter {
                     return Err(error(format!("Model 已存在: {id}/{next_model}")));
                 }
                 let rename = |ids: Vec<String>| -> Vec<String> {
-                    ids.into_iter().map(|m| if m == current { next_model.clone() } else { m }).collect()
+                    ids.into_iter()
+                        .map(|m| if m == current { next_model.clone() } else { m })
+                        .collect()
                 };
                 let ids = rename(personal_ids);
                 let requested = rename(strings(&provider["modelOrder"]));
@@ -797,7 +881,11 @@ impl PersonalWriter {
                 let remaining: Vec<String> = ids.into_iter().filter(|m| *m != model).collect();
                 let mut next = provider.clone();
                 next["personalModelIds"] = json!(remaining);
-                next["modelOrder"] = json!(owned_order(&membership.inherited, &remaining, &strings(&provider["modelOrder"])));
+                next["modelOrder"] = json!(owned_order(
+                    &membership.inherited,
+                    &remaining,
+                    &strings(&provider["modelOrder"])
+                ));
                 personal.set_config(&id, canonical_provider_config(&next));
                 personal.delete_exact(&id, &model);
                 Ok(())
@@ -808,7 +896,12 @@ impl PersonalWriter {
         .await
     }
 
-    pub async fn set_model_enabled(&self, provider_id: &str, model_id: &str, enabled: &Value) -> Result<Value, RpcError> {
+    pub async fn set_model_enabled(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        enabled: &Value,
+    ) -> Result<Value, RpcError> {
         let id = normalize_id("providerId", provider_id)?;
         let model = normalize_id("modelId", model_id)?;
         let Some(enabled) = enabled.as_bool() else {
@@ -818,7 +911,10 @@ impl PersonalWriter {
             let membership = self.membership(&id).await?;
             self.update(move |personal, revision, _| {
                 check_membership(&membership, &id, revision)?;
-                let personal_ids = personal.config(&id).map(|c| strings(&c["personalModelIds"])).unwrap_or_default();
+                let personal_ids = personal
+                    .config(&id)
+                    .map(|c| strings(&c["personalModelIds"]))
+                    .unwrap_or_default();
                 if !membership.inherited.contains(&model) && !personal_ids.contains(&model) {
                     return Err(error(format!("Model 不存在: {id}/{model}")));
                 }
@@ -840,7 +936,8 @@ impl PersonalWriter {
         let original = normalize_id("modelId", input["originalModelId"].as_str().unwrap_or(""))?;
         let next_model = normalize_id("modelId", input["nextModelId"].as_str().unwrap_or(""))?;
         let config = input["personalConfig"].clone();
-        validate_model_config(&config, "personalConfig").map_err(|message| RpcError::new("ZodError", message))?;
+        validate_model_config(&config, "personalConfig")
+            .map_err(|message| RpcError::new("ZodError", message))?;
         let use_recommended = input["useRecommendedConfig"].as_bool();
         let based_on = input["basedOnRevision"].clone();
         self.per_provider(&id.clone(), async || {
@@ -915,12 +1012,18 @@ impl PersonalWriter {
             .find(|provider| provider.provider_id == provider_id)
             .ok_or_else(|| error(format!("Provider 不存在: {provider_id}")))?;
         let (_, builtin) = self.runtime.builtin_snapshot().await;
-        let api_type = provider.effective_config["api"]["type"].as_str().unwrap_or("");
-        let base_url = provider.effective_config["api"]["baseUrl"].as_str().unwrap_or("");
+        let api_type = provider.effective_config["api"]["type"]
+            .as_str()
+            .unwrap_or("");
+        let base_url = provider.effective_config["api"]["baseUrl"]
+            .as_str()
+            .unwrap_or("");
         let template = provider.template_id.as_deref();
         let path = ["providers", provider_id, "models", model_id];
         let personal_value = self.read_personal_value().await;
-        let personal_rules = personal_value.as_ref().map(|value| &value["config"]["modelConfigRules"]);
+        let personal_rules = personal_value
+            .as_ref()
+            .map(|value| &value["config"]["modelConfigRules"]);
         let Some(draft) = input.get("personalConfig").filter(|v| !v.is_null()) else {
             let config = effective_model_config(
                 &builtin["modelConfigRules"],
@@ -938,7 +1041,8 @@ impl PersonalWriter {
                 "issues": completeness_issues(&config, &path),
             }));
         };
-        validate_model_config(draft, "personalConfig").map_err(|message| RpcError::new("ZodError", message))?;
+        validate_model_config(draft, "personalConfig")
+            .map_err(|message| RpcError::new("ZodError", message))?;
         let inherited = effective_model_config(
             &builtin["modelConfigRules"],
             None,
@@ -980,7 +1084,11 @@ impl PersonalWriter {
     }
 }
 
-fn membership_of(resolved: &Resolved, provider_id: &str, personal_revision: String) -> Result<Membership, RpcError> {
+fn membership_of(
+    resolved: &Resolved,
+    provider_id: &str,
+    personal_revision: String,
+) -> Result<Membership, RpcError> {
     let provider = resolved
         .providers
         .iter()
@@ -998,7 +1106,11 @@ fn membership_of(resolved: &Resolved, provider_id: &str, personal_revision: Stri
     })
 }
 
-fn check_membership(membership: &Membership, provider_id: &str, revision: &str) -> Result<(), RpcError> {
+fn check_membership(
+    membership: &Membership,
+    provider_id: &str,
+    revision: &str,
+) -> Result<(), RpcError> {
     if membership.provider_id != provider_id || membership.personal_revision != revision {
         return Err(error("Provider Settings membership revision conflict"));
     }
@@ -1030,36 +1142,78 @@ fn completeness_issues(config: &Value, path: &[&str]) -> Value {
     ] {
         missing(&["properties", key], properties[key].is_boolean());
     }
-    missing(&["properties", "contextWindow"], properties["contextWindow"].as_u64().is_some_and(|n| n > 0));
-    for key in ["supportsText", "supportsImage", "supportsVideo", "supportsAudio", "supportsPdf"] {
-        missing(&["properties", "inputFormat", key], properties["inputFormat"][key].is_boolean());
+    missing(
+        &["properties", "contextWindow"],
+        properties["contextWindow"].as_u64().is_some_and(|n| n > 0),
+    );
+    for key in [
+        "supportsText",
+        "supportsImage",
+        "supportsVideo",
+        "supportsAudio",
+        "supportsPdf",
+    ] {
+        missing(
+            &["properties", "inputFormat", key],
+            properties["inputFormat"][key].is_boolean(),
+        );
     }
-    missing(&["properties", "outputFormat", "supportsText"], properties["outputFormat"]["supportsText"].is_boolean());
+    missing(
+        &["properties", "outputFormat", "supportsText"],
+        properties["outputFormat"]["supportsText"].is_boolean(),
+    );
     let specs = &config["optionSpecs"];
-    missing(&["optionSpecs", "reasoningLevel", "values"], specs["reasoningLevel"]["values"].as_array().is_some_and(|v| !v.is_empty()));
-    missing(&["optionSpecs", "reasoningLevel", "map"], specs["reasoningLevel"]["map"].is_string());
-    missing(&["optionSpecs", "maxOutputTokens", "max"], specs["maxOutputTokens"]["max"].as_u64().is_some_and(|n| n > 0));
-    missing(&["optionSpecs", "maxOutputTokens", "map"], specs["maxOutputTokens"]["map"].is_string());
+    missing(
+        &["optionSpecs", "reasoningLevel", "values"],
+        specs["reasoningLevel"]["values"]
+            .as_array()
+            .is_some_and(|v| !v.is_empty()),
+    );
+    missing(
+        &["optionSpecs", "reasoningLevel", "map"],
+        specs["reasoningLevel"]["map"].is_string(),
+    );
+    missing(
+        &["optionSpecs", "maxOutputTokens", "max"],
+        specs["maxOutputTokens"]["max"]
+            .as_u64()
+            .is_some_and(|n| n > 0),
+    );
+    missing(
+        &["optionSpecs", "maxOutputTokens", "map"],
+        specs["maxOutputTokens"]["map"].is_string(),
+    );
     Value::Array(issues)
 }
 
 /// 测试连通性的执行器（由 Agent 子系统注入：同步 Account Config 后发 `provider/testModelConnectivity`）。
-pub type ConnectivityTester =
-    Arc<dyn Fn(Value) -> futures_util::future::BoxFuture<'static, Result<(), String>> + Send + Sync>;
+pub type ConnectivityTester = Arc<
+    dyn Fn(Value) -> futures_util::future::BoxFuture<'static, Result<(), String>> + Send + Sync,
+>;
 
 fn ids_arg(args: &zcode_host_kit::Args, index: usize, name: &str) -> Result<Vec<String>, RpcError> {
     let value: Value = args.get(index, name)?;
     value
         .as_array()
         .filter(|items| items.iter().all(Value::is_string))
-        .map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
         .ok_or_else(|| RpcError::new("ZodError", format!("{name} must be an array of strings")))
 }
 
 /// provider-settings 的写成员；只登记这些方法，读成员由 `provider_settings_service` 应答。
 pub fn writer_service(
     writer: PersonalWriter,
-    refresh_sources: Arc<dyn Fn(String) -> futures_util::future::BoxFuture<'static, Result<(), String>> + Send + Sync>,
+    refresh_sources: Arc<
+        dyn Fn(String) -> futures_util::future::BoxFuture<'static, Result<(), String>>
+            + Send
+            + Sync,
+    >,
     tester: Option<ConnectivityTester>,
 ) -> ServiceBuilder {
     macro_rules! handler {
@@ -1105,7 +1259,9 @@ pub fn writer_service(
                 let id: String = args.get(0, "providerId")?;
                 let config: Value = args.get(1, "config")?;
                 let metadata: Option<Value> = args.opt(2, "metadata")?;
-                w.save_provider_overlay(&id, &config, metadata.as_ref()).await.map(Reply::Value)
+                w.save_provider_overlay(&id, &config, metadata.as_ref())
+                    .await
+                    .map(Reply::Value)
             }),
         )
         .method(
@@ -1137,7 +1293,9 @@ pub fn writer_service(
                 let model: String = args.get(1, "modelId")?;
                 let config: Value = args.get(2, "config")?;
                 let recommended: Option<bool> = args.opt(3, "useRecommendedConfig")?;
-                w.add_model(&id, &model, &config, recommended).await.map(Reply::Value)
+                w.add_model(&id, &model, &config, recommended)
+                    .await
+                    .map(Reply::Value)
             }),
         )
         .method(
@@ -1170,7 +1328,9 @@ pub fn writer_service(
                 let id: String = args.get(0, "providerId")?;
                 let model: String = args.get(1, "modelId")?;
                 let enabled = args.raw(2).cloned().unwrap_or(Value::Null);
-                w.set_model_enabled(&id, &model, &enabled).await.map(Reply::Value)
+                w.set_model_enabled(&id, &model, &enabled)
+                    .await
+                    .map(Reply::Value)
             }),
         )
         .method("testModelConnectivity", move |_, args| {
@@ -1196,7 +1356,10 @@ mod tests {
     use super::*;
 
     fn builtin_path() -> PathBuf {
-        PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../../config/provider/zcode-builtin.json"))
+        PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../../config/provider/zcode-builtin.json"
+        ))
     }
 
     #[tokio::test]
@@ -1215,12 +1378,28 @@ mod tests {
             .await
             .unwrap();
         writer
-            .add_model("new-provider", "m2", &json!({"properties": {"contextWindow": 1000}}), None)
+            .add_model(
+                "new-provider",
+                "m2",
+                &json!({"properties": {"contextWindow": 1000}}),
+                None,
+            )
             .await
             .unwrap();
-        assert!(writer.add_model("new-provider", "m1", &json!({}), None).await.is_err());
-        writer.rename_model("new-provider", "m1", "m1b").await.unwrap();
-        writer.reorder_models("new-provider", vec!["m2".into(), "m1b".into()]).await.unwrap();
+        assert!(
+            writer
+                .add_model("new-provider", "m1", &json!({}), None)
+                .await
+                .is_err()
+        );
+        writer
+            .rename_model("new-provider", "m1", "m1b")
+            .await
+            .unwrap();
+        writer
+            .reorder_models("new-provider", vec!["m2".into(), "m1b".into()])
+            .await
+            .unwrap();
         writer
             .set_model_enabled("new-provider", "m2", &json!(false))
             .await
@@ -1255,8 +1434,14 @@ mod tests {
         // 第二个同名 provider 自动加后缀。
         let second = writer.create_provider(&json!({})).await.unwrap();
         assert_eq!(second["providerId"], "new-provider-2");
-        let view = writer.reorder_providers(vec!["new-provider-2".into()]).await.unwrap();
-        assert_eq!(view["providerOrder"], json!(["new-provider-2", "new-provider"]));
+        let view = writer
+            .reorder_providers(vec!["new-provider-2".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            view["providerOrder"],
+            json!(["new-provider-2", "new-provider"])
+        );
         let names: Vec<&str> = view["providers"]
             .as_array()
             .unwrap()
@@ -1265,14 +1450,25 @@ mod tests {
             .collect();
         assert!(names.contains(&"new-provider 2"));
         let renamed = writer
-            .save_provider_overlay("new-provider-2", &json!({}), Some(&json!({"providerName": "New-Provider"})))
+            .save_provider_overlay(
+                "new-provider-2",
+                &json!({}),
+                Some(&json!({"providerName": "New-Provider"})),
+            )
             .await;
-        assert_eq!(renamed.unwrap_err().message, "Provider 名称已存在: New-Provider");
+        assert_eq!(
+            renamed.unwrap_err().message,
+            "Provider 名称已存在: New-Provider"
+        );
         writer.delete_model("new-provider", "m2").await.unwrap();
         writer.delete_provider("new-provider").await.unwrap();
-        let file: Value = serde_json::from_str(&std::fs::read_to_string(&personal).unwrap()).unwrap();
+        let file: Value =
+            serde_json::from_str(&std::fs::read_to_string(&personal).unwrap()).unwrap();
         assert_eq!(file["config"]["providerOrder"], json!(["new-provider-2"]));
-        assert_eq!(file["config"]["modelConfigRules"]["providerModelRules"], json!([]));
+        assert_eq!(
+            file["config"]["modelConfigRules"]["providerModelRules"],
+            json!([])
+        );
     }
 
     #[tokio::test]
@@ -1282,7 +1478,11 @@ mod tests {
         let runtime = ProviderRuntime::new(Some(builtin_path()), personal.clone());
         let writer = PersonalWriter::new(runtime.clone());
         let error = writer
-            .save_provider_overlay("account:zai-start-plan", &json!({"access": {"type": "api-key"}}), None)
+            .save_provider_overlay(
+                "account:zai-start-plan",
+                &json!({"access": {"type": "api-key"}}),
+                None,
+            )
             .await
             .unwrap_err();
         assert!(error.message.contains("固定 Account Provider 的 Access"));
@@ -1291,12 +1491,17 @@ mod tests {
             .save_model_draft(&json!({"providerId": "account:zai-start-plan", "originalModelId": "GLM-5.3-Flash", "nextModelId": "GLM-5.3-Flash", "personalConfig": {}, "basedOnRevision": revision + 5}))
             .await
             .unwrap_err();
-        assert!(stale.message.starts_with("Provider Settings revision conflict"));
+        assert!(
+            stale
+                .message
+                .starts_with("Provider Settings revision conflict")
+        );
         writer
             .save_model_draft(&json!({"providerId": "account:zai-start-plan", "originalModelId": "GLM-5.3-Flash", "nextModelId": "GLM-5.3-Flash", "personalConfig": {"enabled": false}, "basedOnRevision": revision}))
             .await
             .unwrap();
-        let file: Value = serde_json::from_str(&std::fs::read_to_string(&personal).unwrap()).unwrap();
+        let file: Value =
+            serde_json::from_str(&std::fs::read_to_string(&personal).unwrap()).unwrap();
         assert_eq!(
             file["config"]["modelConfigRules"]["providerModelRules"],
             json!([{"modelId": "GLM-5.3-Flash", "config": {"enabled": false}, "providerId": "account:zai-start-plan"}])

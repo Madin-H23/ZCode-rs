@@ -48,7 +48,8 @@ fn is_unrenderable(message: &str) -> bool {
     if normalized.is_empty() {
         return false;
     }
-    let html = regex::Regex::new(r"<\s*(html|head|body|script|style|title|meta)\b").expect("static regex");
+    let html =
+        regex::Regex::new(r"<\s*(html|head|body|script|style|title|meta)\b").expect("static regex");
     normalized.starts_with("<!doctype")
         || html.is_match(&normalized)
         || normalized.contains("errors.aliyun.com")
@@ -78,10 +79,18 @@ fn remote_error(message: Option<&str>, provider_id: &str, code: Option<&Value>) 
 fn unwrap_envelope(payload: Value, provider_id: &str) -> Result<Value, RpcError> {
     let code = &payload["code"];
     if !code.is_null() && code.as_f64() != Some(200.0) {
-        return Err(error(remote_error(payload["msg"].as_str(), provider_id, Some(code))));
+        return Err(error(remote_error(
+            payload["msg"].as_str(),
+            provider_id,
+            Some(code),
+        )));
     }
     if payload["success"] == false {
-        return Err(error(remote_error(payload["msg"].as_str(), provider_id, None)));
+        return Err(error(remote_error(
+            payload["msg"].as_str(),
+            provider_id,
+            None,
+        )));
     }
     match payload.get("data") {
         Some(data) if !data.is_null() => Ok(data.clone()),
@@ -125,7 +134,13 @@ fn field(request: &Value, key: &str) -> Option<Value> {
 
 /// `request.x ?? default`。
 fn or(request: &Value, key: &str, default: Value) -> Option<Value> {
-    Some(request.get(key).filter(|value| !value.is_null()).cloned().unwrap_or(default))
+    Some(
+        request
+            .get(key)
+            .filter(|value| !value.is_null())
+            .cloned()
+            .unwrap_or(default),
+    )
 }
 
 type ConfigFuture = Shared<BoxFuture<'static, Result<Value, RpcError>>>;
@@ -152,7 +167,12 @@ struct Endpoint {
 }
 
 impl CodingPlanSubscription {
-    pub fn new(api: ApiClient, account_api: AccountApi, credentials: CredentialStore, providers: ProviderRuntime) -> Self {
+    pub fn new(
+        api: ApiClient,
+        account_api: AccountApi,
+        credentials: CredentialStore,
+        providers: ProviderRuntime,
+    ) -> Self {
         Self {
             api,
             account_api,
@@ -199,7 +219,9 @@ impl CodingPlanSubscription {
         }
         let jwt = self.load_trimmed(ZCODE_JWT_TOKEN_KEY).await;
         if !jwt.is_empty() && token == jwt {
-            log::warn("[codingPlanSubscription] BigModel access token is stale zcode JWT; login required");
+            log::warn(
+                "[codingPlanSubscription] BigModel access token is stale zcode JWT; login required",
+            );
             return Err(error("bigmodel_oauth_required"));
         }
         Ok(token)
@@ -241,7 +263,12 @@ impl CodingPlanSubscription {
             .timeout_ms(REQUEST_TIMEOUT_MS)
     }
 
-    async fn post(&self, provider_id: Option<&str>, path: &str, payload: Value) -> Result<Value, RpcError> {
+    async fn post(
+        &self,
+        provider_id: Option<&str>,
+        path: &str,
+        payload: Value,
+    ) -> Result<Value, RpcError> {
         let endpoint = self.endpoint(provider_id).await?;
         let request = Self::login_headers(
             ApiRequest::post(format!("{}{BIZ_PREFIX}{path}", endpoint.host)),
@@ -257,14 +284,21 @@ impl CodingPlanSubscription {
         unwrap_envelope(self.read(request).await?, &endpoint.provider_id)
     }
 
-    async fn zai_pay(&self, provider_id: Option<&str>, path: &str, payload: Option<Value>) -> Result<Value, RpcError> {
+    async fn zai_pay(
+        &self,
+        provider_id: Option<&str>,
+        path: &str,
+        payload: Option<Value>,
+    ) -> Result<Value, RpcError> {
         let endpoint = self.endpoint(provider_id).await?;
         if !is_zai_coding_plan_provider(&endpoint.provider_id) {
             return Err(error(ZAI_OVERSEAS_PAYMENT_REQUIRED));
         }
         let url = format!("{}{ZAI_PAY_PREFIX}{path}", endpoint.host);
         let request = match payload {
-            Some(payload) => Self::login_headers(ApiRequest::post(url), &endpoint.token).json(&payload),
+            Some(payload) => {
+                Self::login_headers(ApiRequest::post(url), &endpoint.token).json(&payload)
+            }
             None => Self::login_headers(ApiRequest::get(url), &endpoint.token),
         };
         unwrap_envelope(self.read(request).await?, &endpoint.provider_id)
@@ -307,11 +341,14 @@ impl CodingPlanSubscription {
                                 ("platform", &format!("{}-{}", node_platform(), node_arch())),
                             ],
                         );
-                        let result = this.read(ApiRequest::get(url).timeout_ms(REQUEST_TIMEOUT_MS)).await;
+                        let result = this
+                            .read(ApiRequest::get(url).timeout_ms(REQUEST_TIMEOUT_MS))
+                            .await;
                         let mut cache = this.cache.lock().unwrap_or_else(|p| p.into_inner());
                         cache.request = None;
                         if let Ok(payload) = &result {
-                            cache.snapshot = Some((payload.clone(), Instant::now() + CLIENT_CONFIG_TTL));
+                            cache.snapshot =
+                                Some((payload.clone(), Instant::now() + CLIENT_CONFIG_TTL));
                         }
                         result
                     }
@@ -371,7 +408,9 @@ impl CodingPlanSubscription {
         }
         let products = &payload["data"]["configs"]["codingPlanStaticTeamProducts"];
         let Some(map) = products.as_object() else {
-            return Err(error("ZCode client config missing Coding Plan team products"));
+            return Err(error(
+                "ZCode client config missing Coding Plan team products",
+            ));
         };
         let non_empty = |value: &Value| value.as_str().is_some_and(|s| !s.trim().is_empty());
         let copy_ok = |value: &Value| {
@@ -379,7 +418,8 @@ impl CodingPlanSubscription {
                 || value.as_array().is_some_and(|items| {
                     items.iter().all(|item| {
                         non_empty(item)
-                            || (non_empty(&item["text"]) && (item.get("tooltip").is_none() || item["tooltip"].is_string()))
+                            || (non_empty(&item["text"])
+                                && (item.get("tooltip").is_none() || item["tooltip"].is_string()))
                     })
                 })
         };
@@ -389,16 +429,25 @@ impl CodingPlanSubscription {
                     non_empty(&product["productId"])
                         && non_empty(&product["productName"])
                         && matches!(product["tier"].as_str(), Some("LITE" | "PRO" | "MAX"))
-                        && matches!(product["subscribeMode"].as_str(), Some("CONTINUOUS" | "ONE_TIME"))
-                        && matches!(product["subscribePeriod"].as_str(), Some("MONTHLY" | "QUARTERLY" | "YEARLY"))
+                        && matches!(
+                            product["subscribeMode"].as_str(),
+                            Some("CONTINUOUS" | "ONE_TIME")
+                        )
+                        && matches!(
+                            product["subscribePeriod"].as_str(),
+                            Some("MONTHLY" | "QUARTERLY" | "YEARLY")
+                        )
                         && non_empty(&product["purchaseMethodName"])
                         && product["priceCurrency"] == "CNY"
                         && (product.get("equity").is_none() || copy_ok(&product["equity"]))
-                        && (product.get("description").is_none() || copy_ok(&product["description"]))
+                        && (product.get("description").is_none()
+                            || copy_ok(&product["description"]))
                 })
             });
             if !valid {
-                return Err(error("ZCode client config has invalid Coding Plan team products"));
+                return Err(error(
+                    "ZCode client config has invalid Coding Plan team products",
+                ));
             }
         }
         Ok(Self::normalize_product_ids(products))
@@ -413,7 +462,10 @@ impl CodingPlanSubscription {
         if preview.is_null() || preview == &json!(false) {
             return Ok(Value::Null);
         }
-        if !preview["planId"].is_string() || !preview["name"].is_string() || !preview["entitlements"].is_array() {
+        if !preview["planId"].is_string()
+            || !preview["name"].is_string()
+            || !preview["entitlements"].is_array()
+        {
             return Err(error("ZCode client config invalid Start Plan preview"));
         }
         let entitlements: Vec<Value> = preview["entitlements"]
@@ -422,11 +474,15 @@ impl CodingPlanSubscription {
             .flatten()
             .filter(|entry| {
                 entry["grantUnits"].is_number()
-                    && ["meter", "period", "showName", "unitType"].iter().all(|key| entry[*key].is_string())
+                    && ["meter", "period", "showName", "unitType"]
+                        .iter()
+                        .all(|key| entry[*key].is_string())
             })
             .cloned()
             .collect();
-        Ok(json!({"planId": preview["planId"], "name": preview["name"], "entitlements": entitlements}))
+        Ok(
+            json!({"planId": preview["planId"], "name": preview["name"], "entitlements": entitlements}),
+        )
     }
 
     pub async fn force_update(&self) -> Result<Value, RpcError> {
@@ -452,7 +508,11 @@ impl CodingPlanSubscription {
     pub async fn off_peak_config(&self, force_refresh: bool) -> Result<Value, RpcError> {
         if self.env("ZCODE_OFFPEAK_MOCK").as_deref() == Some("1") {
             let view = self.off_peak_view().await;
-            let has_models = view["providers"].as_array().into_iter().flatten().any(|p| p["models"].as_array().is_some_and(|m| !m.is_empty()));
+            let has_models = view["providers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|p| p["models"].as_array().is_some_and(|m| !m.is_empty()));
             return Ok(json!({
                 "enabled": has_models,
                 "modelSelectionView": view,
@@ -461,7 +521,11 @@ impl CodingPlanSubscription {
         }
         let payload = self.client_configs(force_refresh).await?;
         let view = self.off_peak_view().await;
-        let has_models = view["providers"].as_array().into_iter().flatten().any(|p| p["models"].as_array().is_some_and(|m| !m.is_empty()));
+        let has_models = view["providers"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|p| p["models"].as_array().is_some_and(|m| !m.is_empty()));
         Ok(json!({
             "enabled": payload["data"]["configs"]["offPeak"]["enable_offpeak_task"] == true && has_models,
             "modelSelectionView": view,
@@ -501,41 +565,68 @@ impl CodingPlanSubscription {
 
     pub async fn enterprise_pricing(&self, request: &Value) -> Result<Value, RpcError> {
         let zai = request["family"] == "zai";
-        let provider_id = if zai { ZAI_CODING_PLAN } else { BIGMODEL_CODING_PLAN };
-        let host = if zai { self.zai_host() } else { self.bigmodel_host() };
+        let provider_id = if zai {
+            ZAI_CODING_PLAN
+        } else {
+            BIGMODEL_CODING_PLAN
+        };
+        let host = if zai {
+            self.zai_host()
+        } else {
+            self.bigmodel_host()
+        };
         if request["authenticated"] == false {
             let payload = self
                 .read(
-                    ApiRequest::get(format!("{host}{BIZ_PREFIX}/campaign/partner/enterprise/pricing"))
-                        .timeout_ms(REQUEST_TIMEOUT_MS),
+                    ApiRequest::get(format!(
+                        "{host}{BIZ_PREFIX}/campaign/partner/enterprise/pricing"
+                    ))
+                    .timeout_ms(REQUEST_TIMEOUT_MS),
                 )
                 .await?;
             return unwrap_envelope(payload, provider_id);
         }
-        let token = if zai { self.zai_token().await? } else { self.bigmodel_token().await? };
+        let token = if zai {
+            self.zai_token().await?
+        } else {
+            self.bigmodel_token().await?
+        };
         let response = unwrap_envelope(
             self.read(Self::login_headers(
-                ApiRequest::get(format!("{host}{BIZ_PREFIX}/subscription/enterprise/v2/pricing")),
+                ApiRequest::get(format!(
+                    "{host}{BIZ_PREFIX}/subscription/enterprise/v2/pricing"
+                )),
                 &token,
             ))
             .await?,
             provider_id,
         )?;
-        self.enrich_team_projects(response, &host, &token, provider_id).await
+        self.enrich_team_projects(response, &host, &token, provider_id)
+            .await
     }
 
     /// `enrichEnterprisePricingTeamProjects`：补全团队项目并预热每个团队项目的 API key。
-    async fn enrich_team_projects(&self, mut response: Value, host: &str, token: &str, family: &str) -> Result<Value, RpcError> {
-        let products: Vec<Value> = response["productList"].as_array().cloned().unwrap_or_default();
+    async fn enrich_team_projects(
+        &self,
+        mut response: Value,
+        host: &str,
+        token: &str,
+        family: &str,
+    ) -> Result<Value, RpcError> {
+        let products: Vec<Value> = response["productList"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         if products.is_empty() {
             return Ok(response);
         }
         let trimmed = |value: &Value| value.as_str().map(str::trim).unwrap_or("").to_owned();
         let has_subscribed = products.iter().any(|p| p["subscribed"] == true);
         let missing_context = products.iter().any(|p| {
-            p["subscribed"] == true && (trimmed(&p["projectId"]).is_empty() || trimmed(&p["organizationId"]).is_empty())
+            p["subscribed"] == true
+                && (trimmed(&p["projectId"]).is_empty() || trimmed(&p["organizationId"]).is_empty())
         });
-        if !(has_subscribed && !missing_context) {
+        if !has_subscribed || missing_context {
             let customer = self
                 .read(Self::login_headers(
                     ApiRequest::get(format!("{host}{BIZ_PREFIX}/customer/getCustomerInfo")),
@@ -543,7 +634,11 @@ impl CodingPlanSubscription {
                 ))
                 .await?;
             let mut team_projects = Vec::new();
-            for organization in customer["data"]["organizations"].as_array().into_iter().flatten() {
+            for organization in customer["data"]["organizations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
                 let organization_id = trimmed(&organization["organizationId"]);
                 if organization_id.is_empty() {
                     continue;
@@ -569,8 +664,16 @@ impl CodingPlanSubscription {
             } else {
                 let score = |p: &Value| {
                     (if p["tier"] == "PRO" { 100 } else { 0 })
-                        + (if p["subscribeMode"] == "ONE_TIME" { 20 } else { 0 })
-                        + (if p["subscribePeriod"] == "MONTHLY" { 10 } else { 0 })
+                        + (if p["subscribeMode"] == "ONE_TIME" {
+                            20
+                        } else {
+                            0
+                        })
+                        + (if p["subscribePeriod"] == "MONTHLY" {
+                            10
+                        } else {
+                            0
+                        })
                 };
                 let mut best: Option<&Value> = None;
                 for product in &products {
@@ -584,23 +687,34 @@ impl CodingPlanSubscription {
                 .into_iter()
                 .map(|mut product| {
                     let enrich = product["subscribed"] == true
-                        || fallback.as_ref().is_some_and(|id| product["productId"] == *id);
+                        || fallback
+                            .as_ref()
+                            .is_some_and(|id| product["productId"] == *id);
                     if !enrich {
                         return product;
                     }
-                    let (org, project) = (trimmed(&product["organizationId"]), trimmed(&product["projectId"]));
+                    let (org, project) = (
+                        trimmed(&product["organizationId"]),
+                        trimmed(&product["projectId"]),
+                    );
                     let matched: Vec<Value> = team_projects
                         .iter()
                         .filter(|candidate| {
                             (org.is_empty() || candidate["organizationId"] == org.as_str())
-                                && (project.is_empty() || candidate["projectId"] == project.as_str())
+                                && (project.is_empty()
+                                    || candidate["projectId"] == project.as_str())
                         })
                         .cloned()
                         .collect();
                     let Some(primary) = matched.first().cloned() else {
                         return product;
                     };
-                    for key in ["organizationId", "organizationName", "projectId", "projectName"] {
+                    for key in [
+                        "organizationId",
+                        "organizationName",
+                        "projectId",
+                        "projectName",
+                    ] {
                         if !primary[key].is_null() {
                             product[key] = primary[key].clone();
                         }
@@ -621,20 +735,29 @@ impl CodingPlanSubscription {
             if org.trim().is_empty() || project.trim().is_empty() {
                 return None;
             }
-            statuses.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())
+            statuses
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.clone())
         };
         if let Some(list) = response["productList"].as_array_mut() {
             for product in list {
                 if let Some(projects) = product["teamProjects"].as_array_mut() {
                     for project in projects {
-                        if let Some(fields) = status_fields(&trimmed(&project["organizationId"]), &trimmed(&project["projectId"])) {
+                        if let Some(fields) = status_fields(
+                            &trimmed(&project["organizationId"]),
+                            &trimmed(&project["projectId"]),
+                        ) {
                             for (key, value) in fields.as_object().into_iter().flatten() {
                                 project[key] = value.clone();
                             }
                         }
                     }
                 }
-                if let Some(fields) = status_fields(&trimmed(&product["organizationId"]), &trimmed(&product["projectId"])) {
+                if let Some(fields) = status_fields(
+                    &trimmed(&product["organizationId"]),
+                    &trimmed(&product["projectId"]),
+                ) {
                     for (key, value) in fields.as_object().into_iter().flatten() {
                         product[key] = value.clone();
                     }
@@ -644,20 +767,36 @@ impl CodingPlanSubscription {
         Ok(response)
     }
 
-    async fn prewarm_team_keys(&self, response: &Value, host: &str, token: &str, family: &str) -> Vec<(String, Value)> {
+    async fn prewarm_team_keys(
+        &self,
+        response: &Value,
+        host: &str,
+        token: &str,
+        family: &str,
+    ) -> Vec<(String, Value)> {
         let mut contexts: Vec<(String, String)> = Vec::new();
         for product in response["productList"].as_array().into_iter().flatten() {
             if product["subscribed"] != true {
                 continue;
             }
-            let projects: Vec<&Value> = match product["teamProjects"].as_array().filter(|p| !p.is_empty()) {
-                Some(projects) => projects.iter().collect(),
-                None => vec![product],
-            };
+            let projects: Vec<&Value> =
+                match product["teamProjects"].as_array().filter(|p| !p.is_empty()) {
+                    Some(projects) => projects.iter().collect(),
+                    None => vec![product],
+                };
             for project in projects {
-                let org = project["organizationId"].as_str().map(str::trim).unwrap_or("").to_owned();
-                let id = project["projectId"].as_str().map(str::trim).unwrap_or("").to_owned();
-                if org.is_empty() || id.is_empty() || contexts.contains(&(org.clone(), id.clone())) {
+                let org = project["organizationId"]
+                    .as_str()
+                    .map(str::trim)
+                    .unwrap_or("")
+                    .to_owned();
+                let id = project["projectId"]
+                    .as_str()
+                    .map(str::trim)
+                    .unwrap_or("")
+                    .to_owned();
+                if org.is_empty() || id.is_empty() || contexts.contains(&(org.clone(), id.clone()))
+                {
                     continue;
                 }
                 contexts.push((org, id));
@@ -670,8 +809,12 @@ impl CodingPlanSubscription {
                 .ensure_team_project_api_key(token, host, (&org, &project), REQUEST_TIMEOUT_MS)
                 .await
             {
-                Ok(Some(_)) => json!({"apiKeyStatus": "available", "apiKeyUnavailableReason": null, "apiKeyUnavailableMessage": null}),
-                Ok(None) => json!({"apiKeyStatus": "unavailable", "apiKeyUnavailableReason": "request_failed", "apiKeyUnavailableMessage": null}),
+                Ok(Some(_)) => {
+                    json!({"apiKeyStatus": "available", "apiKeyUnavailableReason": null, "apiKeyUnavailableMessage": null})
+                }
+                Ok(None) => {
+                    json!({"apiKeyStatus": "unavailable", "apiKeyUnavailableReason": "request_failed", "apiKeyUnavailableMessage": null})
+                }
                 Err(failure) => {
                     log::warn(format!(
                         "[codingPlanSubscription] Team Plan project api key prewarm failed family={family}: {}",
@@ -702,123 +845,316 @@ pub fn service(plan: CodingPlanSubscription) -> ServiceBuilder {
     }
     let provider = |request: &Value| request["providerId"].as_str().map(str::to_owned);
     ServiceBuilder::new("coding-plan-subscription")
-        .method("batchPreview", handler!(|p, r| p.post(provider(&r).as_deref(), "/pay/batch-preview", body(&[("invitationCode", field(&r, "invitationCode"))])).await))
-        .method("getStaticProducts", handler!(|p, _r| p.static_products().await))
-        .method("getStaticTeamProducts", handler!(|p, _r| p.static_team_products().await))
-        .method("getStartPlanPreview", handler!(|p, _r| p.start_plan_preview().await))
-        .method("getOffPeakClientConfig", handler!(|p, r| p.off_peak_config(r["forceRefresh"] == true).await))
-        .method("getDynamicWorkflowClientConfig", handler!(|p, r| Ok(p.dynamic_workflow_config(r["forceRefresh"] == true).await)))
-        .method("getModelContextBudgetStrategy", handler!(|_p, _r| Ok(json!("preflight-v1"))))
-        .method("getForceUpdateConfig", handler!(|p, _r| p.force_update().await))
-        .method("productInfo", handler!(|p, r| {
-            let base = format!("{}{BIZ_PREFIX}/product/info", p.host_for(provider(&r).as_deref()));
-            let url = p.url_with(&base, &[("productId", r["productId"].as_str().unwrap_or(""))]);
-            p.get(provider(&r).as_deref(), url).await
-        }))
-        .method("preview", handler!(|p, r| {
-            let id = provider(&r);
-            let path = if id.as_deref().is_some_and(is_zai_coding_plan_provider) { "/pay/zai-preview" } else { "/pay/preview" };
-            p.post(id.as_deref(), path, body(&[
-                ("productId", field(&r, "productId")),
-                ("invitationCode", field(&r, "invitationCode")),
-                ("imRef", or(&r, "imRef", Value::Null)),
-                ("ticket", or(&r, "ticket", Value::Null)),
-                ("randstr", or(&r, "randstr", Value::Null)),
-                ("salesChannel", or(&r, "salesChannel", json!("zcode"))),
-            ])).await
-        }))
-        .method("createSign", handler!(|p, r| {
-            if provider(&r).as_deref().is_some_and(is_zai_coding_plan_provider) {
-                return Err(error(ZAI_OVERSEAS_PAYMENT_REQUIRED));
-            }
-            p.post(provider(&r).as_deref(), "/pay/create-sign", body(&[
-                ("bizId", field(&r, "bizId")),
-                ("payType", or(&r, "payType", json!("ALI"))),
-                ("invitationCode", field(&r, "invitationCode")),
-                ("renew", or(&r, "renew", Value::Null)),
-                ("isDelay", or(&r, "isDelay", json!(0))),
-                ("effectiveTime", or(&r, "effectiveTime", Value::Null)),
-            ])).await
-        }))
-        .method("updateSign", handler!(|p, r| {
-            if provider(&r).as_deref().is_some_and(is_zai_coding_plan_provider) {
-                return Err(error(ZAI_OVERSEAS_PAYMENT_REQUIRED));
-            }
-            p.post(provider(&r).as_deref(), "/pay/product/update/sign", body(&[
-                ("bizId", field(&r, "bizId")),
-                ("payType", or(&r, "payType", json!("ALI"))),
-            ])).await
-        }))
-        .method("checkPayment", handler!(|p, r| {
-            let base = format!("{}{BIZ_PREFIX}/pay/check", p.host_for(provider(&r).as_deref()));
-            let url = p.url_with(&base, &[("bizId", r["bizId"].as_str().unwrap_or(""))]);
-            let status = p.get(provider(&r).as_deref(), url).await?;
-            Ok(json!({"status": status}))
-        }))
-        .method("checkPendingOrders", handler!(|p, r| {
-            let url = format!("{}{BIZ_PREFIX}/pay/check-pending-orders", p.host_for(provider(&r).as_deref()));
-            p.get(provider(&r).as_deref(), url).await
-        }))
-        .method("queryStripeCards", handler!(|p, r| p.zai_pay(provider(&r).as_deref(), "/stripe/query", None).await))
-        .method("bindStripeCard", handler!(|p, r| p.zai_pay(provider(&r).as_deref(), "/stripe/bind", Some(body(&[
-            ("paymentMethodId", field(&r, "paymentMethodId")),
-            ("returnUrl", field(&r, "returnUrl")),
-            ("trackingContext", field(&r, "trackingContext")),
-        ]))).await))
-        .method("unbindStripeCard", handler!(|p, r| p.zai_pay(provider(&r).as_deref(), "/stripe/unbind", Some(body(&[
-            ("paymentMethodId", field(&r, "paymentMethodId")),
-        ]))).await))
-        .method("payStripe", handler!(|p, r| p.zai_pay(provider(&r).as_deref(), "/stripe/pay", Some(body(&[
-            ("productId", field(&r, "productId")),
-            ("paymentMethodId", field(&r, "paymentMethodId")),
-            ("isSubscribe", or(&r, "isSubscribe", json!(true))),
-            ("returnUrl", field(&r, "returnUrl")),
-            ("channelCode", field(&r, "channelCode")),
-            ("estimatePayAmount", field(&r, "estimatePayAmount")),
-            ("invitationCode", field(&r, "invitationCode")),
-            ("bizId", field(&r, "bizId")),
-            ("renew", or(&r, "renew", json!(false))),
-        ]))).await))
-        .method("checkPaypalSupport", handler!(|p, r| p.zai_pay(provider(&r).as_deref(), "/paypal/isSupport", None).await))
-        .method("createPaypalSetupToken", handler!(|p, r| p.zai_pay(provider(&r).as_deref(), "/paypal/setupToken", Some(body(&[
-            ("returnUrl", field(&r, "returnUrl")),
-            ("cancelUrl", field(&r, "cancelUrl")),
-        ]))).await))
-        .method("subscribePaypal", handler!(|p, r| p.zai_pay(provider(&r).as_deref(), "/paypal/subscribe", Some(body(&[
-            ("productId", field(&r, "productId")),
-            ("productDesc", field(&r, "productDesc")),
-            ("setupTokenId", field(&r, "setupTokenId")),
-            ("amount", field(&r, "amount")),
-            ("isSubscribe", or(&r, "isSubscribe", json!(true))),
-            ("estimatePayAmount", field(&r, "estimatePayAmount")),
-            ("invitationCode", field(&r, "invitationCode")),
-            ("bizId", field(&r, "bizId")),
-            ("channelCode", field(&r, "channelCode")),
-        ]))).await))
-        .method("getEnterprisePricing", handler!(|p, r| p.enterprise_pricing(&r).await))
-        .method("getEnterpriseBalance", handler!(|p, _r| {
-            let url = format!("{}{BIZ_PREFIX}/subscription/enterprise/v2/balance", p.bigmodel_host());
-            p.get(Some(BIGMODEL_CODING_PLAN), url).await
-        }))
-        .method("calculateEnterpriseOrder", handler!(|p, r| p.post(Some(BIGMODEL_CODING_PLAN), "/subscription/enterprise/v2/order/calculate", r.clone()).await))
-        .method("createEnterpriseOrder", handler!(|p, r| p.post(Some(BIGMODEL_CODING_PLAN), "/subscription/enterprise/v2/order", r.clone()).await))
-        .method("getEnterprisePendingOrders", handler!(|p, _r| {
-            let url = format!("{}{BIZ_PREFIX}/subscription/enterprise/v2/orders/pending", p.bigmodel_host());
-            p.get(Some(BIGMODEL_CODING_PLAN), url).await
-        }))
-        .method("cancelEnterpriseOrder", handler!(|p, r| {
-            let order = encode_uri_component(r["orderNo"].as_str().unwrap_or(""));
-            p.post(Some(BIGMODEL_CODING_PLAN), &format!("/subscription/enterprise/v2/order/{order}/cancel"), json!({})).await
-        }))
-        .method("continueEnterpriseOrderPayment", handler!(|p, r| {
-            let order = encode_uri_component(r["orderNo"].as_str().unwrap_or(""));
-            p.post(Some(BIGMODEL_CODING_PLAN), &format!("/subscription/enterprise/v2/order/{order}/pay"), json!({})).await
-        }))
-        .method("checkEnterpriseOrderStatus", handler!(|p, r| {
-            let order = encode_uri_component(r["orderNo"].as_str().unwrap_or(""));
-            let url = format!("{}{BIZ_PREFIX}/subscription/enterprise/v2/order/{order}/status", p.bigmodel_host());
-            p.get(Some(BIGMODEL_CODING_PLAN), url).await
-        }))
+        .method(
+            "batchPreview",
+            handler!(|p, r| p
+                .post(
+                    provider(&r).as_deref(),
+                    "/pay/batch-preview",
+                    body(&[("invitationCode", field(&r, "invitationCode"))])
+                )
+                .await),
+        )
+        .method(
+            "getStaticProducts",
+            handler!(|p, _r| p.static_products().await),
+        )
+        .method(
+            "getStaticTeamProducts",
+            handler!(|p, _r| p.static_team_products().await),
+        )
+        .method(
+            "getStartPlanPreview",
+            handler!(|p, _r| p.start_plan_preview().await),
+        )
+        .method(
+            "getOffPeakClientConfig",
+            handler!(|p, r| p.off_peak_config(r["forceRefresh"] == true).await),
+        )
+        .method(
+            "getDynamicWorkflowClientConfig",
+            handler!(|p, r| Ok(p.dynamic_workflow_config(r["forceRefresh"] == true).await)),
+        )
+        .method(
+            "getModelContextBudgetStrategy",
+            handler!(|_p, _r| Ok(json!("preflight-v1"))),
+        )
+        .method(
+            "getForceUpdateConfig",
+            handler!(|p, _r| p.force_update().await),
+        )
+        .method(
+            "productInfo",
+            handler!(|p, r| {
+                let base = format!(
+                    "{}{BIZ_PREFIX}/product/info",
+                    p.host_for(provider(&r).as_deref())
+                );
+                let url = p.url_with(
+                    &base,
+                    &[("productId", r["productId"].as_str().unwrap_or(""))],
+                );
+                p.get(provider(&r).as_deref(), url).await
+            }),
+        )
+        .method(
+            "preview",
+            handler!(|p, r| {
+                let id = provider(&r);
+                let path = if id.as_deref().is_some_and(is_zai_coding_plan_provider) {
+                    "/pay/zai-preview"
+                } else {
+                    "/pay/preview"
+                };
+                p.post(
+                    id.as_deref(),
+                    path,
+                    body(&[
+                        ("productId", field(&r, "productId")),
+                        ("invitationCode", field(&r, "invitationCode")),
+                        ("imRef", or(&r, "imRef", Value::Null)),
+                        ("ticket", or(&r, "ticket", Value::Null)),
+                        ("randstr", or(&r, "randstr", Value::Null)),
+                        ("salesChannel", or(&r, "salesChannel", json!("zcode"))),
+                    ]),
+                )
+                .await
+            }),
+        )
+        .method(
+            "createSign",
+            handler!(|p, r| {
+                if provider(&r)
+                    .as_deref()
+                    .is_some_and(is_zai_coding_plan_provider)
+                {
+                    return Err(error(ZAI_OVERSEAS_PAYMENT_REQUIRED));
+                }
+                p.post(
+                    provider(&r).as_deref(),
+                    "/pay/create-sign",
+                    body(&[
+                        ("bizId", field(&r, "bizId")),
+                        ("payType", or(&r, "payType", json!("ALI"))),
+                        ("invitationCode", field(&r, "invitationCode")),
+                        ("renew", or(&r, "renew", Value::Null)),
+                        ("isDelay", or(&r, "isDelay", json!(0))),
+                        ("effectiveTime", or(&r, "effectiveTime", Value::Null)),
+                    ]),
+                )
+                .await
+            }),
+        )
+        .method(
+            "updateSign",
+            handler!(|p, r| {
+                if provider(&r)
+                    .as_deref()
+                    .is_some_and(is_zai_coding_plan_provider)
+                {
+                    return Err(error(ZAI_OVERSEAS_PAYMENT_REQUIRED));
+                }
+                p.post(
+                    provider(&r).as_deref(),
+                    "/pay/product/update/sign",
+                    body(&[
+                        ("bizId", field(&r, "bizId")),
+                        ("payType", or(&r, "payType", json!("ALI"))),
+                    ]),
+                )
+                .await
+            }),
+        )
+        .method(
+            "checkPayment",
+            handler!(|p, r| {
+                let base = format!(
+                    "{}{BIZ_PREFIX}/pay/check",
+                    p.host_for(provider(&r).as_deref())
+                );
+                let url = p.url_with(&base, &[("bizId", r["bizId"].as_str().unwrap_or(""))]);
+                let status = p.get(provider(&r).as_deref(), url).await?;
+                Ok(json!({"status": status}))
+            }),
+        )
+        .method(
+            "checkPendingOrders",
+            handler!(|p, r| {
+                let url = format!(
+                    "{}{BIZ_PREFIX}/pay/check-pending-orders",
+                    p.host_for(provider(&r).as_deref())
+                );
+                p.get(provider(&r).as_deref(), url).await
+            }),
+        )
+        .method(
+            "queryStripeCards",
+            handler!(|p, r| p
+                .zai_pay(provider(&r).as_deref(), "/stripe/query", None)
+                .await),
+        )
+        .method(
+            "bindStripeCard",
+            handler!(|p, r| p
+                .zai_pay(
+                    provider(&r).as_deref(),
+                    "/stripe/bind",
+                    Some(body(&[
+                        ("paymentMethodId", field(&r, "paymentMethodId")),
+                        ("returnUrl", field(&r, "returnUrl")),
+                        ("trackingContext", field(&r, "trackingContext")),
+                    ]))
+                )
+                .await),
+        )
+        .method(
+            "unbindStripeCard",
+            handler!(|p, r| p
+                .zai_pay(
+                    provider(&r).as_deref(),
+                    "/stripe/unbind",
+                    Some(body(&[("paymentMethodId", field(&r, "paymentMethodId")),]))
+                )
+                .await),
+        )
+        .method(
+            "payStripe",
+            handler!(|p, r| p
+                .zai_pay(
+                    provider(&r).as_deref(),
+                    "/stripe/pay",
+                    Some(body(&[
+                        ("productId", field(&r, "productId")),
+                        ("paymentMethodId", field(&r, "paymentMethodId")),
+                        ("isSubscribe", or(&r, "isSubscribe", json!(true))),
+                        ("returnUrl", field(&r, "returnUrl")),
+                        ("channelCode", field(&r, "channelCode")),
+                        ("estimatePayAmount", field(&r, "estimatePayAmount")),
+                        ("invitationCode", field(&r, "invitationCode")),
+                        ("bizId", field(&r, "bizId")),
+                        ("renew", or(&r, "renew", json!(false))),
+                    ]))
+                )
+                .await),
+        )
+        .method(
+            "checkPaypalSupport",
+            handler!(|p, r| p
+                .zai_pay(provider(&r).as_deref(), "/paypal/isSupport", None)
+                .await),
+        )
+        .method(
+            "createPaypalSetupToken",
+            handler!(|p, r| p
+                .zai_pay(
+                    provider(&r).as_deref(),
+                    "/paypal/setupToken",
+                    Some(body(&[
+                        ("returnUrl", field(&r, "returnUrl")),
+                        ("cancelUrl", field(&r, "cancelUrl")),
+                    ]))
+                )
+                .await),
+        )
+        .method(
+            "subscribePaypal",
+            handler!(|p, r| p
+                .zai_pay(
+                    provider(&r).as_deref(),
+                    "/paypal/subscribe",
+                    Some(body(&[
+                        ("productId", field(&r, "productId")),
+                        ("productDesc", field(&r, "productDesc")),
+                        ("setupTokenId", field(&r, "setupTokenId")),
+                        ("amount", field(&r, "amount")),
+                        ("isSubscribe", or(&r, "isSubscribe", json!(true))),
+                        ("estimatePayAmount", field(&r, "estimatePayAmount")),
+                        ("invitationCode", field(&r, "invitationCode")),
+                        ("bizId", field(&r, "bizId")),
+                        ("channelCode", field(&r, "channelCode")),
+                    ]))
+                )
+                .await),
+        )
+        .method(
+            "getEnterprisePricing",
+            handler!(|p, r| p.enterprise_pricing(&r).await),
+        )
+        .method(
+            "getEnterpriseBalance",
+            handler!(|p, _r| {
+                let url = format!(
+                    "{}{BIZ_PREFIX}/subscription/enterprise/v2/balance",
+                    p.bigmodel_host()
+                );
+                p.get(Some(BIGMODEL_CODING_PLAN), url).await
+            }),
+        )
+        .method(
+            "calculateEnterpriseOrder",
+            handler!(|p, r| p
+                .post(
+                    Some(BIGMODEL_CODING_PLAN),
+                    "/subscription/enterprise/v2/order/calculate",
+                    r.clone()
+                )
+                .await),
+        )
+        .method(
+            "createEnterpriseOrder",
+            handler!(|p, r| p
+                .post(
+                    Some(BIGMODEL_CODING_PLAN),
+                    "/subscription/enterprise/v2/order",
+                    r.clone()
+                )
+                .await),
+        )
+        .method(
+            "getEnterprisePendingOrders",
+            handler!(|p, _r| {
+                let url = format!(
+                    "{}{BIZ_PREFIX}/subscription/enterprise/v2/orders/pending",
+                    p.bigmodel_host()
+                );
+                p.get(Some(BIGMODEL_CODING_PLAN), url).await
+            }),
+        )
+        .method(
+            "cancelEnterpriseOrder",
+            handler!(|p, r| {
+                let order = encode_uri_component(r["orderNo"].as_str().unwrap_or(""));
+                p.post(
+                    Some(BIGMODEL_CODING_PLAN),
+                    &format!("/subscription/enterprise/v2/order/{order}/cancel"),
+                    json!({}),
+                )
+                .await
+            }),
+        )
+        .method(
+            "continueEnterpriseOrderPayment",
+            handler!(|p, r| {
+                let order = encode_uri_component(r["orderNo"].as_str().unwrap_or(""));
+                p.post(
+                    Some(BIGMODEL_CODING_PLAN),
+                    &format!("/subscription/enterprise/v2/order/{order}/pay"),
+                    json!({}),
+                )
+                .await
+            }),
+        )
+        .method(
+            "checkEnterpriseOrderStatus",
+            handler!(|p, r| {
+                let order = encode_uri_component(r["orderNo"].as_str().unwrap_or(""));
+                let url = format!(
+                    "{}{BIZ_PREFIX}/subscription/enterprise/v2/order/{order}/status",
+                    p.bigmodel_host()
+                );
+                p.get(Some(BIGMODEL_CODING_PLAN), url).await
+            }),
+        )
 }
 
 #[cfg(test)]
@@ -827,25 +1163,45 @@ mod tests {
 
     #[test]
     fn envelopes_and_error_normalization_match_node() {
-        assert_eq!(unwrap_envelope(json!({"code": 200, "data": {"a": 1}}), BIGMODEL_CODING_PLAN).unwrap(), json!({"a": 1}));
-        assert_eq!(unwrap_envelope(json!({"data": "ok"}), BIGMODEL_CODING_PLAN).unwrap(), json!("ok"));
         assert_eq!(
-            unwrap_envelope(json!({"code": 500}), ZAI_CODING_PLAN).unwrap_err().message,
+            unwrap_envelope(json!({"code": 200, "data": {"a": 1}}), BIGMODEL_CODING_PLAN).unwrap(),
+            json!({"a": 1})
+        );
+        assert_eq!(
+            unwrap_envelope(json!({"data": "ok"}), BIGMODEL_CODING_PLAN).unwrap(),
+            json!("ok")
+        );
+        assert_eq!(
+            unwrap_envelope(json!({"code": 500}), ZAI_CODING_PLAN)
+                .unwrap_err()
+                .message,
             "Z.ai request failed: 500"
         );
         assert_eq!(
-            unwrap_envelope(json!({"code": 1001, "msg": "<html><body>blocked"}), BIGMODEL_CODING_PLAN).unwrap_err().message,
+            unwrap_envelope(
+                json!({"code": 1001, "msg": "<html><body>blocked"}),
+                BIGMODEL_CODING_PLAN
+            )
+            .unwrap_err()
+            .message,
             SYSTEM_BUSY
         );
         assert_eq!(
-            unwrap_envelope(json!({"code": 200, "data": null}), BIGMODEL_CODING_PLAN).unwrap_err().message,
+            unwrap_envelope(json!({"code": 200, "data": null}), BIGMODEL_CODING_PLAN)
+                .unwrap_err()
+                .message,
             "BigModel response missing data"
         );
         assert_eq!(
             body(&[("a", Some(json!(1))), ("b", None), ("c", Some(Value::Null))]),
             json!({"a": 1, "c": null})
         );
-        let normalized = CodingPlanSubscription::normalize_product_ids(&json!({"builtin:zai-coding-plan": [], "x": [1]}));
-        assert_eq!(normalized, json!({"x": [1], "account:zai-individual-coding-plan": []}));
+        let normalized = CodingPlanSubscription::normalize_product_ids(
+            &json!({"builtin:zai-coding-plan": [], "x": [1]}),
+        );
+        assert_eq!(
+            normalized,
+            json!({"x": [1], "account:zai-individual-coding-plan": []})
+        );
     }
 }

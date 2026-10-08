@@ -25,7 +25,12 @@ fn tsx_available(root: &Path) -> bool {
 fn run_ts(root: &Path, home: &Path, mode: &str, payload: Value) -> Value {
     let output = Command::new("node")
         .current_dir(root)
-        .args(["--import", "tsx", "scripts/rust-host/credential-interop.ts", mode])
+        .args([
+            "--import",
+            "tsx",
+            "scripts/rust-host/credential-interop.ts",
+            mode,
+        ])
         .arg(payload.to_string())
         .env("HOME", home)
         .env("USERPROFILE", home)
@@ -80,7 +85,10 @@ async fn credentials_cross_read_and_write_with_typescript() {
         json!({"oauth:zai:access_token": "token-ts", "zcodejwttoken": null}),
     );
     assert_eq!(
-        rust.load("oauth:zai:access_token").await.unwrap().as_deref(),
+        rust.load("oauth:zai:access_token")
+            .await
+            .unwrap()
+            .as_deref(),
         Some("token-ts")
     );
     assert_eq!(rust.load("zcodejwttoken").await.unwrap(), None);
@@ -189,7 +197,8 @@ fn feedback_redaction_matches_typescript() {
             json!({"texts": texts, "diagnostic": diagnostic}),
         );
         for (index, text) in texts.iter().enumerate() {
-            let actual = zcode_host_services::account::privacy::redact_feedback_text(text, diagnostic);
+            let actual =
+                zcode_host_services::account::privacy::redact_feedback_text(text, diagnostic);
             assert_eq!(
                 Value::String(actual),
                 expected[index],

@@ -134,7 +134,10 @@ pub struct Release {
 /// 拒绝已退出的 ZAPI provider。规则内部字段由解析层按 TS 的容错规则处理。
 pub fn decode_release(value: Value) -> Result<Release, String> {
     let object = value.as_object().ok_or("Release 不是对象")?;
-    if object.keys().any(|key| !matches!(key.as_str(), "schemaVersion" | "revision" | "config")) {
+    if object
+        .keys()
+        .any(|key| !matches!(key.as_str(), "schemaVersion" | "revision" | "config"))
+    {
         return Err("Release 含未知字段".into());
     }
     if object.get("schemaVersion") != Some(&json!(1)) {
@@ -149,7 +152,10 @@ pub fn decode_release(value: Value) -> Result<Release, String> {
         .get("config")
         .and_then(Value::as_object)
         .ok_or("Release config 不是对象")?;
-    if config.len() != 2 || !config.contains_key("providerConfigRules") || !config.contains_key("modelConfigRules") {
+    if config.len() != 2
+        || !config.contains_key("providerConfigRules")
+        || !config.contains_key("modelConfigRules")
+    {
         return Err("Release config 字段非法".into());
     }
     let retired = config["providerConfigRules"]["providerRules"]
@@ -174,7 +180,8 @@ fn semantic_eq(left: &Value, right: &Value) -> bool {
         }
         (Value::Object(a), Value::Object(b)) => {
             a.len() == b.len()
-                && a.iter().all(|(key, x)| b.get(key).is_some_and(|y| semantic_eq(x, y)))
+                && a.iter()
+                    .all(|(key, x)| b.get(key).is_some_and(|y| semantic_eq(x, y)))
         }
         _ => left == right,
     }
@@ -294,8 +301,12 @@ impl BuiltinSource {
         let paths = match self.paths().await {
             Ok(paths) => paths,
             Err(error) => {
-                log::warn(format!("ZCode Built-in Endpoint 不可用，使用随包配置: {error}"));
-                let bytes = tokio::fs::read(&self.bundled).await.map_err(|e| e.to_string())?;
+                log::warn(format!(
+                    "ZCode Built-in Endpoint 不可用，使用随包配置: {error}"
+                ));
+                let bytes = tokio::fs::read(&self.bundled)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 return Ok(BuiltinRead {
                     path: self.bundled.clone(),
                     bytes,
@@ -304,7 +315,10 @@ impl BuiltinSource {
             }
         };
         // 先无锁读取：Active 只经原子替换写入，已对齐时不必每次轮询都取目录锁。
-        let (bundled, active) = (read_candidate(&self.bundled).await, read_candidate(&paths.active).await);
+        let (bundled, active) = (
+            read_candidate(&self.bundled).await,
+            read_candidate(&paths.active).await,
+        );
         if let Ok(true) = select(&bundled, &active)
             && let Some(Ok((bytes, _))) = active
         {
@@ -314,7 +328,8 @@ impl BuiltinSource {
                 materialized: true,
             });
         }
-        if let (Ok(false), Some(Ok((_, b))), Some(Ok((bytes, a)))) = (select(&bundled, &active), &bundled, &active)
+        if let (Ok(false), Some(Ok((_, b))), Some(Ok((bytes, a)))) =
+            (select(&bundled, &active), &bundled, &active)
             && same_release(b, a)
         {
             return Ok(BuiltinRead {
@@ -331,7 +346,9 @@ impl BuiltinSource {
             }),
             Err(error) => {
                 // Active 只是可丢弃缓存：锁或原子写失败不能阻断 Bundled 基线。
-                log::warn(format!("ZCode Built-in Active 物化失败，使用随包配置: {error}"));
+                log::warn(format!(
+                    "ZCode Built-in Active 物化失败，使用随包配置: {error}"
+                ));
                 match bundled {
                     Some(Ok((bytes, _))) => Ok(BuiltinRead {
                         path: paths.active,
@@ -370,7 +387,10 @@ impl BuiltinSource {
                 if same_release(&release, &current) {
                     return Ok("unchanged");
                 }
-                anyhow::bail!("ZCode Built-in 相同 revision {} 对应不同内容", release.revision);
+                anyhow::bail!(
+                    "ZCode Built-in 相同 revision {} 对应不同内容",
+                    release.revision
+                );
             }
             write_active(&active_path, &release.value).await?;
             Ok("updated")
@@ -403,14 +423,16 @@ impl BuiltinSource {
         let lease_id = crate::main_bridge::random_id();
         let now = (self.now)();
         let acquired = {
-            let (control, endpoint, lease_id) = (paths.control.clone(), endpoint.clone(), lease_id.clone());
+            let (control, endpoint, lease_id) =
+                (paths.control.clone(), endpoint.clone(), lease_id.clone());
             with_file_lock(&paths.control, &LockOptions::default(), async || {
                 let current = read_control(&control).await;
                 let same = current["endpointKey"] == endpoint.as_str();
                 if same && current["leaseUntil"].as_f64().unwrap_or(0.0) > now as f64 {
                     return Ok(Some("lease-held"));
                 }
-                if !force && same && current["nextEligibleAt"].as_f64().unwrap_or(0.0) > now as f64 {
+                if !force && same && current["nextEligibleAt"].as_f64().unwrap_or(0.0) > now as f64
+                {
                     return Ok(Some("not-due"));
                 }
                 let mut next = Map::new();
@@ -420,11 +442,19 @@ impl BuiltinSource {
                 next.insert("leaseUntil".into(), json!(now + LEASE_MS));
                 next.insert(
                     "nextEligibleAt".into(),
-                    if same { current["nextEligibleAt"].clone() } else { json!(0) },
+                    if same {
+                        current["nextEligibleAt"].clone()
+                    } else {
+                        json!(0)
+                    },
                 );
                 next.insert(
                     "failureCount".into(),
-                    if same { current["failureCount"].clone() } else { json!(0) },
+                    if same {
+                        current["failureCount"].clone()
+                    } else {
+                        json!(0)
+                    },
                 );
                 write_control(&control, &Value::Object(next)).await?;
                 Ok(None)
@@ -439,7 +469,8 @@ impl BuiltinSource {
         let fetched = (self.environment.fetch_release)(endpoint.clone()).await;
         let outcome = async {
             let release = fetched?;
-            let current_endpoint = normalize_endpoint_origin(&(self.environment.resolve_origin)().await?)?;
+            let current_endpoint =
+                normalize_endpoint_origin(&(self.environment.resolve_origin)().await?)?;
             if current_endpoint != endpoint {
                 log::debug("ZCode Built-in 刷新检查: skipped (endpoint-changed)".to_owned());
                 return Ok("skipped".to_owned());
@@ -454,12 +485,15 @@ impl BuiltinSource {
             if result == "updated" {
                 log::info(format!("ZCode Built-in CDN 配置已更新 revision={revision}"));
             } else {
-                log::debug(format!("ZCode Built-in 刷新检查: {result} revision={revision}"));
+                log::debug(format!(
+                    "ZCode Built-in 刷新检查: {result} revision={revision}"
+                ));
             }
             Ok(result.to_owned())
         }
         .await;
-        self.finish_lease(&paths.control, &endpoint, &lease_id, outcome.is_ok()).await;
+        self.finish_lease(&paths.control, &endpoint, &lease_id, outcome.is_ok())
+            .await;
         outcome
     }
 
@@ -476,7 +510,9 @@ impl BuiltinSource {
                 HOUR_MS
             } else {
                 let exponent = failure_count.saturating_sub(1).min(32) as u32;
-                FAILURE_BASE_DELAY_MS.saturating_mul(2i64.saturating_pow(exponent)).min(HOUR_MS)
+                FAILURE_BASE_DELAY_MS
+                    .saturating_mul(2i64.saturating_pow(exponent))
+                    .min(HOUR_MS)
             };
             write_control(
                 control,
@@ -499,9 +535,14 @@ impl BuiltinSource {
 
 /// 锁内：读两份候选，选出较新者，必要时替换 Active。返回 (Active 字节, 选中的 Release)。
 async fn materialize_locked(bundled: &Path, active: &Path) -> anyhow::Result<(Vec<u8>, Release)> {
-    let (bundled_candidate, active_candidate) = (read_candidate(bundled).await, read_candidate(active).await);
+    let (bundled_candidate, active_candidate) =
+        (read_candidate(bundled).await, read_candidate(active).await);
     let use_active = select(&bundled_candidate, &active_candidate).map_err(anyhow::Error::msg)?;
-    let selected = if use_active { &active_candidate } else { &bundled_candidate };
+    let selected = if use_active {
+        &active_candidate
+    } else {
+        &bundled_candidate
+    };
     let Some(Ok((_, release))) = selected else {
         anyhow::bail!("ZCode Built-in Release 不可用");
     };
@@ -585,17 +626,28 @@ mod tests {
 
     #[test]
     fn cache_paths_match_node_layout() {
-        let paths = cache_paths(Path::new("/root"), "darwin-aarch64", "1.2.3", "https://zcode.z.ai/x?y").unwrap();
+        let paths = cache_paths(
+            Path::new("/root"),
+            "darwin-aarch64",
+            "1.2.3",
+            "https://zcode.z.ai/x?y",
+        )
+        .unwrap();
         let key = &sha256_hex("https://zcode.z.ai")[..32];
         assert_eq!(
             paths.active,
-            PathBuf::from(format!("/root/runtime/provider/darwin-aarch64/1.2.3/endpoint-{key}/zcode-builtin.json"))
+            PathBuf::from(format!(
+                "/root/runtime/provider/darwin-aarch64/1.2.3/endpoint-{key}/zcode-builtin.json"
+            ))
         );
         assert!(cache_paths(Path::new("/root"), "..", "1", "https://a").is_err());
         assert!(cache_paths(Path::new("/root"), "p", "1", "ftp://a").is_err());
         let vars = BTreeMap::from([("ZCODE_TEST_RELEASE_ARCH".to_owned(), "riscv".to_owned())]);
         assert_eq!(release_platform(&vars, "win32", "x64"), "windows-riscv");
-        assert_eq!(release_platform(&BTreeMap::new(), "darwin", "arm64"), "darwin-aarch64");
+        assert_eq!(
+            release_platform(&BTreeMap::new(), "darwin", "arm64"),
+            "darwin-aarch64"
+        );
         assert!(decode_release(json!({"schemaVersion": 1, "revision": 1, "config": {"providerConfigRules": {"providerRules": [{"providerId": "builtin:zapi"}]}, "modelConfigRules": {}}})).is_err());
         assert!(decode_release(json!({"schemaVersion": 1, "revision": -1, "config": {}})).is_err());
     }
@@ -603,26 +655,44 @@ mod tests {
     #[tokio::test]
     async fn read_materializes_newest_and_refresh_applies_remote_once_per_lease() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("bundled.json"), release(5, "bundled").to_string()).unwrap();
+        std::fs::write(
+            dir.path().join("bundled.json"),
+            release(5, "bundled").to_string(),
+        )
+        .unwrap();
         let origin = Arc::new(Mutex::new("http://127.0.0.1:9".to_owned()));
         let remote = Arc::new(Mutex::new(Ok(Some(release(7, "remote")))));
         let fetches = Arc::new(AtomicUsize::new(0));
         let clock = Arc::new(AtomicI64::new(1_000_000));
-        let source = source(dir.path(), origin.clone(), remote.clone(), fetches.clone(), clock.clone());
+        let source = source(
+            dir.path(),
+            origin.clone(),
+            remote.clone(),
+            fetches.clone(),
+            clock.clone(),
+        );
 
         // 首读：Active 不存在 → 物化为 Bundled。
         let first = source.read().await.unwrap();
         assert!(first.path.ends_with("zcode-builtin.json"));
-        assert!(first.path.starts_with(dir.path().join("v2/runtime/provider/darwin-aarch64/1.2.3")));
+        assert!(
+            first
+                .path
+                .starts_with(dir.path().join("v2/runtime/provider/darwin-aarch64/1.2.3"))
+        );
         let written: Value = serde_json::from_slice(&std::fs::read(&first.path).unwrap()).unwrap();
         assert_eq!(written["revision"], 5);
 
         // 刷新：下载到更高 revision → 写 Active；控制文件记录下次时间。
         assert_eq!(source.refresh(false).await.unwrap(), "updated");
         let second = source.read().await.unwrap();
-        assert_eq!(serde_json::from_slice::<Value>(&second.bytes).unwrap()["revision"], 7);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&second.bytes).unwrap()["revision"],
+            7
+        );
         let control_path = first.path.with_file_name("zcode-builtin-refresh.json");
-        let control: Value = serde_json::from_str(&std::fs::read_to_string(&control_path).unwrap()).unwrap();
+        let control: Value =
+            serde_json::from_str(&std::fs::read_to_string(&control_path).unwrap()).unwrap();
         assert_eq!(control["endpointKey"], "http://127.0.0.1:9");
         assert_eq!(control["nextEligibleAt"], 1_000_000 + HOUR_MS);
         assert!(control.get("leaseId").is_none());
@@ -635,15 +705,29 @@ mod tests {
         *remote.lock().unwrap() = Ok(Some(release(6, "older")));
         assert_eq!(source.refresh(true).await.unwrap(), "stale");
         *remote.lock().unwrap() = Ok(Some(release(7, "conflict")));
-        assert!(source.refresh(true).await.unwrap_err().contains("相同 revision 7"));
-        let control: Value = serde_json::from_str(&std::fs::read_to_string(&control_path).unwrap()).unwrap();
+        assert!(
+            source
+                .refresh(true)
+                .await
+                .unwrap_err()
+                .contains("相同 revision 7")
+        );
+        let control: Value =
+            serde_json::from_str(&std::fs::read_to_string(&control_path).unwrap()).unwrap();
         assert_eq!(control["failureCount"], 1);
         assert_eq!(control["nextEligibleAt"], 1_000_000 + FAILURE_BASE_DELAY_MS);
 
         // Bundled 升级到更高 revision → 读取时以 Bundled 覆盖 Active。
-        std::fs::write(dir.path().join("bundled.json"), release(9, "upgraded").to_string()).unwrap();
+        std::fs::write(
+            dir.path().join("bundled.json"),
+            release(9, "upgraded").to_string(),
+        )
+        .unwrap();
         let third = source.read().await.unwrap();
-        assert_eq!(serde_json::from_slice::<Value>(&third.bytes).unwrap()["revision"], 9);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&third.bytes).unwrap()["revision"],
+            9
+        );
 
         // Endpoint 切换：换到另一份 Active，不复用上一 Endpoint 的缓存。
         *origin.lock().unwrap() = "http://127.0.0.1:10".to_owned();

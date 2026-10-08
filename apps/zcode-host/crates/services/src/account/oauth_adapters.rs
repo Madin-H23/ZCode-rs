@@ -300,9 +300,17 @@ impl Adapter {
 
     pub fn parse_callback(&self, url: &Url) -> Result<CallbackParams, AdapterError> {
         let (first, second, message) = if self.config.id == BIGMODEL {
-            ("authCode", "code", "OAuth 回调缺少 authCode/code 或 state 参数")
+            (
+                "authCode",
+                "code",
+                "OAuth 回调缺少 authCode/code 或 state 参数",
+            )
         } else {
-            ("code", "authCode", "OAuth 回调缺少 code/authCode 或 state 参数")
+            (
+                "code",
+                "authCode",
+                "OAuth 回调缺少 code/authCode 或 state 参数",
+            )
         };
         let code = query(url, first).or_else(|| query(url, second));
         let state = query(url, "state");
@@ -431,7 +439,10 @@ impl Adapter {
         let Some(jwt) = jwt else {
             return Err(AdapterError::new("Token 交换失败：响应缺少 data.token"));
         };
-        let Some(access) = data["zai"]["access_token"].as_str().filter(|t| !t.is_empty()) else {
+        let Some(access) = data["zai"]["access_token"]
+            .as_str()
+            .filter(|t| !t.is_empty())
+        else {
             return Err(AdapterError::new(
                 "Token 交换失败：响应缺少 data.zai.access_token",
             ));
@@ -444,8 +455,11 @@ impl Adapter {
         let meaningful = ["user_id", "email", "name", "avatar"]
             .iter()
             .any(|key| user[*key].as_str().is_some_and(|v| !v.trim().is_empty()));
-        *self.last_backend_user.lock().unwrap_or_else(|p| p.into_inner()) = meaningful
-            .then(|| (state.to_owned(), backend_user_profile(user)));
+        *self
+            .last_backend_user
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) =
+            meaningful.then(|| (state.to_owned(), backend_user_profile(user)));
         Ok(TokenSet {
             access_token: business,
             refresh_token: None,
@@ -498,8 +512,13 @@ impl Adapter {
             });
         }
         {
-            let mut cached = self.last_backend_user.lock().unwrap_or_else(|p| p.into_inner());
-            if cached.as_ref().is_some_and(|(cached_state, _)| cached_state == state)
+            let mut cached = self
+                .last_backend_user
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            if cached
+                .as_ref()
+                .is_some_and(|(cached_state, _)| cached_state == state)
                 && let Some((_, profile)) = cached.take()
             {
                 return Ok(profile);
@@ -519,7 +538,9 @@ impl Adapter {
         } else {
             &payload["data"]
         };
-        let id = first_string(user, &["sub", "id"]).unwrap_or("unknown").to_owned();
+        let id = first_string(user, &["sub", "id"])
+            .unwrap_or("unknown")
+            .to_owned();
         let username = first_string(user, &["name", "preferred_username", "email"])
             .map(str::to_owned)
             .unwrap_or_else(|| id.clone());
@@ -660,9 +681,15 @@ mod tests {
     #[test]
     fn runtime_config_and_authorize_urls() {
         let configs = runtime_config(&endpoints());
-        assert_eq!(configs[0].token_url, "https://zcode.z.ai/api/v1/oauth/token");
+        assert_eq!(
+            configs[0].token_url,
+            "https://zcode.z.ai/api/v1/oauth/token"
+        );
         assert_eq!(configs[0].authorize_url, "https://bigmodel.cn/login");
-        assert_eq!(configs[1].userinfo_url, "https://chat.z.ai/api/oauth/userinfo");
+        assert_eq!(
+            configs[1].userinfo_url,
+            "https://chat.z.ai/api/oauth/userinfo"
+        );
         assert_eq!(
             configs[1].business_login_url.as_deref(),
             Some("https://api.z.ai/api/auth/z/login")
@@ -674,9 +701,13 @@ mod tests {
             zai.build_authorize_url("s1"),
             "https://chat.z.ai/api/oauth/authorize?redirect_uri=https%3A%2F%2Fzcode.z.ai%2Fapp%2Foauth%2Flogin%3Fredirect%3Dzcode%253A%252F%252Foauth%252Fcallback%26app_version%3D1.0.0&response_type=code&client_id=client_P8X5CMWmlaRO9gyO-KSqtg&state=s1"
         );
-        let url = Url::parse("zcode://oauth/callback?authCode=c&code=d&state=s&utm_source=x").unwrap();
+        let url =
+            Url::parse("zcode://oauth/callback?authCode=c&code=d&state=s&utm_source=x").unwrap();
         assert_eq!(zai.parse_callback(&url).unwrap().code, "d");
-        assert_eq!(parse_attribution(&url).unwrap(), json!({"utm_source": "x"}).as_object().unwrap().clone());
+        assert_eq!(
+            parse_attribution(&url).unwrap(),
+            json!({"utm_source": "x"}).as_object().unwrap().clone()
+        );
     }
 
     #[test]
@@ -699,6 +730,9 @@ mod tests {
         );
         assert!(!needs_bigmodel_migration(&migrated, 11));
         let done = migrated_bigmodel_profile(&migrated, Ok(UserProfile::fallback()), 11);
-        assert_eq!(done.raw_profile.unwrap(), json!({"zcodeProfileSchemaVersion": 2}));
+        assert_eq!(
+            done.raw_profile.unwrap(),
+            json!({"zcodeProfileSchemaVersion": 2})
+        );
     }
 }

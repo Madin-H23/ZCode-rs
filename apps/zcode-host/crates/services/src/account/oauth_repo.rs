@@ -351,7 +351,10 @@ impl OAuthCredentialRepo {
         self.credentials.delete(ACTIVE_PROVIDER_KEY).await
     }
 
-    async fn load_token_set_raw(&self, provider: &str) -> Result<Option<TokenSet>, CredentialError> {
+    async fn load_token_set_raw(
+        &self,
+        provider: &str,
+    ) -> Result<Option<TokenSet>, CredentialError> {
         let Some(access_token) = self
             .credentials
             .load(&access_token_key(provider))
@@ -399,7 +402,11 @@ impl OAuthCredentialRepo {
                     .save(&refresh_token_key(provider), refresh)
                     .await?
             }
-            None => self.credentials.delete(&refresh_token_key(provider)).await?,
+            None => {
+                self.credentials
+                    .delete(&refresh_token_key(provider))
+                    .await?
+            }
         }
         if KNOWN_PROVIDERS.contains(&provider) {
             match tokens.zcode_jwt_token.as_deref().filter(|t| !t.is_empty()) {
@@ -410,7 +417,10 @@ impl OAuthCredentialRepo {
         Ok(())
     }
 
-    pub async fn user_profile(&self, provider: &str) -> Result<Option<UserProfile>, CredentialError> {
+    pub async fn user_profile(
+        &self,
+        provider: &str,
+    ) -> Result<Option<UserProfile>, CredentialError> {
         let raw = match self.credentials.load(&user_info_key(provider)).await {
             Ok(raw) => raw,
             Err(error) if error.is_decrypt() => {
@@ -471,7 +481,9 @@ impl OAuthCredentialRepo {
 
     pub async fn clear_provider(&self, provider: &str) -> Result<(), CredentialError> {
         self.credentials.delete(&access_token_key(provider)).await?;
-        self.credentials.delete(&refresh_token_key(provider)).await?;
+        self.credentials
+            .delete(&refresh_token_key(provider))
+            .await?;
         self.credentials.delete(&user_info_key(provider)).await?;
         if KNOWN_PROVIDERS.contains(&provider) {
             self.credentials.delete(ZCODE_JWT_TOKEN_KEY).await?;
@@ -516,7 +528,10 @@ pub fn encode_uri_component(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric()
-            || matches!(byte, b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')')
+            || matches!(
+                byte,
+                b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+            )
         {
             out.push(byte as char);
         } else {
@@ -551,7 +566,10 @@ pub fn jwt_expiration(token: &str, now_ms: i64) -> JwtExpiration {
     let Ok(payload) = serde_json::from_slice::<Value>(&bytes) else {
         return JwtExpiration::Unknown;
     };
-    let Some(exp) = payload["exp"].as_f64().filter(|exp| exp.is_finite() && *exp > 0.0) else {
+    let Some(exp) = payload["exp"]
+        .as_f64()
+        .filter(|exp| exp.is_finite() && *exp > 0.0)
+    else {
         return JwtExpiration::Unknown;
     };
     let expires_at = (exp * 1000.0) as i64;
@@ -581,20 +599,32 @@ mod tests {
         .await
         .unwrap();
         repo.set_active_provider(Some(ZAI)).await.unwrap();
-        let raw_user = json!({"user_id": "u1", "name": " Alice ", "email": "a@x", "avatar": "https://img"});
+        let raw_user =
+            json!({"user_id": "u1", "name": " Alice ", "email": "a@x", "avatar": "https://img"});
         let profile = profile_from_raw_zai_user(&raw_user).unwrap();
         repo.save_user_profile(ZAI, &profile).await.unwrap();
         // zai 存原始 user 对象。
-        let stored = repo.credentials().load(&user_info_key(ZAI)).await.unwrap().unwrap();
+        let stored = repo
+            .credentials()
+            .load(&user_info_key(ZAI))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), raw_user);
         let loaded = repo.active_user_profile().await.unwrap().unwrap();
         assert_eq!(loaded.username, "Alice");
-        assert_eq!(loaded.user_info(), json!({"id": "u1", "username": "Alice", "displayName": "Alice", "avatarUrl": "https://img"}));
+        assert_eq!(
+            loaded.user_info(),
+            json!({"id": "u1", "username": "Alice", "displayName": "Alice", "avatarUrl": "https://img"})
+        );
         let tokens = repo.active_token_set().await.unwrap().unwrap();
         assert_eq!(tokens.zcode_jwt_token.as_deref(), Some("jwt"));
         repo.clear_active_session().await.unwrap();
         assert_eq!(repo.active_provider().await.unwrap(), None);
-        assert_eq!(repo.credentials().load(ZCODE_JWT_TOKEN_KEY).await.unwrap(), None);
+        assert_eq!(
+            repo.credentials().load(ZCODE_JWT_TOKEN_KEY).await.unwrap(),
+            None
+        );
     }
 
     #[tokio::test]
@@ -616,7 +646,10 @@ mod tests {
         assert_eq!(receiver.recv().await.unwrap(), vec!["bigmodel", "zai"]);
         assert_eq!(good.load(ACTIVE_PROVIDER_KEY).await.unwrap(), None);
         assert_eq!(good.load(&access_token_key(BIGMODEL)).await.unwrap(), None);
-        assert_eq!(good.load("ssh:host").await.unwrap().as_deref(), Some("keep"));
+        assert_eq!(
+            good.load("ssh:host").await.unwrap().as_deref(),
+            Some("keep")
+        );
     }
 
     #[test]
@@ -632,7 +665,8 @@ mod tests {
             JwtExpiration::Expired(100_000)
         );
         assert_eq!(jwt_expiration("opaque", 0), JwtExpiration::Unknown);
-        let png = base64::engine::general_purpose::STANDARD.encode([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0, 1, 2, 3, 4]);
+        let png = base64::engine::general_purpose::STANDARD
+            .encode([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0, 1, 2, 3, 4]);
         assert_eq!(
             normalize_avatar(Some(&png)).unwrap(),
             format!("data:image/png;base64,{png}")

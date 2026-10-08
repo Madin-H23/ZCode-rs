@@ -18,14 +18,14 @@ pub mod net;
 pub mod oauth;
 pub mod oauth_adapters;
 pub mod oauth_repo;
+#[cfg(test)]
+pub(crate) mod oauth_tests;
 pub mod official_mcp;
 pub mod onboarding;
 pub mod privacy;
 pub mod telemetry;
 pub mod usage;
 pub mod usage_monitor;
-#[cfg(test)]
-pub(crate) mod oauth_tests;
 
 use std::sync::Arc;
 
@@ -38,7 +38,6 @@ use crate::broadcast::Broadcaster;
 use crate::providers::ProviderRuntime;
 use crate::settings::SettingStore;
 use crate::tasks_index::{ListFilter, TasksIndex};
-
 
 /// `ZCODE_JWT_INVALID_BROADCAST_CHANNEL`。
 const JWT_INVALID_BROADCAST_CHANNEL: &str = "auth:zcode-jwt-invalid";
@@ -64,7 +63,11 @@ pub struct AccountStack {
 
 impl AccountStack {
     /// 构建账号栈并把账号 overlay 接入 provider runtime（之后的读取等首份账号快照）。
-    pub fn new(context: &ServiceContext, settings: &SettingStore, runtime: &ProviderRuntime) -> Self {
+    pub fn new(
+        context: &ServiceContext,
+        settings: &SettingStore,
+        runtime: &ProviderRuntime,
+    ) -> Self {
         let environment = &context.environment;
         let app_config_dir = environment.app_config_dir();
         let credentials = credential::CredentialStore::new(
@@ -76,7 +79,8 @@ impl AccountStack {
         let repo = oauth_repo::OAuthCredentialRepo::new(credentials.clone());
         let oauth = oauth::OAuthService::new(repo.clone(), api.clone());
         let account_api = auth::AccountApi::new(api.clone());
-        let keys = auth::CodingPlanKeys::new(credentials.clone(), repo.clone(), account_api.clone());
+        let keys =
+            auth::CodingPlanKeys::new(credentials.clone(), repo.clone(), account_api.clone());
         let auth = auth::AccountRequestAuth::new(
             settings.clone(),
             repo.clone(),
@@ -123,9 +127,11 @@ impl AccountStack {
             fetch_release: {
                 let api = api.clone();
                 Arc::new(move |origin| {
-                    let (api, app_version, platform) = (api.clone(), app_version.clone(), platform.clone());
+                    let (api, app_version, platform) =
+                        (api.clone(), app_version.clone(), platform.clone());
                     Box::pin(async move {
-                        builtin_download::download_release(&api, &origin, &app_version, &platform).await
+                        builtin_download::download_release(&api, &origin, &app_version, &platform)
+                            .await
                     })
                 })
             },
@@ -185,28 +191,37 @@ impl AccountStack {
         }));
         // 401：只有在会话队列里复核为当前登录凭据才退出，并广播 JWT 失效。
         let oauth = self.oauth.clone();
-        self.api.set_unauthorized_handler(Arc::new(move |url, headers| {
-            let (oauth, broadcaster) = (oauth.clone(), broadcaster.clone());
-            Box::pin(async move {
-                match oauth.logout_if_current_credential_request(url, headers).await {
-                    Ok(true) => broadcaster.send(json!({
-                        "channel": JWT_INVALID_BROADCAST_CHANNEL,
-                        "payload": {},
-                    })),
-                    Ok(false) => {}
-                    Err(error) => log::warn(format!(
-                        "[zcodeJwtLogout] ZCode JWT logout failed: {}",
-                        error.message
-                    )),
-                }
-            })
-        }));
+        self.api
+            .set_unauthorized_handler(Arc::new(move |url, headers| {
+                let (oauth, broadcaster) = (oauth.clone(), broadcaster.clone());
+                Box::pin(async move {
+                    match oauth
+                        .logout_if_current_credential_request(url, headers)
+                        .await
+                    {
+                        Ok(true) => broadcaster.send(json!({
+                            "channel": JWT_INVALID_BROADCAST_CHANNEL,
+                            "payload": {},
+                        })),
+                        Ok(false) => {}
+                        Err(error) => log::warn(format!(
+                            "[zcodeJwtLogout] ZCode JWT logout failed: {}",
+                            error.message
+                        )),
+                    }
+                })
+            }));
         self.providers.start();
         self.runtime.start_builtin_refresh();
     }
 
     /// 账号相关 channel。
-    pub fn register(&self, registry: &mut ChannelRegistry, tasks_index: TasksIndex, app_config_dir: std::path::PathBuf) {
+    pub fn register(
+        &self,
+        registry: &mut ChannelRegistry,
+        tasks_index: TasksIndex,
+        app_config_dir: std::path::PathBuf,
+    ) {
         registry.implement(credential::service(self.credentials.clone()));
         registry.implement(oauth::service(self.oauth.clone()));
         registry.implement(client_config::client_config_service(
@@ -248,8 +263,9 @@ impl AccountStack {
             Arc::new(move |params| {
                 let process = sync.any_process();
                 Box::pin(async move {
-                    let process = process
-                        .ok_or_else(|| zcode_host_kit::RpcError::new("Error", "no_active_workspace"))?;
+                    let process = process.ok_or_else(|| {
+                        zcode_host_kit::RpcError::new("Error", "no_active_workspace")
+                    })?;
                     process.request_value("v4/usage/stats", &params).await
                 })
             }),
@@ -285,12 +301,14 @@ impl AccountStack {
 
     /// `coding-plan-subscription`（需要 provider runtime 投影闲时视图）。
     pub fn register_coding_plan(&self, registry: &mut ChannelRegistry, runtime: &ProviderRuntime) {
-        registry.implement(coding_plan::service(coding_plan::CodingPlanSubscription::new(
-            self.api.clone(),
-            self.account_api.clone(),
-            self.credentials.clone(),
-            runtime.clone(),
-        )));
+        registry.implement(coding_plan::service(
+            coding_plan::CodingPlanSubscription::new(
+                self.api.clone(),
+                self.account_api.clone(),
+                self.credentials.clone(),
+                runtime.clone(),
+            ),
+        ));
     }
 
     /// provider-settings 的写成员（个人配置）与模型连通性测试；`refresh` 同时刷新账号层。
@@ -302,7 +320,9 @@ impl AccountStack {
     ) {
         let (source, builtin) = (self.providers.clone(), runtime.clone());
         let refresh: Arc<
-            dyn Fn(String) -> futures_util::future::BoxFuture<'static, Result<(), String>> + Send + Sync,
+            dyn Fn(String) -> futures_util::future::BoxFuture<'static, Result<(), String>>
+                + Send
+                + Sync,
         > = Arc::new(move |reason| {
             let (source, builtin) = (source.clone(), builtin.clone());
             Box::pin(async move {

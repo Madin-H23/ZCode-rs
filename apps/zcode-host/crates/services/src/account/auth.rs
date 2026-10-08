@@ -15,8 +15,7 @@ use zcode_host_kit::log;
 use super::credential::CredentialStore;
 use super::net::{ApiClient, ApiError, ApiRequest};
 use super::oauth_repo::{
-    BIGMODEL, OAuthCredentialRepo, ZAI, ZCODE_JWT_TOKEN_KEY, access_token_key,
-    encode_uri_component,
+    BIGMODEL, OAuthCredentialRepo, ZAI, ZCODE_JWT_TOKEN_KEY, access_token_key, encode_uri_component,
 };
 use crate::settings::SettingStore;
 
@@ -184,7 +183,11 @@ impl AccountApi {
     }
 
     /// `resolveProviderApiKey`：个人 Coding Plan 的模型 API key；任何失败都返回 None。
-    pub async fn resolve_provider_api_key(&self, provider: &str, access_token: &str) -> Option<String> {
+    pub async fn resolve_provider_api_key(
+        &self,
+        provider: &str,
+        access_token: &str,
+    ) -> Option<String> {
         let endpoints = self.api.endpoints();
         let result = match provider {
             BIGMODEL => {
@@ -284,15 +287,23 @@ impl AccountApi {
         let usable = |item: &Value| {
             item["name"] == TEAM_PLAN_API_KEY_NAME
                 && item["keyType"].as_i64() == Some(TEAM_PLAN_API_KEY_TYPE)
-                && item["apiKey"].as_str().is_some_and(|key| !key.trim().is_empty())
+                && item["apiKey"]
+                    .as_str()
+                    .is_some_and(|key| !key.trim().is_empty())
         };
         let url = Self::team_keys_url(host, team.0, team.1);
         let list = self
             .api
-            .read_json(team_headers(ApiRequest::get(&url), authorization, team).timeout_ms(timeout_ms))
+            .read_json(
+                team_headers(ApiRequest::get(&url), authorization, team).timeout_ms(timeout_ms),
+            )
             .await?;
         if biz_envelope_ok(&list)
-            && let Some(existing) = list["data"].as_array().into_iter().flatten().find(|item| usable(item))
+            && let Some(existing) = list["data"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|item| usable(item))
         {
             return Ok(Some(existing.clone()));
         }
@@ -301,7 +312,9 @@ impl AccountApi {
             .read_json(
                 team_headers(ApiRequest::post(&url), authorization, team)
                     .timeout_ms(timeout_ms)
-                    .json(&json!({"name": TEAM_PLAN_API_KEY_NAME, "keyType": TEAM_PLAN_API_KEY_TYPE})),
+                    .json(
+                        &json!({"name": TEAM_PLAN_API_KEY_NAME, "keyType": TEAM_PLAN_API_KEY_TYPE}),
+                    ),
             )
             .await?;
         Ok(biz_envelope_ok(&created)
@@ -324,10 +337,16 @@ impl AccountApi {
         );
         let payload = self
             .api
-            .read_json(team_headers(ApiRequest::get(url), authorization, team).timeout_ms(timeout_ms))
+            .read_json(
+                team_headers(ApiRequest::get(url), authorization, team).timeout_ms(timeout_ms),
+            )
             .await?;
         Ok(biz_envelope_ok(&payload)
-            .then(|| payload["data"]["secretKey"].as_str().map(|s| s.trim().to_owned()))
+            .then(|| {
+                payload["data"]["secretKey"]
+                    .as_str()
+                    .map(|s| s.trim().to_owned())
+            })
             .flatten()
             .filter(|secret| !secret.is_empty()))
     }
@@ -404,7 +423,12 @@ impl AccountApi {
         }
         let team = (organization, project);
         let entry = self
-            .ensure_team_project_api_key(&token, &host, team, TEAM_PLAN_RUNTIME_KEY_REQUEST_TIMEOUT_MS)
+            .ensure_team_project_api_key(
+                &token,
+                &host,
+                team,
+                TEAM_PLAN_RUNTIME_KEY_REQUEST_TIMEOUT_MS,
+            )
             .await?;
         let api_key = entry
             .as_ref()
@@ -477,7 +501,9 @@ impl CodingPlanKeys {
                 let credential_key = key.clone();
                 let operation_key = operation.clone();
                 let future = async move {
-                    let result = this.load_uncached(&credential_key, &family, force_refresh).await;
+                    let result = this
+                        .load_uncached(&credential_key, &family, force_refresh)
+                        .await;
                     this.in_flight
                         .lock()
                         .unwrap_or_else(|p| p.into_inner())
@@ -562,7 +588,10 @@ pub async fn read_account_settings(settings: &SettingStore) -> AccountSettings {
         .into_iter()
         .filter(|family| {
             let mut probe = serde_json::Map::new();
-            for key in ["modelProviderFamilyModes", "modelProviderFamilySelectedKeys"] {
+            for key in [
+                "modelProviderFamilyModes",
+                "modelProviderFamilySelectedKeys",
+            ] {
                 if let Some(value) = raw[key].get(*family) {
                     probe.insert(key.to_owned(), json!({ *family: value }));
                 }
@@ -598,9 +627,8 @@ pub fn resolve_current_access(
     }
     let has_identity = identity.is_some_and(|id| !id.trim().is_empty());
     if mode == "start-plan" {
-        return has_identity.then(
-            || json!({"type": "zhipu-account", "family": family, "planKind": "start-plan"}),
-        );
+        return has_identity
+            .then(|| json!({"type": "zhipu-account", "family": family, "planKind": "start-plan"}));
     }
     let selection = settings.selection(family);
     let kind = selection["kind"].as_str()?;
@@ -698,7 +726,10 @@ impl AccountRequestAuth {
     ) -> Result<String, CredentialUnavailable> {
         let provider_id = provider_id.trim().to_owned();
         let unavailable = || CredentialUnavailable(provider_id.clone());
-        let access = self.resolve_access(account_access).await.ok_or_else(unavailable)?;
+        let access = self
+            .resolve_access(account_access)
+            .await
+            .ok_or_else(unavailable)?;
         let family = access["family"].as_str().unwrap_or("");
         let key = match access["planKind"].as_str() {
             Some("start-plan") => self
@@ -746,7 +777,13 @@ mod tests {
     #[test]
     fn credential_keys_match_node() {
         assert_eq!(
-            credential_key("account:zai-individual-coding-plan", "individual-coding-plan", "u 1", None).unwrap(),
+            credential_key(
+                "account:zai-individual-coding-plan",
+                "individual-coding-plan",
+                "u 1",
+                None
+            )
+            .unwrap(),
             "account-provider:coding-plan:account:zai-individual-coding-plan:account:u%201:api-key"
         );
         assert_eq!(
@@ -781,7 +818,8 @@ mod tests {
             selections: json!({"zai": {"kind": "team-coding-plan", "productId": "pr", "organizationId": "o", "projectId": "p"}}),
             unresolved_families: vec![],
         };
-        let team = json!({"type": "zhipu-account", "accountType": "zai", "mode": "team-coding-plan"});
+        let team =
+            json!({"type": "zhipu-account", "accountType": "zai", "mode": "team-coding-plan"});
         assert_eq!(
             resolve_current_access(&team, &settings, Some("u")).unwrap()["projectId"],
             "p"
@@ -797,7 +835,8 @@ mod tests {
             resolve_current_access(&start, &settings, Some("u")).unwrap(),
             json!({"type": "zhipu-account", "family": "zai", "planKind": "start-plan"})
         );
-        let bigmodel = json!({"type": "zhipu-account", "accountType": "bigmodel", "mode": "start-plan"});
+        let bigmodel =
+            json!({"type": "zhipu-account", "accountType": "bigmodel", "mode": "start-plan"});
         assert!(resolve_current_access(&bigmodel, &settings, Some("u")).is_none());
     }
 }

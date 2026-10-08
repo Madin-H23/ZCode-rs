@@ -111,10 +111,7 @@ impl ClientConfig {
             .map_err(|error| error.to_string())?;
         url.query_pairs_mut()
             .append_pair("app_version", &endpoints.app_version())
-            .append_pair(
-                "platform",
-                &format!("{}-{}", node_platform(), node_arch()),
-            );
+            .append_pair("platform", &format!("{}-{}", node_platform(), node_arch()));
         let key = url.to_string();
         let future = {
             let mut entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
@@ -178,7 +175,10 @@ pub fn client_config_service(config: ClientConfig) -> ServiceBuilder {
             if !options.is_object()
                 || !(options["forceRefresh"].is_null() || options["forceRefresh"].is_boolean())
             {
-                return Err(RpcError::new("ZodError", "invalid client config read options"));
+                return Err(RpcError::new(
+                    "ZodError",
+                    "invalid client config read options",
+                ));
             }
             config
                 .snapshot(options["forceRefresh"] == true)
@@ -210,11 +210,13 @@ mod tests {
     #[test]
     fn snapshot_parsing_matches_zod_rules() {
         assert_eq!(
-            parse_client_config_snapshot(&json!({"code": 0, "data": {"configs": {"pluginStoreOrder": {
-                "code": {"categoryOrder": [" a ", "a", "b"], "pluginOrder": {"x": ["p"]}},
-                "work": {"categoryOrder": [""]},
-                "extra": 1,
-            }}}}))
+            parse_client_config_snapshot(
+                &json!({"code": 0, "data": {"configs": {"pluginStoreOrder": {
+                    "code": {"categoryOrder": [" a ", "a", "b"], "pluginOrder": {"x": ["p"]}},
+                    "work": {"categoryOrder": [""]},
+                    "extra": 1,
+                }}}})
+            )
             .unwrap(),
             json!({"pluginStoreOrder": {"code": {"categoryOrder": ["a", "b"], "pluginOrder": {"x": ["p"]}}}})
         );

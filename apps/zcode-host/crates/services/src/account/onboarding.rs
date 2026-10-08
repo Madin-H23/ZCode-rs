@@ -136,8 +136,8 @@ fn parse_file(value: &Value) -> Option<Value> {
         .map(parse_entry)
         .collect::<Option<_>>()?;
     let decisions: Vec<Value> = match value["version"].as_f64() {
-        Some(v) if v == 1.0 => Vec::new(),
-        Some(v) if v == 2.0 => value["decisions"]
+        Some(1.0) => Vec::new(),
+        Some(2.0) => value["decisions"]
             .as_array()?
             .iter()
             .map(parse_decision)
@@ -245,8 +245,8 @@ impl OnboardingRecords {
             }
         }
         record.insert("uploadState".into(), json!("pending"));
-        let validated =
-            parse_entry(&Value::Object(record)).ok_or_else(|| invalid("invalid onboarding record entry"))?;
+        let validated = parse_entry(&Value::Object(record))
+            .ok_or_else(|| invalid("invalid onboarding record entry"))?;
         let entries = file["entries"].as_array_mut().expect("parsed entries");
         match entries.iter().position(|item| user_matches(item, &user)) {
             Some(index) => entries[index] = validated,
@@ -454,9 +454,7 @@ pub fn service(records: OnboardingRecords) -> ServiceBuilder {
         )
         .method(
             "syncSettingsFromRecord",
-            handler!(|records, _args| Ok(Reply::Value(
-                records.sync_settings_from_record().await
-            ))),
+            handler!(|records, _args| Ok(Reply::Value(records.sync_settings_from_record().await))),
         )
         .method(
             "updateRecordPreferences",
@@ -485,7 +483,11 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    fn records(dir: &std::path::Path, user: Arc<Mutex<Option<String>>>, has_task: bool) -> OnboardingRecords {
+    fn records(
+        dir: &std::path::Path,
+        user: Arc<Mutex<Option<String>>>,
+        has_task: bool,
+    ) -> OnboardingRecords {
         OnboardingRecords::new(
             dir.to_path_buf(),
             Arc::new(move || {
@@ -527,10 +529,18 @@ mod tests {
             .update_record_preferences(&json!({"memoryEnabled": false}))
             .await
             .unwrap();
-        assert_eq!(records.latest_entry().await.unwrap()["memoryEnabled"], false);
+        assert_eq!(
+            records.latest_entry().await.unwrap()["memoryEnabled"],
+            false
+        );
         let text = std::fs::read_to_string(dir.path().join("onboarding-record.json")).unwrap();
         assert!(text.starts_with("{\n  \"version\": 2,\n  \"deviceMid\": \"mid\""));
-        assert!(records.append_record("mid", &json!({"occupation": "x"})).await.is_err());
+        assert!(
+            records
+                .append_record("mid", &json!({"occupation": "x"}))
+                .await
+                .is_err()
+        );
         records.clear_records().await.unwrap();
         assert!(records.read().await.is_none());
     }

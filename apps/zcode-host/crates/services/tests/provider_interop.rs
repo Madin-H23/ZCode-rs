@@ -17,11 +17,19 @@ fn repo_root() -> PathBuf {
 fn check(root: &Path, file: &Path) -> Value {
     let output = Command::new("node")
         .current_dir(root)
-        .args(["--import", "tsx", "scripts/rust-host/provider-config-interop.ts"])
+        .args([
+            "--import",
+            "tsx",
+            "scripts/rust-host/provider-config-interop.ts",
+        ])
         .arg(file)
         .output()
         .expect("run node");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
@@ -45,7 +53,12 @@ async fn personal_writes_are_canonical_for_typescript() {
         .await
         .unwrap();
     writer
-        .add_model("new-provider", "m-smart", &json!({"optionSpecs": {"maxOutputTokens": {"max": 4096}}}), None)
+        .add_model(
+            "new-provider",
+            "m-smart",
+            &json!({"optionSpecs": {"maxOutputTokens": {"max": 4096}}}),
+            None,
+        )
         .await
         .unwrap();
     let manual = json!({
@@ -64,10 +77,22 @@ async fn personal_writes_are_canonical_for_typescript() {
         .await
         .unwrap();
     writer
-        .save_provider_overlay("account:zai-start-plan", &json!({"modelOrder": ["GLM-5.2"]}), Some(&json!({"providerName": "Start"})))
+        .save_provider_overlay(
+            "account:zai-start-plan",
+            &json!({"modelOrder": ["GLM-5.2"]}),
+            Some(&json!({"providerName": "Start"})),
+        )
         .await
         .unwrap();
-    writer.create_provider(&json!({"templateId": "deepseek"})).await.ok();
+    writer
+        .create_provider(&json!({"templateId": "deepseek"}))
+        .await
+        .ok();
     let result = check(&root, &personal);
-    assert_eq!(result, json!({"decoded": true, "canonical": true}), "{}", std::fs::read_to_string(&personal).unwrap());
+    assert_eq!(
+        result,
+        json!({"decoded": true, "canonical": true}),
+        "{}",
+        std::fs::read_to_string(&personal).unwrap()
+    );
 }

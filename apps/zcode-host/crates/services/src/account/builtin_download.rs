@@ -72,7 +72,13 @@ pub async fn download_release(
     platform: &str,
 ) -> Result<Option<Value>, String> {
     let at_cdn = AtomicBool::new(false);
-    let stage = |at_cdn: &AtomicBool| if at_cdn.load(Ordering::SeqCst) { "cdn" } else { "client-config" };
+    let stage = |at_cdn: &AtomicBool| {
+        if at_cdn.load(Ordering::SeqCst) {
+            "cdn"
+        } else {
+            "client-config"
+        }
+    };
     let work = async {
         let mut url = url::Url::parse(origin)
             .and_then(|base| base.join("/api/v1/client/configs"))
@@ -126,12 +132,29 @@ mod tests {
         }))
         .await;
         let dir = tempfile::tempdir().unwrap();
-        let api = ApiClient::with_network(endpoints_for(&server.origin), dir.path().to_path_buf(), NetworkOptions::default());
+        let api = ApiClient::with_network(
+            endpoints_for(&server.origin),
+            dir.path().to_path_buf(),
+            NetworkOptions::default(),
+        );
         // 非 https 的 CDN 地址在下载前被拒绝（测试不访问任何外部地址）。
-        let error = download_release(&api, &server.origin, "1.2.3", "darwin-aarch64").await.unwrap_err();
-        assert_eq!(error, "ZCode Built-in client-config: invalid schema at data.configs.builtin_provider_config_json (custom)");
-        let error = download_release(&api, &server.origin, "0", "x").await.unwrap_err();
-        assert_eq!(error, "ZCode Built-in client-config: invalid schema at code (invalid_value)");
-        assert_eq!(cdn_url(&json!({"code": 0, "data": {"configs": {}}})).ok(), Some(None));
+        let error = download_release(&api, &server.origin, "1.2.3", "darwin-aarch64")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error,
+            "ZCode Built-in client-config: invalid schema at data.configs.builtin_provider_config_json (custom)"
+        );
+        let error = download_release(&api, &server.origin, "0", "x")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error,
+            "ZCode Built-in client-config: invalid schema at code (invalid_value)"
+        );
+        assert_eq!(
+            cdn_url(&json!({"code": 0, "data": {"configs": {}}})).ok(),
+            Some(None)
+        );
     }
 }

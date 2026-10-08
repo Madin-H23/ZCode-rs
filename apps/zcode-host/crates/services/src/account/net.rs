@@ -85,7 +85,9 @@ pub enum ProxyRoute {
 fn normalize_proxy_url(value: &str) -> Option<String> {
     let has_scheme = value.split_once("://").is_some_and(|(scheme, _)| {
         let mut chars = scheme.chars();
-        chars.next().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
             && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '+' | '.' | '-'))
     });
     let candidate = if has_scheme {
@@ -121,7 +123,10 @@ fn matches_no_proxy(url: &Url, value: Option<&str>) -> bool {
             }
             let without_scheme = match rule.split_once("://") {
                 Some((scheme, rest))
-                    if scheme.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+                    if scheme
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_lowercase())
                         && scheme.chars().all(|c| {
                             c.is_ascii_lowercase()
                                 || c.is_ascii_digit()
@@ -141,7 +146,8 @@ fn matches_no_proxy(url: &Url, value: Option<&str>) -> bool {
                 return false;
             }
             let host_matches = host == normalized || host.ends_with(&format!(".{normalized}"));
-            host_matches && rule_port.is_none_or(|rule_port| rule_port.is_empty() || rule_port == port)
+            host_matches
+                && rule_port.is_none_or(|rule_port| rule_port.is_empty() || rule_port == port)
         })
 }
 
@@ -223,7 +229,9 @@ pub fn client_timezone(vars: &BTreeMap<String, String>) -> Option<String> {
             }
             let known = tz.eq_ignore_ascii_case("UTC")
                 || (!tz.contains("..")
-                    && std::path::Path::new("/usr/share/zoneinfo").join(tz).is_file());
+                    && std::path::Path::new("/usr/share/zoneinfo")
+                        .join(tz)
+                        .is_file());
             known.then(|| tz.to_owned())
         }
     }
@@ -379,7 +387,9 @@ impl HeaderList {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().map(|(name, value)| (name.as_str(), value.as_str()))
+        self.0
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
     }
 
     /// 排序后的小写键名（只用于日志，不记录值）。
@@ -538,7 +548,8 @@ fn error_message(error: &reqwest::Error) -> String {
 }
 
 /// 响应 401 的观察者：参数是最终请求 URL 与请求头，由登录态决定是否退出。
-pub type UnauthorizedHandler = Arc<dyn Fn(String, HeaderList) -> BoxFuture<'static, ()> + Send + Sync>;
+pub type UnauthorizedHandler =
+    Arc<dyn Fn(String, HeaderList) -> BoxFuture<'static, ()> + Send + Sync>;
 
 enum NetworkSource {
     Settings(SettingStore),
@@ -609,7 +620,9 @@ impl ApiClient {
         }
         let options = match &self.inner.network {
             NetworkSource::Fixed(options) => options.clone(),
-            NetworkSource::Settings(settings) => NetworkOptions::from_settings(&settings.get().await),
+            NetworkSource::Settings(settings) => {
+                NetworkOptions::from_settings(&settings.get().await)
+            }
         };
         *cached = Some(options.clone());
         options
@@ -650,9 +663,11 @@ impl ApiClient {
             ),
             None => None,
         };
-        let client = tokio::task::spawn_blocking(move || build_client(proxy.as_deref(), ca, follow_redirects))
-            .await
-            .map_err(|error| error.to_string())??;
+        let client = tokio::task::spawn_blocking(move || {
+            build_client(proxy.as_deref(), ca, follow_redirects)
+        })
+        .await
+        .map_err(|error| error.to_string())??;
         self.inner
             .clients
             .lock()
@@ -697,7 +712,11 @@ impl ApiClient {
         let options = self.network_options().await;
         let route = resolve_proxy(&url, &options);
         let client = self
-            .client_for(&route, options.ca_cert_path.as_deref(), request.follow_redirects)
+            .client_for(
+                &route,
+                options.ca_cert_path.as_deref(),
+                request.follow_redirects,
+            )
             .await
             .map_err(|message| ApiError::new(message, &url, &method))?;
         let parsed_method = reqwest::Method::from_bytes(method.as_bytes())
@@ -727,7 +746,8 @@ impl ApiClient {
             }
             None => send.await,
         };
-        let response = result.map_err(|error| ApiError::new(error_message(&error), &url, &method))?;
+        let response =
+            result.map_err(|error| ApiError::new(error_message(&error), &url, &method))?;
         let status = response.status().as_u16();
         let response_headers: HeaderList = response
             .headers()
@@ -928,7 +948,10 @@ pub(crate) mod testing {
                         }
                         buffer.extend_from_slice(&chunk[..read]);
                         if let Some(index) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
-                            break (index + 4, String::from_utf8_lossy(&buffer[..index]).into_owned());
+                            break (
+                                index + 4,
+                                String::from_utf8_lossy(&buffer[..index]).into_owned(),
+                            );
                         }
                     };
                     let mut lines = head.split("\r\n");
@@ -1009,10 +1032,19 @@ mod tests {
             resolve_proxy("https://api.example.com/x", &options("")),
             ProxyRoute::Proxy("http://127.0.0.1:8888/".into())
         );
-        for rule in ["example.com", ".example.com", "*.example.com", "*", "api.example.com:443", "https://example.com"] {
+        for rule in [
+            "example.com",
+            ".example.com",
+            "*.example.com",
+            "*",
+            "api.example.com:443",
+            "https://example.com",
+        ] {
             assert_eq!(
                 resolve_proxy("https://api.example.com/x", &options(rule)),
-                ProxyRoute::Direct { no_proxy_matched: true },
+                ProxyRoute::Direct {
+                    no_proxy_matched: true
+                },
                 "{rule}"
             );
         }
@@ -1034,7 +1066,9 @@ mod tests {
         );
         assert_eq!(
             resolve_proxy("https://a/", &NetworkOptions::default()),
-            ProxyRoute::Direct { no_proxy_matched: false }
+            ProxyRoute::Direct {
+                no_proxy_matched: false
+            }
         );
     }
 
@@ -1049,8 +1083,11 @@ mod tests {
         }))
         .await;
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("telemetry-state.json"), r#"{"deviceMid":"mid-1"}"#)
-            .unwrap();
+        std::fs::write(
+            dir.path().join("telemetry-state.json"),
+            r#"{"deviceMid":"mid-1"}"#,
+        )
+        .unwrap();
         let client = ApiClient::with_network(
             endpoints(&server.origin),
             dir.path().to_path_buf(),
@@ -1074,7 +1111,10 @@ mod tests {
         assert_eq!(error.method, "POST");
         assert_eq!(
             error.response_headers,
-            Some(BTreeMap::from([("x-request-id".to_owned(), "srv-1".to_owned())]))
+            Some(BTreeMap::from([(
+                "x-request-id".to_owned(),
+                "srv-1".to_owned()
+            )]))
         );
         let requests = server.requests();
         let first = &requests[0];
@@ -1105,7 +1145,8 @@ mod tests {
             .await
             .unwrap();
         let other = endpoints("https://zcode.z.ai");
-        let plain = ApiClient::with_network(other, dir.path().to_path_buf(), NetworkOptions::default());
+        let plain =
+            ApiClient::with_network(other, dir.path().to_path_buf(), NetworkOptions::default());
         plain
             .read_json(ApiRequest::get(format!("{}/plain", server.origin)))
             .await
@@ -1120,8 +1161,14 @@ mod tests {
     #[tokio::test]
     async fn explicit_proxy_routes_requests_and_no_proxy_bypasses() {
         // mock 同时充当代理：代理请求的 request-target 是绝对 URL。
-        let proxy = serve(Arc::new(|_: &Recorded| (200, r#"{"via":"proxy"}"#.to_owned()))).await;
-        let direct = serve(Arc::new(|_: &Recorded| (200, r#"{"via":"direct"}"#.to_owned()))).await;
+        let proxy = serve(Arc::new(|_: &Recorded| {
+            (200, r#"{"via":"proxy"}"#.to_owned())
+        }))
+        .await;
+        let direct = serve(Arc::new(|_: &Recorded| {
+            (200, r#"{"via":"direct"}"#.to_owned())
+        }))
+        .await;
         let dir = tempfile::tempdir().unwrap();
         let client = ApiClient::with_network(
             endpoints("https://zcode.z.ai"),
@@ -1171,7 +1218,12 @@ mod tests {
                 ..NetworkOptions::default()
             },
         );
-        assert!(missing_ca.request(ApiRequest::get("http://127.0.0.1:9/")).await.is_err());
+        assert!(
+            missing_ca
+                .request(ApiRequest::get("http://127.0.0.1:9/"))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

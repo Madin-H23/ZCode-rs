@@ -21,7 +21,10 @@ fn object<'a>(value: &'a Value, path: &str) -> SchemaResult<&'a Map<String, Valu
 /// strict：只允许列出的键。
 fn strict_keys(object: &Map<String, Value>, allowed: &[&str], path: &str) -> SchemaResult<()> {
     match object.keys().find(|key| !allowed.contains(&key.as_str())) {
-        Some(key) => Err(invalid(path, &format!("Unrecognized key(s) in object: '{key}'"))),
+        Some(key) => Err(invalid(
+            path,
+            &format!("Unrecognized key(s) in object: '{key}'"),
+        )),
         None => Ok(()),
     }
 }
@@ -71,9 +74,11 @@ fn check_ids(value: &Value, path: &str) -> SchemaResult<()> {
     if value.is_null() {
         return Ok(());
     }
-    let ok = value
-        .as_array()
-        .is_some_and(|items| items.iter().all(|item| item.as_str().is_some_and(|s| !s.is_empty())));
+    let ok = value.as_array().is_some_and(|items| {
+        items
+            .iter()
+            .all(|item| item.as_str().is_some_and(|s| !s.is_empty()))
+    });
     if ok {
         Ok(())
     } else {
@@ -86,9 +91,9 @@ fn check_option_map(value: &Value, variable: &str, path: &str) -> SchemaResult<(
     let Some(source) = value.as_str().filter(|source| !source.is_empty()) else {
         return Err(invalid(path, "expected non-empty option map"));
     };
-    let compiles = [json!("x"), json!(1)].iter().any(|input| {
-        zcode_cli_domain::option_map::evaluate(source, variable, input).is_ok()
-    });
+    let compiles = [json!("x"), json!(1)]
+        .iter()
+        .any(|input| zcode_cli_domain::option_map::evaluate(source, variable, input).is_ok());
     if compiles {
         Ok(())
     } else {
@@ -97,7 +102,11 @@ fn check_option_map(value: &Value, variable: &str, path: &str) -> SchemaResult<(
 }
 
 /// 只保留出现的键，按给定顺序输出（TS `objectWithoutUndefined({...})` 的键序）。
-fn ordered(object: &Map<String, Value>, keys: &[&str], transform: impl Fn(&str, &Value) -> Value) -> Value {
+fn ordered(
+    object: &Map<String, Value>,
+    keys: &[&str],
+    transform: impl Fn(&str, &Value) -> Value,
+) -> Value {
     let mut result = Map::new();
     for key in keys {
         if let Some(value) = object.get(*key) {
@@ -132,19 +141,32 @@ fn validate_access(value: &Value, path: &str) -> SchemaResult<()> {
             if let Some(url) = sparse(access, "apiKeyManagementUrl")
                 && !(url.is_null() || url.as_str().is_some_and(is_url))
             {
-                return Err(invalid(&format!("{path}.apiKeyManagementUrl"), "Invalid url"));
+                return Err(invalid(
+                    &format!("{path}.apiKeyManagementUrl"),
+                    "Invalid url",
+                ));
             }
             Ok(())
         }
         Some("zhipu-account") => {
             strict_keys(access, &["type", "accountType", "mode", "entitled"], path)?;
             if let Some(kind) = sparse(access, "accountType") {
-                check_enum(kind, &["zai", "bigmodel"], &format!("{path}.accountType"), true)?;
+                check_enum(
+                    kind,
+                    &["zai", "bigmodel"],
+                    &format!("{path}.accountType"),
+                    true,
+                )?;
             }
             if let Some(mode) = sparse(access, "mode") {
                 check_enum(
                     mode,
-                    &["start-plan", "individual-coding-plan", "team-coding-plan", "off-peak"],
+                    &[
+                        "start-plan",
+                        "individual-coding-plan",
+                        "team-coding-plan",
+                        "off-peak",
+                    ],
                     &format!("{path}.mode"),
                     true,
                 )?;
@@ -154,7 +176,10 @@ fn validate_access(value: &Value, path: &str) -> SchemaResult<()> {
             }
             Ok(())
         }
-        _ => Err(invalid(&format!("{path}.type"), "Invalid discriminator value")),
+        _ => Err(invalid(
+            &format!("{path}.type"),
+            "Invalid discriminator value",
+        )),
     }
 }
 
@@ -163,9 +188,17 @@ fn canonical_access(value: &Value) -> Value {
         return value.clone();
     };
     if access["type"] == "zhipu-account" {
-        ordered(access, &["type", "accountType", "mode", "entitled"], |_, v| v.clone())
+        ordered(
+            access,
+            &["type", "accountType", "mode", "entitled"],
+            |_, v| v.clone(),
+        )
     } else {
-        ordered(access, &["type", "apiKey", "apiKeyManagementUrl"], |_, v| v.clone())
+        ordered(
+            access,
+            &["type", "apiKey", "apiKeyManagementUrl"],
+            |_, v| v.clone(),
+        )
     }
 }
 
@@ -178,7 +211,11 @@ fn validate_api(value: &Value, path: &str, personal: bool) -> SchemaResult<()> {
     if let Some(kind) = sparse(api, "type") {
         check_enum(
             kind,
-            &["anthropic-messages", "openai-chat-completions", "openai-responses"],
+            &[
+                "anthropic-messages",
+                "openai-chat-completions",
+                "openai-responses",
+            ],
             &format!("{path}.type"),
             true,
         )?;
@@ -195,13 +232,20 @@ fn validate_api(value: &Value, path: &str, personal: bool) -> SchemaResult<()> {
                 .as_object()
                 .is_some_and(|map| map.values().all(Value::is_string));
         if !ok {
-            return Err(invalid(&format!("{path}.headers"), "expected record of strings"));
+            return Err(invalid(
+                &format!("{path}.headers"),
+                "expected record of strings",
+            ));
         }
     }
     Ok(())
 }
 
-pub fn validate_provider_config(value: &Value, context: ProviderContext, path: &str) -> SchemaResult<()> {
+pub fn validate_provider_config(
+    value: &Value,
+    context: ProviderContext,
+    path: &str,
+) -> SchemaResult<()> {
     let config = object(value, path)?;
     let allowed: &[&str] = match context {
         ProviderContext::Input => &[
@@ -238,10 +282,10 @@ pub fn validate_provider_config(value: &Value, context: ProviderContext, path: &
         let logo_object = object(logo, &format!("{path}.logo"))?;
         strict_keys(logo_object, &["type", "key"], &format!("{path}.logo"))?;
         if logo_object.get("type") != Some(&json!("builtin"))
-            || !logo_object
+            || logo_object
                 .get("key")
                 .and_then(Value::as_str)
-                .is_some_and(|key| !key.is_empty())
+                .is_none_or(str::is_empty)
         {
             return Err(invalid(&format!("{path}.logo"), "invalid logo"));
         }
@@ -250,7 +294,11 @@ pub fn validate_provider_config(value: &Value, context: ProviderContext, path: &
         validate_access(access, &format!("{path}.access"))?;
     }
     if let Some(api) = sparse(config, "api") {
-        validate_api(api, &format!("{path}.api"), context == ProviderContext::Personal)?;
+        validate_api(
+            api,
+            &format!("{path}.api"),
+            context == ProviderContext::Personal,
+        )?;
     }
     for key in ["builtinModelIds", "personalModelIds", "modelOrder"] {
         if let Some(ids) = sparse(config, key) {
@@ -258,7 +306,12 @@ pub fn validate_provider_config(value: &Value, context: ProviderContext, path: &
         }
     }
     if let Some(visibility) = sparse(config, "visibility") {
-        check_enum(visibility, &["visible", "hidden"], &format!("{path}.visibility"), true)?;
+        check_enum(
+            visibility,
+            &["visible", "hidden"],
+            &format!("{path}.visibility"),
+            true,
+        )?;
     }
     Ok(())
 }
@@ -383,7 +436,10 @@ pub fn validate_model_config(value: &Value, path: &str) -> SchemaResult<()> {
                     .iter()
                     .all(|item| item.as_str().is_some_and(|s| !s.trim().is_empty()))
                 {
-                    return Err(invalid(&reasoning_path, "reasoningLevel.values 必须是非空字符串"));
+                    return Err(invalid(
+                        &reasoning_path,
+                        "reasoningLevel.values 必须是非空字符串",
+                    ));
                 }
                 let unique: std::collections::HashSet<&str> =
                     items.iter().filter_map(Value::as_str).collect();
@@ -435,7 +491,11 @@ pub fn validate_manual_model_config(value: &Value, path: &str) -> SchemaResult<(
         ],
         &format!("{path}.properties"),
     )?;
-    check_positive_int(&properties["contextWindow"], &format!("{path}.properties.contextWindow"), false)?;
+    check_positive_int(
+        &properties["contextWindow"],
+        &format!("{path}.properties.contextWindow"),
+        false,
+    )?;
     for key in [
         "supportsJsonSchemaOutput",
         "supportsNativeWebSearch",
@@ -446,9 +506,17 @@ pub fn validate_manual_model_config(value: &Value, path: &str) -> SchemaResult<(
     let input = properties["inputFormat"]
         .as_object()
         .ok_or_else(|| invalid(path, "manual inputFormat is required"))?;
-    strict_keys(input, &["supportsImage", "supportsVideo", "supportsPdf"], path)?;
+    strict_keys(
+        input,
+        &["supportsImage", "supportsVideo", "supportsPdf"],
+        path,
+    )?;
     for key in ["supportsImage", "supportsVideo", "supportsPdf"] {
-        check_bool(&input[key], &format!("{path}.properties.inputFormat.{key}"), false)?;
+        check_bool(
+            &input[key],
+            &format!("{path}.properties.inputFormat.{key}"),
+            false,
+        )?;
     }
     let specs = config
         .get("optionSpecs")
@@ -458,15 +526,25 @@ pub fn validate_manual_model_config(value: &Value, path: &str) -> SchemaResult<(
         .get("reasoningLevel")
         .and_then(Value::as_object)
         .ok_or_else(|| invalid(path, "manual reasoningLevel is required"))?;
-    if !reasoning.get("values").is_some_and(Value::is_array) || !reasoning.get("map").is_some_and(Value::is_string) {
+    if !reasoning.get("values").is_some_and(Value::is_array)
+        || !reasoning.get("map").is_some_and(Value::is_string)
+    {
         return Err(invalid(path, "manual reasoningLevel must be complete"));
     }
     let max = specs
         .get("maxOutputTokens")
         .and_then(Value::as_object)
         .ok_or_else(|| invalid(path, "manual maxOutputTokens is required"))?;
-    strict_keys(max, &["max"], &format!("{path}.optionSpecs.maxOutputTokens"))?;
-    check_positive_int(&max["max"], &format!("{path}.optionSpecs.maxOutputTokens.max"), false)?;
+    strict_keys(
+        max,
+        &["max"],
+        &format!("{path}.optionSpecs.maxOutputTokens"),
+    )?;
+    check_positive_int(
+        &max["max"],
+        &format!("{path}.optionSpecs.maxOutputTokens.max"),
+        false,
+    )?;
     Ok(())
 }
 
@@ -521,26 +599,42 @@ pub fn canonical_model_config(value: &Value) -> Value {
     let Some(config) = value.as_object() else {
         return value.clone();
     };
-    ordered(config, &["enabled", "properties", "optionSpecs"], |key, value| {
-        let Some(inner) = value.as_object() else {
-            return value.clone();
-        };
-        match key {
-            "properties" => ordered(inner, &PROPERTY_KEYS, |key, value| match (key, value.as_object()) {
-                ("inputFormat", Some(format)) => ordered(format, &INPUT_FORMAT_KEYS, |_, v| v.clone()),
-                ("outputFormat", Some(format)) => ordered(format, &["supportsText"], |_, v| v.clone()),
+    ordered(
+        config,
+        &["enabled", "properties", "optionSpecs"],
+        |key, value| {
+            let Some(inner) = value.as_object() else {
+                return value.clone();
+            };
+            match key {
+                "properties" => ordered(inner, &PROPERTY_KEYS, |key, value| {
+                    match (key, value.as_object()) {
+                        ("inputFormat", Some(format)) => {
+                            ordered(format, &INPUT_FORMAT_KEYS, |_, v| v.clone())
+                        }
+                        ("outputFormat", Some(format)) => {
+                            ordered(format, &["supportsText"], |_, v| v.clone())
+                        }
+                        _ => value.clone(),
+                    }
+                }),
+                "optionSpecs" => ordered(
+                    inner,
+                    &["reasoningLevel", "maxOutputTokens"],
+                    |key, value| match (key, value.as_object()) {
+                        ("reasoningLevel", Some(spec)) => {
+                            ordered(spec, &["values", "map"], |_, v| v.clone())
+                        }
+                        ("maxOutputTokens", Some(spec)) => {
+                            ordered(spec, &["max", "map"], |_, v| v.clone())
+                        }
+                        _ => value.clone(),
+                    },
+                ),
                 _ => value.clone(),
-            }),
-            "optionSpecs" => ordered(inner, &["reasoningLevel", "maxOutputTokens"], |key, value| {
-                match (key, value.as_object()) {
-                    ("reasoningLevel", Some(spec)) => ordered(spec, &["values", "map"], |_, v| v.clone()),
-                    ("maxOutputTokens", Some(spec)) => ordered(spec, &["max", "map"], |_, v| v.clone()),
-                    _ => value.clone(),
-                }
-            }),
-            _ => value.clone(),
-        }
-    })
+            }
+        },
+    )
 }
 
 /// `manualModelConfigSchema` 的输出键序（pick 后 extend）。
@@ -548,37 +642,49 @@ pub fn canonical_manual_model_config(value: &Value) -> Value {
     let Some(config) = value.as_object() else {
         return value.clone();
     };
-    ordered(config, &["enabled", "properties", "optionSpecs"], |key, value| {
-        let Some(inner) = value.as_object() else {
-            return value.clone();
-        };
-        match key {
-            "properties" => ordered(
-                inner,
-                &[
-                    "contextWindow",
-                    "supportsJsonSchemaOutput",
-                    "supportsNativeWebSearch",
-                    "supportsMidConversationSystem",
-                    "inputFormat",
-                ],
-                |key, value| match (key, value.as_object()) {
-                    ("inputFormat", Some(format)) => {
-                        ordered(format, &["supportsImage", "supportsVideo", "supportsPdf"], |_, v| v.clone())
-                    }
-                    _ => value.clone(),
-                },
-            ),
-            "optionSpecs" => ordered(inner, &["reasoningLevel", "maxOutputTokens"], |key, value| {
-                match (key, value.as_object()) {
-                    ("reasoningLevel", Some(spec)) => ordered(spec, &["values", "map"], |_, v| v.clone()),
-                    ("maxOutputTokens", Some(spec)) => ordered(spec, &["max"], |_, v| v.clone()),
-                    _ => value.clone(),
-                }
-            }),
-            _ => value.clone(),
-        }
-    })
+    ordered(
+        config,
+        &["enabled", "properties", "optionSpecs"],
+        |key, value| {
+            let Some(inner) = value.as_object() else {
+                return value.clone();
+            };
+            match key {
+                "properties" => ordered(
+                    inner,
+                    &[
+                        "contextWindow",
+                        "supportsJsonSchemaOutput",
+                        "supportsNativeWebSearch",
+                        "supportsMidConversationSystem",
+                        "inputFormat",
+                    ],
+                    |key, value| match (key, value.as_object()) {
+                        ("inputFormat", Some(format)) => ordered(
+                            format,
+                            &["supportsImage", "supportsVideo", "supportsPdf"],
+                            |_, v| v.clone(),
+                        ),
+                        _ => value.clone(),
+                    },
+                ),
+                "optionSpecs" => ordered(
+                    inner,
+                    &["reasoningLevel", "maxOutputTokens"],
+                    |key, value| match (key, value.as_object()) {
+                        ("reasoningLevel", Some(spec)) => {
+                            ordered(spec, &["values", "map"], |_, v| v.clone())
+                        }
+                        ("maxOutputTokens", Some(spec)) => {
+                            ordered(spec, &["max"], |_, v| v.clone())
+                        }
+                        _ => value.clone(),
+                    },
+                ),
+                _ => value.clone(),
+            }
+        },
+    )
 }
 
 /// TS `ConfigOverlay` 语义：缺失继承，null 与叶子整体替换，嵌套 config 递归。
@@ -593,7 +699,12 @@ pub fn overlay_model_config(base: &Value, next: &Value) -> Value {
     for (key, value) in next {
         let nested = matches!(
             key.as_str(),
-            "properties" | "optionSpecs" | "inputFormat" | "outputFormat" | "reasoningLevel" | "maxOutputTokens"
+            "properties"
+                | "optionSpecs"
+                | "inputFormat"
+                | "outputFormat"
+                | "reasoningLevel"
+                | "maxOutputTokens"
         );
         if nested && value.is_object() && merged[key].is_object() {
             merged[key] = overlay_model_config(&merged[key], value);
@@ -632,23 +743,39 @@ fn decode_provider_rule(rule: &Value, path: &str) -> SchemaResult<Value> {
     let object_rule = object(rule, path)?;
     strict_keys(
         object_rule,
-        &["providerId", "templateId", "providerName", "enabled", "config"],
+        &[
+            "providerId",
+            "templateId",
+            "providerName",
+            "enabled",
+            "config",
+        ],
         path,
     )?;
     if !id_string(&rule["providerId"]) {
-        return Err(invalid(&format!("{path}.providerId"), "expected non-empty string"));
+        return Err(invalid(
+            &format!("{path}.providerId"),
+            "expected non-empty string",
+        ));
     }
     for key in ["templateId", "providerName"] {
         if let Some(value) = object_rule.get(key)
             && !(value.is_null() || id_string(value))
         {
-            return Err(invalid(&format!("{path}.{key}"), "expected non-empty string"));
+            return Err(invalid(
+                &format!("{path}.{key}"),
+                "expected non-empty string",
+            ));
         }
     }
     if let Some(enabled) = object_rule.get("enabled") {
         check_bool(enabled, &format!("{path}.enabled"), false)?;
     }
-    validate_provider_config(&rule["config"], ProviderContext::Personal, &format!("{path}.config"))?;
+    validate_provider_config(
+        &rule["config"],
+        ProviderContext::Personal,
+        &format!("{path}.config"),
+    )?;
     if rule["providerId"]
         .as_str()
         .is_some_and(|id| id.starts_with("account:"))
@@ -669,7 +796,13 @@ pub fn canonical_provider_rule(rule: &Value) -> Value {
     };
     ordered(
         object,
-        &["providerId", "templateId", "providerName", "enabled", "config"],
+        &[
+            "providerId",
+            "templateId",
+            "providerName",
+            "enabled",
+            "config",
+        ],
         |key, value| {
             if key == "config" {
                 canonical_provider_config(value)
@@ -684,7 +817,10 @@ fn decode_model_rule(rule: &Value, manual: bool, path: &str) -> SchemaResult<Mod
     let object_rule = object(rule, path)?;
     strict_keys(object_rule, &["providerId", "modelId", "config"], path)?;
     if !id_string(&rule["providerId"]) || !id_string(&rule["modelId"]) {
-        return Err(invalid(path, "providerId / modelId must be non-empty strings"));
+        return Err(invalid(
+            path,
+            "providerId / modelId must be non-empty strings",
+        ));
     }
     let mut config = rule["config"].clone();
     if manual {
@@ -733,7 +869,12 @@ pub fn decode(file: &Value) -> SchemaResult<Personal> {
     let config = object(&file["config"], "$.config")?;
     strict_keys(
         config,
-        &["providerOrder", "providerConfigRules", "modelConfigRules", "defaultModelSelection"],
+        &[
+            "providerOrder",
+            "providerConfigRules",
+            "modelConfigRules",
+            "defaultModelSelection",
+        ],
         "$.config",
     )?;
     let provider_order = match config.get("providerOrder") {
@@ -743,23 +884,40 @@ pub fn decode(file: &Value) -> SchemaResult<Personal> {
                 .as_array()
                 .filter(|items| items.iter().all(id_string))
                 .ok_or_else(|| invalid("$.config.providerOrder", "expected array of ids"))?;
-            Some(items.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            Some(
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
+            )
         }
     };
-    let rules = object(&file["config"]["providerConfigRules"], "$.config.providerConfigRules")?;
+    let rules = object(
+        &file["config"]["providerConfigRules"],
+        "$.config.providerConfigRules",
+    )?;
     strict_keys(rules, &["providerRules"], "$.config.providerConfigRules")?;
     let mut providers = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for (index, rule) in file["config"]["providerConfigRules"]["providerRules"]
         .as_array()
-        .ok_or_else(|| invalid("$.config.providerConfigRules.providerRules", "expected array"))?
+        .ok_or_else(|| {
+            invalid(
+                "$.config.providerConfigRules.providerRules",
+                "expected array",
+            )
+        })?
         .iter()
         .enumerate()
     {
         let decoded = decode_provider_rule(rule, &format!("providerRules[{index}]"))?;
         let id = decoded["providerId"].as_str().unwrap_or("").to_owned();
         if !seen.insert(id.clone()) {
-            return Err(invalid("providerRules", &format!("duplicate providerId: {id}")));
+            return Err(invalid(
+                "providerRules",
+                &format!("duplicate providerId: {id}"),
+            ));
         }
         providers.push(decoded);
     }
@@ -771,10 +929,18 @@ pub fn decode(file: &Value) -> SchemaResult<Personal> {
         "$.config.modelConfigRules",
     )?;
     let mut models = Vec::new();
-    for (key, manual) in [("providerModelRules", false), ("manualProviderModelRules", true)] {
+    for (key, manual) in [
+        ("providerModelRules", false),
+        ("manualProviderModelRules", true),
+    ] {
         for (index, rule) in models_value[key]
             .as_array()
-            .ok_or_else(|| invalid(&format!("$.config.modelConfigRules.{key}"), "expected array"))?
+            .ok_or_else(|| {
+                invalid(
+                    &format!("$.config.modelConfigRules.{key}"),
+                    "expected array",
+                )
+            })?
             .iter()
             .enumerate()
         {
@@ -783,13 +949,17 @@ pub fn decode(file: &Value) -> SchemaResult<Personal> {
     }
     // 同一模型不能同时有智能与手动规则。
     for rule in models.iter().filter(|rule| rule.manual) {
-        if models
-            .iter()
-            .any(|other| !other.manual && other.provider_id == rule.provider_id && other.model_id == rule.model_id)
-        {
+        if models.iter().any(|other| {
+            !other.manual
+                && other.provider_id == rule.provider_id
+                && other.model_id == rule.model_id
+        }) {
             return Err(invalid(
                 "manualProviderModelRules",
-                &format!("conflicting smart and manual rules: {}/{}", rule.provider_id, rule.model_id),
+                &format!(
+                    "conflicting smart and manual rules: {}/{}",
+                    rule.provider_id, rule.model_id
+                ),
             ));
         }
     }
@@ -797,7 +967,10 @@ pub fn decode(file: &Value) -> SchemaResult<Personal> {
         None => None,
         Some(selection) => {
             if !selection["providerId"].is_string() || !selection["modelId"].is_string() {
-                return Err(invalid("$.config.defaultModelSelection", "invalid model selection"));
+                return Err(invalid(
+                    "$.config.defaultModelSelection",
+                    "invalid model selection",
+                ));
             }
             Some(selection.clone())
         }

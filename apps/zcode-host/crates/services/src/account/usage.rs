@@ -10,12 +10,14 @@ use serde_json::{Map, Value, json};
 use zcode_host_kit::{Reply, RpcError, ServiceBuilder, log};
 
 use super::auth::{AccountRequestAuth, oauth_provider_of};
-use super::availability::{Entitlement, StartPlanBilling, fetch_personal_entitlement, fetch_team_entitlement, js_number};
+use super::availability::{
+    Entitlement, StartPlanBilling, fetch_personal_entitlement, fetch_team_entitlement, js_number,
+};
 use super::credential::CredentialStore;
 use super::net::{ApiClient, ApiError, ApiRequest};
 use super::oauth_adapters::now_ms;
-use super::official_mcp::OfficialMcpCredentials;
 use super::oauth_repo::ZCODE_JWT_TOKEN_KEY;
+use super::official_mcp::OfficialMcpCredentials;
 
 const REQUEST_TIMEOUT_MS: u64 = 15_000;
 const BIGMODEL_QUOTA_PATH: &str = "/api/monitor/usage/quota/limit";
@@ -26,7 +28,9 @@ const MCP_USAGE_QUOTA_LIMIT_TYPE: &str = "MCP_USAGE_LIMIT";
 pub fn is_zai_coding_plan_provider(id: &str) -> bool {
     matches!(
         id,
-        "account:zai-individual-coding-plan" | "account:zai-team-coding-plan" | "account:zai-start-plan"
+        "account:zai-individual-coding-plan"
+            | "account:zai-team-coding-plan"
+            | "account:zai-start-plan"
     )
 }
 
@@ -114,7 +118,11 @@ fn parse_local_date_time(value: Option<&str>) -> Option<String> {
     if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&normalized) {
         return Some(super::onboarding::iso_from_ms(parsed.timestamp_millis()));
     }
-    for format in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%dT%H:%M"] {
+    for format in [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M",
+    ] {
         if let Ok(naive) = NaiveDateTime::parse_from_str(&normalized, format) {
             let local = Local.from_local_datetime(&naive).earliest()?;
             return Some(super::onboarding::iso_from_ms(local.timestamp_millis()));
@@ -139,7 +147,8 @@ fn subscription_summary(item: &Value) -> Option<Value> {
         None => {
             // `valid` 里最后一个日期（时间）片段是有效期结束。
             let valid = item["valid"].as_str().unwrap_or("");
-            let pattern = regex::Regex::new(r"\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2})?").expect("static regex");
+            let pattern = regex::Regex::new(r"\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2})?")
+                .expect("static regex");
             parse_local_date_time(pattern.find_iter(valid).last().map(|m| m.as_str()))
         }
     };
@@ -162,7 +171,15 @@ pub fn normalize_limits(limits: &Value) -> Vec<Value> {
         .map(|limit| {
             let mut normalized = Map::new();
             normalized.insert("type".into(), limit["type"].clone());
-            for key in ["unit", "number", "usage", "currentValue", "remaining", "percentage", "nextResetTime"] {
+            for key in [
+                "unit",
+                "number",
+                "usage",
+                "currentValue",
+                "remaining",
+                "percentage",
+                "nextResetTime",
+            ] {
                 if limit[key].is_number() {
                     normalized.insert(key.into(), limit[key].clone());
                 }
@@ -180,7 +197,11 @@ pub fn normalize_limits(limits: &Value) -> Vec<Value> {
                     }
                     item.insert(
                         "usage".into(),
-                        if detail["usage"].is_number() { detail["usage"].clone() } else { json!(0) },
+                        if detail["usage"].is_number() {
+                            detail["usage"].clone()
+                        } else {
+                            json!(0)
+                        },
                     );
                     Value::Object(item)
                 })
@@ -202,7 +223,9 @@ pub fn pick_primary_limit(limits: &[Value]) -> Option<&Value> {
 fn bigmodel_envelope_ok(payload: &Value) -> bool {
     payload["success"] != false
         && (payload["code"].is_null()
-            || payload["code"].as_f64().is_some_and(|code| code == 0.0 || code == 200.0))
+            || payload["code"]
+                .as_f64()
+                .is_some_and(|code| code == 0.0 || code == 200.0))
 }
 
 /// 套餐额度查询的鉴权（`ResolvedQuotaAuthorization`）。
@@ -250,7 +273,11 @@ pub struct UsageStats {
     billing: StartPlanBilling,
     official: OfficialMcpCredentials,
     /// App Usage 读取任意已运行 workspace 的 CLI（usage 表在全局会话库）。
-    app_usage: Arc<dyn Fn(Value) -> futures_util::future::BoxFuture<'static, Result<Value, RpcError>> + Send + Sync>,
+    app_usage: Arc<
+        dyn Fn(Value) -> futures_util::future::BoxFuture<'static, Result<Value, RpcError>>
+            + Send
+            + Sync,
+    >,
 }
 
 impl UsageStats {
@@ -260,7 +287,11 @@ impl UsageStats {
         credentials: CredentialStore,
         billing: StartPlanBilling,
         official: OfficialMcpCredentials,
-        app_usage: Arc<dyn Fn(Value) -> futures_util::future::BoxFuture<'static, Result<Value, RpcError>> + Send + Sync>,
+        app_usage: Arc<
+            dyn Fn(Value) -> futures_util::future::BoxFuture<'static, Result<Value, RpcError>>
+                + Send
+                + Sync,
+        >,
     ) -> Self {
         Self {
             api,
@@ -323,7 +354,9 @@ impl UsageStats {
             if let Some(key) = env_key {
                 return Ok(Some(QuotaAuthorization {
                     authorization: key,
-                    quota_url: self.quota_url_from_env().unwrap_or_else(|| self.bigmodel_quota_url()),
+                    quota_url: self
+                        .quota_url_from_env()
+                        .unwrap_or_else(|| self.bigmodel_quota_url()),
                     team: None,
                     provider: json!({"id": "env:bigmodel-usage", "name": "BigModel"}),
                 }));
@@ -369,13 +402,27 @@ impl UsageStats {
         url.set_path("/api/biz/subscription/list");
         url.set_query(None);
         if let Some((organization, project, family)) = team {
-            let token = self.load_trimmed(&format!("oauth:{family}:access_token")).await;
+            let token = self
+                .load_trimmed(&format!("oauth:{family}:access_token"))
+                .await;
             if token.is_empty() {
                 return Entitlement::Unknown;
             }
-            let authorization = if family == "zai" { format!("Bearer {token}") } else { token };
+            let authorization = if family == "zai" {
+                format!("Bearer {token}")
+            } else {
+                token
+            };
             let origin = url.origin().ascii_serialization();
-            return match fetch_team_entitlement(&self.api, &authorization, &origin, (organization, project), REQUEST_TIMEOUT_MS).await {
+            return match fetch_team_entitlement(
+                &self.api,
+                &authorization,
+                &origin,
+                (organization, project),
+                REQUEST_TIMEOUT_MS,
+            )
+            .await
+            {
                 Ok(Entitlement::Available(detail)) => Entitlement::Available(json!({
                     "productId": detail["productId"].as_str().unwrap_or(""),
                     "productName": detail["productName"].as_str().unwrap_or(""),
@@ -387,7 +434,9 @@ impl UsageStats {
                 Err(_) => Entitlement::Unknown,
             };
         }
-        match fetch_personal_entitlement(&self.api, authorization, url.as_str(), REQUEST_TIMEOUT_MS).await {
+        match fetch_personal_entitlement(&self.api, authorization, url.as_str(), REQUEST_TIMEOUT_MS)
+            .await
+        {
             Ok(Entitlement::Available(subscription)) => match subscription_summary(&subscription) {
                 Some(summary) => Entitlement::Available(summary),
                 None => Entitlement::Unknown,
@@ -433,11 +482,20 @@ impl UsageStats {
             .team
             .as_ref()
             .map(|(_, _, family)| family.clone())
-            .unwrap_or_else(|| if is_zai_coding_plan_provider(provider_id) { "zai" } else { "bigmodel" }.to_owned());
+            .unwrap_or_else(|| {
+                if is_zai_coding_plan_provider(provider_id) {
+                    "zai"
+                } else {
+                    "bigmodel"
+                }
+                .to_owned()
+            });
         let snapshot = match self.official.resolve().await {
             Ok(snapshot) => snapshot,
             Err(reason) => {
-                log::info(format!("[usage-stats] 官方 MCP 额度不可用，跳过请求 reason={reason}"));
+                log::info(format!(
+                    "[usage-stats] 官方 MCP 额度不可用，跳过请求 reason={reason}"
+                ));
                 return Value::Null;
             }
         };
@@ -474,12 +532,18 @@ impl UsageStats {
         let response = match self.api.request(request).await {
             Ok(response) => response,
             Err(failure) => {
-                log::warn(format!("[usage-stats] 官方 MCP 额度请求异常: {}", failure.message));
+                log::warn(format!(
+                    "[usage-stats] 官方 MCP 额度请求异常: {}",
+                    failure.message
+                ));
                 return Value::Null;
             }
         };
         if !response.ok() {
-            log::warn(format!("[usage-stats] 官方 MCP 额度请求失败 status={}", response.status));
+            log::warn(format!(
+                "[usage-stats] 官方 MCP 额度请求失败 status={}",
+                response.status
+            ));
             return Value::Null;
         }
         let Ok(payload) = response
@@ -493,12 +557,17 @@ impl UsageStats {
         let data = &payload["data"];
         let total = &data["total_usage"];
         let finite = |value: &Value| value.as_f64().filter(|v| v.is_finite());
-        if payload["code"].as_f64() != Some(0.0) || !data.is_object() || finite(&data["server_time"]).is_none() {
+        if payload["code"].as_f64() != Some(0.0)
+            || !data.is_object()
+            || finite(&data["server_time"]).is_none()
+        {
             return Value::Null;
         }
-        let (Some(used), Some(limit), Some(remaining)) =
-            (finite(&total["used"]), finite(&total["limit"]), finite(&total["remaining"]))
-        else {
+        let (Some(used), Some(limit), Some(remaining)) = (
+            finite(&total["used"]),
+            finite(&total["limit"]),
+            finite(&total["remaining"]),
+        ) else {
             log::warn("[usage-stats] 官方 MCP 额度响应缺少 total_usage");
             return Value::Null;
         };
@@ -529,7 +598,12 @@ impl UsageStats {
     }
 
     /// monitor 接口 URL：把 quota/limit 路径换成目标接口并带上查询参数（`build*MonitorUrl`）。
-    fn monitor_url(resolved: &QuotaAuthorization, from: &str, to: &str, pairs: &[(&str, &str)]) -> String {
+    fn monitor_url(
+        resolved: &QuotaAuthorization,
+        from: &str,
+        to: &str,
+        pairs: &[(&str, &str)],
+    ) -> String {
         let Ok(mut url) = url::Url::parse(&resolved.quota_url) else {
             return resolved.quota_url.clone();
         };
@@ -540,9 +614,16 @@ impl UsageStats {
         with_query(url.as_str(), pairs)
     }
 
-    async fn fetch_monitor(&self, resolved: &QuotaAuthorization, url: String) -> Result<Value, ApiError> {
+    async fn fetch_monitor(
+        &self,
+        resolved: &QuotaAuthorization,
+        url: String,
+    ) -> Result<Value, ApiError> {
         self.api
-            .read_json(Self::usage_headers(ApiRequest::get(url).timeout_ms(REQUEST_TIMEOUT_MS), resolved))
+            .read_json(Self::usage_headers(
+                ApiRequest::get(url).timeout_ms(REQUEST_TIMEOUT_MS),
+                resolved,
+            ))
             .await
     }
 
@@ -557,20 +638,43 @@ impl UsageStats {
             )
             .await?
             .ok_or_else(|| error("no_bigmodel_api_key"))?;
-        let (start, end) = super::usage_monitor::usage_time_range(request["range"].as_str().unwrap_or(""));
-        let team = if resolved.team.is_some() { vec![("type", "2")] } else { Vec::new() };
+        let (start, end) =
+            super::usage_monitor::usage_time_range(request["range"].as_str().unwrap_or(""));
+        let team = if resolved.team.is_some() {
+            vec![("type", "2")]
+        } else {
+            Vec::new()
+        };
         let query = |extra: &[(&'static str, &str)]| -> Vec<(&'static str, String)> {
-            team.iter().map(|(k, v)| (*k, (*v).to_owned())).chain(extra.iter().map(|(k, v)| (*k, (*v).to_owned()))).collect()
+            team.iter()
+                .map(|(k, v)| (*k, (*v).to_owned()))
+                .chain(extra.iter().map(|(k, v)| (*k, (*v).to_owned())))
+                .collect()
         };
         let pairs = query(&[("startTime", &start), ("endTime", &end)]);
         let pairs: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let (model, tool) = tokio::join!(
-            self.fetch_monitor(&resolved, Self::monitor_url(&resolved, "/quota/limit", "/model-usage", &pairs)),
-            self.fetch_monitor(&resolved, Self::monitor_url(&resolved, "/quota/limit", "/tool-usage", &pairs)),
+            self.fetch_monitor(
+                &resolved,
+                Self::monitor_url(&resolved, "/quota/limit", "/model-usage", &pairs)
+            ),
+            self.fetch_monitor(
+                &resolved,
+                Self::monitor_url(&resolved, "/quota/limit", "/tool-usage", &pairs)
+            ),
         );
-        let model = monitor_data(&model.map_err(api_error)?, "BigModel model usage failed", false)?;
-        let tool = monitor_data(&tool.map_err(api_error)?, "BigModel tool usage failed", true)?;
-        let mut snapshot = super::usage_monitor::usage_stats_snapshot(request, &model, &tool, now_ms());
+        let model = monitor_data(
+            &model.map_err(api_error)?,
+            "BigModel model usage failed",
+            false,
+        )?;
+        let tool = monitor_data(
+            &tool.map_err(api_error)?,
+            "BigModel tool usage failed",
+            true,
+        )?;
+        let mut snapshot =
+            super::usage_monitor::usage_stats_snapshot(request, &model, &tool, now_ms());
         snapshot["sourceProvider"] = resolved.provider.clone();
         Ok(snapshot)
     }
@@ -594,20 +698,53 @@ impl UsageStats {
         let (health_start, health_end) = super::usage_monitor::trailing_range(time_zone, 6)?;
         let credit_type = if resolved.team.is_some() { "3" } else { "1" };
         let credit_url = |endpoint: &str, start: &str, end: &str, usage_type: Option<&str>| {
-            let mut pairs = vec![("type", credit_type), ("startTime", start), ("endTime", end)];
+            let mut pairs = vec![
+                ("type", credit_type),
+                ("startTime", start),
+                ("endTime", end),
+            ];
             if let Some(usage_type) = usage_type {
                 pairs.push(("usageType", usage_type));
             }
-            Self::monitor_url(&resolved, "/usage/quota/limit", &format!("/credit-usage/{endpoint}"), &pairs)
+            Self::monitor_url(
+                &resolved,
+                "/usage/quota/limit",
+                &format!("/credit-usage/{endpoint}"),
+                &pairs,
+            )
         };
         let (quota, activity, model_detail, tool_detail, health) = tokio::join!(
             self.fetch_quota(&resolved),
-            self.fetch_monitor(&resolved, credit_url("activity", &activity_start, &activity_end, None)),
-            self.fetch_monitor(&resolved, credit_url("usage-detail", &range.start_time, &range.end_time, Some("MODEL"))),
-            self.fetch_monitor(&resolved, credit_url("usage-detail", &range.start_time, &range.end_time, Some("MCP"))),
             self.fetch_monitor(
                 &resolved,
-                Self::monitor_url(&resolved, "/quota/limit", "/model-performance-day", &[("startTime", &health_start), ("endTime", &health_end)]),
+                credit_url("activity", &activity_start, &activity_end, None)
+            ),
+            self.fetch_monitor(
+                &resolved,
+                credit_url(
+                    "usage-detail",
+                    &range.start_time,
+                    &range.end_time,
+                    Some("MODEL")
+                )
+            ),
+            self.fetch_monitor(
+                &resolved,
+                credit_url(
+                    "usage-detail",
+                    &range.start_time,
+                    &range.end_time,
+                    Some("MCP")
+                )
+            ),
+            self.fetch_monitor(
+                &resolved,
+                Self::monitor_url(
+                    &resolved,
+                    "/quota/limit",
+                    "/model-performance-day",
+                    &[("startTime", &health_start), ("endTime", &health_end)]
+                ),
             ),
         );
         let quota = quota.map_err(api_error)?;
@@ -623,17 +760,19 @@ impl UsageStats {
         } else {
             Value::Null
         };
-        Ok(super::usage_monitor::coding_plan_snapshot(super::usage_monitor::CodingPlanInputs {
-            request,
-            provider: &resolved.provider,
-            quota,
-            range: &range,
-            activity: &activity,
-            model_detail: &model_detail,
-            tool_detail: &tool_detail,
-            health: &health,
-            now_ms: now_ms(),
-        }))
+        Ok(super::usage_monitor::coding_plan_snapshot(
+            super::usage_monitor::CodingPlanInputs {
+                request,
+                provider: &resolved.provider,
+                quota,
+                range: &range,
+                activity: &activity,
+                model_detail: &model_detail,
+                tool_detail: &tool_detail,
+                health: &health,
+                now_ms: now_ms(),
+            },
+        ))
     }
 
     /// `getSnapshotForRequest`。
@@ -642,7 +781,11 @@ impl UsageStats {
         let preferred = request["preferredProviderId"].as_str().unwrap_or("");
         if !preferred.is_empty() && is_start_plan_provider(preferred) {
             return self
-                .start_plan_snapshot(preferred, access.as_ref(), request["invalidateBalanceCache"] == true)
+                .start_plan_snapshot(
+                    preferred,
+                    access.as_ref(),
+                    request["invalidateBalanceCache"] == true,
+                )
                 .await;
         }
         let generated_at = now_ms();
@@ -651,9 +794,16 @@ impl UsageStats {
         let team_entitlement = match &team {
             Some(context) => {
                 let quota_url = self.quota_url_from_env().unwrap_or_else(|| {
-                    if context.2 == "zai" { self.zai_quota_url() } else { self.bigmodel_quota_url() }
+                    if context.2 == "zai" {
+                        self.zai_quota_url()
+                    } else {
+                        self.bigmodel_quota_url()
+                    }
                 });
-                Some(self.subscription_summary("", &quota_url, Some(context)).await)
+                Some(
+                    self.subscription_summary("", &quota_url, Some(context))
+                        .await,
+                )
             }
             None => None,
         };
@@ -697,7 +847,8 @@ impl UsageStats {
         };
         let (quota_payload, mcp_quota) = match &resolved {
             Some(resolved) => {
-                let (quota, mcp) = tokio::join!(self.fetch_quota(resolved), self.fetch_mcp_quota(resolved));
+                let (quota, mcp) =
+                    tokio::join!(self.fetch_quota(resolved), self.fetch_mcp_quota(resolved));
                 (quota.ok(), mcp)
             }
             None => (None, Value::Null),
@@ -706,7 +857,12 @@ impl UsageStats {
             .filter(bigmodel_envelope_ok)
             .map(|payload| payload["data"].clone())
             .filter(|data| data.is_object());
-        let limits = normalize_limits(quota_data.as_ref().map(|data| &data["limits"]).unwrap_or(&Value::Null));
+        let limits = normalize_limits(
+            quota_data
+                .as_ref()
+                .map(|data| &data["limits"])
+                .unwrap_or(&Value::Null),
+        );
         let primary = pick_primary_limit(&limits);
         if let Some(access) = &access
             && !provider_id.is_empty()
@@ -731,21 +887,37 @@ impl UsageStats {
             snapshot.insert("teamPlanUnavailableReason".into(), json!(reason));
         }
         let detail = &subscription["details"][0];
-        let product = |key: &str| non_empty(&detail[key]).map(Value::String).unwrap_or(Value::Null);
+        let product = |key: &str| {
+            non_empty(&detail[key])
+                .map(Value::String)
+                .unwrap_or(Value::Null)
+        };
         let context = match &resolved {
             Some(resolved) => match &resolved.team {
-                None => json!({"scope": "personal", "productId": product("productId"), "displayName": product("productName")}),
-                Some((organization, project, _)) => json!({"scope": "team", "organizationId": organization, "projectId": project, "productId": product("productId"), "displayName": product("productName")}),
+                None => {
+                    json!({"scope": "personal", "productId": product("productId"), "displayName": product("productName")})
+                }
+                Some((organization, project, _)) => {
+                    json!({"scope": "team", "organizationId": organization, "projectId": project, "productId": product("productId"), "displayName": product("productName")})
+                }
             },
-            None => match access.as_ref().filter(|access| access["planKind"] == "team-coding-plan") {
-                Some(access) => json!({"scope": "team", "organizationId": access["organizationId"], "projectId": access["projectId"]}),
+            None => match access
+                .as_ref()
+                .filter(|access| access["planKind"] == "team-coding-plan")
+            {
+                Some(access) => {
+                    json!({"scope": "team", "organizationId": access["organizationId"], "projectId": access["projectId"]})
+                }
                 None => json!({"scope": "personal"}),
             },
         };
         snapshot.insert("context".into(), context);
         snapshot.insert(
             "provider".into(),
-            resolved.as_ref().map(|r| r.provider.clone()).unwrap_or(Value::Null),
+            resolved
+                .as_ref()
+                .map(|r| r.provider.clone())
+                .unwrap_or(Value::Null),
         );
         snapshot.insert(
             "remaining".into(),
@@ -839,11 +1011,9 @@ impl UsageStats {
                     .any(|value| value.contains("start-plan") || value.contains("start plan"))
         });
         if current.is_none() {
-            let expired = plans
-                .as_array()
-                .into_iter()
-                .flatten()
-                .any(|plan| plan["status"].as_str().map(str::to_lowercase).as_deref() == Some("expired"));
+            let expired = plans.as_array().into_iter().flatten().any(|plan| {
+                plan["status"].as_str().map(str::to_lowercase).as_deref() == Some("expired")
+            });
             return Ok(json!({
                 "generatedAt": generated_at,
                 "authenticated": true,
@@ -864,7 +1034,10 @@ impl UsageStats {
         snapshot.insert("authenticated".into(), json!(true));
         snapshot.insert("context".into(), json!({"scope": "personal"}));
         snapshot.insert("provider".into(), provider);
-        if let Some(server_time) = payload["data"]["server_time"].as_f64().filter(|t| t.is_finite() && *t >= 0.0) {
+        if let Some(server_time) = payload["data"]["server_time"]
+            .as_f64()
+            .filter(|t| t.is_finite() && *t >= 0.0)
+        {
             snapshot.insert("serverTime".into(), number(server_time * 1000.0));
         }
         snapshot.insert("remaining".into(), start_plan_remaining(&remaining_limits));
@@ -880,7 +1053,10 @@ impl UsageStats {
         Ok(Value::Object(snapshot))
     }
 
-    async fn reset_authorization(&self, request: &Value) -> Result<(String, String, Option<(String, String, String)>), RpcError> {
+    async fn reset_authorization(
+        &self,
+        request: &Value,
+    ) -> Result<(String, String, Option<(String, String, String)>), RpcError> {
         let access = self
             .resolve_request_access(&request["accountAccess"])
             .await
@@ -896,7 +1072,9 @@ impl UsageStats {
         }
         let family = access["family"].as_str().unwrap_or("");
         let maas = self
-            .load_trimmed(&super::oauth_repo::access_token_key(oauth_provider_of(family)))
+            .load_trimmed(&super::oauth_repo::access_token_key(oauth_provider_of(
+                family,
+            )))
             .await;
         if maas.is_empty() {
             return Err(error("coding_plan_reset_maas_jwt_required"));
@@ -922,7 +1100,10 @@ impl UsageStats {
             return Err(error("no_bigmodel_api_key"));
         }
         let (zcode, maas, team) = self.reset_authorization(request).await?;
-        let url = self.api.endpoints().zcode_api_url(&format!("{CODING_PLAN_RESET_BASE_PATH}/{path}"));
+        let url = self
+            .api
+            .endpoints()
+            .zcode_api_url(&format!("{CODING_PLAN_RESET_BASE_PATH}/{path}"));
         let mut api_request = match &body {
             Some(_) => ApiRequest::post(&url),
             None if path == "history/read" => ApiRequest::post(&url),
@@ -943,12 +1124,18 @@ impl UsageStats {
             }
         }
         if let Some(body) = &body {
-            api_request = api_request.json(body).header("content-type", "application/json");
+            api_request = api_request
+                .json(body)
+                .header("content-type", "application/json");
         }
         let response = self.api.request(api_request).await.map_err(api_error)?;
         let status = response.status;
         let ok = response.ok();
-        let request_id = response.header("x-request-id").map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned);
+        let request_id = response
+            .header("x-request-id")
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned);
         let text = response.text().await.map_err(api_error)?;
         let payload = serde_json::from_str::<Value>(&text).ok();
         if let Some(payload) = &payload
@@ -960,7 +1147,9 @@ impl UsageStats {
             if accepted.contains(&code) {
                 return Ok(payload.clone());
             }
-            let suffix = request_id.map(|id| format!(" (x-request-id:{id})")).unwrap_or_default();
+            let suffix = request_id
+                .map(|id| format!(" (x-request-id:{id})"))
+                .unwrap_or_default();
             return Err(error(format!("coding_plan_reset_api_error:{code}{suffix}")));
         }
         if !ok {
@@ -985,13 +1174,18 @@ impl UsageStats {
             return Err(error("coding_plan_reset_invalid_response"));
         }
         if payload["code"].as_f64() != Some(0.0) {
-            return Err(error(format!("coding_plan_reset_api_error:{}", payload["code"])));
+            return Err(error(format!(
+                "coding_plan_reset_api_error:{}",
+                payload["code"]
+            )));
         }
         Ok(&payload["data"])
     }
 
     pub async fn reset_status(&self, request: &Value) -> Result<Value, RpcError> {
-        let payload = self.reset_request(request, "status", None, true, &[]).await?;
+        let payload = self
+            .reset_request(request, "status", None, true, &[])
+            .await?;
         let data = Self::reset_data(&payload)?;
         let invalid = || error("coding_plan_reset_invalid_response");
         let positive = |value: &Value| value.as_f64().filter(|v| v.is_finite() && *v > 0.0);
@@ -1000,13 +1194,19 @@ impl UsageStats {
                 .as_array()
                 .ok_or_else(invalid)?
                 .iter()
-                .map(|item| positive(&item["expire_at"]).map(|v| json!({"expireAt": number(v)})).ok_or_else(invalid))
+                .map(|item| {
+                    positive(&item["expire_at"])
+                        .map(|v| json!({"expireAt": number(v)}))
+                        .ok_or_else(invalid)
+                })
                 .collect()
         };
         let history = |key: &str| -> Result<Value, RpcError> {
             match &data[key] {
                 Value::Null if data.get(key).is_some() => Ok(Value::Null),
-                item => positive(&item["used_at"]).map(|v| json!({"usedAt": number(v)})).ok_or_else(invalid),
+                item => positive(&item["used_at"])
+                    .map(|v| json!({"usedAt": number(v)}))
+                    .ok_or_else(invalid),
             }
         };
         Ok(json!({
@@ -1019,7 +1219,11 @@ impl UsageStats {
     }
 
     fn idempotency_key(request: &Value) -> Result<String, RpcError> {
-        let key = request["idempotencyKey"].as_str().unwrap_or("").trim().to_owned();
+        let key = request["idempotencyKey"]
+            .as_str()
+            .unwrap_or("")
+            .trim()
+            .to_owned();
         if key.is_empty() || key.chars().count() > 64 {
             return Err(error("coding_plan_reset_invalid_idempotency_key"));
         }
@@ -1029,7 +1233,9 @@ impl UsageStats {
     pub async fn use_reset(&self, request: &Value) -> Result<Value, RpcError> {
         let key = Self::idempotency_key(request)?;
         let body = json!({"idempotency_key": key, "reset_type": request["resetType"]});
-        let payload = self.reset_request(request, "use", Some(body), true, &[]).await?;
+        let payload = self
+            .reset_request(request, "use", Some(body), true, &[])
+            .await?;
         let data = Self::reset_data(&payload)?;
         if data["used"] != true {
             return Err(error("coding_plan_reset_invalid_response"));
@@ -1040,7 +1246,13 @@ impl UsageStats {
     pub async fn request_opportunity(&self, request: &Value) -> Result<Value, RpcError> {
         let key = Self::idempotency_key(request)?;
         let payload = self
-            .reset_request(request, "opportunity", Some(json!({"idempotency_key": key})), true, &[3301])
+            .reset_request(
+                request,
+                "opportunity",
+                Some(json!({"idempotency_key": key})),
+                true,
+                &[3301],
+            )
             .await?;
         if payload["code"].as_i64() == Some(3301) {
             let next = payload["data"]["next_try_at"]
@@ -1057,7 +1269,9 @@ impl UsageStats {
     }
 
     pub async fn mark_history_read(&self, request: &Value) -> Result<(), RpcError> {
-        let payload = self.reset_request(request, "history/read", None, false, &[]).await?;
+        let payload = self
+            .reset_request(request, "history/read", None, false, &[])
+            .await?;
         Self::reset_data(&payload).map(|_| ())
     }
 }
@@ -1089,9 +1303,20 @@ fn start_plan_limits(balances: &Value, plans: Option<&Value>) -> Vec<Value> {
             let plan_id = non_empty(&balance["plan_id"]);
             let user_plan_id = non_empty(&balance["user_plan_id"]);
             let plan = plans.and_then(|plans| {
-                plans.as_array()?.iter().find(|candidate| match (&user_plan_id, candidate["user_plan_id"].as_str().filter(|s| !s.is_empty())) {
-                    (Some(owner), Some(id)) => owner == id,
-                    _ => candidate.get("plan_id").and_then(Value::as_str).map(str::to_owned) == plan_id,
+                plans.as_array()?.iter().find(|candidate| {
+                    match (
+                        &user_plan_id,
+                        candidate["user_plan_id"].as_str().filter(|s| !s.is_empty()),
+                    ) {
+                        (Some(owner), Some(id)) => owner == id,
+                        _ => {
+                            candidate
+                                .get("plan_id")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned)
+                                == plan_id
+                        }
+                    }
                 })
             });
             let period = plan.and_then(|plan| {
@@ -1107,13 +1332,25 @@ fn start_plan_limits(balances: &Value, plans: Option<&Value>) -> Vec<Value> {
                     limit.insert(key.to_owned(), value);
                 }
             };
-            put("bucketId", non_empty(&balance["bucket_id"]).map(Value::String));
+            put(
+                "bucketId",
+                non_empty(&balance["bucket_id"]).map(Value::String),
+            );
             put("userPlanId", user_plan_id.clone().map(Value::String));
-            put("periodStart", parse_unix_seconds(&balance["period_start"]).map(|v| number(v * 1000.0)));
-            put("periodEnd", parse_unix_seconds(&balance["period_end"]).map(|v| number(v * 1000.0)));
+            put(
+                "periodStart",
+                parse_unix_seconds(&balance["period_start"]).map(|v| number(v * 1000.0)),
+            );
+            put(
+                "periodEnd",
+                parse_unix_seconds(&balance["period_end"]).map(|v| number(v * 1000.0)),
+            );
             put("period", period.map(Value::String));
             put("meter", non_empty(&balance["meter"]).map(Value::String));
-            put("unitType", non_empty(&balance["unit_type"]).map(Value::String));
+            put(
+                "unitType",
+                non_empty(&balance["unit_type"]).map(Value::String),
+            );
             let kind = non_empty(&balance["entitlement_id"])
                 .or(capability_type)
                 .or_else(|| non_empty(&balance["meter"]))
@@ -1154,9 +1391,18 @@ fn start_plan_remaining(limits: &[Value]) -> Value {
     if limits.is_empty() {
         return Value::Null;
     }
-    let total: f64 = limits.iter().map(|limit| limit["number"].as_f64().unwrap_or(0.0)).sum();
-    let remaining: f64 = limits.iter().map(|limit| limit["remaining"].as_f64().unwrap_or(0.0)).sum();
-    let mut resets: Vec<f64> = limits.iter().filter_map(|limit| limit["nextResetTime"].as_f64()).collect();
+    let total: f64 = limits
+        .iter()
+        .map(|limit| limit["number"].as_f64().unwrap_or(0.0))
+        .sum();
+    let remaining: f64 = limits
+        .iter()
+        .map(|limit| limit["remaining"].as_f64().unwrap_or(0.0))
+        .sum();
+    let mut resets: Vec<f64> = limits
+        .iter()
+        .filter_map(|limit| limit["nextResetTime"].as_f64())
+        .collect();
     resets.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mut value = json!({"count": number(remaining), "isShow": true});
     if total > 0.0 {
@@ -1215,7 +1461,10 @@ fn monitor_data(payload: &Value, fallback: &str, allow_missing: bool) -> Result<
     if data.is_object() || data.is_array() {
         return Ok(data.clone());
     }
-    let explicit = payload["success"] == true || payload["code"].as_f64().is_some_and(|c| c == 0.0 || c == 200.0);
+    let explicit = payload["success"] == true
+        || payload["code"]
+            .as_f64()
+            .is_some_and(|c| c == 0.0 || c == 200.0);
     if allow_missing && explicit {
         // 团队项目无工具调用时 monitor 返回 code=200 但省略 data：空统计，不中断页面。
         return Ok(json!({}));
@@ -1309,7 +1558,9 @@ pub fn service(usage: UsageStats) -> ServiceBuilder {
             "markCodingPlanResetHistoryRead",
             handler!(|u, request| {
                 require_coding_plan(&request)?;
-                u.mark_history_read(&request).await.map(|()| Reply::Undefined)
+                u.mark_history_read(&request)
+                    .await
+                    .map(|()| Reply::Undefined)
             }),
         )
 }
@@ -1326,7 +1577,10 @@ mod tests {
             {"type": ""},
         ]));
         assert_eq!(limits.len(), 2);
-        assert_eq!(limits[0]["usageDetails"], json!([{"modelCode": "m", "displayName": "M", "usage": 0}]));
+        assert_eq!(
+            limits[0]["usageDetails"],
+            json!([{"modelCode": "m", "displayName": "M", "usage": 0}])
+        );
         assert_eq!(pick_primary_limit(&limits).unwrap()["type"], "TIME_LIMIT");
         let balances = json!([{"bucket_id": "b", "user_plan_id": "u", "plan_id": "p", "entitlement_id": "e1",
             "total_units": "100", "used_units": 40, "remaining_units": 60, "expires_at": 1000,
@@ -1338,7 +1592,10 @@ mod tests {
         assert_eq!(mapped[0]["nextResetTime"], json!(1_000_000));
         assert_eq!(mapped[0]["number"], json!(100));
         let remaining = start_plan_remaining(&start_plan_limits(&balances, None));
-        assert_eq!(remaining, json!({"count": 60, "isShow": true, "percentage": 0.6, "nextResetTime": 1_000_000}));
+        assert_eq!(
+            remaining,
+            json!({"count": 60, "isShow": true, "percentage": 0.6, "nextResetTime": 1_000_000})
+        );
         assert_eq!(
             subscription_summary(&json!({"productId": "p", "productName": "GLM Coding Pro", "autoRenew": 0, "valid": "2026-01-01 00:00:00-2026-02-01"}))
                 .unwrap()["expireTime"],
