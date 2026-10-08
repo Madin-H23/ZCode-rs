@@ -242,6 +242,7 @@ pub fn install(
     )));
     account.attach_agent(&agent, &context);
     account.start(broadcaster);
+    account::telemetry::start_host_resource_samples(context.control.clone());
 
     agent::session::warm_up(
         agent.clone(),

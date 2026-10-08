@@ -21,6 +21,7 @@ pub mod oauth_repo;
 pub mod official_mcp;
 pub mod onboarding;
 pub mod privacy;
+pub mod telemetry;
 pub mod usage;
 pub mod usage_monitor;
 #[cfg(test)]
