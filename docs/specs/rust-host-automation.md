@@ -153,7 +153,68 @@ sessions-index：会话 running → 终态 ─► markTerminal ─► 会话置�
 
 ## 7. bots
 
-见 [rust-host-automation-bots.md](rust-host-automation-bots.md)（实现时补充）。
+模块：`bots/`（`model.rs` 数据规则与 schema、`store.rs` 配置/状态文件、`credentials.rs` 凭据文件、`feishu/` 开放平台 HTTP、长连接帧与客户端、`runtime.rs` 长连接生命周期、`runtime_lock.rs` 跨进程运行锁、`inbound.rs` 入站命令、`delivery.rs` 投递与终态回推、`service.rs` 管理面与 channel）。本阶段只实现飞书 / Lark 通道。
+
+### 7.1 规则
+
+1. **文件**（与 Node 共用，`~/.zcode/v2/`）：`bot-config.v3.json`、`bot-state.v3.json`。读写都在跨进程文件锁内，写入为私密原子写（0600），内容为 `JSON.stringify(value, null, 2) + "\n"`。当前文件缺失时从 `bot-config.json` / `bot-state.v2.json` / `bot-state.json` 单向导入（旧 `model` / `thoughtLevel` 迁移成 `modelSelection`，`builtin:*` provider 按冻结表改名，官方 GLM 模型 id 规范大小写）并立即落盘。
+2. **schema**：与 zod 等价——`botConfigSchema` 等 strict 对象拒绝未知键，状态条目这类非 strict 对象丢弃未知键，输出按 schema 键序重建。`zcodePermissionResponseSchema` 的 `modifiedInput` / `permissionUpdates` 与问答 `origin` 只校验形状、原样保留。
+3. **归一化**：`saveBot` / `saveConfig` / `/bind` 走 `normalizeBotConfig`：`allowedWorkspaces` 去空去重、空或含 `*` 时为 `["*"]`；命令策略补默认值并丢弃旧 `cli`；`currentOptions` 只保留合法的 `modelSelection` 与非空 `mode` / `sandboxMode` / `approvalPolicy`；回复颗粒度飞书只允许 `streaming_card`，其余通道不允许它；微信去掉 `webhookUrl`。`saveBot` 把更新后的 Bot 移到列表末尾（同 Node）。
+4. **凭据**：`credentials.json` 与 Node 逐字节兼容：值为 `enc:v1:<iv>.<tag>.<cipher>`（base64url，AES-256-GCM），密钥 = sha256(`ZCODE_CREDENTIAL_SECRET`，否则 `zcode-credential-fallback:<platform>:<homedir>:<username>`)；非前缀值按旧明文读。文件损坏时按内容备份为 `.corrupt-<sha>.bak` 并拒绝覆盖。Bot 凭据键为 `bot:<id>:credential`、`bot:<id>:webhook-secret`。
+5. **校验**（`validateBotConfig`）：id 必填；同通道已启用的 Bot 不能绑定同一用户；Telegram / 飞书 / Lark 已启用的 Bot 不能共用同一凭据。
+6. **名称**：保存时带新凭据或名称为空，从开放平台读应用名（先 `applications/<appId>`，失败或为空再读 `me`），按 0 / 800 / 1800 ms 重试。
+7. **注册**：`beginFeishuRegistration` 向 accounts 域的 `/oauth/v1/app/registration` 依次发 `init`、`begin`（轮询域固定 feishu，二维码 URL 补 `from=sdk&source=node-sdk/zcode&tp=sdk`）；`pollFeishuRegistration` 按 `authorization_pending` / `slow_down` / `access_denied` / `expired_token` 映射状态，租户品牌为 lark 时切到 lark 轮询域。
+8. **长连接**（@larksuiteoapi/node-sdk `WSClient` 协议）：`POST <open>/callback/ws/endpoint {AppID, AppSecret}` 取 wss 地址与 ClientConfig；帧为 `pbbp2.Frame` protobuf（手写编解码）；按 `PingInterval` 发 control/ping，pong 更新 ClientConfig；`type=event` 的 data 帧按 `message_id/sum/seq` 拼包，事件按 EventDispatcher 规则拍平（v2 schema 把 header、event 摊到顶层）后处理，回同一帧作为 ack（追加 `biz_rt`，payload `{"code":200[,"data":base64(JSON)]}`，处理失败为 500 让飞书重投）。首次连接 20 s 超时；断线按 `ReconnectNonce` 随机延迟、`ReconnectInterval` 间隔重连，`ReconnectCount` 次后终止，5 s 后由运行循环整体重试。
+9. **运行锁**：连接前在 `~/.zcode/v2/bots-runtime-locks/<provider>-websocket/<sha256(appId)>.lock/` 拿锁（pending 目录 + rename、`owner.json`、每 10 s touch 的租约文件；持有者存活且租约 30 s 内更新时让出，状态为“handled by another ZCode window”，10 s 后重试）。Node Host 与 Rust Host 共用这套锁，同一应用只会有一条长连接。
+10. **对齐**：配置变更后 `scheduleRefresh` 串行对齐（只有最新一次走完）：启用且配齐 App ID / App Secret 的飞书 Bot 才连接；凭据指纹（sha256(JSON[provider, appId, credentialRef, secret])）变化时重连；禁用的显示 `disabled`。运行状态（`getStatus.botRuntime`）与 Node 的 `messageId` / 文案相同；投递错误单独记在 `deliveryError`。
+11. **入站**：解析飞书文本 / 富文本（post）/ 卡片按钮回调，去掉 @；2 分钟内同一消息 id 只处理一次；同一聊天上下文串行处理。授权（`withAuthorizedContext`）：Bot 启用且绑定的是这个用户、私聊、命令未被禁用、有可用 workspace（`settings.lastWorkspaceSession`）、上下文 workspace 仍在授权范围；带 `workspaceIdentity` 的上下文视为远端未连接，只放行不需要运行时的命令。
+12. **命令**：`/bind <code>`（30 s 绑定码，私聊，覆盖旧绑定，回绑定成功 + 帮助）、`/help`、`/status`（工作区、模型、任务、状态）、`/new`（回到草稿，Bot 硬锁 yolo）、`/stop`、普通消息。普通消息：草稿态用目标 Host 的首选（或草稿已选并经有效解析的）模型新建 v4 草稿会话，写入上下文后发送；任务态续用当前会话（`session/read` 取原选择并有效解析）；已软删除的任务回到草稿新建并提示；任务运行中回 `taskRunning`。输入在后台以 `botDeliveryTarget` = 当前聊天发送，先订阅终态再发。
+13. **回复**：飞书普通回复用 Card JSON 2.0 的 markdown 元素（单换行转硬换行、`---` 补空行），超过 1900 个 UTF-16 码元分卡；`receive_id_type` 按 `oc_` 前缀选 chat_id / open_id。会话终态后回推最后一段助手文本（摘要模式的 latestPart），失败回 `taskFailed`。
+14. **automation 回推**：`watchAutomationRun`（channel 成员与 automation 区域的 `BotDelivery`）只对存在、启用、通道一致的 Bot 订阅该会话终态并回推摘要；跳过原因 5 分钟内只告警一次。
+15. 未实现的成员（`beginWeixinRegistration`、`pollWeixinRegistration`）留在 stub，回 `NotImplemented`；`handleProviderCallback(Response)` 与 `testBot` 对 Telegram / Webhook / 微信回 `NotImplemented`，discord / wecom 回“reserved for a future version”（同 Node）。
+
+### 7.2 状态所有者
+
+| 状态                                       | 唯一所有者                                                           |
+| ------------------------------------------ | -------------------------------------------------------------------- |
+| Bot 配置、聊天上下文（草稿 / 当前任务）    | `bot-config.v3.json`、`bot-state.v3.json`（Node 与 Rust 同文件同锁） |
+| 应用密钥                                   | `credentials.json`（与 Node 共用的加密文件）                         |
+| 某个飞书应用的长连接归属                   | `bots-runtime-locks` 目录锁（跨进程）                                |
+| 绑定码、入站去重、运行中任务、运行状态展示 | `bots::service::Bots`（内存，Host 退出即丢，同 Node）                |
+| 会话与轮次、终态                           | CLI（经 TaskDriver 的 sessions-index 终态事件）                      |
+
+### 7.3 事件顺序
+
+```text
+飞书                       Rust Host（runtime / inbound / delivery）                        CLI
+│◄── POST callback/ws/endpoint ── 拿运行锁 → 取接入点
+│◄══ wss 连接 ═══════════════════ running
+│── event 帧(im.message.receive_v1) ─►│ 拼包 → 拍平 → 去重 → 串行队列
+│                                    │ 授权 / 读上下文
+│                                    │ 草稿：model_view → session/create（v4 草稿）────────────►│
+│                                    │ 写上下文（task）→ 订阅终态（inputId）
+│◄── ack 帧 {code:200} ───────────────│ 后台 sendText(botDeliveryTarget) ─────────────────────►│ v4/command
+│                                    │◄──────────────── sessions-index：running → completed
+│                                    │ rowsRange 取最后一段助手文本
+│◄── POST im/v1/messages（卡片）───────│
+```
+
+### 7.4 有意与 Node 不同之处
+
+| Node 行为                                                                  | Rust Host                                                      | 理由                                                     |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------- |
+| Telegram 轮询、Webhook、微信轮询与扫码注册                                 | 未实现（`NotImplemented`）                                     | 本阶段只做飞书长连接；其余通道沿用同一管理面后续补传输层 |
+| 飞书流式卡片（`streaming_card`）逐步更新、工具面板、变更摘要               | 终态后发一张卡片，内容为最后一段助手文本                       | 卡片流式更新与 Markdown 工具面板体量大，后续单独移植     |
+| `/workspace`、`/model`、`/mode`、`/think`、`/task`、`/reply` 选择卡与按钮  | 回 `unknownCommand`                                            | 依赖选择卡、配置项读写，随流式卡片一起移植               |
+| 权限请求、问答（elicitation）在聊天里应答                                  | 不转发（在 ZCode 界面处理）                                    | 同上                                                     |
+| `/new` 继承当前任务的模型与思考档位                                        | 新草稿只带 yolo，模型取目标 Host 首选                          | 继承需要读任务配置项；派发仍经有效选择解析               |
+| `/status` 含已工作时长与实时进展                                           | 不含                                                           | 依赖流式事件的进展跟踪                                   |
+| 附件下载、缓存后作为 prompt 附件                                           | 回 `attachmentRejected`（下载不可用）                          | 附件管线后续移植                                         |
+| 入站时查通讯录补发送者昵称；输入中 reaction；卡片点击后 `card/update` 原卡 | 不做                                                           | 只影响展示；绑定时 `displayName` 为空                    |
+| `bots:task` 广播（侧栏增量）                                               | 不发；新建会话由 TaskDriver 写 tasks-index 并广播 task_created | 侧栏走已有的任务列表事件                                 |
+| 远端 workspace 的 Bot 运行时与 `/reconnect`                                | 远端上下文一律视为未连接                                       | 远端 workspace 不在本阶段                                |
+| `listWorkspaceRefs` 5 s 缓存                                               | 每次读设置                                                     | 设置读取本身已缓存                                       |
+| 开放平台基址固定                                                           | 可由 `ZCODE_FEISHU_OPEN_BASE_URL` 等变量覆盖                   | 只供测试指向 127.0.0.1 mock                              |
 
 ## 8. conversation-share
 
@@ -188,3 +249,5 @@ sessions-index：会话 running → 终态 ─► markTerminal ─► 会话置�
 - `pnpm exec tsx scripts/rust-host/automation-fixtures.ts --check`：用真实 TS 实现（`AutomationRepo`、`automationCron.ts`、`AutomationService`）在固定时钟、固定时区下生成对拍 fixture。
 - `cargo test -p zcode-host-services automation`：仓库每一步的返回值与最终表内容与 TS 相同；cron 与 scheduleRule 的下次触发时间与 croner / TS 相同（含夏令时）；service 的校验文案相同；反向请求的参数校验与结果形状。
 - 真实 App（`scripts/rust-host/e2e/scenarios/automation-run-now.mjs`）：在设置页创建定时任务，点“立即运行”，mock 模型收到 prompt，侧栏出现带定时标记的新会话，运行历史出现成功的 manual run。
+- `pnpm exec tsx scripts/rust-host/bots-fixtures.ts --check`：Bot 文案表、命令解析、配置归一化、旧版配置/状态导入后的 schema 输出、Node 加密的凭据向量，均由真实 TS 实现生成。
+- `cargo test -p zcode-host-services bots`：上述对拍；`pbbp2.Frame` 编码与 protobufjs 逐字节相同；凭据文件与 Node 互通、损坏时备份并拒绝覆盖；运行锁互斥；127.0.0.1 上的飞书 mock（开放平台 HTTP + 长连接 WS）走完扫码注册轮询、保存 Bot 时回填应用名、`/help`（未绑定）→ `/bind` → `/status` → 普通消息（新建会话、后台发送、终态回推卡片）→ 重投去重 → 未移植命令，以及 automation 回推到绑定的群聊。
