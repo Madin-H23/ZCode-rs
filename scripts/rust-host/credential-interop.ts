@@ -1,9 +1,11 @@
 // Rust Host 凭据存储与 TS 实现的交叉读写（docs/specs/rust-host-account.md §2.1）。
 // 由 apps/zcode-host/crates/services/tests/account_interop.rs 调用；环境（HOME、ZCODE_DATA_BASE_DIR、
 // ZCODE_CREDENTIAL_SECRET）由调用方指向临时目录，绝不读写开发者真实的 ~/.zcode。
-// 用法：node --import tsx scripts/rust-host/credential-interop.ts <read|write|vector> <json>
+// 反馈脱敏（redact）也在这里比对：Rust 的 account/privacy.rs 逐条移植 feedbackPrivacy.ts。
+// 用法：node --import tsx scripts/rust-host/credential-interop.ts <read|write|vector|redact> <json>
 import { createCipheriv, createHash } from "node:crypto";
 import { createCredentialService } from "../../packages/services/src/credential/credentialService.js";
+import { redactFeedbackText } from "../../packages/shared/src/feedbackPrivacy.js";
 
 const [mode, payload = "null"] = process.argv.slice(2);
 const input = JSON.parse(payload) as unknown;
@@ -42,6 +44,10 @@ async function main(): Promise<unknown> {
       const cipher = createCipheriv("aes-256-gcm", key, iv);
       const encrypted = Buffer.concat([cipher.update(plaintext, "utf-8"), cipher.final()]);
       return `enc:v1:${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${encrypted.toString("base64url")}`;
+    }
+    case "redact": {
+      const { texts, diagnostic } = input as { texts: string[]; diagnostic: boolean };
+      return texts.map((text) => redactFeedbackText(text, { diagnostic }));
     }
     default:
       throw new Error(`unknown mode: ${mode}`);

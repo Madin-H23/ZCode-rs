@@ -234,6 +234,7 @@ pub fn install(
     );
     account.register_coding_plan(registry, &providers);
     account.register_provider_writes(registry, &providers, &agent);
+    account.register_feedback(registry, &context, bridge.clone(), router);
     registry.implement(settings_sync::service(settings_sync::SettingsSync::new(
         settings.clone(),
         &context.environment.vars,

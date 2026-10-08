@@ -12,6 +12,7 @@ pub mod client_config;
 pub mod coding_plan;
 pub mod credential;
 pub mod endpoint;
+pub mod feedback;
 pub mod net;
 pub mod oauth;
 pub mod oauth_adapters;
@@ -218,6 +219,33 @@ impl AccountStack {
                     process.request_value("v4/usage/stats", &params).await
                 })
             }),
+        )));
+    }
+
+    /// `feedback`：工单与附件上传；完整日志归档经 Main（`feedback-log-archive-*` 控制消息）。
+    pub fn register_feedback(
+        &self,
+        registry: &mut ChannelRegistry,
+        context: &ServiceContext,
+        bridge: crate::main_bridge::MainBridge,
+        router: &mut zcode_host_control::ControlRouter,
+    ) {
+        let environment = &context.environment;
+        let app_config_dir = environment.app_config_dir();
+        let data_root = app_config_dir
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| app_config_dir.clone());
+        registry.implement(feedback::service(feedback::Feedback::new(
+            self.api.clone(),
+            self.credentials.clone(),
+            bridge,
+            router,
+            // Main 目前不下发 feedbackApiBase；与 Node 一样回落到 env / 当前 endpoint。
+            None,
+            context.init.device_mid.clone(),
+            &data_root,
+            app_config_dir,
         )));
     }
 

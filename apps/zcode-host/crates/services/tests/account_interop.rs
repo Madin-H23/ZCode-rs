@@ -151,3 +151,50 @@ fn fixed_iv_ciphertext_matches_node_crypto() {
         }
     }
 }
+
+/// 反馈脱敏与 `feedbackPrivacy.ts` 逐字一致（工单文本与诊断日志两种模式）。
+#[test]
+fn feedback_redaction_matches_typescript() {
+    let root = repo_root();
+    if !tsx_available(&root) {
+        eprintln!("skipped: node_modules/.bin/tsx missing (run pnpm install)");
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let texts = [
+        "plain text",
+        "Authorization: Bearer abc.def\nok line",
+        "Proxy-Authorization: Basic Zm9v\r\nnext",
+        "token=abc123 rest; apiKey: 'quoted value', name=bob",
+        "see https://user:pw@example.com/a/b?x=1#h now",
+        "hook https://hooks.slack.com/services/T/B/X and https://example.com/docs?page=2",
+        "reset https://example.com/reset-password/abc123 and https://example.com/%E0%A4%A",
+        "open /Users/alice/project/file.ts and C:\\Users\\bob\\x.txt",
+        r#"{"apiKey":"sk","nested":{"name":"x","list":[{"password":"p"}]}}"#,
+        r#"log {"prompt":"secret stuff","model":"glm"} done"#,
+        "multi {\"token\": \"abc\",\n \"other\": 1\n} tail",
+        "headers: {\"x\": 1} trailing secret",
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\nafter",
+        "contact a.b+c@example.co for help",
+        "\"password\": \"hunter2\"\nsecond line",
+        "env = {\"PATH\": \"/usr/bin\"}",
+        "[1, 2, {\"cookie\": \"c\"}] and [broken",
+        "credential:\n  value",
+    ];
+    for diagnostic in [false, true] {
+        let expected = run_ts(
+            &root,
+            temp.path(),
+            "redact",
+            json!({"texts": texts, "diagnostic": diagnostic}),
+        );
+        for (index, text) in texts.iter().enumerate() {
+            let actual = zcode_host_services::account::privacy::redact_feedback_text(text, diagnostic);
+            assert_eq!(
+                Value::String(actual),
+                expected[index],
+                "diagnostic={diagnostic} input={text:?}"
+            );
+        }
+    }
+}
