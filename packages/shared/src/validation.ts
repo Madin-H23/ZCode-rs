@@ -474,7 +474,8 @@ export const hostIssueAttachmentEndpointMessageSchema = z
     type: z.literal("issue-attachment-endpoint"),
     requestId: nonEmptyStringSchema,
     attachmentId: nonEmptyStringSchema,
-    clientMode: z.literal("desktop-continuous"),
+    // web-remote-replayable：Main 发起的 attachment（AttachServicePort 经 WebSocket 桥接）。
+    clientMode: z.enum(["desktop-continuous", "web-remote-replayable"]),
     scope: z.object({ kind: z.literal("local") }).strict(),
   })
   .strict();

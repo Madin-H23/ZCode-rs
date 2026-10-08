@@ -647,6 +647,21 @@ impl Scope {
         {
             return Err(fault("proto.independentPlanUnsupported"));
         }
+        // web-remote-replayable 与远端 / 带 identity 的目标不带 ttft（Node sendConversationCommandV4）：
+        // 首 token 计时只对本地 desktop-continuous 有意义（rust-host-tasks.md §2.4）。
+        let non_local = self.client_mode != ClientMode::DesktopContinuous
+            || target
+                .workspace_identity
+                .as_deref()
+                .is_some_and(|id| !id.trim().is_empty())
+            || target.remote_session_id.is_some();
+        if non_local && envelope.get("ttft").is_some() {
+            let mut stripped = envelope.clone();
+            if let Some(object) = stripped.as_object_mut() {
+                object.remove("ttft");
+            }
+            return Ok(raw_reply(process.request("v4/command", &stripped).await?));
+        }
         Ok(raw_reply(process.request("v4/command", envelope).await?))
     }
 

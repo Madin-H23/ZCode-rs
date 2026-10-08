@@ -229,12 +229,13 @@ impl HostCore {
     }
 
     fn issue_endpoint(&self, meta: AttachmentMeta) -> AttachmentEndpointResult {
-        // 只接 Renderer 的本地 attachment；Bot 远程运行时与远端 workspace 后续接入。
-        if meta.client_mode != ClientMode::DesktopContinuous || meta.scope != AttachmentScope::Local
-        {
+        // 本地 scope 的 desktop-continuous 与 web-remote-replayable 都可签发（rust-host-tasks.md §2.4）；
+        // 两者的差别（deliveryProfile、capabilities、ttft）由 connection scope 按 clientMode 处理。
+        // 远端 scope 随远端 workspace 接入。
+        if meta.scope != AttachmentScope::Local {
             return AttachmentEndpointResult::Failed {
                 ok: False,
-                error: "only local desktop-continuous attachments are supported".to_owned(),
+                error: "only local attachments are supported".to_owned(),
             };
         }
         let capability = self.inner.attachments.issue(meta);

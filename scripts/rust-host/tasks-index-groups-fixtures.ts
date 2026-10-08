@@ -148,21 +148,36 @@ export const SCENARIOS: Array<{ name: string; dump: string[]; ops: Op[] }> = [
         now: BASE_NOW + 30,
         input: {
           workspaceScopes: [scope(W)],
-          topLevelNodes: [{ type: "task", task: ref("t3") }, { type: "group", group: 0 }],
+          topLevelNodes: [
+            { type: "task", task: ref("t3") },
+            { type: "group", group: 0 },
+          ],
           groups: [{ group: 0, taskRefs: [ref("t1")] }],
         },
       },
       {
         op: "apply",
-        input: { workspaceScopes: [scope(W)], topLevelNodes: [{ type: "task", task: ref("o1", OTHER) }], groups: [] },
+        input: {
+          workspaceScopes: [scope(W)],
+          topLevelNodes: [{ type: "task", task: ref("o1", OTHER) }],
+          groups: [],
+        },
       },
       {
         op: "apply",
-        input: { workspaceScopes: [scope(W)], topLevelNodes: [{ type: "task", task: ref("pinned") }], groups: [] },
+        input: {
+          workspaceScopes: [scope(W)],
+          topLevelNodes: [{ type: "task", task: ref("pinned") }],
+          groups: [],
+        },
       },
       {
         op: "apply",
-        input: { workspaceScopes: [scope(W)], topLevelNodes: [{ type: "group", groupId: "nope" }], groups: [] },
+        input: {
+          workspaceScopes: [scope(W)],
+          topLevelNodes: [{ type: "group", groupId: "nope" }],
+          groups: [],
+        },
       },
       {
         op: "apply",
@@ -183,8 +198,17 @@ export const SCENARIOS: Array<{ name: string; dump: string[]; ops: Op[] }> = [
     dump: ["tasks"],
     ops: [
       row("a", { updated_at: 300, created_at: 10, searchable_text: "the quick brown fox jumps" }),
-      row("b", { updated_at: 200, created_at: 30, title: "Needle in title", searchable_text: "nothing here" }),
-      row("c", { updated_at: 100, created_at: 20, searchable_text: `${"x".repeat(40)} NEEDLE ${"y".repeat(90)} needle tail` }),
+      row("b", {
+        updated_at: 200,
+        created_at: 30,
+        title: "Needle in title",
+        searchable_text: "nothing here",
+      }),
+      row("c", {
+        updated_at: 100,
+        created_at: 20,
+        searchable_text: `${"x".repeat(40)} NEEDLE ${"y".repeat(90)} needle tail`,
+      }),
       row("p", { pinned: 1, searchable_text: "needle pinned" }),
       row("ar", { archived: 1, searchable_text: "needle archived" }),
       row("d", { deleted: 1, searchable_text: "needle deleted" }),
@@ -196,11 +220,19 @@ export const SCENARIOS: Array<{ name: string; dump: string[]; ops: Op[] }> = [
         searchable_text: "remote needle",
       }),
       { op: "list", query: { kind: "timeline", workspaceScopes: [scope(W)] }, provider: "glm" },
-      { op: "list", query: { kind: "timeline", workspaceScopes: [scope(W)], sortBy: "created", limit: 2 }, provider: "glm" },
+      {
+        op: "list",
+        query: { kind: "timeline", workspaceScopes: [scope(W)], sortBy: "created", limit: 2 },
+        provider: "glm",
+      },
       { op: "list", query: { kind: "timeline", workspaceScopes: [scope(W)], limit: 0 } },
       { op: "list", query: { kind: "pinned", workspaceScopes: [scope(W)] }, provider: "glm" },
       { op: "list", query: { kind: "archived", workspaceScopes: [scope(W)] }, provider: "glm" },
-      { op: "list", query: { kind: "timeline", workspaceScopes: [scope(W)], search: "  NeEdle " }, provider: "glm" },
+      {
+        op: "list",
+        query: { kind: "timeline", workspaceScopes: [scope(W)], search: "  NeEdle " },
+        provider: "glm",
+      },
       { op: "list", query: { kind: "timeline", workspaceScopes: [scope(W)], search: "zzz" } },
       {
         op: "list",
