@@ -491,9 +491,10 @@ impl Checkpoints {
             if let Some(target) = target
                 && removed.insert(target.clone())
             {
-                remove_if_exists(Path::new(target))
-                    .await
-                    .map_err(io_error)?;
+                remove_if_exists(Path::new(target)).await.map_err(|error| {
+                    // Node `rm` 的错误文案（Windows 上文件被占用时为 EBUSY）。
+                    git_error(crate::support::node_error::fs_message(&error, "rm", target))
+                })?;
             }
         }
 

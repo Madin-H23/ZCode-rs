@@ -236,8 +236,23 @@ pub fn normalize_affected_repo_path(repo_root: &str, value: &str) -> String {
     if !path::is_absolute(value) {
         return normalize_git_path(value);
     }
-    let prefix = format!("{repo_root}{}", std::path::MAIN_SEPARATOR);
-    normalize_git_path(&value.replacen(&prefix, "", 1))
+    strip_repo_root(repo_root, value, std::path::MAIN_SEPARATOR, cfg!(windows))
+}
+
+fn strip_repo_root(repo_root: &str, value: &str, separator: char, windows: bool) -> String {
+    let stripped = value.replacen(&format!("{repo_root}{separator}"), "", 1);
+    if windows && stripped == value {
+        // 修复：Windows 上 git 报告的 repoRoot 是 `C:/repo`，而绝对路径由 resolve 生成为
+        // `C:\repo\a`，Node 的字符串替换对不上，rename 旧路径会以绝对路径进入冲突检测。
+        // 这里统一成 `/` 并忽略大小写再去前缀（Windows 文件系统大小写不敏感）。
+        let root = normalize_git_path(repo_root);
+        let prefix = format!("{}/", root.trim_end_matches('/')).to_lowercase();
+        let normalized = normalize_git_path(value);
+        if normalized.to_lowercase().starts_with(&prefix) {
+            return normalized[prefix.len()..].to_owned();
+        }
+    }
+    normalize_git_path(&stripped)
 }
 
 /// `GitCheckpointStore`：manifest 放在 `<appConfigDir>/checkpoints/<hash12>/<id>.json`。
@@ -337,6 +352,22 @@ mod tests {
         let tree = parse_ls_tree("100644 blob abc123\tsrc/a.txt\x00120000 blob def\tlink\x00");
         assert_eq!(tree["src/a.txt"].object_id, "abc123");
         assert_eq!(tree["link"].mode, "120000");
+    }
+
+    #[test]
+    fn affected_paths_strip_repo_root_on_both_platforms() {
+        assert_eq!(
+            strip_repo_root("/repo", "/repo/src/a.ts", '/', false),
+            "src/a.ts"
+        );
+        assert_eq!(
+            strip_repo_root("C:/Repo", r"C:\repo\src\a.ts", '\\', true),
+            "src/a.ts"
+        );
+        assert_eq!(
+            strip_repo_root(r"C:\Repo", r"C:\Repo\src\a.ts", '\\', true),
+            "src/a.ts"
+        );
     }
 
     #[test]
