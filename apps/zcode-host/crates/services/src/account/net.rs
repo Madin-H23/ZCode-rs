@@ -414,6 +414,8 @@ pub struct ApiRequest {
     pub headers: HeaderList,
     pub body: ApiBody,
     pub timeout_ms: Option<u64>,
+    /// `redirect: "error"`：不跟随重定向（3xx 原样返回，调用方按非 2xx 处理）。
+    pub follow_redirects: bool,
 }
 
 impl ApiRequest {
@@ -424,6 +426,7 @@ impl ApiRequest {
             headers: HeaderList::default(),
             body: ApiBody::Empty,
             timeout_ms: None,
+            follow_redirects: true,
         }
     }
 
@@ -458,6 +461,11 @@ impl ApiRequest {
 
     pub fn timeout_ms(mut self, timeout_ms: u64) -> Self {
         self.timeout_ms = Some(timeout_ms);
+        self
+    }
+
+    pub fn no_redirect(mut self) -> Self {
+        self.follow_redirects = false;
         self
     }
 }
@@ -611,6 +619,7 @@ impl ApiClient {
         &self,
         route: &ProxyRoute,
         ca_cert_path: Option<&str>,
+        follow_redirects: bool,
     ) -> Result<reqwest::Client, String> {
         let proxy = match route {
             ProxyRoute::Proxy(proxy) => Some(proxy.clone()),
@@ -618,7 +627,7 @@ impl ApiClient {
             ProxyRoute::Invalid(reason) => return Err((*reason).to_owned()),
         };
         let key = format!(
-            "{}:{}:{}",
+            "{}:{}:{}:{follow_redirects}",
             if proxy.is_some() { "proxy" } else { "direct" },
             proxy.as_deref().unwrap_or("direct"),
             ca_cert_path.unwrap_or("")
@@ -641,7 +650,7 @@ impl ApiClient {
             ),
             None => None,
         };
-        let client = tokio::task::spawn_blocking(move || build_client(proxy.as_deref(), ca))
+        let client = tokio::task::spawn_blocking(move || build_client(proxy.as_deref(), ca, follow_redirects))
             .await
             .map_err(|error| error.to_string())??;
         self.inner
@@ -688,7 +697,7 @@ impl ApiClient {
         let options = self.network_options().await;
         let route = resolve_proxy(&url, &options);
         let client = self
-            .client_for(&route, options.ca_cert_path.as_deref())
+            .client_for(&route, options.ca_cert_path.as_deref(), request.follow_redirects)
             .await
             .map_err(|message| ApiError::new(message, &url, &method))?;
         let parsed_method = reqwest::Method::from_bytes(method.as_bytes())
@@ -814,12 +823,20 @@ pub fn response_message(body: &str, status: u16) -> String {
     }
 }
 
-fn build_client(proxy: Option<&str>, ca: Option<Vec<u8>>) -> Result<reqwest::Client, String> {
+fn build_client(
+    proxy: Option<&str>,
+    ca: Option<Vec<u8>>,
+    follow_redirects: bool,
+) -> Result<reqwest::Client, String> {
     // rustls-no-provider 不自动选择算法；与 CLI 一样统一用 ring。
     let _ = rustls::crypto::ring::default_provider().install_default();
     let mut builder = reqwest::Client::builder()
         .no_proxy()
-        .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS));
+        .redirect(if follow_redirects {
+            reqwest::redirect::Policy::limited(MAX_REDIRECTS)
+        } else {
+            reqwest::redirect::Policy::none()
+        });
     if let Some(proxy) = proxy {
         builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(|error| error.to_string())?);
     }

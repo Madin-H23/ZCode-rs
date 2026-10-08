@@ -1059,7 +1059,7 @@ fn ids_arg(args: &zcode_host_kit::Args, index: usize, name: &str) -> Result<Vec<
 /// provider-settings 的写成员；只登记这些方法，读成员由 `provider_settings_service` 应答。
 pub fn writer_service(
     writer: PersonalWriter,
-    refresh_sources: Arc<dyn Fn(String) -> futures_util::future::BoxFuture<'static, ()> + Send + Sync>,
+    refresh_sources: Arc<dyn Fn(String) -> futures_util::future::BoxFuture<'static, Result<(), String>> + Send + Sync>,
     tester: Option<ConnectivityTester>,
 ) -> ServiceBuilder {
     macro_rules! handler {
@@ -1078,8 +1078,10 @@ pub fn writer_service(
             async move {
                 let reason: String = args.opt(0, "reason")?.unwrap_or_default();
                 // `refreshSources("settings:<reason>")`：账号层（以及内置配置）随设置页刷新。
-                refresh_sources(format!("settings:{reason}")).await;
+                let refreshed = refresh_sources(format!("settings:{reason}")).await;
                 writer.runtime.reload().await;
+                // 与 TS 相同：先刷新 registry，再把来源刷新失败（如 CDN 不可用）抛给调用方。
+                refreshed.map_err(|message| RpcError::new("Error", message))?;
                 Ok(Reply::Value(writer.view().await))
             }
         })

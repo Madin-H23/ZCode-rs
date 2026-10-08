@@ -7,6 +7,7 @@
 pub mod account_providers;
 pub mod auth;
 pub mod availability;
+pub mod builtin_download;
 pub mod cli;
 pub mod client_config;
 pub mod coding_plan;
@@ -56,6 +57,7 @@ pub struct AccountStack {
     pub providers: account_providers::AccountProviderSource,
     pub official_mcp: official_mcp::OfficialMcpCredentials,
     pub config_sync: cli::AccountConfigSync,
+    pub runtime: ProviderRuntime,
 }
 
 impl AccountStack {
@@ -98,7 +100,36 @@ impl AccountStack {
             credentials.clone(),
         );
         let config_sync = cli::AccountConfigSync::new(providers.clone());
+        // 内置配置按当前 Endpoint 物化 Active 并从 CDN 刷新（`zcodeBuiltinEnvironment`）。
+        let platform = crate::providers::builtin::release_platform(
+            &environment.vars,
+            credential::node_platform(),
+            net::node_arch(),
+        );
+        let app_version = endpoints.app_version();
+        runtime.set_builtin_environment(crate::providers::builtin::BuiltinEnvironment {
+            config_root: app_config_dir.clone(),
+            platform: platform.clone(),
+            app_version: app_version.clone(),
+            resolve_origin: {
+                let endpoints = endpoints.clone();
+                Arc::new(move || {
+                    let endpoints = endpoints.clone();
+                    Box::pin(async move { endpoints.current_origin().await })
+                })
+            },
+            fetch_release: {
+                let api = api.clone();
+                Arc::new(move |origin| {
+                    let (api, app_version, platform) = (api.clone(), app_version.clone(), platform.clone());
+                    Box::pin(async move {
+                        builtin_download::download_release(&api, &origin, &app_version, &platform).await
+                    })
+                })
+            },
+        });
         Self {
+            runtime: runtime.clone(),
             config_sync,
             credentials,
             endpoints,
@@ -169,6 +200,7 @@ impl AccountStack {
             })
         }));
         self.providers.start();
+        self.runtime.start_builtin_refresh();
     }
 
     /// 账号相关 channel。
@@ -266,14 +298,19 @@ impl AccountStack {
         runtime: &ProviderRuntime,
         agent: &AgentRuntime,
     ) {
-        let source = self.providers.clone();
-        let refresh: Arc<dyn Fn(String) -> futures_util::future::BoxFuture<'static, ()> + Send + Sync> =
-            Arc::new(move |reason| {
-                let source = source.clone();
-                Box::pin(async move {
-                    let _ = source.refresh(&reason).await;
-                })
-            });
+        let (source, builtin) = (self.providers.clone(), runtime.clone());
+        let refresh: Arc<
+            dyn Fn(String) -> futures_util::future::BoxFuture<'static, Result<(), String>> + Send + Sync,
+        > = Arc::new(move |reason| {
+            let (source, builtin) = (source.clone(), builtin.clone());
+            Box::pin(async move {
+                // `refreshSources`：强制刷新内置配置与账号层（allSettled），任一失败在 registry 刷新后抛出。
+                let (builtin_result, account_result) =
+                    tokio::join!(builtin.refresh_builtin(true), source.refresh(&reason));
+                builtin_result.map(|_| ())?;
+                account_result.map(|_| ())
+            })
+        });
         let (agent, sync) = (agent.clone(), self.config_sync.clone());
         let tester: crate::providers::personal::ConnectivityTester = Arc::new(move |input| {
             let (agent, sync) = (agent.clone(), sync.clone());
@@ -309,6 +346,24 @@ impl AccountStack {
 
     /// CLI 集成：Account Config 同步、反向请求、取消通知与 spawn 环境。
     pub fn attach_agent(&self, runtime: &AgentRuntime, context: &ServiceContext) {
+        // CLI 读 Active 内置配置：spawn 前等首轮物化完成（`resolveZCodeBuiltinActiveFilePath`）。
+        // 运行时随后按 `builtin_file()` 写入同一路径，这里先给出确定的值。
+        let providers = self.runtime.clone();
+        runtime.extensions().add_env_contributor(Arc::new(move |_| {
+            let providers = providers.clone();
+            Box::pin(async move {
+                providers
+                    .ensure_builtin_file()
+                    .await
+                    .map(|path| {
+                        std::collections::BTreeMap::from([(
+                            "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE".to_owned(),
+                            path.display().to_string(),
+                        )])
+                    })
+                    .unwrap_or_default()
+            })
+        }));
         cli::register(
             runtime,
             self.config_sync.clone(),
