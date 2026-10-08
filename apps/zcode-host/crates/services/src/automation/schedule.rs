@@ -70,12 +70,20 @@ pub fn is_one_shot(recurring: bool, max_runs: Option<i64>) -> bool {
 }
 
 /// `computeNextRunAt`：cron 的下一次（本地时区）；表达式非法时报错（与 `new Cron` 抛错相同）。
-pub fn compute_next_run_at(zone: &dyn Zone, cron_expr: &str, from: i64) -> Result<Option<i64>, String> {
+pub fn compute_next_run_at(
+    zone: &dyn Zone,
+    cron_expr: &str,
+    from: i64,
+) -> Result<Option<i64>, String> {
     Ok(Cron::parse(cron_expr, zone)?.next_run(zone, from))
 }
 
 /// `buildRelativeDelaySchedule`：返回兼容展示用的 cron 与锚定服务端时钟的一次性规则。
-pub fn build_relative_delay_schedule(zone: &dyn Zone, delay_minutes: i64, from: i64) -> (String, Rule) {
+pub fn build_relative_delay_schedule(
+    zone: &dyn Zone,
+    delay_minutes: i64,
+    from: i64,
+) -> (String, Rule) {
     let target = zone.fields(from + delay_minutes * 60 * 1_000);
     let cron_expr = format!(
         "{} {} {} {} *",
@@ -160,13 +168,26 @@ pub fn compute_schedule_rule_next_run_at(zone: &dyn Zone, rule: &Rule, from: i64
             Some(anchor_at + steps * step)
         }
         Some("hourly") => {
-            let base = zone.make([anchor.year, anchor.month, anchor.day, anchor.hour, minute, 0, 0]);
+            let base = zone.make([
+                anchor.year,
+                anchor.month,
+                anchor.day,
+                anchor.hour,
+                minute,
+                0,
+                0,
+            ]);
             let step = interval * 60 * 60 * 1_000;
             let steps = ((from - base).div_euclid(step) + 1).max(0);
             Some(base + steps * step)
         }
         Some("daily") => (0..36_600).find_map(|index| {
-            let day = date(zone, anchor.year, anchor.month, anchor.day + index * interval);
+            let day = date(
+                zone,
+                anchor.year,
+                anchor.month,
+                anchor.day + index * interval,
+            );
             let candidate = at_time(zone, day, hour, minute);
             (candidate > from).then_some(candidate)
         }),
@@ -211,29 +232,28 @@ pub fn compute_schedule_rule_next_run_at(zone: &dyn Zone, rule: &Rule, from: i64
             let mut offset = 0;
             while offset <= 1_200 {
                 let month = zone.fields(date(zone, anchor.year, anchor.month + offset, 1));
-                let candidates: Vec<i64> = if rule.get("monthlyMode").and_then(Value::as_str)
-                    == Some("weekday")
-                {
-                    let weekday = list(rule, "weekdays")
-                        .and_then(|values| values.first().copied())
-                        .map_or(1, |value| value as i64);
-                    let first = zone.fields(date(zone, month.year, month.month, 1));
-                    vec![date(
-                        zone,
-                        month.year,
-                        month.month,
-                        1 + (weekday - first.weekday + 7).rem_euclid(7),
-                    )]
-                } else {
-                    let mut days = list(rule, "monthDays")
-                        .filter(|values| !values.is_empty())
-                        .unwrap_or_else(|| vec![1.0]);
-                    days.sort_by(f64::total_cmp);
-                    days.into_iter()
-                        .map(|day| date(zone, month.year, month.month, day as i64))
-                        .filter(|candidate| zone.fields(*candidate).month == month.month)
-                        .collect()
-                };
+                let candidates: Vec<i64> =
+                    if rule.get("monthlyMode").and_then(Value::as_str) == Some("weekday") {
+                        let weekday = list(rule, "weekdays")
+                            .and_then(|values| values.first().copied())
+                            .map_or(1, |value| value as i64);
+                        let first = zone.fields(date(zone, month.year, month.month, 1));
+                        vec![date(
+                            zone,
+                            month.year,
+                            month.month,
+                            1 + (weekday - first.weekday + 7).rem_euclid(7),
+                        )]
+                    } else {
+                        let mut days = list(rule, "monthDays")
+                            .filter(|values| !values.is_empty())
+                            .unwrap_or_else(|| vec![1.0]);
+                        days.sort_by(f64::total_cmp);
+                        days.into_iter()
+                            .map(|day| date(zone, month.year, month.month, day as i64))
+                            .filter(|candidate| zone.fields(*candidate).month == month.month)
+                            .collect()
+                    };
                 for day in candidates {
                     let candidate = at_time(zone, day, hour, minute);
                     if candidate > from {
@@ -269,13 +289,19 @@ pub fn compute_schedule_rule_next_run_at(zone: &dyn Zone, rule: &Rule, from: i64
 }
 
 /// `inferMinuteIntervalScheduleRule`：`*/N * * * *` → 以 anchorAt 为锚点的分钟规则。
-pub fn infer_minute_interval_schedule_rule(zone: &dyn Zone, cron_expr: &str, anchor_at: i64) -> Option<Rule> {
+pub fn infer_minute_interval_schedule_rule(
+    zone: &dyn Zone,
+    cron_expr: &str,
+    anchor_at: i64,
+) -> Option<Rule> {
     let parts: Vec<&str> = cron_expr.split_whitespace().collect();
     if parts.len() != 5 || parts[1..].iter().any(|part| *part != "*") {
         return None;
     }
     let step = parts[0].strip_prefix("*/")?;
-    let valid = step.bytes().all(|byte| byte.is_ascii_digit()) && !step.starts_with('0') && !step.is_empty();
+    let valid = step.bytes().all(|byte| byte.is_ascii_digit())
+        && !step.starts_with('0')
+        && !step.is_empty();
     if !valid {
         return None;
     }
@@ -302,7 +328,10 @@ fn js_to_number(text: &str) -> Option<f64> {
             .and_then(|_| u64::from_str_radix(&text[2..], radix).ok())
             .map(|value| value as f64)
     };
-    if let Some(value) = radix("0x", 16).or_else(|| radix("0o", 8)).or_else(|| radix("0b", 2)) {
+    if let Some(value) = radix("0x", 16)
+        .or_else(|| radix("0o", 8))
+        .or_else(|| radix("0b", 2))
+    {
         return Some(value);
     }
     match text {
@@ -378,10 +407,14 @@ pub fn build_interval_schedule_rule(
 ) -> Result<Rule, String> {
     let fields = parse_cron_fields(cron_expr);
     let anchor = zone.fields(anchor_at);
-    let minute = fields.minute.map_or_else(|| json!(anchor.minute), js_number);
+    let minute = fields
+        .minute
+        .map_or_else(|| json!(anchor.minute), js_number);
     let hour = fields.hour.map_or_else(|| json!(anchor.hour), js_number);
     let month_days = fields.month_days.unwrap_or_else(|| vec![anchor.day as f64]);
-    let months = fields.months.unwrap_or_else(|| vec![(anchor.month + 1) as f64]);
+    let months = fields
+        .months
+        .unwrap_or_else(|| vec![(anchor.month + 1) as f64]);
     let weekdays = fields.weekdays.unwrap_or_else(|| vec![1.0]);
     let mut rule = Rule::new();
     rule.insert("unit".into(), json!(unit));

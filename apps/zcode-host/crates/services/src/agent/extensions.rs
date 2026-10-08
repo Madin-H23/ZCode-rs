@@ -2,13 +2,15 @@
 //! 不直接修改 runtime 与 channel 的代码：
 //! - 反向请求：按方法名登记 CLI → Host 请求的处理器（优先于内置默认应答）；
 //! - spawn 环境：启动 CLI 前追加环境变量（在设置页网络变量之后、命令自带变量之前）；
-//! - 使用前钩子：会话被订阅、新建、读取 presentation 之前执行（例如同步 Account Config）。
+//! - 使用前钩子：会话被订阅、新建、读取 presentation 之前执行（例如同步 Account Config）；
+//! - channel 成员：不依赖连接 scope 的 `zcode-agent` 成员（例如 automation），由
+//!   `AgentChannel` 委托给登记的处理器。
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, RwLock};
 
 use futures_util::future::BoxFuture;
 use serde_json::Value;
-use zcode_host_kit::RpcError;
+use zcode_host_kit::{Args, Reply, RpcError};
 
 use super::runtime::{AgentProcess, WorkspaceTarget};
 
@@ -37,6 +39,8 @@ pub type ReverseHandler =
     Arc<dyn Fn(ReverseContext) -> BoxFuture<'static, ReverseReply> + Send + Sync>;
 pub type EnvContributor =
     Arc<dyn Fn(WorkspaceTarget) -> BoxFuture<'static, BTreeMap<String, String>> + Send + Sync>;
+pub type MemberHandler =
+    Arc<dyn Fn(Args) -> BoxFuture<'static, Result<Reply, RpcError>> + Send + Sync>;
 pub type UseHook = Arc<
     dyn Fn(Arc<AgentProcess>, UseReason) -> BoxFuture<'static, Result<(), RpcError>> + Send + Sync,
 >;
@@ -55,6 +59,7 @@ pub struct Extensions {
     reverse: RwLock<HashMap<String, ReverseHandler>>,
     env: RwLock<Vec<EnvContributor>>,
     use_hooks: RwLock<Vec<UseHook>>,
+    members: RwLock<HashMap<String, MemberHandler>>,
 }
 
 fn read<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
@@ -90,6 +95,15 @@ impl Extensions {
 
     pub fn use_hooks(&self) -> Vec<UseHook> {
         read(&self.use_hooks).clone()
+    }
+
+    /// 登记 `zcode-agent` 成员；同名后登记的覆盖先登记的。连接相关的内置成员优先。
+    pub fn register_member(&self, name: impl Into<String>, handler: MemberHandler) {
+        write(&self.members).insert(name.into(), handler);
+    }
+
+    pub fn member(&self, name: &str) -> Option<MemberHandler> {
+        read(&self.members).get(name).cloned()
     }
 }
 

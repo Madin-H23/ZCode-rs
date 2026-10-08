@@ -42,8 +42,14 @@ pub fn parse_model_selection(value: &Value) -> Option<Value> {
         return None;
     }
     let mut out = Map::new();
-    out.insert("providerId".into(), json!(trimmed_non_empty(object.get("providerId")?)?));
-    out.insert("modelId".into(), json!(trimmed_non_empty(object.get("modelId")?)?));
+    out.insert(
+        "providerId".into(),
+        json!(trimmed_non_empty(object.get("providerId")?)?),
+    );
+    out.insert(
+        "modelId".into(),
+        json!(trimmed_non_empty(object.get("modelId")?)?),
+    );
     if let Some(options) = object.get("options") {
         let options = options.as_object()?;
         if options.keys().any(|key| key != "reasoningLevel") {
@@ -100,7 +106,8 @@ pub fn parse_bot_delivery_target(value: &Value) -> Option<Value> {
     }
     let provider = object.get("provider")?.as_str()?;
     let chat_type = object.get("chatType")?.as_str()?;
-    if !matches!(provider, "feishu" | "lark" | "weixin") || !matches!(chat_type, "private" | "group")
+    if !matches!(provider, "feishu" | "lark" | "weixin")
+        || !matches!(chat_type, "private" | "group")
     {
         return None;
     }
@@ -242,7 +249,11 @@ impl AutomationRow {
         if let Some(end_at) = self.end_at {
             put("endAt", json!(end_at));
         }
-        if let Some(rule) = self.schedule_rule.as_deref().filter(|rule| !rule.is_empty()) {
+        if let Some(rule) = self
+            .schedule_rule
+            .as_deref()
+            .filter(|rule| !rule.is_empty())
+        {
             let rule: Value = serde_json::from_str(rule)
                 .with_context(|| format!("invalid schedule_rule of {}", self.automation_id))?;
             put("scheduleRule", rule);
@@ -510,7 +521,10 @@ impl AutomationRepo {
         ORDER BY created_at DESC",
                 )?;
                 let rows = statement
-                    .query_map(named_params! {":workspace_key": workspace_key}, AutomationRow::read)?
+                    .query_map(
+                        named_params! {":workspace_key": workspace_key},
+                        AutomationRow::read,
+                    )?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 rows.iter().map(AutomationRow::to_value).collect()
             })
@@ -614,12 +628,15 @@ impl AutomationRepo {
         assert_valid_mode(patch_field(&patch, "mode"))?;
         let model_selection = match patch_field(&patch, "modelSelection") {
             None => None,
-            Some(value) => Some(serialize_model_selection(Some(value))?.unwrap_or_else(|| "null".into())),
+            Some(value) => {
+                Some(serialize_model_selection(Some(value))?.unwrap_or_else(|| "null".into()))
+            }
         };
         let automation_id = automation_id.to_owned();
         self.index
             .call(move |conn, now| {
-                let Some(existing) = get_row(conn, &automation_id, workspace_key.as_deref())? else {
+                let Some(existing) = get_row(conn, &automation_id, workspace_key.as_deref())?
+                else {
                     return Ok(None);
                 };
                 let text = |key: &str, current: &str| -> String {
@@ -674,7 +691,11 @@ impl AutomationRepo {
             .await
     }
 
-    pub async fn delete(&self, automation_id: &str, workspace_key: Option<String>) -> anyhow::Result<bool> {
+    pub async fn delete(
+        &self,
+        automation_id: &str,
+        workspace_key: Option<String>,
+    ) -> anyhow::Result<bool> {
         let automation_id = automation_id.to_owned();
         self.index
             .call(move |conn, _| {
@@ -886,7 +907,11 @@ impl AutomationRepo {
     }
 
     /// manual run 结束后只释放 single-flight 锁。
-    pub async fn release_manual_claim(&self, automation_id: &str, workspace_key: &str) -> anyhow::Result<()> {
+    pub async fn release_manual_claim(
+        &self,
+        automation_id: &str,
+        workspace_key: &str,
+    ) -> anyhow::Result<()> {
         self.claim_update(
             "UPDATE automations
         SET running = 0, claimed_at = NULL, updated_at = :now
@@ -900,7 +925,11 @@ impl AutomationRepo {
     }
 
     /// Host 仍持有 manual run 时续租，避免被 scheduler 当作僵尸回收。
-    pub async fn touch_manual_claim(&self, automation_id: &str, workspace_key: &str) -> anyhow::Result<()> {
+    pub async fn touch_manual_claim(
+        &self,
+        automation_id: &str,
+        workspace_key: &str,
+    ) -> anyhow::Result<()> {
         self.claim_update(
             "UPDATE automations
         SET claimed_at = :now, updated_at = :now
@@ -957,7 +986,11 @@ impl AutomationRepo {
     }
 
     /// 首次形成 Submission 时原子固定 run 的模型选择；之后只能读回原值。
-    pub async fn fix_run_model_selection(&self, run_id: &str, selection: &Value) -> anyhow::Result<Value> {
+    pub async fn fix_run_model_selection(
+        &self,
+        run_id: &str,
+        selection: &Value,
+    ) -> anyhow::Result<Value> {
         let serialized = serialize_model_selection(Some(selection))?;
         let run_id = run_id.to_owned();
         self.index
@@ -1067,7 +1100,12 @@ impl AutomationRepo {
     }
 
     /// 运行结果（running / succeeded / failed / stopped）；已有终态时 running 不覆盖。
-    pub async fn mark_run_outcome(&self, run_id: &str, outcome: &str, error: Option<String>) -> anyhow::Result<()> {
+    pub async fn mark_run_outcome(
+        &self,
+        run_id: &str,
+        outcome: &str,
+        error: Option<String>,
+    ) -> anyhow::Result<()> {
         let (run_id, outcome) = (run_id.to_owned(), outcome.to_owned());
         self.index
             .call(move |conn, now| {
@@ -1090,7 +1128,11 @@ impl AutomationRepo {
             .await
     }
 
-    pub async fn list_runs(&self, automation_id: &str, workspace_key: Option<String>) -> anyhow::Result<Vec<Value>> {
+    pub async fn list_runs(
+        &self,
+        automation_id: &str,
+        workspace_key: Option<String>,
+    ) -> anyhow::Result<Vec<Value>> {
         let automation_id = automation_id.to_owned();
         self.index
             .call(move |conn, _| {
@@ -1127,7 +1169,11 @@ impl AutomationRepo {
             .await
     }
 
-    pub async fn delete_run(&self, run_id: &str, workspace_key: Option<String>) -> anyhow::Result<()> {
+    pub async fn delete_run(
+        &self,
+        run_id: &str,
+        workspace_key: Option<String>,
+    ) -> anyhow::Result<()> {
         let run_id = run_id.to_owned();
         self.index
             .call(move |conn, _| {

@@ -941,7 +941,11 @@ impl AgentChannel {
                 scope.assert_ready()?;
                 Ok(Reply::Value(json!({"kind": "chunked"})))
             }),
-            _ => return None,
+            // 其他区域登记的成员（例如 automation，见 extensions.rs `register_member`）。
+            name => match runtime.extensions().member(name) {
+                Some(handler) => handler(args),
+                None => return None,
+            },
         };
         Some(future)
     }

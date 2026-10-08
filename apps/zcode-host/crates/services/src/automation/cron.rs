@@ -219,7 +219,13 @@ impl Pattern {
         self.slots(field).len() as i64
     }
 
-    fn part_to_array(&mut self, field: Field, text: &str, offset: i64, value: u8) -> ParseResult<()> {
+    fn part_to_array(
+        &mut self,
+        field: Field,
+        text: &str,
+        offset: i64,
+        value: u8,
+    ) -> ParseResult<()> {
         let day_l = field == Field::Day && (self.last_day_of_month || self.last_weekday);
         if text.is_empty() && !day_l {
             return err("CronPattern: configuration entry is empty, check for trailing spaces.");
@@ -263,13 +269,23 @@ impl Pattern {
         Ok((text.to_owned(), Nth::Default))
     }
 
-    fn handle_number(&mut self, text: &str, field: Field, offset: i64, value: u8) -> ParseResult<()> {
+    fn handle_number(
+        &mut self,
+        text: &str,
+        field: Field,
+        offset: i64,
+        value: u8,
+    ) -> ParseResult<()> {
         let (base, nth) = Self::extract_nth(text, field)?;
         let nearest = text.to_uppercase().contains('W');
         if field != Field::Day && nearest {
             return err("CronPattern: Nearest weekday modifier (W) only allowed in day-of-month.");
         }
-        let field = if nearest { Field::NearestWeekdays } else { field };
+        let field = if nearest {
+            Field::NearestWeekdays
+        } else {
+            field
+        };
         let number = parse_int_prefix(&base)
             .ok_or_else(|| "CronPattern: value is not a number".to_owned())?
             + offset;
@@ -323,7 +339,13 @@ impl Pattern {
         }
     }
 
-    fn validate_range(&mut self, from: i64, to: i64, step: Option<i64>, field: Field) -> ParseResult<()> {
+    fn validate_range(
+        &mut self,
+        from: i64,
+        to: i64,
+        step: Option<i64>,
+        field: Field,
+    ) -> ParseResult<()> {
         if from > to {
             return err("CronPattern: From value is larger than to value");
         }
@@ -332,13 +354,21 @@ impl Pattern {
                 return err("CronPattern: Syntax error, illegal stepping: 0");
             }
             if step > self.len(field) {
-                return err("CronPattern: Syntax error, steps cannot be greater than maximum value of part");
+                return err(
+                    "CronPattern: Syntax error, steps cannot be greater than maximum value of part",
+                );
             }
         }
         Ok(())
     }
 
-    fn handle_range_with_stepping(&mut self, text: &str, field: Field, offset: i64, value: u8) -> ParseResult<()> {
+    fn handle_range_with_stepping(
+        &mut self,
+        text: &str,
+        field: Field,
+        offset: i64,
+        value: u8,
+    ) -> ParseResult<()> {
         if text.to_uppercase().contains('W') {
             return err("CronPattern: Syntax error, W is not allowed in ranges with stepping.");
         }
@@ -349,7 +379,8 @@ impl Pattern {
         let (from, to) = range
             .split_once('-')
             .ok_or_else(|| "CronPattern: Syntax error, illegal range with stepping".to_owned())?;
-        let digits = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+        let digits =
+            |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
         if !digits(from) || !digits(to) || !digits(step) {
             return err("CronPattern: Syntax error, illegal range with stepping");
         }
@@ -367,7 +398,13 @@ impl Pattern {
         Ok(())
     }
 
-    fn handle_range(&mut self, text: &str, field: Field, offset: i64, value: u8) -> ParseResult<()> {
+    fn handle_range(
+        &mut self,
+        text: &str,
+        field: Field,
+        offset: i64,
+        value: u8,
+    ) -> ParseResult<()> {
         if text.to_uppercase().contains('W') {
             return err("CronPattern: Syntax error, W is not allowed in a range.");
         }
@@ -391,7 +428,13 @@ impl Pattern {
         Ok(())
     }
 
-    fn handle_stepping(&mut self, text: &str, field: Field, offset: i64, value: u8) -> ParseResult<()> {
+    fn handle_stepping(
+        &mut self,
+        text: &str,
+        field: Field,
+        offset: i64,
+        value: u8,
+    ) -> ParseResult<()> {
         if text.to_uppercase().contains('W') {
             return err("CronPattern: Syntax error, W is not allowed in parts with stepping.");
         }
@@ -608,7 +651,11 @@ impl CronDate {
             (!pattern.star_dow && unit == Unit::Day).then(|| weekday(self.year, self.month, 1));
         let len = Self::slot_len(pattern, unit);
         let mut index = original + offset;
-        while if direction == 1 { index < len } else { index >= 0 } {
+        while if direction == 1 {
+            index < len
+        } else {
+            index >= 0
+        } {
             let mut matched = Self::slot(pattern, unit, index) != 0;
             if unit == Unit::Day {
                 let day = index - offset;
@@ -714,7 +761,11 @@ impl CronDate {
             if level >= LEVELS.len() {
                 return Some(self);
             }
-            let limit = if pattern.star_year { 3_000 } else { YEARS as i64 };
+            let limit = if pattern.star_year {
+                3_000
+            } else {
+                YEARS as i64
+            };
             if self.year >= limit {
                 return None;
             }

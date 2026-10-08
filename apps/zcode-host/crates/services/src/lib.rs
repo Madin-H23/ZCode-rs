@@ -234,17 +234,16 @@ pub fn install(
 
     // ── automation ──（R6：automation、闲时任务、bots、conversation-share、cua-permission）
     let automation = automation::install(
-        automation::Area {
-            context: context.clone(),
-            bridge: bridge.clone(),
-            settings: settings.clone(),
-            providers: providers.clone(),
-            agent: agent.clone(),
-            observer: observer.clone(),
-            tasks: task_service,
-            tasks_index: storage.tasks_index.clone(),
-            bot_delivery: Default::default(),
-        },
+        automation::Area::new(
+            context.clone(),
+            bridge.clone(),
+            settings.clone(),
+            providers.clone(),
+            agent.clone(),
+            observer.clone(),
+            task_service,
+            storage.tasks_index.clone(),
+        ),
         registry,
         router,
     );
