@@ -2,6 +2,7 @@
 //! `localeCompare` 近似排序和进程信号。
 pub mod collate;
 pub mod env;
+pub mod http;
 pub mod node_error;
 pub mod path;
 pub mod signal;

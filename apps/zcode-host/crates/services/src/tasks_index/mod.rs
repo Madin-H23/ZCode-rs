@@ -17,12 +17,14 @@
 //! ```
 mod api;
 mod archive;
+pub mod automation_repo;
 mod grouped_view;
 mod groups;
 #[cfg(test)]
 mod groups_tests;
 mod legacy_selection;
 mod meta;
+pub mod off_peak_repo;
 mod repo;
 mod schema;
 mod startup;

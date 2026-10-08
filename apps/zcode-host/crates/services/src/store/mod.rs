@@ -7,3 +7,5 @@ mod process;
 
 pub use atomic::{atomic_write_private_text, atomic_write_text};
 pub use lock::{FileLock, LockOptions, acquire_file_lock, with_file_lock};
+// bots 运行锁（bots-runtime-locks）判断持有者存活。
+pub use process::is_alive;

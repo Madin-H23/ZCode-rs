@@ -6,13 +6,15 @@
 //! - 通知总线：三个 lane 的 CLI 通知（V4 帧除外）与可观察的反向请求，按到达顺序广播；
 //! - 进程事件：CLI 进程生命周期与进程诊断，已是 Main 控制消息的形状；
 //! - 功能门禁：闲时工具、动态工作流（docs/specs/rust-host-agent.md §2.7）。
+//! - channel 成员：不依赖连接 scope 的 `zcode-agent` 成员（例如 automation），由
+//!   `AgentChannel` 委托给登记的处理器。
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use futures_util::future::BoxFuture;
 use serde_json::Value;
-use zcode_host_kit::RpcError;
+use zcode_host_kit::{Args, Reply, RpcError};
 
 use zcode_host_kit::EventHub;
 
@@ -43,6 +45,8 @@ pub type ReverseHandler =
     Arc<dyn Fn(ReverseContext) -> BoxFuture<'static, ReverseReply> + Send + Sync>;
 pub type EnvContributor =
     Arc<dyn Fn(WorkspaceTarget) -> BoxFuture<'static, BTreeMap<String, String>> + Send + Sync>;
+pub type MemberHandler =
+    Arc<dyn Fn(Args) -> BoxFuture<'static, Result<Reply, RpcError>> + Send + Sync>;
 pub type UseHook = Arc<
     dyn Fn(Arc<AgentProcess>, UseReason) -> BoxFuture<'static, Result<(), RpcError>> + Send + Sync,
 >;
@@ -95,6 +99,7 @@ pub struct Extensions {
     off_peak_tools: AtomicBool,
     dynamic_workflow_gate: RwLock<Option<DynamicWorkflowGate>>,
     dynamic_workflow: tokio::sync::OnceCell<bool>,
+    members: RwLock<HashMap<String, MemberHandler>>,
 }
 
 fn read<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
@@ -176,6 +181,15 @@ impl Extensions {
                 }
             })
             .await
+    }
+
+    /// 登记 `zcode-agent` 成员；同名后登记的覆盖先登记的。连接相关的内置成员优先。
+    pub fn register_member(&self, name: impl Into<String>, handler: MemberHandler) {
+        write(&self.members).insert(name.into(), handler);
+    }
+
+    pub fn member(&self, name: &str) -> Option<MemberHandler> {
+        read(&self.members).get(name).cloned()
     }
 }
 
