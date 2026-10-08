@@ -190,11 +190,14 @@ impl OffPeakDispatcher {
                 "off-peak dispatch has no usable model (Built-in Provider models empty)",
             ));
         }
-        let credentials = self
-            .service
-            .client()
-            .credentials()
-            .map_err(|error| permanent(error.to_string()))?;
+        // 凭据缺失与套餐不可用是确定性配置错误（OffPeakPermanentDispatchError）；其余按暂时失败重试。
+        let credentials = self.service.client().credentials().await.map_err(|error| {
+            if error.permanent() {
+                permanent(error.to_string())
+            } else {
+                transient(error.to_string())
+            }
+        })?;
         let auth = request_auth(&credentials, ticket_id);
         let target = request.target();
         let kind = dispatch_kind(

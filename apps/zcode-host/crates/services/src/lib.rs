@@ -318,7 +318,11 @@ pub fn install(
             storage.tasks_index.clone(),
             account.credentials.clone(),
             account.repo.clone(),
-        ),
+        )
+        .with_account(automation::AccountLink {
+            auth: account.auth.clone(),
+            source_headers: account.api.source_headers().clone(),
+        }),
         registry,
         router,
     );

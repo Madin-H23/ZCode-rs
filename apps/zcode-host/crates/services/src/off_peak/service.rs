@@ -7,7 +7,6 @@
 //! sync 周期（tokio 定时器）：补报未核销终态 → 无票补取号 → POST /ticket/status → 写回快照
 //!                          间隔 = next_poll_after（钳制 5 s – 5 min），失败指数退避
 //! ```
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -45,7 +44,6 @@ pub struct OffPeakService {
     repo: OffPeakRepo,
     client: ServerClient,
     providers: ProviderRuntime,
-    vars: BTreeMap<String, String>,
     clock: Clock,
     wake: Hook,
     stop_running: Option<StopRunning>,
@@ -111,7 +109,6 @@ impl OffPeakService {
         repo: OffPeakRepo,
         client: ServerClient,
         providers: ProviderRuntime,
-        vars: BTreeMap<String, String>,
         clock: Clock,
         wake: Hook,
         stop_running: Option<StopRunning>,
@@ -120,7 +117,6 @@ impl OffPeakService {
             repo,
             client,
             providers,
-            vars,
             clock,
             wake,
             stop_running,
@@ -153,8 +149,9 @@ impl OffPeakService {
         (self.wake)();
     }
 
-    pub fn coding_plan_support(&self) -> Value {
-        models::coding_plan_support(&self.vars)
+    /// `getCodingPlanSupport`（`resolveOffPeakCodingPlanSupport`）：每次按当前账号状态解析。
+    pub async fn coding_plan_support(&self) -> Result<Value, String> {
+        self.client.credential_source().support().await
     }
 
     /// `resolveTelemetryProviderName`：只取安全的 hostname，失败为空串。
@@ -174,7 +171,12 @@ impl OffPeakService {
         level: Option<&str>,
     ) -> Option<Value> {
         let (_, resolved) = self.providers.snapshot().await;
-        models::resolve_model_selection(&resolved, &self.vars, model_id, level)
+        // 旧行没有 Provider 身份：只能复用当前凭据链裁定的 family，不能按 Registry 顺序猜。
+        let support = self.coding_plan_support().await.unwrap_or(Value::Null);
+        let family = (support["supported"] == true)
+            .then(|| support["providerFamily"].as_str())
+            .flatten();
+        models::resolve_model_selection(&resolved, family, model_id, level)
     }
 
     /// Host 派发前的窄检查：同一 Provider、同一模型仍可解析。

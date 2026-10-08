@@ -1,89 +1,25 @@
-//! 闲时任务的凭据、支持矩阵与模型选择（offPeakRuntimeModel.ts、offPeakModelSelectionView.ts、
+//! 闲时任务的支持矩阵、模型选择与逐请求鉴权（offPeakRuntimeModel.ts、offPeakModelSelectionView.ts、
 //! node.ts 的 `resolveModelSelection`、coding-plan 的 `resolveOffPeakClientConfig`）。
 //!
-//! Rust Host 还没有账号与 OAuth（R4）：真实凭据链（zhipu-account Provider、zcode JWT、Coding Plan
-//! key）一律解析为 `connection_unavailable`。`ZCODE_OFFPEAK_MOCK=1` 时与 Node 相同，使用确定性的
-//! mock 凭据，配合进程内 mock 网关跑通取号与派发。
+//! 双凭证（zcode JWT + Coding Plan key）的解析在 [`super::credentials`]：`ZCODE_OFFPEAK_MOCK=1` 时
+//! 与 Node 相同用确定性的 mock 凭据，否则走 account 区域的真实账号链。
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
 
+use super::credentials::{Credentials, plan_identity_headers};
 use crate::providers::resolve::{ProviderEntry, Resolved};
 
 pub const OFF_PEAK_PROVIDER_ZAI: &str = "account:zai-offpeak-idle-plan";
 pub const OFF_PEAK_PROVIDER_BIGMODEL: &str = "account:bigmodel-offpeak-idle-plan";
-const BIGMODEL_INDIVIDUAL_CODING_PLAN: &str = "account:bigmodel-individual-coding-plan";
+pub const BIGMODEL_INDIVIDUAL_CODING_PLAN: &str = "account:bigmodel-individual-coding-plan";
 
 pub fn mock_enabled(vars: &BTreeMap<String, String>) -> bool {
     vars.get("ZCODE_OFFPEAK_MOCK").map(String::as_str) == Some("1")
 }
 
-fn mock_no_plan(vars: &BTreeMap<String, String>) -> bool {
+pub fn mock_no_plan(vars: &BTreeMap<String, String>) -> bool {
     vars.get("ZCODE_OFFPEAK_MOCK_NO_PLAN").map(String::as_str) == Some("1")
-}
-
-/// 一次凭据解析的结果（`OffPeakCredentialSnapshot`）。
-#[derive(Debug, Clone, PartialEq)]
-pub struct Credentials {
-    pub jwt: String,
-    pub coding_plan_api_key: String,
-    pub kind: &'static str,
-    pub provider_family: &'static str,
-    pub provider_id: String,
-}
-
-/// 凭据不可用（`OffPeakCodingPlanUnavailableError` / `OffPeakCredentialsUnavailableError`）。
-#[derive(Debug, Clone, PartialEq)]
-pub struct Unavailable {
-    /// `OffPeakCodingPlanUnsupportedReason`。
-    pub reason: &'static str,
-}
-
-impl std::fmt::Display for Unavailable {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "off-peak selected coding plan unavailable: {}",
-            self.reason
-        )
-    }
-}
-
-impl std::error::Error for Unavailable {}
-
-/// `resolveOffPeakCredentials`。
-pub fn resolve_credentials(vars: &BTreeMap<String, String>) -> Result<Credentials, Unavailable> {
-    if mock_enabled(vars) {
-        if mock_no_plan(vars) {
-            return Err(Unavailable {
-                reason: "connection_unavailable",
-            });
-        }
-        return Ok(Credentials {
-            jwt: "offpeak-mock-jwt".into(),
-            coding_plan_api_key: "offpeak-mock-key".into(),
-            kind: "bigmodel-personal",
-            provider_family: "bigmodel",
-            provider_id: BIGMODEL_INDIVIDUAL_CODING_PLAN.into(),
-        });
-    }
-    // 账号 Provider（zhipu-account）在 Rust Host 里尚不可用：与 Node 未选中 Coding Plan 时相同。
-    Err(Unavailable {
-        reason: "connection_unavailable",
-    })
-}
-
-/// `resolveOffPeakCodingPlanSupport`：renderer 可见的脱敏快照。
-pub fn coding_plan_support(vars: &BTreeMap<String, String>) -> Value {
-    match resolve_credentials(vars) {
-        Ok(credentials) => json!({
-            "supported": true,
-            "kind": credentials.kind,
-            "providerFamily": credentials.provider_family,
-            "providerId": credentials.provider_id,
-        }),
-        Err(error) => json!({"supported": false, "reason": error.reason}),
-    }
 }
 
 pub fn provider_for_family(family: &str) -> &'static str {
@@ -194,15 +130,15 @@ pub fn is_valid_selection(resolved: &Resolved, selection: &Value) -> bool {
     }
 }
 
-/// node.ts 的 `resolveModelSelection`：固定 Off-Peak Provider + 输入模型（缺省取第一个）。
+/// node.ts 的 `resolveModelSelection`：固定 Off-Peak Provider（由当前凭据链裁定的 family 决定）+
+/// 输入模型（缺省取第一个）。`family` 为 None 表示凭据不可用。
 pub fn resolve_model_selection(
     resolved: &Resolved,
-    vars: &BTreeMap<String, String>,
+    family: Option<&str>,
     model_id: Option<&str>,
     reasoning_level: Option<&str>,
 ) -> Option<Value> {
-    let credentials = resolve_credentials(vars).ok()?;
-    let provider = registry_provider(resolved, provider_for_family(credentials.provider_family))?;
+    let provider = registry_provider(resolved, provider_for_family(family?))?;
     let model_id = match model_id {
         Some(model_id) => model_id.to_owned(),
         None => provider.models.first()?.model_id.clone(),
@@ -233,14 +169,20 @@ pub fn complete_new_selection(view: &Value, provider_id: &str, model_id: &str) -
     )
 }
 
-/// `buildOffPeakRequestAuth`：一次闲时执行的动态鉴权材料。
+/// `buildOffPeakRequestAuth`：一次闲时执行的动态鉴权材料（BigModel Team 另带组织 / 项目头）。
 pub fn request_auth(credentials: &Credentials, ticket_id: &str) -> Value {
-    json!({
-        "apiKey": credentials.jwt,
-        "headers": {
-            "Authorization": format!("Bearer {}", credentials.jwt),
-            "X-Coding-Plan-Api-Key": credentials.coding_plan_api_key,
-            "X-Off-Peak-Ticket-ID": ticket_id,
-        },
-    })
+    let mut headers = Map::new();
+    headers.insert(
+        "Authorization".into(),
+        json!(format!("Bearer {}", credentials.jwt)),
+    );
+    headers.insert(
+        "X-Coding-Plan-Api-Key".into(),
+        json!(credentials.coding_plan_api_key),
+    );
+    headers.insert("X-Off-Peak-Ticket-ID".into(), json!(ticket_id));
+    for (name, value) in plan_identity_headers(credentials) {
+        headers.insert(name.into(), json!(value));
+    }
+    json!({"apiKey": credentials.jwt, "headers": headers})
 }

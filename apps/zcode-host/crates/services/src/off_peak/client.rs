@@ -8,8 +8,10 @@ use serde_json::{Value, json};
 use tokio::sync::OnceCell;
 use zcode_host_kit::log;
 
+use super::credentials::{CredentialSource, Credentials, Unavailable, plan_identity_headers};
 use super::gateway::Gateway;
-use super::models::{Credentials, Unavailable, mock_enabled, resolve_credentials};
+use super::models::mock_enabled;
+use crate::account::net::SourceHeaders;
 use crate::agent::service::uuid_v4;
 use crate::support::http;
 
@@ -117,6 +119,9 @@ fn poll_after(value: Option<&Value>) -> Result<Option<i64>, ()> {
 
 pub struct ServerClient {
     vars: BTreeMap<String, String>,
+    credentials: CredentialSource,
+    /// ZCode 来源头（account 区域的 `buildZCodeSourceHeaders`）；没有账号栈时不发。
+    source_headers: Option<SourceHeaders>,
     gateway: OnceCell<Option<Arc<Gateway>>>,
     gateway_port: Option<u16>,
     http: reqwest::Client,
@@ -124,17 +129,29 @@ pub struct ServerClient {
 
 impl ServerClient {
     /// `gateway_port` 只供测试覆盖 mock 网关端口（生产用 `ZCODE_OFFPEAK_MOCK_PORT` 或固定端口）。
-    pub fn new(vars: BTreeMap<String, String>, gateway_port: Option<u16>) -> anyhow::Result<Self> {
+    pub fn new(
+        vars: BTreeMap<String, String>,
+        credentials: CredentialSource,
+        source_headers: Option<SourceHeaders>,
+        gateway_port: Option<u16>,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             vars,
+            credentials,
+            source_headers,
             gateway: OnceCell::new(),
             gateway_port,
             http: http::client(REQUEST_TIMEOUT)?,
         })
     }
 
-    pub fn credentials(&self) -> Result<Credentials, Unavailable> {
-        resolve_credentials(&self.vars)
+    /// 本次请求的凭据快照（不缓存）。
+    pub async fn credentials(&self) -> Result<Credentials, Unavailable> {
+        self.credentials.resolve().await
+    }
+
+    pub fn credential_source(&self) -> &CredentialSource {
+        &self.credentials
     }
 
     /// API origin：mock 模式懒启动进程内网关（多实例经端口占用复用同一份票据状态），否则 ZCode API。
@@ -167,23 +184,50 @@ impl ServerClient {
         path: &str,
         body: Option<Value>,
     ) -> Result<Value, ClientError> {
-        let credentials = self.credentials().map_err(ClientError::Credentials)?;
+        let credentials = self.credentials().await.map_err(ClientError::Credentials)?;
         let origin = self.origin().await?;
+        // 来源头 + 双凭证 + Team 身份头，最后补链路 id（withRequestIdHeader）；凭据不进日志。
+        let mut headers = crate::account::net::HeaderList::default();
+        if let Some(source) = &self.source_headers {
+            for (name, value) in source.build() {
+                headers.set(name, value);
+            }
+        }
+        if body.is_some() {
+            headers.set("content-type", "application/json");
+        }
+        headers.set("authorization", format!("Bearer {}", credentials.jwt));
+        headers.set(
+            "x-coding-plan-api-key",
+            credentials.coding_plan_api_key.clone(),
+        );
+        for (name, value) in plan_identity_headers(&credentials) {
+            headers.set(name, value);
+        }
+        if !headers.contains("x-request-id") {
+            headers.set("x-request-id", uuid_v4());
+        }
+        let request_id = headers.get("x-request-id").unwrap_or_default().to_owned();
         let mut request = self
             .http
-            .request(method.clone(), format!("{origin}/api/v1/off-peak{path}"))
-            .header("x-request-id", uuid_v4())
-            .header("authorization", format!("Bearer {}", credentials.jwt))
-            .header("x-coding-plan-api-key", &credentials.coding_plan_api_key);
+            .request(method.clone(), format!("{origin}/api/v1/off-peak{path}"));
+        for (name, value) in headers.iter() {
+            request = request.header(name, value);
+        }
         if let Some(body) = &body {
-            request = request
-                .header("content-type", "application/json")
-                .body(body.to_string());
+            request = request.body(body.to_string());
         }
         let response = request.send().await.map_err(|error| {
             ClientError::Other(format!("off-peak {path} request failed: {error}"))
         })?;
         let status = response.status();
+        let response_request_id = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
         let text = response
             .text()
             .await
@@ -196,10 +240,12 @@ impl ServerClient {
         if !status.is_success() {
             let code = json["code"].as_i64();
             let message = json["msg"].as_str().or_else(|| json["message"].as_str());
+            // 可恢复的服务端拒绝：只记契约元数据，禁止记录凭证原文或响应体。
             log::warn(format!(
-                "off-peak request rejected method={method} path={path} httpStatus={} bizCode={code:?} credentialKind={}",
+                "off-peak request rejected method={method} path={path} httpStatus={} bizCode={code:?} credentialKind={} requestId={}",
                 status.as_u16(),
-                credentials.kind
+                credentials.kind,
+                response_request_id.as_deref().unwrap_or(&request_id)
             ));
             return Err(ClientError::Server(ServerError {
                 message: format!(

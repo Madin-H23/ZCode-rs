@@ -126,7 +126,10 @@ async fn create(
     let support = if allowed_models(&gray, None).is_empty() {
         Value::Null
     } else {
-        service.coding_plan_support()
+        match service.coding_plan_support().await {
+            Ok(support) => support,
+            Err(error) => return internal(&context.method, &context.workspace_key, error),
+        }
     };
     let provider_id = (support["supported"] == true)
         .then(|| provider_for_family(support["providerFamily"].as_str().unwrap_or_default()));
