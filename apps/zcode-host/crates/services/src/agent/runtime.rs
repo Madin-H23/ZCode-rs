@@ -810,6 +810,21 @@ struct Handler {
 
 impl ClientHandler for Handler {
     fn notification(&self, _client: &Arc<ProtocolClient>, notification: Notification) {
+        if let Some(hook) = self.extensions.notification_hook(&notification.method) {
+            let params = notification
+                .params
+                .as_deref()
+                .and_then(|raw| serde_json::from_str(raw.get()).ok())
+                .unwrap_or(Value::Null);
+            hook(super::extensions::NotificationContext {
+                target: self.target.clone(),
+                workspace_key: self.key.clone(),
+                generation: self.generation,
+                method: notification.method.clone(),
+                params,
+            });
+            return;
+        }
         if notification.method != "v4/conversation/frame" {
             log::debug(format!(
                 "agent[{}] notification ignored: {}",

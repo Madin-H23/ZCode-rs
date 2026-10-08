@@ -37,6 +37,19 @@ pub type ReverseHandler =
     Arc<dyn Fn(ReverseContext) -> BoxFuture<'static, ReverseReply> + Send + Sync>;
 pub type EnvContributor =
     Arc<dyn Fn(WorkspaceTarget) -> BoxFuture<'static, BTreeMap<String, String>> + Send + Sync>;
+/// CLI → Host 通知的处理器（例如 `interaction/providerRuntimeHeadersCancelled`）。
+pub type NotificationHook = Arc<dyn Fn(NotificationContext) + Send + Sync>;
+
+/// 一条 CLI 通知的上下文。
+#[derive(Debug, Clone)]
+pub struct NotificationContext {
+    pub target: WorkspaceTarget,
+    pub workspace_key: String,
+    pub generation: u64,
+    pub method: String,
+    pub params: Value,
+}
+
 pub type UseHook = Arc<
     dyn Fn(Arc<AgentProcess>, UseReason) -> BoxFuture<'static, Result<(), RpcError>> + Send + Sync,
 >;
@@ -55,6 +68,7 @@ pub struct Extensions {
     reverse: RwLock<HashMap<String, ReverseHandler>>,
     env: RwLock<Vec<EnvContributor>>,
     use_hooks: RwLock<Vec<UseHook>>,
+    notification_hooks: RwLock<HashMap<String, NotificationHook>>,
 }
 
 fn read<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
@@ -90,6 +104,15 @@ impl Extensions {
 
     pub fn use_hooks(&self) -> Vec<UseHook> {
         read(&self.use_hooks).clone()
+    }
+
+    /// 按方法名登记通知处理器；同名后登记的覆盖先登记的。
+    pub fn register_notification(&self, method: impl Into<String>, hook: NotificationHook) {
+        write(&self.notification_hooks).insert(method.into(), hook);
+    }
+
+    pub fn notification_hook(&self, method: &str) -> Option<NotificationHook> {
+        read(&self.notification_hooks).get(method).cloned()
     }
 }
 

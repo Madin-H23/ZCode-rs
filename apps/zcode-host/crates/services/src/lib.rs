@@ -136,7 +136,8 @@ pub fn install(
 ) -> Installed {
     let bridge = MainBridge::new(context.control.clone());
     let settings = settings::SettingStore::new(&context.environment.home_dir);
-    registry.implement(broadcast::service(bridge.clone(), router));
+    let (broadcast_service, broadcaster) = broadcast::service_with_sender(bridge.clone(), router);
+    registry.implement(broadcast_service);
     registry.implement(settings::service(settings.clone()));
 
     let providers = providers::ProviderRuntime::new(
@@ -154,11 +155,6 @@ pub fn install(
     providers.start_polling();
     registry.implement(providers::provider_settings_service(providers.clone()));
     registry.implement(providers::model_selection_service(providers.clone()));
-
-    registry.implement(account::oauth_service(&context.environment.vars));
-    registry.implement(account::onboarding_record_service());
-    registry.implement(account::usage_stats_service());
-    registry.implement(account::coding_plan_service(providers.clone()));
 
     registry.implement(file::service(file::FileServiceConfig {
         conversation_workspace: context
@@ -225,6 +221,20 @@ pub fn install(
         workspace_events,
     );
     registry.implement(tasks::controller::service(controller.clone()));
+
+    // ── account ──
+    // 账号栈（docs/specs/rust-host-account.md）：凭据、ApiClient、OAuth、账号 provider overlay、
+    // CLI 集成，以及账号增值 channel。必须在预热拉起 CLI 之前登记 CLI 扩展点。
+    let account = account::AccountStack::new(&context, &settings, &providers);
+    account.register(
+        registry,
+        storage.tasks_index.clone(),
+        context.environment.app_config_dir(),
+    );
+    registry.implement(account::usage_stats_service());
+    registry.implement(account::coding_plan_service(providers.clone()));
+    account.attach_agent(&agent, &context);
+    account.start(broadcaster);
 
     agent::session::warm_up(
         agent.clone(),
