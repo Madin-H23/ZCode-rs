@@ -27,6 +27,10 @@ struct Inner {
     personal_file: PathBuf,
     state: RwLock<State>,
     changed: EventHub<()>,
+    /// 内置配置内容变化（账号层据此重新解析，reason `config:zcodeBuiltin:file-changed`）。
+    builtin_changed: EventHub<()>,
+    /// 账号层已接入时，首份账号快照发布前的读取要等待它（TS 的 Registry 同样等账号源首读）。
+    account_ready: tokio::sync::watch::Sender<bool>,
 }
 
 #[derive(Default)]
@@ -34,6 +38,43 @@ struct State {
     signature: Vec<u8>,
     revision: u64,
     resolved: Arc<Resolved>,
+    builtin: Arc<Value>,
+    personal: Arc<Value>,
+    builtin_revision: String,
+    builtin_signature: Vec<u8>,
+    account: Option<Arc<AccountLayer>>,
+}
+
+/// 第三层账号 overlay（`AccountProviderConfigSnapshot`）：providers 只含 access / builtinModelIds。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AccountLayer {
+    pub revision: String,
+    pub based_on_builtin_revision: String,
+    pub providers: serde_json::Map<String, Value>,
+    pub states: serde_json::Map<String, Value>,
+}
+
+/// 内置文件的签名部分（reload 里 builtin 字节后接 0 再接个人字节）。
+fn builtin_bytes_signature(signature: &[u8]) -> Vec<u8> {
+    match signature.iter().position(|byte| *byte == 0) {
+        Some(index) => signature[..index].to_vec(),
+        None => signature.to_vec(),
+    }
+}
+
+/// `zcode-builtin:<revision>:<sha256(resolve(path))>`，与 CLI registry 的计算一致。
+fn builtin_revision_of(builtin: &Value, path: Option<&Path>) -> String {
+    use sha2::Digest;
+    let Some(path) = path else {
+        return "zcode-builtin:none".to_owned();
+    };
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let digest = sha2::Sha256::digest(absolute.to_string_lossy().as_bytes());
+    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    match builtin["revision"].as_u64() {
+        Some(revision) => format!("zcode-builtin:{revision}:{hex}"),
+        None => format!("zcode-builtin:invalid:{hex}"),
+    }
 }
 
 async fn read_json(path: &Path) -> (Vec<u8>, Value) {
@@ -68,6 +109,8 @@ impl ProviderRuntime {
                 personal_file,
                 state: RwLock::new(State::default()),
                 changed: EventHub::new(),
+                builtin_changed: EventHub::new(),
+                account_ready: tokio::sync::watch::channel(true).0,
             }),
         }
     }
@@ -105,13 +148,38 @@ impl ProviderRuntime {
                 json!({})
             }
         };
-        let (builtin, personal) = (config_of(&builtin), config_of(&personal));
-        let resolved = tokio::task::spawn_blocking(move || resolve::resolve(&builtin, &personal))
-            .await
-            .unwrap_or_default();
+        let builtin_revision = builtin_revision_of(&builtin, self.inner.builtin_file.as_deref());
+        let (builtin, personal) = (Arc::new(config_of(&builtin)), Arc::new(config_of(&personal)));
+        let builtin_changed = {
+            let mut state = self.lock_write();
+            let changed = state.revision > 0 && state.builtin_signature != builtin_bytes_signature(&signature);
+            state.builtin_signature = builtin_bytes_signature(&signature);
+            state.builtin = builtin;
+            state.personal = personal;
+            state.builtin_revision = builtin_revision;
+            state.signature = signature;
+            changed
+        };
+        let snapshot = self.re_resolve().await;
+        if builtin_changed {
+            self.inner.builtin_changed.emit(());
+        }
+        snapshot
+    }
+
+    /// 用缓存的两层配置与当前账号层重新解析，revision 加一并通知。
+    async fn re_resolve(&self) -> (u64, Arc<Resolved>) {
+        let (builtin, personal, account) = {
+            let state = self.lock_read();
+            (state.builtin.clone(), state.personal.clone(), state.account.clone())
+        };
+        let resolved = tokio::task::spawn_blocking(move || {
+            resolve::resolve(&builtin, &personal, account.as_deref())
+        })
+        .await
+        .unwrap_or_default();
         let snapshot = {
             let mut state = self.lock_write();
-            state.signature = signature;
             state.revision += 1;
             state.resolved = Arc::new(resolved);
             (state.revision, state.resolved.clone())
@@ -122,7 +190,51 @@ impl ProviderRuntime {
         snapshot
     }
 
+    /// 账号层接入：之后的读取等首份账号快照（`set_account_layer`）发布。
+    pub fn attach_account_layer(&self) {
+        let has_layer = self.lock_read().account.is_some();
+        if !has_layer {
+            self.inner.account_ready.send_replace(false);
+        }
+    }
+
+    /// 发布账号层；内容不变时不重新解析。
+    pub async fn set_account_layer(&self, layer: AccountLayer) {
+        let unchanged = {
+            let mut state = self.lock_write();
+            let unchanged = state.account.as_deref() == Some(&layer);
+            if !unchanged {
+                state.account = Some(Arc::new(layer));
+            }
+            unchanged
+        };
+        if !unchanged && self.lock_read().revision > 0 {
+            self.re_resolve().await;
+        }
+        self.inner.account_ready.send_replace(true);
+    }
+
+    pub fn account_layer(&self) -> Option<Arc<AccountLayer>> {
+        self.lock_read().account.clone()
+    }
+
+    /// 内置层的账号 provider 规则与 revision（`zcode-builtin:<revision>:<sha256(path)>`）。
+    pub async fn builtin_snapshot(&self) -> (String, Arc<Value>) {
+        if self.lock_read().revision == 0 {
+            self.reload().await;
+        }
+        let state = self.lock_read();
+        (state.builtin_revision.clone(), state.builtin.clone())
+    }
+
+    pub fn builtin_changes(&self) -> EventHub<()> {
+        self.inner.builtin_changed.clone()
+    }
+
     pub async fn snapshot(&self) -> (u64, Arc<Resolved>) {
+        let mut ready = self.inner.account_ready.subscribe();
+        // 发送端由自身持有，wait_for 不会因关闭而失败；失败时直接读当前快照。
+        let _ = ready.wait_for(|ready| *ready).await;
         {
             let state = self.lock_read();
             if state.revision > 0 {
