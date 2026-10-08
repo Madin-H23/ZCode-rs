@@ -59,6 +59,8 @@ pub struct Area {
     pub tasks_index: TasksIndex,
     /// credentials.json 的唯一读写入口（account 区域所有；bots 读应用凭据也走它）。
     pub credentials: crate::account::credential::CredentialStore,
+    /// 当前账号的 OAuth 凭据（account 区域所有），会话分享等需要 zcode JWT 的出站请求从这里取 token。
+    pub oauth: crate::account::oauth_repo::OAuthCredentialRepo,
     /// bots 安装时登记；没有登记（或 Bot 未配置）时 automation 不做回推。
     pub bot_delivery: OnceLock<Arc<dyn BotDelivery>>,
 }
@@ -75,6 +77,7 @@ impl Area {
         tasks: Arc<TaskService>,
         tasks_index: TasksIndex,
         credentials: crate::account::credential::CredentialStore,
+        oauth: crate::account::oauth_repo::OAuthCredentialRepo,
     ) -> Self {
         let driver = driver::TaskDriver::start(agent.clone(), tasks.clone(), &observer);
         Self {
@@ -88,6 +91,7 @@ impl Area {
             tasks,
             tasks_index,
             credentials,
+            oauth,
             bot_delivery: OnceLock::new(),
         }
     }

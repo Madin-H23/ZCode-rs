@@ -316,6 +316,7 @@ pub fn install(
             task_service.clone(),
             storage.tasks_index.clone(),
             account.credentials.clone(),
+            account.repo.clone(),
         ),
         registry,
         router,

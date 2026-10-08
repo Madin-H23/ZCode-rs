@@ -3,7 +3,7 @@
 //! 按连接的 clientMode 门禁（conversationShareAttachmentService.ts）：desktop-continuous 全部可用；
 //! web-remote-replayable 只读能力发现与预览，其余写操作以 `feature_disabled` 拒绝，导入副本读回 null。
 //!
-//! Rust Host 还没有账号（R4），token provider 恒为空：`getCapabilities`、`preflight`、`publish`
+//! token 取自当前账号（未登录时为空）：`getCapabilities`、`preflight`、`publish`
 //! 在发请求前就以 `authentication_required` 失败（与 Node 未登录时相同）；预览、续接与导入走
 //! 可选鉴权，照常可用。
 // 分享错误携带脱敏后的 issue 列表与诊断字段，只在失败路径构造；不为减小 Err 体积而装箱。
@@ -216,8 +216,15 @@ pub fn install(
             return None;
         }
     };
-    // 账号（R4）接入前没有 zcode JWT。
-    let token: TokenProvider = Arc::new(|| Box::pin(async { None }));
+    // 与 Node 相同：当前账号的 zcode JWT，没有时用 access token；未登录为 None（required 端点直接失败）。
+    let oauth = area.oauth.clone();
+    let token: TokenProvider = Arc::new(move || {
+        let oauth = oauth.clone();
+        Box::pin(async move {
+            let tokens = oauth.active_token_set().await.ok().flatten()?;
+            Some(tokens.zcode_jwt_token.unwrap_or(tokens.access_token))
+        })
+    });
     let client = match ShareClient::new(format!("{origin}/api/v1"), token) {
         Ok(client) => Arc::new(client),
         Err(error) => {

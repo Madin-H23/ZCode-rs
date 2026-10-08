@@ -1,5 +1,5 @@
 //! 分享服务端客户端（conversationShareHttpClient.ts）：统一的鉴权、错误归一化与成功信封解析。
-//! Rust Host 还没有账号（R4），token provider 恒为空：`required` 端点在发请求前就以
+//! 未登录时 token provider 为空：`required` 端点在发请求前就以
 //! `authentication_required` 失败，与 Node 未登录时相同；`optional` 端点（预览、续接）照常请求。
 use std::sync::Arc;
 use std::time::Duration;
