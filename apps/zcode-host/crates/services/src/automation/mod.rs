@@ -3,6 +3,10 @@
 //!
 //! [`install`] 是本区域在 `crate::install` 里的唯一入口：先构建共享的 [`Area`]（Host 内部 task
 //! 驱动、Bot 回推挂钩），再依次安装各子模块。子模块只依赖 [`Area`]，彼此之间经它交互。
+pub mod cron;
+pub mod schedule;
+pub mod time;
+
 use std::any::Any;
 use std::sync::{Arc, OnceLock};
 

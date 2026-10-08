@@ -39,4 +39,6 @@ libc.workspace = true
 windows-sys.workspace = true
 
 [dev-dependencies]
+# automation 的时区对拍（夏令时）用固定 IANA 时区。
+chrono-tz = "0.10"
 tempfile = "3"
