@@ -1,4 +1,5 @@
 //! Agent 子系统：每个 workspace 一个 CLI 进程，经 stdio NDJSON 通信（docs/specs/rust-host.md R2）。
+pub mod browser;
 pub mod client;
 pub mod command;
 pub mod extensions;

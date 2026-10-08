@@ -676,7 +676,9 @@ impl AgentRuntime {
                 "workspacePath": target.workspace_path,
             })));
         }
-        let process = self.get_client(target, RuntimePolicy::StartIfNeeded).await?;
+        let process = self
+            .get_client(target, RuntimePolicy::StartIfNeeded)
+            .await?;
         if process.mark_ready() {
             self.report_ready(&process);
         }
@@ -922,7 +924,8 @@ impl AgentRuntime {
             command.supports_storage_startup
         ));
         let diagnostic_sink = self.diagnostic_sink(target, generation, spawned.pid, &instance_id);
-        let (tail, stderr_done) = process::drain_stderr(spawned.stderr, label.clone(), diagnostic_sink);
+        let (tail, stderr_done) =
+            process::drain_stderr(spawned.stderr, label.clone(), diagnostic_sink);
         let handler = Arc::new(Handler {
             key: key.clone(),
             target: target.clone(),
@@ -1059,10 +1062,7 @@ impl AgentRuntime {
             _ => Map::new(),
         };
         let full_retention = normalized.get("modelIoFullRetentionEnabled") == Some(&json!(true));
-        normalized.insert(
-            "modelIoFullRetentionEnabled".into(),
-            json!(full_retention),
-        );
+        normalized.insert("modelIoFullRetentionEnabled".into(), json!(full_retention));
         {
             let mut latest = lock(&self.inner.app_preferences);
             let version = latest.as_ref().map(|(version, _)| *version).unwrap_or(0) + 1;

@@ -235,8 +235,12 @@ pub fn parse_diagnostic(line: &str) -> Option<serde_json::Value> {
     if object.keys().any(|key| !KEYS.contains(&key.as_str())) {
         return None;
     }
-    let kind_ok =
-        |value: Option<&Value>| matches!(value.and_then(Value::as_str), Some("uncaughtException" | "unhandledRejection"));
+    let kind_ok = |value: Option<&Value>| {
+        matches!(
+            value.and_then(Value::as_str),
+            Some("uncaughtException" | "unhandledRejection")
+        )
+    };
     let version_ok = object.get("version").and_then(Value::as_f64) == Some(1.0);
     let error_id_ok = object
         .get("errorId")

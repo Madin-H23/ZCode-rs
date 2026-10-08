@@ -19,7 +19,9 @@ pub enum Ty {
         positive: bool,
     },
     /// `z.number()`，可选非负。
-    Num { nonnegative: bool },
+    Num {
+        nonnegative: bool,
+    },
     Bool,
     Enum(&'static [&'static str]),
     NumLiteral(f64),
@@ -115,9 +117,9 @@ fn is_provider_hostname(value: &str) -> bool {
     {
         return true;
     }
-    !value
-        .chars()
-        .any(|c| c.is_whitespace() || c == '\u{feff}' || matches!(c, '/' | ':' | '?' | '#' | '@' | '[' | ']'))
+    !value.chars().any(|c| {
+        c.is_whitespace() || c == '\u{feff}' || matches!(c, '/' | ':' | '?' | '#' | '@' | '[' | ']')
+    })
 }
 
 pub fn check(value: &Value, ty: &Ty) -> bool {
@@ -129,8 +131,9 @@ pub fn check(value: &Value, ty: &Ty) -> bool {
         Ty::Int {
             nonnegative,
             positive,
-        } => as_integer(value)
-            .is_some_and(|n| (!nonnegative || n >= 0.0) && (!positive || n > 0.0)),
+        } => {
+            as_integer(value).is_some_and(|n| (!nonnegative || n >= 0.0) && (!positive || n > 0.0))
+        }
         Ty::Num { nonnegative } => value
             .as_f64()
             .is_some_and(|n| n.is_finite() && (!nonnegative || n >= 0.0)),
@@ -231,7 +234,13 @@ const TTFT_FACTS: &[Field] = &[
     opt("outputKind", Ty::Enum(&["text", "reasoning", "tool"])),
     opt(
         "terminal",
-        Ty::Enum(&["completed", "failed", "cancelled", "rejected", "interrupted"]),
+        Ty::Enum(&[
+            "completed",
+            "failed",
+            "cancelled",
+            "rejected",
+            "interrupted",
+        ]),
     ),
     opt(
         "excluded",
@@ -265,7 +274,10 @@ const CUA_ACCESS_STATUS: &[Field] = &[
     req("platform", Ty::StrLiteral("darwin")),
     req("grantOwner", NONEMPTY),
     req("accessibility", Ty::Enum(&["granted", "stale", "denied"])),
-    req("screenRecording", Ty::Enum(&["granted", "denied", "unknown"])),
+    req(
+        "screenRecording",
+        Ty::Enum(&["granted", "denied", "unknown"]),
+    ),
 ];
 
 const CUA_OBSERVATION: &[Field] = &[
@@ -358,7 +370,10 @@ const TURN_STARTED: &[Field] = fact!(
     "turn.started",
     opt("executionKind", Ty::Enum(&["agent", "controlOnly"])),
     opt("inputSource", Ty::Enum(SYNTHETIC_SOURCES)),
-    opt("backgroundSource", Ty::Enum(&["bash", "subagent", "workflow"])),
+    opt(
+        "backgroundSource",
+        Ty::Enum(&["bash", "subagent", "workflow"])
+    ),
     opt("automationId", NONEMPTY),
     opt("offPeakTaskId", NONEMPTY),
     opt("offPeakRunType", Ty::Enum(&["init", "resume"])),
@@ -577,8 +592,8 @@ mod tests {
     /// TS 生成的样本（scripts/rust-host/agent-schema-fixtures.ts）：每条用真实 zod schema 判定。
     #[test]
     fn matches_typescript_schemas() {
-        let cases: Value = serde_json::from_str(include_str!("fixtures/schema-cases.json"))
-            .expect("fixture json");
+        let cases: Value =
+            serde_json::from_str(include_str!("fixtures/schema-cases.json")).expect("fixture json");
         let cases = cases["cases"].as_array().expect("cases");
         assert!(cases.len() > 20);
         for case in cases {

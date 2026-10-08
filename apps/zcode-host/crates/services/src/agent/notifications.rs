@@ -188,7 +188,12 @@ mod tests {
     use super::*;
     use crate::agent::{Lane, WorkspaceTarget};
 
-    fn notification(target: WorkspaceTarget, lane: Lane, method: &str, params: Value) -> AgentNotification {
+    fn notification(
+        target: WorkspaceTarget,
+        lane: Lane,
+        method: &str,
+        params: Value,
+    ) -> AgentNotification {
         AgentNotification {
             workspace_key: target.key(),
             target,
@@ -211,11 +216,21 @@ mod tests {
         remote.workspace_identity = Some("remote:ssh:h:22:u:/w".into());
 
         events.dispatch(
-            &notification(local.clone(), Lane::PluginManagement, "plugins/operationProgress", json!({"operationId": "op-2"})),
+            &notification(
+                local.clone(),
+                Lane::PluginManagement,
+                "plugins/operationProgress",
+                json!({"operationId": "op-2"}),
+            ),
             None,
         );
         events.dispatch(
-            &notification(local.clone(), Lane::PluginManagement, "plugins/operationProgress", json!({"operationId": "op-1", "stage": "x"})),
+            &notification(
+                local.clone(),
+                Lane::PluginManagement,
+                "plugins/operationProgress",
+                json!({"operationId": "op-1", "stage": "x"}),
+            ),
             None,
         );
         assert_eq!(
@@ -224,17 +239,57 @@ mod tests {
         );
 
         let facts = json!({"version": 1, "observationId": "123e4567-e89b-42d3-a456-426614174000", "instanceId": "i", "commandId": "c", "receivedAt": 1});
-        events.dispatch(&notification(remote.clone(), Lane::Chat, "v4/telemetry/local-ttft", facts.clone()), None);
+        events.dispatch(
+            &notification(
+                remote.clone(),
+                Lane::Chat,
+                "v4/telemetry/local-ttft",
+                facts.clone(),
+            ),
+            None,
+        );
         let mut invalid = facts.clone();
         invalid["extra"] = json!(1);
-        events.dispatch(&notification(local.clone(), Lane::Chat, "v4/telemetry/local-ttft", invalid), None);
-        events.dispatch(&notification(local.clone(), Lane::Chat, "v4/telemetry/local-ttft", facts.clone()), None);
+        events.dispatch(
+            &notification(
+                local.clone(),
+                Lane::Chat,
+                "v4/telemetry/local-ttft",
+                invalid,
+            ),
+            None,
+        );
+        events.dispatch(
+            &notification(
+                local.clone(),
+                Lane::Chat,
+                "v4/telemetry/local-ttft",
+                facts.clone(),
+            ),
+            None,
+        );
         assert_eq!(ttft.next().await, Some(Reply::Value(facts)));
 
         let observation = json!({"schemaVersion": 1, "eventId": "e", "eventSeq": 0, "occurredAt": 1, "sessionId": "s", "toolCallId": "t",
             "permissionStatus": {"schemaVersion": 1, "platform": "darwin", "grantOwner": "g", "accessibility": "granted", "screenRecording": "denied"}});
-        events.dispatch(&notification(remote, Lane::Chat, "v4/cua/permission-observation", observation.clone()), None);
-        events.dispatch(&notification(local, Lane::Chat, "v4/cua/permission-observation", observation.clone()), None);
+        events.dispatch(
+            &notification(
+                remote,
+                Lane::Chat,
+                "v4/cua/permission-observation",
+                observation.clone(),
+            ),
+            None,
+        );
+        events.dispatch(
+            &notification(
+                local,
+                Lane::Chat,
+                "v4/cua/permission-observation",
+                observation.clone(),
+            ),
+            None,
+        );
         let mut expected = observation;
         expected["workspacePath"] = json!("/w");
         assert_eq!(cua.next().await, Some(Reply::Value(expected)));
