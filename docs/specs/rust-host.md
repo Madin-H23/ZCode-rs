@@ -1,6 +1,6 @@
 # Rust Host：原生 Host 重写规划
 
-日期：2026-10-08（第三版）。基线：`main` / `06ba978`。状态：实施中。S0、R0 已完成（细节与验收见 [rust-host-r0.md](rust-host-r0.md)）；核心能力已完成：R1（setting、provider、account、file、system），R2（agent 子系统、侧栏与 tasks-index），以及 R3 的 git、终端与文件监听，均已在隔离的真实 App 中端到端验证（见 [rust-host-r2.md](rust-host-r2.md)）。下一步是 D2（Host 自动重启）与其余里程碑。Renderer 接入方式（D7）已按性能对比选定 C（本机 WebSocket）。性能报告是 `perf/rust-host-abc` 分支（`357e589`）上的 `docs/reports/rust-host-transport-perf-2026-10-08.md`。其余决策见第 10 节。
+日期：2026-10-09（第四版）。基线：`main` / `06ba978`。状态：实施中。S0、R0–R6 已按领域实现并在隔离的真实 App 中端到端验证，进度见 5.1；R7（默认切换与打包）未开始。Renderer 接入方式（D7）已按性能对比选定 C（本机 WebSocket）。性能报告是 `perf/rust-host-abc` 分支（`357e589`）上的 `docs/reports/rust-host-transport-perf-2026-10-08.md`。决策见第 10 节。
 
 版本沿革：
 
@@ -431,6 +431,23 @@ Main 读取 `ZCODE_DESKTOP_HOST=rust` 来选择启动哪个 Host。这个开关�
 - R7 依赖前面全部完成。
 - R0 的接入层要等 D7 定下来才能做；但 `rpc`、`control`、契约清单、测试入口不受影响，可以先开工。
 
+### 5.1 进度（2026-10-09）
+
+R1–R6 按领域拆成子规格，由并行的分支实现后合入 `feat/rust-host`。每次合入都跑 `pnpm test:rust-host`、`pnpm typecheck`、`pnpm lint` 与全部桌面 E2E 场景（`scripts/rust-host/e2e/scenarios/`）。
+
+| 里程碑 | 状态                                                                    | 规格                                                                                                                                                                     |
+| ------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R0     | 完成                                                                    | [rust-host-r0.md](rust-host-r0.md)                                                                                                                                       |
+| R1–R3  | 完成                                                                    | [rust-host-r2.md](rust-host-r2.md)、[rust-host-agent.md](rust-host-agent.md)、[rust-host-tasks.md](rust-host-tasks.md)、[rust-host-workspace.md](rust-host-workspace.md) |
+| D2     | 完成：自动重启、启动重试与退出、流控                                    | [rust-host-resilience.md](rust-host-resilience.md)                                                                                                                       |
+| R4     | 完成                                                                    | [rust-host-account.md](rust-host-account.md)                                                                                                                             |
+| R5     | 完成                                                                    | [rust-host-extensions.md](rust-host-extensions.md)                                                                                                                       |
+| R6     | 完成：automation、闲时任务、分享、远端 workspace；bots 的其余渠道进行中 | [rust-host-automation.md](rust-host-automation.md)、[rust-host-remote.md](rust-host-remote.md)                                                                           |
+| 收尾   | 完成：跨领域遗留项                                                      | [rust-host-integration.md](rust-host-integration.md)                                                                                                                     |
+| R7     | 未开始                                                                  | —                                                                                                                                                                        |
+
+已知限制（不在 Host 范围）：Rust CLI 只接受自身 cwd 对应的 workspace，且对同一 cwd 持独占锁，因此 plugin-management / mcp-status lane 配 Rust CLI 时不可用；Node Host 配 Rust CLI 同样如此，见 [rust-host-agent.md](rust-host-agent.md) §5.1。
+
 ## 6. 风险
 
 | #   | 风险                                                                                             | 应对                                                                                     |
@@ -439,7 +456,7 @@ Main 读取 `ZCODE_DESKTOP_HOST=rust` 来选择启动哪个 Host。这个开关�
 | K2  | **共享文件仍有 Node 写入方**（Main、TS CLI、scheduler）                                          | 锁协议、加密方式、schema 逐字节兼容，并做交叉测试；`setting.json` 先在 S0 修好           |
 | K3  | **接入方案自身的风险**                                                                           | 见 3.2 表格最后一行；由性能对比和 D7 决定接受哪一组                                      |
 | K4  | **平台差异**：Windows ConPTY 与路径；新 exe 被杀毒软件误报（A/C）；macOS 签名与 hardened runtime | 三个平台都进 E2E；可执行文件或 `.node` 与 Electron 用同一证书签名，macOS 上 Team ID 相同 |
-| K5  | **Host 崩溃**：今天崩溃后不会恢复，挂起的调用一直挂着，用户没有任何提示                          | 按 D2 决定是否自动恢复；至少在连接关闭时立即拒绝挂起的调用                               |
+| K5  | **Host 崩溃**：今天崩溃后不会恢复，挂起的调用一直挂着，用户没有任何提示                          | 已按 D2 实现自动重启；连接关闭时立即拒绝挂起的调用（rust-host-resilience.md）            |
 | K6  | **全局进程环境**：今天依赖改写 `process.env`                                                     | 改为显式的 `RuntimeEnv`；`host-core` 之外禁止读 env；所有 spawn 都显式设置 cwd 和 env    |
 | K7  | **R6 体量大，又依赖外部 SDK**（飞书、SSH）                                                       | 放在最后做，可以再拆子里程碑；远端仍连 Node server，不同时重写远端                       |
 
@@ -473,17 +490,14 @@ Main 读取 `ZCODE_DESKTOP_HOST=rust` 来选择启动哪个 Host。这个开关�
 
 **已定**
 
-| 编号 | 问题                            | 决定                                                                                                      |
-| ---- | ------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| D1   | Host 粒度                       | 每个窗口一个；App 目前只有一个主窗口                                                                      |
-| D3   | 是否做兜底传输                  | 不做，只实现 D7 选定的一种                                                                                |
-| D4   | 开发期已迁移 service 的 TS 改动 | 不考虑                                                                                                    |
-| D5   | `setting.json` 跨进程丢更新     | 修，先在 Node 侧做（S0）；Rust 实现沿用同一锁语义                                                         |
-| D6   | 代码放在哪里                    | 在新分支上开发；代码放在独立的 Cargo workspace `apps/zcode-host`，只通过路径依赖引用 `zcode-cli-protocol` |
-| D7   | Renderer 接入方式               | C：本机 WebSocket，依据性能报告 `rust-host-transport-perf-2026-10-08.md`                                  |
-
-**待定**
-
-| 编号 | 问题                                                                         | 建议                                                               |
-| ---- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| D2   | Host 异常退出后，是保持现状（3.4），还是由 Main 自动重启并让 Renderer 重连？ | 自动重启。今天 Host 一旦崩溃，用户只能看到界面卡住，又没有任何提示 |
+| 编号 | 问题                            | 决定                                                                                                                                                                                                                                                            |
+| ---- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1   | Host 粒度                       | 每个窗口一个；App 目前只有一个主窗口                                                                                                                                                                                                                            |
+| D3   | 是否做兜底传输                  | 不做，只实现 D7 选定的一种                                                                                                                                                                                                                                      |
+| D4   | 开发期已迁移 service 的 TS 改动 | 不考虑                                                                                                                                                                                                                                                          |
+| D5   | `setting.json` 跨进程丢更新     | 修，先在 Node 侧做（S0）；Rust 实现沿用同一锁语义                                                                                                                                                                                                               |
+| D6   | 代码放在哪里                    | 在新分支上开发；代码放在独立的 Cargo workspace `apps/zcode-host`，只通过路径依赖引用 `zcode-cli-protocol`                                                                                                                                                       |
+| D7   | Renderer 接入方式               | C：本机 WebSocket，依据性能报告 `rust-host-transport-perf-2026-10-08.md`                                                                                                                                                                                        |
+| D2   | Host 异常退出后的行为           | Main 自动重启（60 s 内最多 3 次），Renderer 重新加载窗口；细节见 rust-host-resilience.md                                                                                                                                                                        |
+| D8   | 远端 SSH/WSL/Docker 连接与部署  | 继续用现有 TS 实现，每个连接一个 connector 进程（Electron 以 Node 模式运行），Rust Host 只转发字节；这是唯一实现，不是兜底。理由：部署链路约 6k 行、SSH 认证方式多，远端安装目录与部署锁要与其他版本逐字节兼容，且无法在本机验证重写。见 rust-host-remote.md §5 |
+| D9   | Bot 如何读取会话                | 不恢复 legacy 快照成员，直接用 CLI `session/read` 与 V4 帧，经适配层产出与 Node 相同的消息与卡片                                                                                                                                                                |

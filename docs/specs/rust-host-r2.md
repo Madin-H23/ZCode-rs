@@ -66,13 +66,13 @@
 | ---------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------- |
 | scope 监听 lifecycle `unavailable`，作废该 workspace 的所有权                | 所有权带进程代；帧、退订、resync 都只认同一代 | 结果相同：新进程即便复用 subscriptionId 也不会串帧；而且没有跨事件的竞态窗口 |
 | 退订时按 `runtimePolicy` 取 client，可能为退订拉起新进程，随后发现路由已失效 | 退订只发给仍在运行的同代进程                  | 不为退订启动 CLI                                                             |
-| 订阅、建会话前同步 Account Config（`provider/updateAccountConfig`）          | 不发送                                        | 未登录时没有账号 provider；随 OAuth 迁移                                     |
-| spawn 时注入 `ZCODE_BASE_URL`                                                | 不注入                                        | production 下注入值等于 CLI 从环境推导的值；设置页自定义端点随账号迁移       |
-| `attachmentPreviewSourceV4` 授权本地媒体路径                                 | 固定回 `{kind:"chunked"}`                     | UI 回退到分块读取；media-preview 在 R3                                       |
+| 订阅、建会话前同步 Account Config（`provider/updateAccountConfig`）          | 已对齐                                        | 见 [rust-host-account.md](rust-host-account.md) §2                           |
+| spawn 时注入 `ZCODE_BASE_URL`                                                | 已对齐                                        | 见 [rust-host-account.md](rust-host-account.md) §2                           |
+| `attachmentPreviewSourceV4` 授权本地媒体路径                                 | 已对齐                                        | 见 [rust-host-workspace.md](rust-host-workspace.md)                          |
 | 订阅 ACK 合并 `openTiming` 诊断                                              | 原样转发 CLI ACK                              | 只是诊断字段                                                                 |
-| 冷订阅从 tasks-index 带 `resumeThoughtLevel`                                 | 随 tasks-index repo 实现                      | 见第 6 节                                                                    |
-| plugin-management、mcp-status 两个 lane                                      | 未实现，相关成员回 stub                       | 不在核心链路                                                                 |
-| 流控 `saturated` / `drained`                                                 | 只在断开时发 `closed`                         | WebSocket 没有 MessagePort 的流控边带；背压另行评估                          |
+| 冷订阅从 tasks-index 带 `resumeThoughtLevel`                                 | 已对齐                                        | 见 [rust-host-agent.md](rust-host-agent.md)                                  |
+| plugin-management、mcp-status 两个 lane                                      | 已对齐                                        | 见 [rust-host-agent.md](rust-host-agent.md) §2.1                             |
+| 流控 `saturated` / `drained`                                                 | 已对齐：按 WebSocket 发送积压的水位边沿转发   | 见 [rust-host-resilience.md](rust-host-resilience.md) §2.3                   |
 
 ## 3. 状态所有者
 
@@ -139,9 +139,9 @@ UI                      Scope                         AgentRuntime / CLI
 | Node 行为                                       | Rust Host                      | 理由                                                     |
 | ----------------------------------------------- | ------------------------------ | -------------------------------------------------------- |
 | syncer 与 controller 各一条 sessions-index 订阅 | 合并为一条                     | 都是 Host 内部被动消费者，减少 CLI 负担                  |
-| controller 搜索走 zcode-task 全文检索           | 标题包含匹配                   | 全文检索随 `listTaskList` 移植                           |
+| controller 搜索走 zcode-task 全文检索           | 已对齐                         | 见 [rust-host-tasks.md](rust-host-tasks.md)              |
 | 消息可见性按完整的 projection policy 判定       | 规则近似（见 `tasks/meta.rs`） | 只影响标题兜底、搜索正文与“是否已有用户内容”，不影响渲染 |
-| 迁移失败可在启动页重试                          | 失败后需重启 App               | 重试控制随 D2 一起做                                     |
+| 迁移失败可在启动页重试                          | 已对齐                         | 见 [rust-host-resilience.md](rust-host-resilience.md)    |
 
 ## 6. 验收
 
@@ -210,9 +210,16 @@ open：checking →（waiting_for_lock）→ checking(facts) →（migrating n/t
 
 ## 8. 状态与后续
 
-核心能力（R1 启动与主窗口、R2 核心聊天与侧栏、R3 文件树 / Git / 终端）已在隔离的真实 App 中跑通，见第 6 节。下面这些不在本阶段：
+核心能力（R1 启动与主窗口、R2 核心聊天与侧栏、R3 文件树 / Git / 终端）已在隔离的真实 App 中跑通，见第 6 节。本阶段之后的工作按领域拆成独立规格，第 2、5 节标为“已对齐”的偏差已由这些规格消除：
 
-1. **D2 Host 自动重启**：Rust Host 退出后，Main 重启它，Renderer 重新连接；迁移失败页的重试控制一并在此实现。
-2. **远程与手机**：`web-remote-replayable`、远端 workspace、Bot 远程运行时、task realtime bridge（R6）。
-3. **账号**：OAuth 登录、Account Config 同步、`requestProviderRuntimeHeaders` 应答（R4）。
-4. **其余 stub 成员**：插件、技能目录、automation、分组视图、全文搜索、媒体预览等，按 rust-host.md 第 5 节的里程碑推进。
+| 领域                                   | 规格                                                 |
+| -------------------------------------- | ---------------------------------------------------- |
+| agent 子系统其余成员、三个 lane        | [rust-host-agent.md](rust-host-agent.md)             |
+| zcode-task 其余成员、realtime bridge   | [rust-host-tasks.md](rust-host-tasks.md)             |
+| D2 自动重启、启动重试、流控            | [rust-host-resilience.md](rust-host-resilience.md)   |
+| 账号、OAuth、Account Config            | [rust-host-account.md](rust-host-account.md)         |
+| 扩展（技能、插件、MCP、记忆等）        | [rust-host-extensions.md](rust-host-extensions.md)   |
+| 工作区（提交信息、checkpoint、媒体等） | [rust-host-workspace.md](rust-host-workspace.md)     |
+| automation、闲时任务、bots、分享       | [rust-host-automation.md](rust-host-automation.md)   |
+| 远端 workspace                         | [rust-host-remote.md](rust-host-remote.md)           |
+| 跨领域收尾                             | [rust-host-integration.md](rust-host-integration.md) |
