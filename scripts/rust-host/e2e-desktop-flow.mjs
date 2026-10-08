@@ -1,6 +1,7 @@
 // e2e-desktop.mjs 的界面流程：发送一条消息，等 mock 模型的回复流式出现在对话里。
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 async function composer(page) {
   const candidates = [
@@ -17,7 +18,27 @@ async function composer(page) {
   throw new Error("composer not found");
 }
 
-export async function runCoreFlow({ page, shots, model, workspace, mockReply, writtenReply }) {
+/** 只读打开隔离 HOME 里的 tasks-index.sqlite（WAL 下读者不阻塞 Host 的写入）。 */
+function readTaskRows(home) {
+  const database = new DatabaseSync(join(home, ".zcode", "v2", "tasks-index.sqlite"), {
+    readOnly: true,
+  });
+  try {
+    return database.prepare("SELECT task_id, title, workspace_path, deleted FROM tasks").all();
+  } finally {
+    database.close();
+  }
+}
+
+export async function runCoreFlow({
+  page,
+  shots,
+  model,
+  workspace,
+  home,
+  mockReply,
+  writtenReply,
+}) {
   const input = await composer(page);
   await page.screenshot({ path: join(shots, "01-ready.png") });
   await input.click();
@@ -30,6 +51,23 @@ export async function runCoreFlow({ page, shots, model, workspace, mockReply, wr
   }
   if (model.requests.length === 0) throw new Error("mock model never received a request");
   console.info(`[e2e] reply streamed; model requests=${model.requests.length}`);
+
+  // 侧栏：syncer 写入 tasks-index 行并广播 task_created，Project 列表随之出现这个任务
+  // （对话气泡里一处、侧栏一处）。
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll("body *")].filter(
+        (element) => element.childElementCount === 0 && element.textContent?.trim() === "say hello",
+      ).length >= 2,
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.screenshot({ path: join(shots, "02b-sidebar.png") });
+  const rows = readTaskRows(home);
+  if (!rows.some((row) => row.title === "say hello" && row.workspace_path === workspace)) {
+    throw new Error(`tasks-index row missing: ${JSON.stringify(rows)}`);
+  }
+  console.info("[e2e] new task listed in the sidebar and persisted in tasks-index");
 
   // 权限：Write 需要批准；默认选中 Allow，确认后工具执行，模型收到工具结果再回复。
   await sendFollowUp(page, "please write file hello.txt");
@@ -125,4 +163,18 @@ async function sendFollowUp(page, text) {
   await input.click();
   await page.keyboard.type(text);
   await page.keyboard.press("Enter");
+}
+
+/** 冷启动后：侧栏仍列出上一轮创建的任务（来自 tasks-index，而非内存）。 */
+export async function verifyColdRestart({ page, shots }) {
+  try {
+    // trial click 会做命中测试：启动遮罩还盖着时不算通过（仅 visible 会被遮罩下的 DOM 骗过）。
+    await page
+      .getByText("say hello", { exact: true })
+      .first()
+      .click({ trial: true, timeout: 60_000 });
+  } finally {
+    await page.screenshot({ path: join(shots, "11-cold-restart.png") });
+  }
+  console.info("[e2e] task list survived a cold restart");
 }

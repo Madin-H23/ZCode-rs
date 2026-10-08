@@ -251,6 +251,47 @@ async function main() {
 
   const model = await startMockModel(workspace);
   await seedProfile(home, workspace, model.baseUrl);
+  let app;
+  let failed = false;
+  try {
+    app = await launchApp({ temp, home, cli });
+    if (options.explore) {
+      for (let index = 0; index < 8; index += 1) {
+        await sleep(4000);
+        await app.page.screenshot({ path: join(shots, `explore-${index}.png`) });
+      }
+      console.info(`[e2e] screenshots in ${shots}`);
+      return;
+    }
+    const { runCoreFlow, verifyColdRestart } = await import("./e2e-desktop-flow.mjs");
+    await runCoreFlow({
+      page: app.page,
+      shots,
+      model,
+      workspace,
+      home,
+      mockReply: MOCK_REPLY,
+      writtenReply: WRITTEN_REPLY,
+    });
+    // 冷启动：同一份隔离 profile 重启，任务列表必须从已存在的 tasks-index 读出。
+    await app.stop();
+    app = await launchApp({ temp, home, cli });
+    await verifyColdRestart({ page: app.page, shots });
+    console.info("[e2e] core flow passed");
+  } catch (error) {
+    failed = true;
+    console.error("[e2e] failed:", error);
+  } finally {
+    await app?.stop();
+    model.server.close();
+    if (!options.keep && !failed) await rm(temp, { recursive: true, force: true });
+    else console.info(`[e2e] kept ${temp}`);
+  }
+  if (failed) process.exitCode = 1;
+}
+
+/** 启动一个隔离的 Electron 实例并连上它的 renderer 页面。 */
+async function launchApp({ temp, home, cli }) {
   const cdpPort = await freePort();
   const electronBinary = require("electron");
   const electron = spawn(electronBinary, [".", `--remote-debugging-port=${cdpPort}`], {
@@ -282,49 +323,32 @@ async function main() {
     stdio: ["ignore", "inherit", "inherit"],
     detached: process.platform !== "win32",
   });
-  const stopElectron = () => {
-    if (electron.exitCode !== null || !electron.pid) return;
+  const exited = once(electron, "exit");
+  const signal = (name) => {
+    if (electron.exitCode !== null || electron.signalCode !== null || !electron.pid) return;
     try {
-      process.kill(process.platform === "win32" ? electron.pid : -electron.pid, "SIGTERM");
+      process.kill(process.platform === "win32" ? electron.pid : -electron.pid, name);
     } catch {
-      electron.kill("SIGTERM");
+      electron.kill(name);
     }
   };
-  let failed = false;
+  const stop = async () => {
+    signal("SIGTERM");
+    const timedOut = await Promise.race([exited.then(() => false), sleep(10_000).then(() => true)]);
+    if (timedOut) {
+      signal("SIGKILL");
+      await exited;
+    }
+  };
   try {
     await waitForCdp(cdpPort, electron);
     const { chromium } = require("playwright-core");
     const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
-    const page = await appPage(browser);
-    if (options.explore) {
-      for (let index = 0; index < 8; index += 1) {
-        await sleep(4000);
-        await page.screenshot({ path: join(shots, `explore-${index}.png`) });
-      }
-      console.info(`[e2e] screenshots in ${shots}`);
-      return;
-    }
-    const { runCoreFlow } = await import("./e2e-desktop-flow.mjs");
-    await runCoreFlow({
-      page,
-      shots,
-      model,
-      workspace,
-      mockReply: MOCK_REPLY,
-      writtenReply: WRITTEN_REPLY,
-    });
-    console.info("[e2e] core flow passed");
+    return { page: await appPage(browser), stop };
   } catch (error) {
-    failed = true;
-    console.error("[e2e] failed:", error);
-  } finally {
-    stopElectron();
-    await sleep(1500);
-    model.server.close();
-    if (!options.keep && !failed) await rm(temp, { recursive: true, force: true });
-    else console.info(`[e2e] kept ${temp}`);
+    await stop();
+    throw error;
   }
-  if (failed) process.exitCode = 1;
 }
 
 await main();
