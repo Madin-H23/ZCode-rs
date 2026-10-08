@@ -52,7 +52,11 @@ await run("cargo", ["test", "--manifest-path", manifest]);
 await run("cargo", ["build", "--manifest-path", manifest]);
 
 // 用 Renderer 实际使用的客户端连接真实二进制；测试放在 client 包内，按公开入口导入 @zcode/shared。
-const tests = ["packages/client/test/rustHostConnection.test.ts"];
+const tests = [
+  "packages/client/test/rustHostConnection.test.ts",
+  // Main 发起的 MessagePort attachment（web-remote-replayable）经 WebSocket 桥接（rust-host-tasks.md）。
+  "packages/desktop/test/rustHostPortBridge.test.ts",
+];
 await run(process.execPath, ["--import", "tsx", "--test", ...tests], {
   ...process.env,
   ZCODE_RUST_HOST_BINARY: binary,
