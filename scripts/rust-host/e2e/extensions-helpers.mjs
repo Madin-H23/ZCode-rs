@@ -6,10 +6,18 @@ export { composer } from "./helpers.mjs";
 
 /** 从侧栏底部进入设置页，再点左侧导航的分区（按可见文字定位）。 */
 export async function openSettingsSection(page, label, shots, prefix) {
-  const settings = page.getByRole("button", { name: "Settings", exact: true }).first();
-  await settings.waitFor({ state: "visible", timeout: 30_000 });
-  await settings.click({ trial: true });
-  await settings.click();
+  // 已在设置页时侧栏底部按钮变成“Back to workspace”，直接点分区即可。
+  const inSettings = await page
+    .getByText("Back to workspace", { exact: true })
+    .first()
+    .isVisible()
+    .catch(() => false);
+  if (!inSettings) {
+    const settings = page.getByRole("button", { name: "Settings", exact: true }).first();
+    await settings.waitFor({ state: "visible", timeout: 30_000 });
+    await settings.click({ trial: true });
+    await settings.click();
+  }
   const entry = page.getByRole("button", { name: label, exact: true }).first();
   try {
     await entry.waitFor({ state: "visible", timeout: 30_000 });
