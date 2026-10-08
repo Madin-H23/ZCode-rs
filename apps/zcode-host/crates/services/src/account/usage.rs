@@ -1,8 +1,8 @@
 //! `usage-stats` channel（packages/services/src/usage-stats/**）。
 //!
-//! 已移植：额度 / 套餐快照（`getEntitlementSnapshot`，Composer 工具栏与设置页）、Coding Plan
-//! 重置（状态、领取资格、使用、已读）、App 用量（经 CLI `v4/usage/stats`）。BigModel monitor
-//! 图表（`getSnapshot`、`getCodingPlanUsageSnapshot`）见 docs/specs/rust-host-account.md §5。
+//! 额度 / 套餐快照（`getEntitlementSnapshot`，Composer 工具栏与设置页）、Coding Plan 重置
+//! （状态、领取资格、使用、已读）、App 用量（经 CLI `v4/usage/stats`）、BigModel monitor 用量
+//! （`getSnapshot`、`getCodingPlanUsageSnapshot`，映射见 `usage_monitor.rs`）。
 use std::sync::Arc;
 
 use chrono::{Local, NaiveDateTime, TimeZone};

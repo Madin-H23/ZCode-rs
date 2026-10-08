@@ -375,7 +375,8 @@ impl Feedback {
         let release = os_release();
         json!({
             "appVersion": self.app_version,
-            "buildCommitId": "unknown",
+            // Rust Host 没有 TS 的编译期常量：提交号取 Main 下发的 ZCODE_BUILD_COMMIT_ID，构建时间未知。
+            "buildCommitId": self.api.endpoints().env("ZCODE_BUILD_COMMIT_ID").unwrap_or("unknown"),
             "buildTime": "unknown",
             "osType": os_type(),
             "osPlatform": node_platform(),

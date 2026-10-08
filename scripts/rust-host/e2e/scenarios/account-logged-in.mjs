@@ -141,15 +141,28 @@ export async function seed({ home }) {
 
 export async function run({ page, shots, home }) {
   try {
+    // 已登录但本设备还没有 onboarding 记录：先出现引导（与 Node Host 相同），像用户一样跳过。
+    // 跳过会经 Rust Host 的 onboarding-record.dismissOnboarding 写入记录。
+    const skip = page.getByText("Skip", { exact: true }).first();
+    await skip.waitFor({ state: "visible", timeout: 60_000 });
+    await page.screenshot({ path: join(shots, "00-onboarding.png") });
+    // 引导有多步，每步都可以跳过；直到出现 composer。
+    for (let step = 0; step < 6 && (await skip.isVisible().catch(() => false)); step += 1) {
+      await skip.click();
+      await page.waitForTimeout(800);
+    }
     await composer(page);
-    // 模型菜单：账号 provider（个人 Coding Plan 与 Start Plan）与个人 Mock provider 并列。
-    await page.getByText("Mock/mock-model").first().click();
+    // 侧栏账号区：OAuth 恢复出的用户名与个人套餐（订阅查询）徽标。
+    await page.getByText("E2E Alice", { exact: true }).first().waitFor({ state: "visible" });
+    await page.getByText("Pro", { exact: true }).first().waitFor({ state: "visible" });
+    // 当前模型来自已选的个人 Coding Plan（账号层 current）；模型菜单列出账号 provider。
+    await page.getByText("GLM-5.3", { exact: true }).first().click();
     await page.waitForTimeout(800);
-    await page
-      .getByText("Z.AI Individual Coding Plan", { exact: true })
-      .first()
-      .waitFor({ state: "visible", timeout: 30_000 });
+    // 分组：Z.ai 个人套餐（GLM-5.3、GLM-5.3-Flash）、Start Plan（只含余额白名单里的 GLM-5.3-Flash）、Mock。
+    await page.getByText("Individual", { exact: true }).first().waitFor({ state: "visible" });
     await page.getByText("Start Plan", { exact: true }).first().waitFor({ state: "visible" });
+    const flash = await page.getByText("GLM-5.3-Flash", { exact: true }).count();
+    if (flash !== 2) throw new Error(`expected GLM-5.3-Flash under both plans, got ${flash}`);
     await page.screenshot({ path: join(shots, "01-account-models.png") });
     await page.keyboard.press("Escape");
   } catch (error) {
