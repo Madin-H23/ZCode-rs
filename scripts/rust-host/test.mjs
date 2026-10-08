@@ -33,11 +33,7 @@ await run(process.execPath, [
   "--check",
 ]);
 // R6 automation 区域：automation / 闲时任务仓库、cron 计算与 bots 的对拍 fixture（同上，由 TS 实现生成）。
-for (const script of [
-  "automation-fixtures.ts",
-  "off-peak-fixtures.ts",
-  "bots-fixtures.ts",
-]) {
+for (const script of ["automation-fixtures.ts", "off-peak-fixtures.ts", "bots-fixtures.ts"]) {
   await run(process.execPath, ["--import", "tsx", `scripts/rust-host/${script}`, "--check"]);
 }
 await run("cargo", ["fmt", "--all", "--manifest-path", manifest, "--check"]);

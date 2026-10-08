@@ -6,7 +6,11 @@ import { createCipheriv, createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { format } from "oxfmt";
-import { botsConfigFileSchema, botsStateFileSchema, type BotConfig } from "../../packages/shared/src/index.js";
+import {
+  botsConfigFileSchema,
+  botsStateFileSchema,
+  type BotConfig,
+} from "../../packages/shared/src/index.js";
 import { normalizeBotConfig } from "../../packages/services/src/bots/botConfigHelpers.js";
 import { parseBotCommand } from "../../packages/services/src/bots/commandParser.js";
 import { formatBotMessage, type BotMessageId } from "../../packages/services/src/bots/messages.js";
@@ -21,10 +25,7 @@ const root = resolve(import.meta.dirname, "../..");
 const fixtureDir = resolve(root, "apps/zcode-host/crates/services/src/bots/fixtures");
 
 async function messageTable(): Promise<Record<string, Record<string, string>>> {
-  const source = await readFile(
-    resolve(root, "packages/services/src/bots/messages.ts"),
-    "utf8",
-  );
+  const source = await readFile(resolve(root, "packages/services/src/bots/messages.ts"), "utf8");
   const ids = [...new Set([...source.matchAll(/^ {4}([A-Za-z]+):/gmu)].map((match) => match[1]!))];
   const table: Record<string, Record<string, string>> = {};
   for (const locale of ["zh-CN", "en-US"] as const) {
@@ -80,7 +81,14 @@ const BOT_BASE = {
   name: " Bot ",
   enabled: true,
   allowedWorkspaces: [],
-  allowedCommands: { status: true, new: true, workspace: true, model: true, thoughtLevel: true, reply: true },
+  allowedCommands: {
+    status: true,
+    new: true,
+    workspace: true,
+    model: true,
+    thoughtLevel: true,
+    reply: true,
+  },
   currentOptions: {},
 };
 
@@ -92,7 +100,16 @@ const NORMALIZE_CASES = [
     provider: "telegram",
     replyMode: "streaming_card",
     allowedWorkspaces: [" /a ", "/b", "/a", ""],
-    allowedCommands: { status: false, new: true, workspace: true, model: true, thoughtLevel: true, reply: true, cli: true, sandboxMode: false },
+    allowedCommands: {
+      status: false,
+      new: true,
+      workspace: true,
+      model: true,
+      thoughtLevel: true,
+      reply: true,
+      cli: true,
+      sandboxMode: false,
+    },
     currentOptions: {
       cli: "glm",
       mode: "plan",
@@ -105,7 +122,12 @@ const NORMALIZE_CASES = [
     webhookUrl: "https://example.invalid/hook",
     currentOptions: { modelSelection: { providerId: "", modelId: "m" }, approvalPolicy: "never" },
   },
-  { ...BOT_BASE, provider: "webhook", replyMode: "summary_changes", allowedWorkspaces: ["*", "/a"] },
+  {
+    ...BOT_BASE,
+    provider: "webhook",
+    replyMode: "summary_changes",
+    allowedWorkspaces: ["*", "/a"],
+  },
 ];
 
 const LEGACY_CONFIGS = [
@@ -118,7 +140,11 @@ const LEGACY_CONFIGS = [
         name: "Legacy",
         provider: "telegram",
         replyMode: "assistant_changes",
-        currentOptions: { cli: "glm", model: "builtin:bigmodel-coding-plan/glm-4.6", thoughtLevel: "high" },
+        currentOptions: {
+          cli: "glm",
+          model: "builtin:bigmodel-coding-plan/glm-4.6",
+          thoughtLevel: "high",
+        },
       },
       {
         ...BOT_BASE,
@@ -142,7 +168,10 @@ const LEGACY_CONFIGS = [
         name: "Legacy 4",
         provider: "telegram",
         replyMode: "assistant_changes",
-        currentOptions: { modelSelection: { providerId: "builtin:unknown", modelId: "x" }, mode: "yolo" },
+        currentOptions: {
+          modelSelection: { providerId: "builtin:unknown", modelId: "x" },
+          mode: "yolo",
+        },
       },
     ],
   },
@@ -157,7 +186,12 @@ const LEGACY_STATES = [
         workspacePath: "/w",
         mode: "draft",
         activeTaskId: null,
-        draftOptions: { provider: "claude", model: "builtin:zai-start-plan/GLM-4.7", thoughtLevel: "", mode: "plan" },
+        draftOptions: {
+          provider: "claude",
+          model: "builtin:zai-start-plan/GLM-4.7",
+          thoughtLevel: "",
+          mode: "plan",
+        },
         extra: "dropped",
         updatedAt: 5,
       },
