@@ -32,6 +32,13 @@ libc = "0.2"
 notify = "8.2"
 portable-pty = "0.9"
 regex = "1"
+# Host 出站 HTTP（内网探测等）：与 CLI 同一套 reqwest + rustls(ring)，关闭 system-proxy。
+reqwest = { version = "0.13", default-features = false, features = [
+  "json",
+  "stream",
+  "rustls-no-provider",
+] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # 与 Node Host 共用 tasks-index.sqlite；bundled 固定 SQLite 版本，不依赖系统库。
 rusqlite = { version = "0.37", features = ["bundled"] }
 url = "2"

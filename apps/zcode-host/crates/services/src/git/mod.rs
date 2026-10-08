@@ -1,13 +1,14 @@
 //! `git` channel（packages/services/src/git/gitService.ts、git.ts）。
 //!
 //! 运行真实的 git CLI（[`command`]），解析逻辑在 [`parse`]，仓库级流程在 [`repo`]；本文件负责
-//! 按 workspace 作用域把状态快照切成 UI 用的变更列表。`generateCommitMessage` 需要回调 Agent，
-//! 仍由契约 stub 应答。
+//! 按 workspace 作用域把状态快照切成 UI 用的变更列表。`generateCommitMessage` 经
+//! [`commit_message::TextGenerator`] 回调 Agent（CLI `workspace/generateText`）。
 pub mod checkpoint;
 pub mod checkpoint_store;
 #[cfg(all(test, unix))]
 mod checkpoint_tests;
 pub mod command;
+pub mod commit_message;
 pub mod parse;
 pub mod repo;
 #[cfg(all(test, unix))]
@@ -262,8 +263,44 @@ fn register(builder: ServiceBuilder, name: &str, handler: Handler) -> ServiceBui
     builder.method(name, handler)
 }
 
+#[derive(Clone, Default)]
+pub struct CommitMessageSupport {
+    pub generator: Option<std::sync::Arc<dyn commit_message::TextGenerator>>,
+    /// UI 没给 locale 时的缺省值（Host 进程的 POSIX locale）。
+    pub default_locale: Option<String>,
+}
+
 pub fn service(repo: GitRepo) -> ServiceBuilder {
+    service_with(repo, CommitMessageSupport::default())
+}
+
+pub fn service_with(repo: GitRepo, support: CommitMessageSupport) -> ServiceBuilder {
+    let generate: Handler = {
+        let repo = repo.clone();
+        Box::new(move |_, args| {
+            let (repo, support) = (repo.clone(), support.clone());
+            async move {
+                let request: commit_message::GenerateRequest = args.get(0, "params")?;
+                let Some(generator) = &support.generator else {
+                    return Err(RpcError::new(
+                        "Error",
+                        "Commit message generation is not available.",
+                    ));
+                };
+                let result = commit_message::generate(
+                    &repo,
+                    generator,
+                    request,
+                    support.default_locale.as_deref(),
+                )
+                .await?;
+                Ok(Reply::Value(result))
+            }
+            .boxed()
+        })
+    };
     let methods: Vec<(&str, Handler)> = vec![
+        ("generateCommitMessage", generate),
         (
             "getRepositorySummary",
             call(&repo, |repo, p: RepoRequest| async move {

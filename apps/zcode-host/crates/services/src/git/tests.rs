@@ -610,3 +610,108 @@ async fn push_sets_upstream_and_branch_comparison_follows_it() {
     assert_eq!(again["setUpstream"], false);
     assert_eq!(again["summary"]["ahead"], 0);
 }
+
+/// 记录收到的 generateText 参数，按预设返回文本。
+struct MockGenerator {
+    model: Option<Value>,
+    reply: Result<Value, String>,
+    seen: std::sync::Mutex<Vec<Value>>,
+}
+
+impl super::commit_message::TextGenerator for MockGenerator {
+    fn current_model(&self) -> futures_util::future::BoxFuture<'static, Option<Value>> {
+        let model = self.model.clone();
+        Box::pin(async move { model })
+    }
+
+    fn generate_text(
+        &self,
+        params: Value,
+    ) -> futures_util::future::BoxFuture<'static, Result<Value, zcode_host_kit::RpcError>> {
+        self.seen.lock().unwrap().push(params);
+        let reply = self.reply.clone();
+        Box::pin(
+            async move { reply.map_err(|message| zcode_host_kit::RpcError::new("Error", message)) },
+        )
+    }
+}
+
+#[tokio::test]
+async fn generate_commit_message_uses_agent_text_generation() {
+    let fixture = Fixture::new();
+    let (_dir, root) = fixture.repo();
+    let workspace = root.to_str().unwrap();
+    std::fs::write(root.join("a.txt"), "one\n").unwrap();
+    fixture.sh(&root, &["add", "a.txt"]);
+    fixture.sh(&root, &["commit", "-q", "-m", "init"]);
+    std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+    std::fs::write(root.join("other.txt"), "x\n").unwrap();
+
+    let mock = Arc::new(MockGenerator {
+        model: Some(json!({"providerId": "p", "modelId": "m"})),
+        reply: Ok(json!({"text": "```\nfeat: 增加第二行\n```", "selection": {}})),
+        seen: Default::default(),
+    });
+    let generator: Arc<dyn super::commit_message::TextGenerator> = mock.clone();
+    let git = channel(super::service_with(
+        GitRepo::new(&fixture.env),
+        super::CommitMessageSupport {
+            generator: Some(generator),
+            default_locale: None,
+        },
+    ));
+    let result = call(
+        &git,
+        "generateCommitMessage",
+        json!({"workspacePath": workspace, "workspaceIdentity": "id-1", "locale": "zh-CN",
+               "currentSessionFilePaths": [root.join("a.txt").to_str().unwrap()]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        result,
+        json!({"message": "feat: 增加第二行", "providerId": "p", "model": "m"})
+    );
+    let seen = mock.seen.lock().unwrap()[0].clone();
+    assert_eq!(seen["querySource"], "git_commit_message");
+    assert_eq!(seen["workspaceIdentity"], "id-1");
+    let prompt = seen["prompt"].as_str().unwrap();
+    assert!(prompt.contains("Current branch: main\nCurrent language: Chinese"));
+    // 会话文件过滤：只剩 a.txt，未跟踪的 other.txt 被排除。
+    assert!(prompt.contains("Changed files:\n- modified a.txt (+1/-0)\nDiff excerpts:"));
+    assert!(!prompt.contains("other.txt"));
+
+    let bad = Arc::new(MockGenerator {
+        model: Some(json!({"providerId": "p", "modelId": "m"})),
+        reply: Ok(json!({"text": "I changed some files."})),
+        seen: Default::default(),
+    });
+    let git = channel(super::service_with(
+        GitRepo::new(&fixture.env),
+        super::CommitMessageSupport {
+            generator: Some(bad),
+            default_locale: None,
+        },
+    ));
+    let error = call(
+        &git,
+        "generateCommitMessage",
+        json!({"workspacePath": workspace}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        error.message,
+        "模型没有返回可用的 Conventional Commit 提交消息。"
+    );
+
+    let unavailable = channel(super::service(GitRepo::new(&fixture.env)));
+    let error = call(
+        &unavailable,
+        "generateCommitMessage",
+        json!({"workspacePath": workspace}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.message, "Commit message generation is not available.");
+}

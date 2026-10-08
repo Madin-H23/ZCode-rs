@@ -101,7 +101,15 @@ async fn checkpoint_lifecycle_restores_and_detects_conflicts() {
         .join(format!("{}.json", first["checkpointId"].as_str().unwrap()));
     let text = std::fs::read_to_string(&manifest).unwrap();
     assert!(text.ends_with("}\n") && text.contains("\n  \"checkpointId\""));
-    assert!(!fixture.home.path().join(".zcode/git-checkpoint-index").read_dir().unwrap().any(|_| true));
+    assert!(
+        !fixture
+            .home
+            .path()
+            .join(".zcode/git-checkpoint-index")
+            .read_dir()
+            .unwrap()
+            .any(|_| true)
+    );
 
     // 模拟一轮改动：修改、新增、删除、重命名。
     std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
@@ -112,7 +120,10 @@ async fn checkpoint_lifecycle_restores_and_detects_conflicts() {
         .await
         .unwrap();
     // 用户真实 index 不受影响。
-    assert_eq!(fixture.sh(&root, &["diff", "--cached", "--name-only"]), staged_before);
+    assert_eq!(
+        fixture.sh(&root, &["diff", "--cached", "--name-only"]),
+        staged_before
+    );
 
     let pair = json!({
         "workspacePath": workspace,
@@ -124,33 +135,60 @@ async fn checkpoint_lifecycle_restores_and_detects_conflicts() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|file| format!("{}:{}", file["kind"].as_str().unwrap(), file["repoRelativePath"].as_str().unwrap()))
+        .map(|file| {
+            format!(
+                "{}:{}",
+                file["kind"].as_str().unwrap(),
+                file["repoRelativePath"].as_str().unwrap()
+            )
+        })
         .collect();
     kinds.sort();
-    assert_eq!(kinds, ["deleted:new.txt", "modified:a.txt", "renamed:old.txt"]);
+    assert_eq!(
+        kinds,
+        ["deleted:new.txt", "modified:a.txt", "renamed:old.txt"]
+    );
 
     // 恢复前用户又改了 a.txt：默认拒绝并报告冲突。
     std::fs::write(root.join("a.txt"), "user edit\n").unwrap();
-    let rejected = fixture.call("restoreBetweenCheckpoints", pair.clone()).await.unwrap();
+    let rejected = fixture
+        .call("restoreBetweenCheckpoints", pair.clone())
+        .await
+        .unwrap();
     assert_eq!(rejected["success"], false);
     assert_eq!(rejected["conflicts"][0]["reason"], "content-mismatch");
     assert_eq!(rejected["conflicts"][0]["repoRelativePath"], "a.txt");
 
     let mut forced = pair.clone();
     forced["force"] = json!(true);
-    let restored = fixture.call("restoreBetweenCheckpoints", forced).await.unwrap();
+    let restored = fixture
+        .call("restoreBetweenCheckpoints", forced)
+        .await
+        .unwrap();
     assert_eq!(restored["success"], true, "{restored}");
-    assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "one\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "one\n"
+    );
     assert!(!root.join("new.txt").exists());
     assert!(!root.join("renamed.txt").exists());
-    assert_eq!(std::fs::read_to_string(root.join("old.txt")).unwrap(), "rename me\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("old.txt")).unwrap(),
+        "rename me\n"
+    );
 
     let id = first["checkpointId"].clone();
     let deleted = json!({"workspacePath": workspace, "checkpointId": id});
-    fixture.call("deleteCheckpoint", deleted.clone()).await.unwrap();
+    fixture
+        .call("deleteCheckpoint", deleted.clone())
+        .await
+        .unwrap();
     assert!(!manifest.exists());
     let missing = fixture.call("deleteCheckpoint", deleted).await.unwrap_err();
-    assert_eq!(missing, format!("Checkpoint does not exist: {}", id.as_str().unwrap()));
+    assert_eq!(
+        missing,
+        format!("Checkpoint does not exist: {}", id.as_str().unwrap())
+    );
 }
 
 #[tokio::test]
@@ -158,7 +196,10 @@ async fn checkpoint_requires_repository() {
     let fixture = Fixture::new();
     let plain = tempfile::tempdir().unwrap();
     let error = fixture
-        .call("createCheckpoint", json!({"workspacePath": plain.path().to_str().unwrap()}))
+        .call(
+            "createCheckpoint",
+            json!({"workspacePath": plain.path().to_str().unwrap()}),
+        )
         .await
         .unwrap_err();
     assert_eq!(error, "Workspace is not inside a Git repository.");

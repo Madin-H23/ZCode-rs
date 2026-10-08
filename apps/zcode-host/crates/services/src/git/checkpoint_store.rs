@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(renamed.get("new.txt"), Some(&(0, 0)));
         assert_eq!(renamed.get("old.txt"), Some(&(0, 0)));
         assert_eq!(renamed.get("bin.png"), Some(&(0, 0)));
-        let tree = parse_ls_tree("100644 blob abc123\tsrc/a.txt\0120000 blob def\tlink\0");
+        let tree = parse_ls_tree("100644 blob abc123\tsrc/a.txt\x00120000 blob def\tlink\x00");
         assert_eq!(tree["src/a.txt"].object_id, "abc123");
         assert_eq!(tree["link"].mode, "120000");
     }

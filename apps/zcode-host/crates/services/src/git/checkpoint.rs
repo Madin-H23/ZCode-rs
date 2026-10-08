@@ -114,7 +114,11 @@ impl Checkpoints {
         Ok(resolution)
     }
 
-    async fn load(&self, workspace_path: &str, checkpoint_id: &str) -> Result<CheckpointMeta, RpcError> {
+    async fn load(
+        &self,
+        workspace_path: &str,
+        checkpoint_id: &str,
+    ) -> Result<CheckpointMeta, RpcError> {
         let meta = self
             .inner
             .store
@@ -217,7 +221,11 @@ impl Checkpoints {
         // 降级到 read-tree HEAD，最差回到空 index；最终 tree 由 worktree 决定，语义等价。
         let mut primed = false;
         let index_location = git
-            .run(repo_root, &["rev-parse", "--git-path", "index"], Limits::COMMAND)
+            .run(
+                repo_root,
+                &["rev-parse", "--git-path", "index"],
+                Limits::COMMAND,
+            )
             .await?;
         if index_location.succeeded() {
             let relative = index_location.stdout.trim();
@@ -232,9 +240,14 @@ impl Checkpoints {
                 .run_with_env(repo_root, &["read-tree", "HEAD"], Limits::COMMAND, &env)
                 .await?;
         }
-        git.run_with_env(repo_root, &["add", "-A", "--", pathspec], Limits::COMMAND, &env)
-            .await?
-            .ensure("git add checkpoint")?;
+        git.run_with_env(
+            repo_root,
+            &["add", "-A", "--", pathspec],
+            Limits::COMMAND,
+            &env,
+        )
+        .await?
+        .ensure("git add checkpoint")?;
         let tree = git
             .run_with_env(repo_root, &["write-tree"], Limits::COMMAND, &env)
             .await?;
@@ -250,9 +263,13 @@ impl Checkpoints {
             .await?;
         commit.ensure("git commit-tree checkpoint")?;
         let commit_oid = commit.stdout.trim().to_owned();
-        git.run(repo_root, &["update-ref", ref_name, &commit_oid], Limits::COMMAND)
-            .await?
-            .ensure("git update-ref checkpoint")?;
+        git.run(
+            repo_root,
+            &["update-ref", ref_name, &commit_oid],
+            Limits::COMMAND,
+        )
+        .await?
+        .ensure("git update-ref checkpoint")?;
         Ok(commit_oid)
     }
 
@@ -300,9 +317,16 @@ impl Checkpoints {
 
     pub async fn diff(&self, params: &PairParams) -> Result<Value, RpcError> {
         let (from, to) = self
-            .load_pair(&params.workspace_path, &params.from_checkpoint_id, &params.to_checkpoint_id)
+            .load_pair(
+                &params.workspace_path,
+                &params.from_checkpoint_id,
+                &params.to_checkpoint_id,
+            )
             .await?;
-        Ok(self.compute_diff(&params.workspace_path, &from, &to).await?.1)
+        Ok(self
+            .compute_diff(&params.workspace_path, &from, &to)
+            .await?
+            .1)
     }
 
     pub async fn delete(&self, workspace_path: &str, checkpoint_id: &str) -> Result<(), RpcError> {
@@ -408,7 +432,11 @@ impl Checkpoints {
     pub async fn restore(&self, params: &PairParams) -> Result<Value, RpcError> {
         let workspace_path = params.workspace_path.as_str();
         let (from, to) = self
-            .load_pair(workspace_path, &params.from_checkpoint_id, &params.to_checkpoint_id)
+            .load_pair(
+                workspace_path,
+                &params.from_checkpoint_id,
+                &params.to_checkpoint_id,
+            )
             .await?;
         let resolution = self.ensure_repository(workspace_path).await?;
         let (_, diff) = self.compute_diff(workspace_path, &from, &to).await?;
@@ -419,7 +447,8 @@ impl Checkpoints {
         let mut affected: Vec<String> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for file in &files {
-            for raw in std::iter::once(&file.repo_relative_path).chain(file.original_path.as_ref()) {
+            for raw in std::iter::once(&file.repo_relative_path).chain(file.original_path.as_ref())
+            {
                 if seen.insert(raw.clone()) {
                     affected.push(normalize_affected_repo_path(repo_root, raw));
                 }
@@ -429,7 +458,9 @@ impl Checkpoints {
             return Ok(json!({"success": true, "restoredPaths": []}));
         }
 
-        let conflicts = self.collect_conflicts(&resolution, &from, &affected).await?;
+        let conflicts = self
+            .collect_conflicts(&resolution, &from, &affected)
+            .await?;
         if !conflicts.is_empty() && params.force != Some(true) {
             return Ok(json!({"success": false, "conflicts": conflicts}));
         }
@@ -460,7 +491,9 @@ impl Checkpoints {
             if let Some(target) = target
                 && removed.insert(target.clone())
             {
-                remove_if_exists(Path::new(target)).await.map_err(io_error)?;
+                remove_if_exists(Path::new(target))
+                    .await
+                    .map_err(io_error)?;
             }
         }
 
@@ -507,7 +540,9 @@ pub fn service(checkpoints: Checkpoints) -> ServiceBuilder {
             let checkpoints = create.clone();
             async move {
                 let params: RepositoryParams = args.get(0, "params")?;
-                Ok(Reply::Value(checkpoints.create(&params.workspace_path).await?))
+                Ok(Reply::Value(
+                    checkpoints.create(&params.workspace_path).await?,
+                ))
             }
         })
         .method("diffCheckpoints", move |_, args| {

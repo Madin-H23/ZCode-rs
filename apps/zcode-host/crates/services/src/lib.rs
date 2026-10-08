@@ -16,6 +16,8 @@ pub mod file;
 pub mod file_watcher;
 pub mod git;
 pub mod main_bridge;
+pub mod media_preview;
+pub mod prompt_attachment_transfer;
 pub mod providers;
 pub mod settings;
 pub mod store;
@@ -26,6 +28,7 @@ pub mod tasks_index;
 pub mod terminal;
 #[cfg(test)]
 mod testing;
+pub mod workspace;
 
 use main_bridge::MainBridge;
 use support::env::ProcessEnv;
@@ -179,7 +182,6 @@ pub fn install(
         &context.environment.vars,
         &context.init.runtime_process_env_patch,
     );
-    registry.implement(git::service(git::repo::GitRepo::new(&child_env)));
     registry.implement(file_watcher::service(file_watcher::FileWatchers::new()));
     registry.implement(terminal::service(terminal::Terminals::new(
         child_env.clone(),
@@ -225,6 +227,21 @@ pub fn install(
         workspace_events,
     );
     registry.implement(tasks::controller::service(controller.clone()));
+
+    // ── workspace ──
+    // git（提交信息生成回调 Agent）、git-checkpoint、media-preview（Main 授权路径）、
+    // prompt-attachment-transfer；见 docs/specs/rust-host-workspace.md。
+    workspace::install(
+        workspace::WorkspaceDeps {
+            environment: &context.environment,
+            child_env: &child_env,
+            agent: agent.clone(),
+            providers: providers.clone(),
+            bridge: bridge.clone(),
+        },
+        registry,
+        router,
+    );
 
     agent::session::warm_up(
         agent.clone(),

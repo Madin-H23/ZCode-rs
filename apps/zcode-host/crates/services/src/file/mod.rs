@@ -3,7 +3,7 @@
 //! 与 TS 一样不做路径归一化或 workspace 边界检查：Renderer 给的绝对路径原样使用。
 //! fs 错误保持 Node 的 `code` 与消息前缀，Renderer 依赖它们区分“文件不存在 / 过大”。
 mod collate;
-mod errors;
+pub(crate) mod errors;
 pub mod ignore_rules;
 mod index;
 

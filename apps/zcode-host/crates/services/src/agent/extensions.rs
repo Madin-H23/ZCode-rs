@@ -37,6 +37,9 @@ pub type ReverseHandler =
     Arc<dyn Fn(ReverseContext) -> BoxFuture<'static, ReverseReply> + Send + Sync>;
 pub type EnvContributor =
     Arc<dyn Fn(WorkspaceTarget) -> BoxFuture<'static, BTreeMap<String, String>> + Send + Sync>;
+/// 本地媒体路径授权（Main 规范化并登记路径后返回规范路径），见 rust-host-workspace.md §2.3。
+pub type MediaPathAuthorizer =
+    Arc<dyn Fn(String) -> BoxFuture<'static, Result<String, RpcError>> + Send + Sync>;
 pub type UseHook = Arc<
     dyn Fn(Arc<AgentProcess>, UseReason) -> BoxFuture<'static, Result<(), RpcError>> + Send + Sync,
 >;
@@ -48,6 +51,8 @@ pub enum UseReason {
     CreateSession,
     ReadPresentation,
     SessionRead,
+    /// `generateWorkspaceText`（Node `workspace_generate_text`）。
+    GenerateText,
 }
 
 #[derive(Default)]
@@ -55,6 +60,7 @@ pub struct Extensions {
     reverse: RwLock<HashMap<String, ReverseHandler>>,
     env: RwLock<Vec<EnvContributor>>,
     use_hooks: RwLock<Vec<UseHook>>,
+    media_path_authorizer: RwLock<Option<MediaPathAuthorizer>>,
 }
 
 fn read<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
@@ -90,6 +96,14 @@ impl Extensions {
 
     pub fn use_hooks(&self) -> Vec<UseHook> {
         read(&self.use_hooks).clone()
+    }
+
+    pub fn set_media_path_authorizer(&self, authorizer: MediaPathAuthorizer) {
+        *write(&self.media_path_authorizer) = Some(authorizer);
+    }
+
+    pub fn media_path_authorizer(&self) -> Option<MediaPathAuthorizer> {
+        read(&self.media_path_authorizer).clone()
     }
 }
 
