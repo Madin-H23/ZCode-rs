@@ -1,0 +1,499 @@
+{
+  "source": "scripts/rust-host/automation-fixtures.ts",
+  "rules": [
+    {
+      "rule": {
+        "unit": "minute",
+        "interval": 10,
+        "hour": 0,
+        "minute": 0,
+        "anchorAt": 1791300000000
+      },
+      "definition": "[\"minute\",10,0,0,null,null,null,null]",
+      "next": [
+        {
+          "from": 1791299999999,
+          "next": 1791300600000
+        },
+        {
+          "from": 1791300000000,
+          "next": 1791300600000
+        },
+        {
+          "from": 1791904800001,
+          "next": 1791905400000
+        },
+        {
+          "from": 1793516400000,
+          "next": 1793517000000
+        }
+      ]
+    },
+    {
+      "rule": {
+        "unit": "hourly",
+        "interval": 5,
+        "hour": 0,
+        "minute": 30,
+        "anchorAt": 1791300000000
+      },
+      "definition": "[\"hourly\",5,0,30,null,null,null,null]",
+      "next": [
+        {
+          "from": 1791299999999,
+          "next": 1791300600000
+        },
+        {
+          "from": 1791300000000,
+          "next": 1791300600000
+        },
+        {
+          "from": 1791904800001,
+          "next": 1791912600000
+        },
+        {
+          "from": 1793516400000,
+          "next": 1793532600000
+        }
+      ]
+    },
+    {
+      "rule": {
+        "unit": "daily",
+        "interval": 3,
+        "hour": 2,
+        "minute": 30,
+        "anchorAt": 1772521200000
+      },
+      "definition": "[\"daily\",3,2,30,null,null,null,null]",
+      "next": [
+        {
+          "from": 1791299999999,
+          "next": 1791441000000
+        },
+        {
+          "from": 1791300000000,
+          "next": 1791441000000
+        },
+        {
+          "from": 1791904800001,
+          "next": 1791959400000
+        },
+        {
+          "from": 1793516400000,
+          "next": 1793518200000
+        }
+      ]
+    },
+    {
+      "rule": {
+        "unit": "daily",
+        "interval": 1,
+        "hour": 9,
+        "minute": 0,
+        "anchorAt": 1791300000000
+      },
+      "definition": "[\"daily\",1,9,0,null,null,null,null]",
+      "next": [
+        {
+          "from": 1791299999999,
+          "next": 1791378000000
+        },
+        {
+          "from": 1791300000000,
+          "next": 1791378000000
+        },
+        {
+          "from": 1791904800001,
+          "next": 1791982800000
+        },
+        {
+          "from": 1793516400000,
+          "next": 1793541600000
+        }
+      ]
+    },
+    {
+      "rule": {
+        "unit": "weekly",
+        "interval": 2,
+        "hour": 8,
+        "minute": 15,
+        "weekdays": [5, 1, 3],
+        "anchorAt": 1791300000000
+      },
+      "definition": "[\"weekly\",2,8,15,[1,3,5],null,null,null]",
+      "next": [
+        {
+          "from": 1791299999999,
+          "next": 1791375300000
+        },
+        {
+          "from": 1791300000000,
+          "next": 1791375300000
+        },
+        {
+          "from": 1791904800001,
+          "next": 1792412100000
+        },
+        {
+          "from": 1793516400000,
+          "next": 1793625300000
+        }
+      ]
+    },
+    {
+      "rule": {
+        "unit": "weekly",
+        "interval": 1,
+        "hour": 23,
+        "minute": 59,
+        "anchorAt": 1791300000000
+      },
+      "definition": "[\"weekly\",1,23,59,null,null,null,null]",
+      "next": [
+        {
+          "from": 1791299999999,
+          "next": 1791863940000
+        },
+        {
+          "from": 1791300000000,
+          "next": 1791863940000
+        },
+        {
+          "from": 1791904800001,
+          "next": 1792468740000
+        },
+        {
+          "from": 1793516400000,
+          "next": 1793681940000
+        }
+      ]
+    },
+    {
+      "rule": {
+        "unit": "monthly",
+        "interval": 1,
+        "hour": 10,
+        "minute": 0,
+        "monthDays": [31, 15],
+        "monthlyMode": "date",
+        "anchorAt": 1791300000000
+      },
+      "definition": "[\"monthly\",1,10,0,null,[15,31],null,\"date\"]",
+      "next": [
+        {
+          "from": 1791299999999,
+          "next": 1792072800000
+        },
+        {
+          "from": 1791300000000,
+          "next": 1792072800000
+        },
+        {
+          "from": 1791904800001,
+          "next": 1792072800000
+        },
+        {
+          "from": 1793516400000,
+          "next": 1794754800000
+        }
+      ]
+    },
+    {
+      "rule": {
+        "unit": "monthly",
+        "interval": 2,
+        "hour": 10,
+        "minute": 0,
+        "weekdays": [2],
+        "monthlyMode": "weekday",
+        "anchorAt": 1791300000000
+      },
+      "definition": "[\"monthly\",2,10,0,[2],null,null,\"weekday\"]",
+      "next": [
+        {
+          "from": 1791299999999,
+          "next": 1796137200000
+        },
+        {
+          "from": 1791300000000,
+          "next": 1796137200000
+        },
+        {
+          "from": 1791904800001,
+          "next": 1796137200000
+        },
+        {
+          "from": 1793516400000,
+          "next": 1796137200000
+        }
+      ]
+    },
+    {
+      "rule": {
+        "unit": "yearly",
+        "interval": 1,
+        "hour": 0,
+        "minute": 0,
+        "months": [2],
+        "monthDays": [29],
+        "anchorAt": 1791300000000
+      },
+      "definition": "[\"yearly\",1,0,0,null,[29],[2],null]",
+      "next": [
+        {
+          "from": 1791299999999,
+          "next": 1835413200000
+        },
+        {
+          "from": 1791300000000,
+          "next": 1835413200000
+        },
+        {
+          "from": 1791904800001,
+          "next": 1835413200000
+        },
+        {
+          "from": 1793516400000,
+          "next": 1835413200000
+        }
+      ]
+    },
+    {
+      "rule": {
+        "unit": "yearly",
+        "interval": 2,
+        "hour": 6,
+        "minute": 0,
+        "anchorAt": 1791300000000
+      },
+      "definition": "[\"yearly\",2,6,0,null,null,null,null]",
+      "next": [
+        {
+          "from": 1791299999999,
+          "next": 1854439200000
+        },
+        {
+          "from": 1791300000000,
+          "next": 1854439200000
+        },
+        {
+          "from": 1791904800001,
+          "next": 1854439200000
+        },
+        {
+          "from": 1793516400000,
+          "next": 1854439200000
+        }
+      ]
+    }
+  ],
+  "carriers": [
+    {
+      "unit": "minute",
+      "interval": 45,
+      "cronExpr": "*/45 * * * *",
+      "rule": {
+        "unit": "minute",
+        "interval": 45,
+        "hour": 11,
+        "minute": 20,
+        "anchorAt": 1791300000000
+      }
+    },
+    {
+      "unit": "hourly",
+      "interval": 50,
+      "cronExpr": "15 * * * *",
+      "rule": {
+        "unit": "hourly",
+        "interval": 50,
+        "hour": 0,
+        "minute": 15,
+        "anchorAt": 1791300000000
+      }
+    },
+    {
+      "unit": "daily",
+      "interval": 40,
+      "cronExpr": "30 9 * * *",
+      "rule": {
+        "unit": "daily",
+        "interval": 40,
+        "hour": 9,
+        "minute": 30,
+        "anchorAt": 1791300000000
+      }
+    },
+    {
+      "unit": "weekly",
+      "interval": 3,
+      "cronExpr": "0 8 * * 1,3",
+      "rule": {
+        "unit": "weekly",
+        "interval": 3,
+        "hour": 8,
+        "minute": 0,
+        "weekdays": [1, 3],
+        "anchorAt": 1791300000000
+      }
+    },
+    {
+      "unit": "monthly",
+      "interval": 13,
+      "cronExpr": "0 7 5 * *",
+      "rule": {
+        "unit": "monthly",
+        "interval": 13,
+        "hour": 7,
+        "minute": 0,
+        "monthDays": [5],
+        "monthlyMode": "date",
+        "anchorAt": 1791300000000
+      }
+    },
+    {
+      "unit": "yearly",
+      "interval": 2,
+      "cronExpr": "0 0 1 6 *",
+      "rule": {
+        "unit": "yearly",
+        "interval": 2,
+        "hour": 0,
+        "minute": 0,
+        "months": [6],
+        "monthDays": [1],
+        "anchorAt": 1791300000000
+      }
+    },
+    {
+      "unit": "daily",
+      "interval": 2,
+      "cronExpr": "* * * * *",
+      "rule": {
+        "unit": "daily",
+        "interval": 2,
+        "hour": 11,
+        "minute": 20,
+        "anchorAt": 1791300000000
+      }
+    },
+    {
+      "unit": "weekly",
+      "interval": 2,
+      "cronExpr": "0 0x10 * * 1,",
+      "rule": {
+        "unit": "weekly",
+        "interval": 2,
+        "hour": 16,
+        "minute": 0,
+        "weekdays": [1, 0],
+        "anchorAt": 1791300000000
+      }
+    }
+  ],
+  "relative": [
+    {
+      "delay": 1,
+      "result": {
+        "cronExpr": "21 11 6 10 *",
+        "scheduleRule": {
+          "unit": "minute",
+          "interval": 1,
+          "hour": 11,
+          "minute": 21,
+          "anchorAt": 1791300000000
+        }
+      }
+    },
+    {
+      "delay": 90,
+      "result": {
+        "cronExpr": "50 12 6 10 *",
+        "scheduleRule": {
+          "unit": "minute",
+          "interval": 90,
+          "hour": 12,
+          "minute": 50,
+          "anchorAt": 1791300000000
+        }
+      }
+    },
+    {
+      "delay": 1440,
+      "result": {
+        "cronExpr": "20 11 7 10 *",
+        "scheduleRule": {
+          "unit": "minute",
+          "interval": 1440,
+          "hour": 11,
+          "minute": 20,
+          "anchorAt": 1791300000000
+        }
+      }
+    }
+  ],
+  "inferred": [
+    {
+      "cronExpr": "*/10 * * * *",
+      "rule": {
+        "unit": "minute",
+        "interval": 10,
+        "hour": 11,
+        "minute": 20,
+        "anchorAt": 1791300000000
+      }
+    },
+    {
+      "cronExpr": " */5  * * * * ",
+      "rule": {
+        "unit": "minute",
+        "interval": 5,
+        "hour": 11,
+        "minute": 20,
+        "anchorAt": 1791300000000
+      }
+    },
+    {
+      "cronExpr": "*/0 * * * *",
+      "rule": null
+    },
+    {
+      "cronExpr": "*/10 * * * 1",
+      "rule": null
+    }
+  ],
+  "initial": [
+    {
+      "cronExpr": "0 10 6 10 *",
+      "recurring": false,
+      "from": 1791301230000,
+      "value": 1822831200000
+    },
+    {
+      "cronExpr": "0 10 6 10 *",
+      "recurring": false,
+      "from": 1791301800000,
+      "value": 1822831200000
+    },
+    {
+      "cronExpr": "0 10 6 10 *",
+      "recurring": true,
+      "from": 1791301800000,
+      "value": 1822831200000
+    },
+    {
+      "cronExpr": "30 12 6 10 *",
+      "recurring": false,
+      "from": 1791301800000,
+      "value": 1791304200000
+    },
+    {
+      "cronExpr": "0 9 6 10 *",
+      "recurring": false,
+      "from": 1791301800000,
+      "value": 1822827600000
+    }
+  ]
+}

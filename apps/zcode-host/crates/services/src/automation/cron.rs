@@ -11,6 +11,8 @@ const NTH_BITS: [u8; 5] = [1, 2, 4, 8, 16];
 const ANY_NTH: u8 = 63;
 const LAST_NTH: u8 = 32;
 const YEARS: usize = 10_000;
+/// croner 在 `recurse(…, r - 1)` 于第 0 层时越界读 `f[-1][0]`，JS 抛出这条 TypeError；原样复现。
+pub const CRONER_LEVEL_ERROR: &str = "Cannot read properties of undefined (reading '0')";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Field {
@@ -708,14 +710,17 @@ impl CronDate {
     }
 
     /// `recurse`。
-    fn recurse(mut self, pattern: &Pattern, level: usize) -> Option<Self> {
+    fn recurse(mut self, pattern: &Pattern, level: usize) -> Result<Option<Self>, String> {
         let mut level = level;
         loop {
             if level == 0 && !pattern.star_year {
                 if (0..YEARS as i64).contains(&self.year) && !Self::year_allowed(pattern, self.year)
                 {
-                    let next = (self.year + 1..YEARS as i64)
-                        .find(|year| Self::year_allowed(pattern, *year))?;
+                    let Some(next) = (self.year + 1..YEARS as i64)
+                        .find(|year| Self::year_allowed(pattern, *year))
+                    else {
+                        return Ok(None);
+                    };
                     self = Self {
                         year: next,
                         month: 0,
@@ -727,7 +732,7 @@ impl CronDate {
                     };
                 }
                 if self.year >= YEARS as i64 {
-                    return None;
+                    return Ok(None);
                 }
             }
             let (unit, parent, offset) = LEVELS[level];
@@ -747,19 +752,22 @@ impl CronDate {
                             self.year += 1;
                         }
                         if self.year >= YEARS as i64 {
-                            return None;
+                            return Ok(None);
                         }
                     }
                     level = 0;
                     continue;
                 } else if self.apply() {
-                    level = level.saturating_sub(1);
+                    if level == 0 {
+                        return Err(CRONER_LEVEL_ERROR.into());
+                    }
+                    level -= 1;
                     continue;
                 }
             }
             level += 1;
             if level >= LEVELS.len() {
-                return Some(self);
+                return Ok(Some(self));
             }
             let limit = if pattern.star_year {
                 3_000
@@ -767,7 +775,7 @@ impl CronDate {
                 YEARS as i64
             };
             if self.year >= limit {
-                return None;
+                return Ok(None);
             }
         }
     }
@@ -784,18 +792,26 @@ impl CronDate {
     }
 
     /// `recurseBackward`。
-    fn recurse_backward(mut self, pattern: &Pattern, level: usize, depth: u32) -> Option<Self> {
+    fn recurse_backward(
+        mut self,
+        pattern: &Pattern,
+        level: usize,
+        depth: u32,
+    ) -> Result<Option<Self>, String> {
         let (mut level, mut depth) = (level, depth);
         loop {
             if depth > 10_000 {
-                return None;
+                return Ok(None);
             }
             if level == 0 && !pattern.star_year {
                 if (0..YEARS as i64).contains(&self.year) && !Self::year_allowed(pattern, self.year)
                 {
-                    let previous = (0..self.year)
+                    let Some(previous) = (0..self.year)
                         .rev()
-                        .find(|year| Self::year_allowed(pattern, *year))?;
+                        .find(|year| Self::year_allowed(pattern, *year))
+                    else {
+                        return Ok(None);
+                    };
                     self = Self {
                         year: previous,
                         month: 11,
@@ -807,7 +823,7 @@ impl CronDate {
                     };
                 }
                 if self.year < 0 {
-                    return None;
+                    return Ok(None);
                 }
             }
             let (unit, parent, offset) = LEVELS[level];
@@ -869,24 +885,27 @@ impl CronDate {
                             self.year -= 1;
                         }
                         if self.year < 0 {
-                            return None;
+                            return Ok(None);
                         }
                     }
                     level = 0;
                     depth += 1;
                     continue;
                 } else if self.apply() {
-                    level = level.saturating_sub(1);
+                    if level == 0 {
+                        return Err(CRONER_LEVEL_ERROR.into());
+                    }
+                    level -= 1;
                     depth += 1;
                     continue;
                 }
             }
             level += 1;
             if level >= LEVELS.len() {
-                return Some(self);
+                return Ok(Some(self));
             }
             if self.year < 0 {
-                return None;
+                return Ok(None);
             }
             depth += 1;
         }
@@ -924,30 +943,31 @@ impl Cron {
     }
 
     /// `nextRun(from)`：严格晚于 `from`（至少 +1 s，毫秒清零）的下一次；没有时为 None。
-    pub fn next_run(&self, zone: &dyn Zone, from_ms: i64) -> Option<i64> {
+    pub fn next_run(&self, zone: &dyn Zone, from_ms: i64) -> Result<Option<i64>, String> {
         match self {
-            Cron::Once(at) => (*at > from_ms).then_some(*at),
+            Cron::Once(at) => Ok((*at > from_ms).then_some(*at)),
             Cron::Pattern(pattern) => {
                 let mut date = CronDate::from_fields(zone.fields(from_ms));
                 date.second += 1;
                 date.ms = 0;
                 date.apply();
-                date.recurse(pattern, 0).map(|date| date.time(zone))
+                Ok(date.recurse(pattern, 0)?.map(|date| date.time(zone)))
             }
         }
     }
 
     /// `previousRuns(1, from)[0]`：早于 `from` 的上一次。
-    pub fn previous_run(&self, zone: &dyn Zone, from_ms: i64) -> Option<i64> {
+    pub fn previous_run(&self, zone: &dyn Zone, from_ms: i64) -> Result<Option<i64>, String> {
         match self {
-            Cron::Once(at) => (*at < from_ms).then_some(*at),
+            Cron::Once(at) => Ok((*at < from_ms).then_some(*at)),
             Cron::Pattern(pattern) => {
                 let mut date = CronDate::from_fields(zone.fields(from_ms));
                 date.second -= 1;
                 date.ms = 0;
                 date.apply();
-                date.recurse_backward(pattern, 0, 0)
-                    .map(|date| date.time(zone))
+                Ok(date
+                    .recurse_backward(pattern, 0, 0)?
+                    .map(|date| date.time(zone)))
             }
         }
     }

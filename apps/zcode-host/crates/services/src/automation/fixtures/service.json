@@ -1,0 +1,2052 @@
+{
+  "source": "scripts/rust-host/automation-fixtures.ts",
+  "serviceNow": 1791300000000,
+  "scenarios": [
+    {
+      "name": "create-validate-update",
+      "ops": [
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-a",
+            "title": "daily",
+            "cronExpr": "0 9 * * *",
+            "prompt": "p",
+            "recurring": true
+          }
+        },
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-a",
+            "title": "sel",
+            "cronExpr": "*/10 * * * *",
+            "prompt": "p",
+            "recurring": true,
+            "mode": "edit",
+            "modelSelection": {
+              "providerId": " zai ",
+              "modelId": "glm-5",
+              "options": {
+                "reasoningLevel": "high"
+              }
+            }
+          }
+        },
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-a",
+            "title": "delay",
+            "cronExpr": "* * * * *",
+            "prompt": "p",
+            "relativeDelayMinutes": 90
+          }
+        },
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-a",
+            "title": "carrier",
+            "cronExpr": "0 9 * * *",
+            "prompt": "p",
+            "recurring": true,
+            "intervalUnit": "daily",
+            "interval": 40
+          }
+        },
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-b",
+            "workspaceIdentity": " id-b ",
+            "title": "rule",
+            "cronExpr": "0 9 * * 1",
+            "prompt": "p",
+            "recurring": true,
+            "scheduleRule": {
+              "minute": 0,
+              "unit": "weekly",
+              "interval": 2,
+              "hour": 9,
+              "weekdays": [1]
+            },
+            "endAt": 1791559200000
+          }
+        },
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-a",
+            "title": "once",
+            "cronExpr": "0 10 6 10 *",
+            "prompt": "p",
+            "recurring": false
+          },
+          "now": 1791301800000
+        },
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-a",
+            "title": "bad",
+            "cronExpr": "61 * * * *",
+            "prompt": "p"
+          }
+        },
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-a",
+            "title": "bad-mode",
+            "cronExpr": "0 9 * * *",
+            "prompt": "p",
+            "mode": "turbo"
+          }
+        },
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-a",
+            "title": "bad-delay",
+            "cronExpr": "* * * * *",
+            "prompt": "p",
+            "relativeDelayMinutes": 5,
+            "recurring": true
+          }
+        },
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-a",
+            "title": "bad-rule",
+            "cronExpr": "0 9 * * *",
+            "prompt": "p",
+            "scheduleRule": {
+              "unit": "monthly",
+              "interval": 1,
+              "hour": 9,
+              "minute": 0,
+              "anchorAt": 1
+            }
+          }
+        },
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-a",
+            "title": "bad-carrier",
+            "cronExpr": "0 9 * * *",
+            "prompt": "p",
+            "intervalUnit": "daily",
+            "interval": 201
+          }
+        },
+        {
+          "op": "list"
+        },
+        {
+          "op": "list",
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          }
+        },
+        {
+          "op": "list",
+          "scope": {
+            "workspacePath": "/tmp/ws-b",
+            "workspaceIdentity": " id-b "
+          }
+        },
+        {
+          "op": "update",
+          "id": 0,
+          "patch": {
+            "title": "renamed",
+            "cronExpr": "0 10 * * *"
+          },
+          "now": 1791300060000
+        },
+        {
+          "op": "update",
+          "id": 0,
+          "patch": {
+            "maxRuns": null
+          }
+        },
+        {
+          "op": "update",
+          "id": 0,
+          "patch": {
+            "recurring": true,
+            "maxRuns": 3
+          }
+        },
+        {
+          "op": "update",
+          "id": 0,
+          "patch": {
+            "recurring": false,
+            "maxRuns": 2
+          },
+          "now": 1791300120000
+        },
+        {
+          "op": "update",
+          "id": 0,
+          "patch": {
+            "cronExpr": "*/5 * * * *"
+          },
+          "now": 1791300180000
+        },
+        {
+          "op": "update",
+          "id": 1,
+          "patch": {
+            "modelSelection": null,
+            "mode": null
+          },
+          "now": 1791300240000
+        },
+        {
+          "op": "update",
+          "id": 4,
+          "scope": {
+            "workspacePath": "/tmp/ws-b",
+            "workspaceIdentity": " id-b "
+          },
+          "patch": {
+            "scheduleRule": {
+              "unit": "weekly",
+              "interval": 2,
+              "hour": 9,
+              "minute": 0,
+              "weekdays": [1]
+            }
+          },
+          "now": 1791300300000
+        },
+        {
+          "op": "update",
+          "id": 4,
+          "scope": {
+            "workspacePath": "/tmp/ws-b",
+            "workspaceIdentity": " id-b "
+          },
+          "patch": {
+            "endAt": null,
+            "scheduleEditedByUser": true
+          },
+          "now": 1791300360000
+        },
+        {
+          "op": "update",
+          "id": 4,
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          },
+          "patch": {
+            "title": "cross"
+          }
+        },
+        {
+          "op": "update",
+          "id": 0,
+          "patch": {
+            "intervalUnit": "hourly",
+            "interval": 30
+          },
+          "now": 1791300420000
+        },
+        {
+          "op": "update",
+          "id": 0,
+          "patch": {
+            "scheduleRule": null
+          },
+          "now": 1791300480000
+        },
+        {
+          "op": "update",
+          "id": 2,
+          "patch": {
+            "endAt": 1791300000000
+          },
+          "now": 1791300540000
+        },
+        {
+          "op": "setEnabled",
+          "id": 1,
+          "enabled": false
+        },
+        {
+          "op": "setEnabled",
+          "id": 1,
+          "enabled": true,
+          "now": 1791300600000
+        },
+        {
+          "op": "restart",
+          "id": 1
+        },
+        {
+          "op": "sql",
+          "sql": "UPDATE automations SET lifecycle_status = 'failed', run_count = 4"
+        },
+        {
+          "op": "restart",
+          "id": 1,
+          "now": 1791300660000
+        },
+        {
+          "op": "hasTaskBinding",
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          },
+          "targetTaskId": "task-1"
+        },
+        {
+          "op": "list",
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          }
+        },
+        {
+          "op": "delete",
+          "id": 3,
+          "scope": {
+            "workspacePath": "/tmp/ws-b",
+            "workspaceIdentity": " id-b "
+          }
+        },
+        {
+          "op": "delete",
+          "id": 3,
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          }
+        },
+        {
+          "op": "list"
+        }
+      ],
+      "results": [
+        {
+          "value": {
+            "automationId": "<automation:0>",
+            "title": "daily",
+            "cronExpr": "0 9 * * *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": true,
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791378000000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300000000
+          }
+        },
+        {
+          "value": {
+            "automationId": "<automation:1>",
+            "title": "sel",
+            "cronExpr": "*/10 * * * *",
+            "prompt": "p",
+            "modelSelection": {
+              "providerId": "zai",
+              "modelId": "glm-5",
+              "options": {
+                "reasoningLevel": "high"
+              }
+            },
+            "mode": "edit",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": true,
+            "scheduleRule": {
+              "unit": "minute",
+              "interval": 10,
+              "hour": 11,
+              "minute": 20,
+              "anchorAt": 1791300000000
+            },
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791300600000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300000000
+          }
+        },
+        {
+          "value": {
+            "automationId": "<automation:2>",
+            "title": "delay",
+            "cronExpr": "50 12 6 10 *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": false,
+            "scheduleRule": {
+              "unit": "minute",
+              "interval": 90,
+              "hour": 12,
+              "minute": 50,
+              "anchorAt": 1791300000000
+            },
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791305400000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300000000
+          }
+        },
+        {
+          "value": {
+            "automationId": "<automation:3>",
+            "title": "carrier",
+            "cronExpr": "0 9 * * *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": true,
+            "scheduleRule": {
+              "unit": "daily",
+              "interval": 40,
+              "hour": 9,
+              "minute": 0,
+              "anchorAt": 1791300000000
+            },
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1794751200000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300000000
+          }
+        },
+        {
+          "value": {
+            "automationId": "<automation:4>",
+            "title": "rule",
+            "cronExpr": "0 9 * * 1",
+            "prompt": "p",
+            "workspaceKey": "id-b",
+            "workspacePath": "/tmp/ws-b",
+            "workspaceIdentity": " id-b ",
+            "locationKind": "local",
+            "recurring": true,
+            "endAt": 1791559200000,
+            "scheduleRule": {
+              "minute": 0,
+              "unit": "weekly",
+              "interval": 2,
+              "hour": 9,
+              "weekdays": [1],
+              "anchorAt": 1791300000000
+            },
+            "runCount": 0,
+            "enabled": false,
+            "lifecycleStatus": "completed",
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300000000
+          }
+        },
+        {
+          "value": {
+            "automationId": "<automation:5>",
+            "title": "once",
+            "cronExpr": "0 10 6 10 *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": false,
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1822831200000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791301800000,
+            "updatedAt": 1791301800000
+          }
+        },
+        {
+          "error": "非法的 cron 表达式：61 * * * *"
+        },
+        {
+          "error": "Invalid automation mode: turbo"
+        },
+        {
+          "error": "非法的相对时间定时任务：相对延迟任务必须设置 recurring=false"
+        },
+        {
+          "error": "非法的定时任务调度规则：monthly date 规则必须包含有效的 monthDays"
+        },
+        {
+          "error": "非法的自定义重复入参：interval 必须是 1-200 的整数"
+        },
+        {
+          "value": [
+            {
+              "automationId": "<automation:5>",
+              "title": "once",
+              "cronExpr": "0 10 6 10 *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": false,
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1822831200000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791301800000,
+              "updatedAt": 1791301800000
+            },
+            {
+              "automationId": "<automation:0>",
+              "title": "daily",
+              "cronExpr": "0 9 * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": true,
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1791378000000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300000000
+            },
+            {
+              "automationId": "<automation:1>",
+              "title": "sel",
+              "cronExpr": "*/10 * * * *",
+              "prompt": "p",
+              "modelSelection": {
+                "providerId": "zai",
+                "modelId": "glm-5",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "mode": "edit",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": true,
+              "scheduleRule": {
+                "unit": "minute",
+                "interval": 10,
+                "hour": 11,
+                "minute": 20,
+                "anchorAt": 1791300000000
+              },
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1791300600000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300000000
+            },
+            {
+              "automationId": "<automation:2>",
+              "title": "delay",
+              "cronExpr": "50 12 6 10 *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": false,
+              "scheduleRule": {
+                "unit": "minute",
+                "interval": 90,
+                "hour": 12,
+                "minute": 50,
+                "anchorAt": 1791300000000
+              },
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1791305400000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300000000
+            },
+            {
+              "automationId": "<automation:3>",
+              "title": "carrier",
+              "cronExpr": "0 9 * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": true,
+              "scheduleRule": {
+                "unit": "daily",
+                "interval": 40,
+                "hour": 9,
+                "minute": 0,
+                "anchorAt": 1791300000000
+              },
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1794751200000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300000000
+            },
+            {
+              "automationId": "<automation:4>",
+              "title": "rule",
+              "cronExpr": "0 9 * * 1",
+              "prompt": "p",
+              "workspaceKey": "id-b",
+              "workspacePath": "/tmp/ws-b",
+              "workspaceIdentity": " id-b ",
+              "locationKind": "local",
+              "recurring": true,
+              "endAt": 1791559200000,
+              "scheduleRule": {
+                "minute": 0,
+                "unit": "weekly",
+                "interval": 2,
+                "hour": 9,
+                "weekdays": [1],
+                "anchorAt": 1791300000000
+              },
+              "runCount": 0,
+              "enabled": false,
+              "lifecycleStatus": "completed",
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300000000
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "automationId": "<automation:5>",
+              "title": "once",
+              "cronExpr": "0 10 6 10 *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": false,
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1822831200000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791301800000,
+              "updatedAt": 1791301800000
+            },
+            {
+              "automationId": "<automation:0>",
+              "title": "daily",
+              "cronExpr": "0 9 * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": true,
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1791378000000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300000000
+            },
+            {
+              "automationId": "<automation:1>",
+              "title": "sel",
+              "cronExpr": "*/10 * * * *",
+              "prompt": "p",
+              "modelSelection": {
+                "providerId": "zai",
+                "modelId": "glm-5",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "mode": "edit",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": true,
+              "scheduleRule": {
+                "unit": "minute",
+                "interval": 10,
+                "hour": 11,
+                "minute": 20,
+                "anchorAt": 1791300000000
+              },
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1791300600000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300000000
+            },
+            {
+              "automationId": "<automation:2>",
+              "title": "delay",
+              "cronExpr": "50 12 6 10 *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": false,
+              "scheduleRule": {
+                "unit": "minute",
+                "interval": 90,
+                "hour": 12,
+                "minute": 50,
+                "anchorAt": 1791300000000
+              },
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1791305400000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300000000
+            },
+            {
+              "automationId": "<automation:3>",
+              "title": "carrier",
+              "cronExpr": "0 9 * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": true,
+              "scheduleRule": {
+                "unit": "daily",
+                "interval": 40,
+                "hour": 9,
+                "minute": 0,
+                "anchorAt": 1791300000000
+              },
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1794751200000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300000000
+            }
+          ]
+        },
+        {
+          "value": [
+            {
+              "automationId": "<automation:4>",
+              "title": "rule",
+              "cronExpr": "0 9 * * 1",
+              "prompt": "p",
+              "workspaceKey": "id-b",
+              "workspacePath": "/tmp/ws-b",
+              "workspaceIdentity": " id-b ",
+              "locationKind": "local",
+              "recurring": true,
+              "endAt": 1791559200000,
+              "scheduleRule": {
+                "minute": 0,
+                "unit": "weekly",
+                "interval": 2,
+                "hour": 9,
+                "weekdays": [1],
+                "anchorAt": 1791300000000
+              },
+              "runCount": 0,
+              "enabled": false,
+              "lifecycleStatus": "completed",
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300000000
+            }
+          ]
+        },
+        {
+          "value": {
+            "automationId": "<automation:0>",
+            "title": "renamed",
+            "cronExpr": "0 10 * * *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": true,
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791381600000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300060000
+          }
+        },
+        {
+          "error": "清空 maxRuns 时必须在同一次更新中设置 recurring=true"
+        },
+        {
+          "error": "无限循环任务不能设置有限次数 maxRuns"
+        },
+        {
+          "value": {
+            "automationId": "<automation:0>",
+            "title": "renamed",
+            "cronExpr": "0 10 * * *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": false,
+            "maxRuns": 2,
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791381600000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300120000
+          }
+        },
+        {
+          "value": {
+            "automationId": "<automation:0>",
+            "title": "renamed",
+            "cronExpr": "*/5 * * * *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": false,
+            "maxRuns": 2,
+            "scheduleRule": {
+              "unit": "minute",
+              "interval": 5,
+              "hour": 11,
+              "minute": 23,
+              "anchorAt": 1791300180000
+            },
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791300480000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300180000
+          }
+        },
+        {
+          "value": {
+            "automationId": "<automation:1>",
+            "title": "sel",
+            "cronExpr": "*/10 * * * *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": true,
+            "scheduleRule": {
+              "unit": "minute",
+              "interval": 10,
+              "hour": 11,
+              "minute": 20,
+              "anchorAt": 1791300000000
+            },
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791300600000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300240000
+          }
+        },
+        {
+          "value": {
+            "automationId": "<automation:4>",
+            "title": "rule",
+            "cronExpr": "0 9 * * 1",
+            "prompt": "p",
+            "workspaceKey": "id-b",
+            "workspacePath": "/tmp/ws-b",
+            "workspaceIdentity": " id-b ",
+            "locationKind": "local",
+            "recurring": true,
+            "endAt": 1791559200000,
+            "scheduleRule": {
+              "unit": "weekly",
+              "interval": 2,
+              "hour": 9,
+              "minute": 0,
+              "weekdays": [1],
+              "anchorAt": 1791300000000
+            },
+            "runCount": 0,
+            "enabled": false,
+            "lifecycleStatus": "completed",
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300300000
+          }
+        },
+        {
+          "value": {
+            "automationId": "<automation:4>",
+            "title": "rule",
+            "cronExpr": "0 9 * * 1",
+            "prompt": "p",
+            "workspaceKey": "id-b",
+            "workspacePath": "/tmp/ws-b",
+            "workspaceIdentity": " id-b ",
+            "locationKind": "local",
+            "recurring": true,
+            "scheduleRule": {
+              "unit": "weekly",
+              "interval": 2,
+              "hour": 9,
+              "minute": 0,
+              "weekdays": [1],
+              "anchorAt": 1791300000000
+            },
+            "scheduleEditedByUser": true,
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1792414800000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300360000
+          }
+        },
+        {
+          "value": null
+        },
+        {
+          "value": {
+            "automationId": "<automation:0>",
+            "title": "renamed",
+            "cronExpr": "*/5 * * * *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": true,
+            "scheduleRule": {
+              "unit": "hourly",
+              "interval": 30,
+              "hour": 0,
+              "minute": 27,
+              "anchorAt": 1791300420000
+            },
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791408420000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300420000
+          }
+        },
+        {
+          "value": {
+            "automationId": "<automation:0>",
+            "title": "renamed",
+            "cronExpr": "*/5 * * * *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": true,
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791300600000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300480000
+          }
+        },
+        {
+          "value": {
+            "automationId": "<automation:2>",
+            "title": "delay",
+            "cronExpr": "50 12 6 10 *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": false,
+            "endAt": 1791300000000,
+            "scheduleRule": {
+              "unit": "minute",
+              "interval": 90,
+              "hour": 12,
+              "minute": 50,
+              "anchorAt": 1791300000000
+            },
+            "runCount": 0,
+            "enabled": false,
+            "lifecycleStatus": "completed",
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300540000
+          }
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": false
+        },
+        {
+          "value": [
+            {
+              "automationId": "<automation:5>",
+              "title": "once",
+              "cronExpr": "0 10 6 10 *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": false,
+              "runCount": 4,
+              "enabled": true,
+              "lifecycleStatus": "failed",
+              "nextRunAt": 1822831200000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791301800000,
+              "updatedAt": 1791301800000
+            },
+            {
+              "automationId": "<automation:0>",
+              "title": "renamed",
+              "cronExpr": "*/5 * * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": true,
+              "runCount": 4,
+              "enabled": true,
+              "lifecycleStatus": "failed",
+              "nextRunAt": 1791300600000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300480000
+            },
+            {
+              "automationId": "<automation:1>",
+              "title": "sel",
+              "cronExpr": "*/10 * * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": true,
+              "scheduleRule": {
+                "unit": "minute",
+                "interval": 10,
+                "hour": 11,
+                "minute": 20,
+                "anchorAt": 1791300000000
+              },
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1791301200000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300660000
+            },
+            {
+              "automationId": "<automation:2>",
+              "title": "delay",
+              "cronExpr": "50 12 6 10 *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": false,
+              "endAt": 1791300000000,
+              "scheduleRule": {
+                "unit": "minute",
+                "interval": 90,
+                "hour": 12,
+                "minute": 50,
+                "anchorAt": 1791300000000
+              },
+              "runCount": 4,
+              "enabled": false,
+              "lifecycleStatus": "failed",
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300540000
+            },
+            {
+              "automationId": "<automation:3>",
+              "title": "carrier",
+              "cronExpr": "0 9 * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": true,
+              "scheduleRule": {
+                "unit": "daily",
+                "interval": 40,
+                "hour": 9,
+                "minute": 0,
+                "anchorAt": 1791300000000
+              },
+              "runCount": 4,
+              "enabled": true,
+              "lifecycleStatus": "failed",
+              "nextRunAt": 1794751200000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300000000
+            }
+          ]
+        },
+        {
+          "value": false
+        },
+        {
+          "value": true
+        },
+        {
+          "value": [
+            {
+              "automationId": "<automation:5>",
+              "title": "once",
+              "cronExpr": "0 10 6 10 *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": false,
+              "runCount": 4,
+              "enabled": true,
+              "lifecycleStatus": "failed",
+              "nextRunAt": 1822831200000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791301800000,
+              "updatedAt": 1791301800000
+            },
+            {
+              "automationId": "<automation:0>",
+              "title": "renamed",
+              "cronExpr": "*/5 * * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": true,
+              "runCount": 4,
+              "enabled": true,
+              "lifecycleStatus": "failed",
+              "nextRunAt": 1791300600000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300480000
+            },
+            {
+              "automationId": "<automation:1>",
+              "title": "sel",
+              "cronExpr": "*/10 * * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": true,
+              "scheduleRule": {
+                "unit": "minute",
+                "interval": 10,
+                "hour": 11,
+                "minute": 20,
+                "anchorAt": 1791300000000
+              },
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1791301200000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300660000
+            },
+            {
+              "automationId": "<automation:2>",
+              "title": "delay",
+              "cronExpr": "50 12 6 10 *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "locationKind": "local",
+              "recurring": false,
+              "endAt": 1791300000000,
+              "scheduleRule": {
+                "unit": "minute",
+                "interval": 90,
+                "hour": 12,
+                "minute": 50,
+                "anchorAt": 1791300000000
+              },
+              "runCount": 4,
+              "enabled": false,
+              "lifecycleStatus": "failed",
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300540000
+            },
+            {
+              "automationId": "<automation:4>",
+              "title": "rule",
+              "cronExpr": "0 9 * * 1",
+              "prompt": "p",
+              "workspaceKey": "id-b",
+              "workspacePath": "/tmp/ws-b",
+              "workspaceIdentity": " id-b ",
+              "locationKind": "local",
+              "recurring": true,
+              "scheduleRule": {
+                "unit": "weekly",
+                "interval": 2,
+                "hour": 9,
+                "minute": 0,
+                "weekdays": [1],
+                "anchorAt": 1791300000000
+              },
+              "scheduleEditedByUser": true,
+              "runCount": 4,
+              "enabled": true,
+              "lifecycleStatus": "failed",
+              "nextRunAt": 1792414800000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300360000
+            }
+          ]
+        }
+      ],
+      "dumps": {
+        "automations": [
+          {
+            "automation_id": "<automation:2>",
+            "title": "delay",
+            "cron_expr": "50 12 6 10 *",
+            "prompt": "p",
+            "model": null,
+            "provider": null,
+            "mode": null,
+            "thought_level": null,
+            "model_selection": "null",
+            "workspace_key": "/tmp/ws-a",
+            "workspace_path": "/tmp/ws-a",
+            "workspace_identity": null,
+            "target_task_id": null,
+            "bot_delivery_target": null,
+            "location_kind": "local",
+            "recurring": 0,
+            "max_runs": null,
+            "end_at": 1791300000000,
+            "schedule_rule": "{\"unit\":\"minute\",\"interval\":90,\"hour\":12,\"minute\":50,\"anchorAt\":1791300000000}",
+            "schedule_edited_by_user": 0,
+            "run_count": 4,
+            "scheduled_run_count": 0,
+            "enabled": 0,
+            "lifecycle_status": "failed",
+            "next_run_at": null,
+            "last_run_at": null,
+            "running": 0,
+            "claimed_at": null,
+            "dispatch_status": "idle",
+            "dispatch_attempts": 0,
+            "retry_at": null,
+            "last_error": null,
+            "created_at": 1791300000000,
+            "updated_at": 1791300540000
+          },
+          {
+            "automation_id": "<automation:0>",
+            "title": "renamed",
+            "cron_expr": "*/5 * * * *",
+            "prompt": "p",
+            "model": null,
+            "provider": null,
+            "mode": null,
+            "thought_level": null,
+            "model_selection": "null",
+            "workspace_key": "/tmp/ws-a",
+            "workspace_path": "/tmp/ws-a",
+            "workspace_identity": null,
+            "target_task_id": null,
+            "bot_delivery_target": null,
+            "location_kind": "local",
+            "recurring": 1,
+            "max_runs": null,
+            "end_at": null,
+            "schedule_rule": null,
+            "schedule_edited_by_user": 0,
+            "run_count": 4,
+            "scheduled_run_count": 0,
+            "enabled": 1,
+            "lifecycle_status": "failed",
+            "next_run_at": 1791300600000,
+            "last_run_at": null,
+            "running": 0,
+            "claimed_at": null,
+            "dispatch_status": "idle",
+            "dispatch_attempts": 0,
+            "retry_at": null,
+            "last_error": null,
+            "created_at": 1791300000000,
+            "updated_at": 1791300480000
+          },
+          {
+            "automation_id": "<automation:4>",
+            "title": "rule",
+            "cron_expr": "0 9 * * 1",
+            "prompt": "p",
+            "model": null,
+            "provider": null,
+            "mode": null,
+            "thought_level": null,
+            "model_selection": "null",
+            "workspace_key": "id-b",
+            "workspace_path": "/tmp/ws-b",
+            "workspace_identity": " id-b ",
+            "target_task_id": null,
+            "bot_delivery_target": null,
+            "location_kind": "local",
+            "recurring": 1,
+            "max_runs": null,
+            "end_at": null,
+            "schedule_rule": "{\"unit\":\"weekly\",\"interval\":2,\"hour\":9,\"minute\":0,\"weekdays\":[1],\"anchorAt\":1791300000000}",
+            "schedule_edited_by_user": 1,
+            "run_count": 4,
+            "scheduled_run_count": 0,
+            "enabled": 1,
+            "lifecycle_status": "failed",
+            "next_run_at": 1792414800000,
+            "last_run_at": null,
+            "running": 0,
+            "claimed_at": null,
+            "dispatch_status": "idle",
+            "dispatch_attempts": 0,
+            "retry_at": null,
+            "last_error": null,
+            "created_at": 1791300000000,
+            "updated_at": 1791300360000
+          },
+          {
+            "automation_id": "<automation:1>",
+            "title": "sel",
+            "cron_expr": "*/10 * * * *",
+            "prompt": "p",
+            "model": null,
+            "provider": null,
+            "mode": null,
+            "thought_level": null,
+            "model_selection": "null",
+            "workspace_key": "/tmp/ws-a",
+            "workspace_path": "/tmp/ws-a",
+            "workspace_identity": null,
+            "target_task_id": null,
+            "bot_delivery_target": null,
+            "location_kind": "local",
+            "recurring": 1,
+            "max_runs": null,
+            "end_at": null,
+            "schedule_rule": "{\"unit\":\"minute\",\"interval\":10,\"hour\":11,\"minute\":20,\"anchorAt\":1791300000000}",
+            "schedule_edited_by_user": 0,
+            "run_count": 0,
+            "scheduled_run_count": 0,
+            "enabled": 1,
+            "lifecycle_status": "active",
+            "next_run_at": 1791301200000,
+            "last_run_at": null,
+            "running": 0,
+            "claimed_at": null,
+            "dispatch_status": "idle",
+            "dispatch_attempts": 0,
+            "retry_at": null,
+            "last_error": null,
+            "created_at": 1791300000000,
+            "updated_at": 1791300660000
+          },
+          {
+            "automation_id": "<automation:5>",
+            "title": "once",
+            "cron_expr": "0 10 6 10 *",
+            "prompt": "p",
+            "model": null,
+            "provider": null,
+            "mode": null,
+            "thought_level": null,
+            "model_selection": "null",
+            "workspace_key": "/tmp/ws-a",
+            "workspace_path": "/tmp/ws-a",
+            "workspace_identity": null,
+            "target_task_id": null,
+            "bot_delivery_target": null,
+            "location_kind": "local",
+            "recurring": 0,
+            "max_runs": null,
+            "end_at": null,
+            "schedule_rule": null,
+            "schedule_edited_by_user": 0,
+            "run_count": 4,
+            "scheduled_run_count": 0,
+            "enabled": 1,
+            "lifecycle_status": "failed",
+            "next_run_at": 1822831200000,
+            "last_run_at": null,
+            "running": 0,
+            "claimed_at": null,
+            "dispatch_status": "idle",
+            "dispatch_attempts": 0,
+            "retry_at": null,
+            "last_error": null,
+            "created_at": 1791301800000,
+            "updated_at": 1791301800000
+          }
+        ],
+        "automation_runs": []
+      }
+    },
+    {
+      "name": "runs",
+      "ops": [
+        {
+          "op": "create",
+          "params": {
+            "workspacePath": "/tmp/ws-a",
+            "title": "r",
+            "cronExpr": "0 9 * * *",
+            "prompt": "p",
+            "recurring": true,
+            "targetTaskId": "task-1",
+            "botDeliveryTarget": {
+              "provider": "feishu",
+              "botId": " bot ",
+              "providerUserId": "u1",
+              "chatType": "private"
+            }
+          }
+        },
+        {
+          "op": "hasTaskBinding",
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          },
+          "targetTaskId": "task-1"
+        },
+        {
+          "op": "getBotDeliveryTarget",
+          "id": 0
+        },
+        {
+          "op": "getModelSelectionForDispatch",
+          "id": 0,
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          }
+        },
+        {
+          "op": "runNow",
+          "id": 0,
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          },
+          "now": 1791300001000
+        },
+        {
+          "op": "runNow",
+          "id": 0,
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          },
+          "now": 1791300002000
+        },
+        {
+          "op": "fixRunModelSelection",
+          "run": 0,
+          "selection": {
+            "providerId": "zai",
+            "modelId": "glm-5",
+            "options": {
+              "reasoningLevel": "max"
+            }
+          }
+        },
+        {
+          "op": "fixRunModelSelection",
+          "run": 0,
+          "selection": {
+            "providerId": "other",
+            "modelId": "x",
+            "options": {}
+          }
+        },
+        {
+          "op": "markRunOutcome",
+          "run": 0,
+          "outcome": "running"
+        },
+        {
+          "op": "markManualRunDispatched",
+          "run": 0,
+          "sessionId": "task-1",
+          "dispatchedAt": 1791300003000
+        },
+        {
+          "op": "markManualRunDispatched",
+          "run": 0,
+          "sessionId": "task-1",
+          "dispatchedAt": 1791300004000
+        },
+        {
+          "op": "touchManualClaim",
+          "id": 0,
+          "now": 1791300005000
+        },
+        {
+          "op": "markRunOutcome",
+          "run": 0,
+          "outcome": "succeeded"
+        },
+        {
+          "op": "markRunOutcome",
+          "run": 0,
+          "outcome": "running"
+        },
+        {
+          "op": "releaseManualClaim",
+          "id": 0
+        },
+        {
+          "op": "ensureRunClaimed",
+          "runId": "#0:1791400000000",
+          "id": 0,
+          "scheduledAt": 1791400000000,
+          "trigger": "schedule"
+        },
+        {
+          "op": "markRunOutcome",
+          "runId": "#0:1791400000000",
+          "outcome": "failed",
+          "error": "boom"
+        },
+        {
+          "op": "markRunDispatch",
+          "runId": "#0:1791400000000",
+          "status": "failed_to_dispatch",
+          "error": "x"
+        },
+        {
+          "op": "runNow",
+          "id": 0,
+          "scope": {
+            "workspacePath": "/tmp/ws-b",
+            "workspaceIdentity": " id-b "
+          },
+          "now": 1791300006000
+        },
+        {
+          "op": "sql",
+          "sql": "UPDATE automations SET running = 1, claimed_at = 1"
+        },
+        {
+          "op": "runNow",
+          "id": 0,
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          },
+          "now": 1791300007000
+        },
+        {
+          "op": "listRuns",
+          "id": 0,
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          }
+        },
+        {
+          "op": "deleteRun",
+          "run": 0,
+          "scope": {
+            "workspacePath": "/tmp/ws-b",
+            "workspaceIdentity": " id-b "
+          }
+        },
+        {
+          "op": "deleteRun",
+          "run": 0,
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          }
+        },
+        {
+          "op": "listRuns",
+          "id": 0
+        },
+        {
+          "op": "getRun",
+          "runId": "#0:1791400000000"
+        },
+        {
+          "op": "sql",
+          "sql": "UPDATE automations SET model_selection = NULL, mode = '', schedule_rule = NULL"
+        },
+        {
+          "op": "getModelSelectionForDispatch",
+          "id": 0,
+          "scope": {
+            "workspacePath": "/tmp/ws-a"
+          }
+        },
+        {
+          "op": "list"
+        }
+      ],
+      "results": [
+        {
+          "value": {
+            "automationId": "<automation:0>",
+            "title": "r",
+            "cronExpr": "0 9 * * *",
+            "prompt": "p",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "targetTaskId": "task-1",
+            "locationKind": "local",
+            "recurring": true,
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791378000000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 1791300000000,
+            "updatedAt": 1791300000000
+          }
+        },
+        {
+          "value": true
+        },
+        {
+          "value": {
+            "provider": "feishu",
+            "botId": "bot",
+            "providerUserId": "u1",
+            "chatType": "private"
+          }
+        },
+        {
+          "value": null
+        },
+        {
+          "value": {
+            "automation": {
+              "automationId": "<automation:0>",
+              "title": "r",
+              "cronExpr": "0 9 * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "targetTaskId": "task-1",
+              "locationKind": "local",
+              "recurring": true,
+              "runCount": 0,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1791378000000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300001000
+            },
+            "run": {
+              "runId": "<run:0>",
+              "automationId": "<automation:0>",
+              "workspaceKey": "/tmp/ws-a",
+              "scheduledAt": 1791300001000,
+              "trigger": "manual",
+              "dispatchStatus": "claimed",
+              "attempts": 1,
+              "createdAt": 1791300001000,
+              "updatedAt": 1791300001000
+            }
+          }
+        },
+        {
+          "value": null
+        },
+        {
+          "value": {
+            "providerId": "zai",
+            "modelId": "glm-5",
+            "options": {
+              "reasoningLevel": "max"
+            }
+          }
+        },
+        {
+          "value": {
+            "providerId": "zai",
+            "modelId": "glm-5",
+            "options": {
+              "reasoningLevel": "max"
+            }
+          }
+        },
+        {
+          "value": null
+        },
+        {
+          "value": true
+        },
+        {
+          "value": false
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": {
+            "automation": {
+              "automationId": "<automation:0>",
+              "title": "r",
+              "cronExpr": "0 9 * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "targetTaskId": "task-1",
+              "locationKind": "local",
+              "recurring": true,
+              "runCount": 1,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1791378000000,
+              "lastRunAt": 1791300003000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300007000
+            },
+            "run": {
+              "runId": "<run:1>",
+              "automationId": "<automation:0>",
+              "workspaceKey": "/tmp/ws-a",
+              "scheduledAt": 1791300007000,
+              "trigger": "manual",
+              "dispatchStatus": "claimed",
+              "attempts": 1,
+              "createdAt": 1791300007000,
+              "updatedAt": 1791300007000
+            }
+          }
+        },
+        {
+          "value": [
+            {
+              "runId": "<run:1>",
+              "automationId": "<automation:0>",
+              "workspaceKey": "/tmp/ws-a",
+              "scheduledAt": 1791300007000,
+              "trigger": "manual",
+              "dispatchStatus": "claimed",
+              "attempts": 1,
+              "createdAt": 1791300007000,
+              "updatedAt": 1791300007000
+            },
+            {
+              "runId": "<automation:0>:1791400000000",
+              "automationId": "<automation:0>",
+              "workspaceKey": "/tmp/ws-a",
+              "scheduledAt": 1791400000000,
+              "trigger": "schedule",
+              "dispatchStatus": "failed_to_dispatch",
+              "outcome": "failed",
+              "error": "x",
+              "attempts": 0,
+              "createdAt": 1791300005000,
+              "updatedAt": 1791300005000
+            },
+            {
+              "runId": "<run:0>",
+              "automationId": "<automation:0>",
+              "workspaceKey": "/tmp/ws-a",
+              "scheduledAt": 1791300001000,
+              "trigger": "manual",
+              "modelSelection": {
+                "providerId": "zai",
+                "modelId": "glm-5",
+                "options": {
+                  "reasoningLevel": "max"
+                }
+              },
+              "dispatchStatus": "dispatched",
+              "outcome": "succeeded",
+              "sessionId": "task-1",
+              "attempts": 1,
+              "createdAt": 1791300001000,
+              "updatedAt": 1791300005000
+            }
+          ]
+        },
+        {
+          "value": null
+        },
+        {
+          "value": null
+        },
+        {
+          "value": [
+            {
+              "runId": "<run:1>",
+              "automationId": "<automation:0>",
+              "workspaceKey": "/tmp/ws-a",
+              "scheduledAt": 1791300007000,
+              "trigger": "manual",
+              "dispatchStatus": "claimed",
+              "attempts": 1,
+              "createdAt": 1791300007000,
+              "updatedAt": 1791300007000
+            },
+            {
+              "runId": "<automation:0>:1791400000000",
+              "automationId": "<automation:0>",
+              "workspaceKey": "/tmp/ws-a",
+              "scheduledAt": 1791400000000,
+              "trigger": "schedule",
+              "dispatchStatus": "failed_to_dispatch",
+              "outcome": "failed",
+              "error": "x",
+              "attempts": 0,
+              "createdAt": 1791300005000,
+              "updatedAt": 1791300005000
+            }
+          ]
+        },
+        {
+          "value": {
+            "runId": "<automation:0>:1791400000000",
+            "automationId": "<automation:0>",
+            "workspaceKey": "/tmp/ws-a",
+            "scheduledAt": 1791400000000,
+            "trigger": "schedule",
+            "dispatchStatus": "failed_to_dispatch",
+            "outcome": "failed",
+            "error": "x",
+            "attempts": 0,
+            "createdAt": 1791300005000,
+            "updatedAt": 1791300005000
+          }
+        },
+        {
+          "value": null
+        },
+        {
+          "error": "Automation 模型选择不可用，请重新选择模型与思考档位"
+        },
+        {
+          "value": [
+            {
+              "automationId": "<automation:0>",
+              "title": "r",
+              "cronExpr": "0 9 * * *",
+              "prompt": "p",
+              "workspaceKey": "/tmp/ws-a",
+              "workspacePath": "/tmp/ws-a",
+              "targetTaskId": "task-1",
+              "locationKind": "local",
+              "recurring": true,
+              "runCount": 1,
+              "enabled": true,
+              "lifecycleStatus": "active",
+              "nextRunAt": 1791378000000,
+              "lastRunAt": 1791300003000,
+              "dispatchStatus": "idle",
+              "dispatchAttempts": 0,
+              "createdAt": 1791300000000,
+              "updatedAt": 1791300007000
+            }
+          ]
+        }
+      ],
+      "dumps": {
+        "automations": [
+          {
+            "automation_id": "<automation:0>",
+            "title": "r",
+            "cron_expr": "0 9 * * *",
+            "prompt": "p",
+            "model": null,
+            "provider": null,
+            "mode": "",
+            "thought_level": null,
+            "model_selection": null,
+            "workspace_key": "/tmp/ws-a",
+            "workspace_path": "/tmp/ws-a",
+            "workspace_identity": null,
+            "target_task_id": "task-1",
+            "bot_delivery_target": "{\"provider\":\"feishu\",\"botId\":\" bot \",\"providerUserId\":\"u1\",\"chatType\":\"private\"}",
+            "location_kind": "local",
+            "recurring": 1,
+            "max_runs": null,
+            "end_at": null,
+            "schedule_rule": null,
+            "schedule_edited_by_user": 0,
+            "run_count": 1,
+            "scheduled_run_count": 0,
+            "enabled": 1,
+            "lifecycle_status": "active",
+            "next_run_at": 1791378000000,
+            "last_run_at": 1791300003000,
+            "running": 1,
+            "claimed_at": 1791300007000,
+            "dispatch_status": "idle",
+            "dispatch_attempts": 0,
+            "retry_at": null,
+            "last_error": null,
+            "created_at": 1791300000000,
+            "updated_at": 1791300007000
+          }
+        ],
+        "automation_runs": [
+          {
+            "run_id": "<automation:0>:1791400000000",
+            "automation_id": "<automation:0>",
+            "workspace_key": "/tmp/ws-a",
+            "scheduled_at": 1791400000000,
+            "trigger": "schedule",
+            "model_selection": null,
+            "dispatch_status": "failed_to_dispatch",
+            "outcome": "failed",
+            "session_id": null,
+            "error": "x",
+            "attempts": 0,
+            "created_at": 1791300005000,
+            "updated_at": 1791300005000
+          },
+          {
+            "run_id": "<run:1>",
+            "automation_id": "<automation:0>",
+            "workspace_key": "/tmp/ws-a",
+            "scheduled_at": 1791300007000,
+            "trigger": "manual",
+            "model_selection": null,
+            "dispatch_status": "claimed",
+            "outcome": null,
+            "session_id": null,
+            "error": null,
+            "attempts": 1,
+            "created_at": 1791300007000,
+            "updated_at": 1791300007000
+          }
+        ]
+      }
+    }
+  ]
+}

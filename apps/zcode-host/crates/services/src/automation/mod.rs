@@ -10,6 +10,8 @@ pub mod members;
 pub mod reverse;
 pub mod schedule;
 pub mod service;
+#[cfg(test)]
+mod tests;
 pub mod time;
 
 use std::any::Any;

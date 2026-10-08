@@ -1,0 +1,5515 @@
+{
+  "source": "scripts/rust-host/automation-fixtures.ts",
+  "cases": [
+    {
+      "zone": "America/New_York",
+      "expression": "* * * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772946060000
+          },
+          "previous": {
+            "value": 1772945940000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793502060000
+          },
+          "previous": {
+            "value": 1793501940000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791300060000
+          },
+          "previous": {
+            "value": 1791299940000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835395260000
+          },
+          "previous": {
+            "value": 1835395140000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798761600000
+          },
+          "previous": {
+            "value": 1798761540000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772900040000
+          },
+          "previous": {
+            "value": 1772899980000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 9 * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772974800000
+          },
+          "previous": {
+            "value": 1772892000000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793541600000
+          },
+          "previous": {
+            "value": 1793451600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791378000000
+          },
+          "previous": {
+            "value": 1791291600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835445600000
+          },
+          "previous": {
+            "value": 1835359200000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798812000000
+          },
+          "previous": {
+            "value": 1798725600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772974800000
+          },
+          "previous": {
+            "value": 1772892000000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "*/15 * * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772946900000
+          },
+          "previous": {
+            "value": 1772945100000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793502900000
+          },
+          "previous": {
+            "value": 1793501100000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791300600000
+          },
+          "previous": {
+            "value": 1791299700000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835396100000
+          },
+          "previous": {
+            "value": 1835394300000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798761600000
+          },
+          "previous": {
+            "value": 1798760700000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772900100000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "*/7 * * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772946420000
+          },
+          "previous": {
+            "value": 1772945760000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793502420000
+          },
+          "previous": {
+            "value": 1793501760000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791300060000
+          },
+          "previous": {
+            "value": 1791299640000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835395620000
+          },
+          "previous": {
+            "value": 1835394960000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798761600000
+          },
+          "previous": {
+            "value": 1798761360000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772900040000
+          },
+          "previous": {
+            "value": 1772899620000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 L * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774929600000
+          },
+          "previous": {
+            "value": 1772254800000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1796014800000
+          },
+          "previous": {
+            "value": 1793419200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793419200000
+          },
+          "previous": {
+            "value": 1790740800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "value": 1832907600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1801371600000
+          },
+          "previous": {
+            "value": 1798693200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774929600000
+          },
+          "previous": {
+            "value": 1772254800000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 LW * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774929600000
+          },
+          "previous": {
+            "value": 1772168400000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1796014800000
+          },
+          "previous": {
+            "value": 1793332800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793332800000
+          },
+          "previous": {
+            "value": 1790740800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "value": 1832907600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1801198800000
+          },
+          "previous": {
+            "value": 1798693200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774929600000
+          },
+          "previous": {
+            "value": 1772168400000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 15W * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773633600000
+          },
+          "previous": {
+            "value": 1771218000000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1794805200000
+          },
+          "previous": {
+            "value": 1792036800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1792036800000
+          },
+          "previous": {
+            "value": 1789444800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1836705600000
+          },
+          "previous": {
+            "value": 1834203600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1799989200000
+          },
+          "previous": {
+            "value": 1797310800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773633600000
+          },
+          "previous": {
+            "value": 1771218000000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 1W * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1775016000000
+          },
+          "previous": {
+            "value": 1772427600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793595600000
+          },
+          "previous": {
+            "value": 1790827200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793595600000
+          },
+          "previous": {
+            "value": 1790827200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835499600000
+          },
+          "previous": {
+            "value": 1832994000000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1796101200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1775016000000
+          },
+          "previous": {
+            "value": 1772427600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 * * 5L",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774584000000
+          },
+          "previous": {
+            "value": 1772168400000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1795755600000
+          },
+          "previous": {
+            "value": 1793332800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793332800000
+          },
+          "previous": {
+            "value": 1790308800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1838088000000
+          },
+          "previous": {
+            "value": 1835067600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1801198800000
+          },
+          "previous": {
+            "value": 1798174800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774584000000
+          },
+          "previous": {
+            "value": 1772168400000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 * * 1#2",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773028800000
+          },
+          "previous": {
+            "value": 1770613200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1794200400000
+          },
+          "previous": {
+            "value": 1791777600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791777600000
+          },
+          "previous": {
+            "value": 1789358400000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1836532800000
+          },
+          "previous": {
+            "value": 1834117200000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1799643600000
+          },
+          "previous": {
+            "value": 1797224400000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773028800000
+          },
+          "previous": {
+            "value": 1770613200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 * * 1#5",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774843200000
+          },
+          "previous": {
+            "value": 1766984400000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1796014800000
+          },
+          "previous": {
+            "value": 1788148800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1796014800000
+          },
+          "previous": {
+            "value": 1788148800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1843185600000
+          },
+          "previous": {
+            "value": 1832907600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1806292800000
+          },
+          "previous": {
+            "value": 1796014800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774843200000
+          },
+          "previous": {
+            "value": 1766984400000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 1,15 * 1",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773028800000
+          },
+          "previous": {
+            "value": 1772427600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793505600000
+          },
+          "previous": {
+            "value": 1792987200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791777600000
+          },
+          "previous": {
+            "value": 1791172800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835499600000
+          },
+          "previous": {
+            "value": 1835326800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1798434000000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773028800000
+          },
+          "previous": {
+            "value": 1772427600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 31 2 *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "30 2 * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772955000000
+          },
+          "previous": {
+            "value": 1772868600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793518200000
+          },
+          "previous": {
+            "value": 1793428200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791354600000
+          },
+          "previous": {
+            "value": 1791268200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835422200000
+          },
+          "previous": {
+            "value": 1835335800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798788600000
+          },
+          "previous": {
+            "value": 1798702200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772955000000
+          },
+          "previous": {
+            "value": 1772868600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "30 1 * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772951400000
+          },
+          "previous": {
+            "value": 1772865000000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793511000000
+          },
+          "previous": {
+            "value": 1793424600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791351000000
+          },
+          "previous": {
+            "value": 1791264600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835418600000
+          },
+          "previous": {
+            "value": 1835332200000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798785000000
+          },
+          "previous": {
+            "value": 1798698600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772951400000
+          },
+          "previous": {
+            "value": 1772865000000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 29 2 *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "5 4 * * sun",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772957100000
+          },
+          "previous": {
+            "value": 1772355900000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793523900000
+          },
+          "previous": {
+            "value": 1792915500000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791705900000
+          },
+          "previous": {
+            "value": 1791101100000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835859900000
+          },
+          "previous": {
+            "value": 1835255100000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798967100000
+          },
+          "previous": {
+            "value": 1798362300000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772957100000
+          },
+          "previous": {
+            "value": 1772355900000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 22 * * 1-5",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773108000000
+          },
+          "previous": {
+            "value": 1772852400000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793674800000
+          },
+          "previous": {
+            "value": 1793412000000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791338400000
+          },
+          "previous": {
+            "value": 1791252000000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835406000000
+          },
+          "previous": {
+            "value": 1835146800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798772400000
+          },
+          "previous": {
+            "value": 1798686000000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773108000000
+          },
+          "previous": {
+            "value": 1772852400000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 1 jan *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1767243600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1767243600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1767243600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1861938000000
+          },
+          "previous": {
+            "value": 1830315600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1767243600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1767243600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 9 * jan-mar mon-fri",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773061200000
+          },
+          "previous": {
+            "value": 1772805600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798812000000
+          },
+          "previous": {
+            "value": 1774962000000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798812000000
+          },
+          "previous": {
+            "value": 1774962000000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835445600000
+          },
+          "previous": {
+            "value": 1835359200000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798812000000
+          },
+          "previous": {
+            "value": 1774962000000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773061200000
+          },
+          "previous": {
+            "value": 1772805600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "@daily",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773028800000
+          },
+          "previous": {
+            "value": 1772859600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793505600000
+          },
+          "previous": {
+            "value": 1793419200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791345600000
+          },
+          "previous": {
+            "value": 1791259200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "value": 1835326800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1798693200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772946000000
+          },
+          "previous": {
+            "value": 1772859600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "@weekly",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773547200000
+          },
+          "previous": {
+            "value": 1772341200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793505600000
+          },
+          "previous": {
+            "value": 1792900800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791691200000
+          },
+          "previous": {
+            "value": 1791086400000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835845200000
+          },
+          "previous": {
+            "value": 1835240400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798952400000
+          },
+          "previous": {
+            "value": 1798347600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772946000000
+          },
+          "previous": {
+            "value": 1772341200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "@monthly",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1775016000000
+          },
+          "previous": {
+            "value": 1772341200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793505600000
+          },
+          "previous": {
+            "value": 1790827200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793505600000
+          },
+          "previous": {
+            "value": 1790827200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835499600000
+          },
+          "previous": {
+            "value": 1832994000000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1796101200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1775016000000
+          },
+          "previous": {
+            "value": 1772341200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "@yearly",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1767243600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1767243600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1767243600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1861938000000
+          },
+          "previous": {
+            "value": 1830315600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1767243600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1767243600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 0 1 1 * 2027",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1798779600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 0 1 1 * 2027,2030",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1893474000000
+          },
+          "previous": {
+            "value": 1798779600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "*/10 * * * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772946010000
+          },
+          "previous": {
+            "value": 1772945990000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793502010000
+          },
+          "previous": {
+            "value": 1793501990000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791300010000
+          },
+          "previous": {
+            "value": 1791299990000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835395210000
+          },
+          "previous": {
+            "value": 1835395190000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798761580000
+          },
+          "previous": {
+            "value": 1798761560000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772900010000
+          },
+          "previous": {
+            "value": 1772899990000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "30 0 9 * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772974830000
+          },
+          "previous": {
+            "value": 1772892030000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793541630000
+          },
+          "previous": {
+            "value": 1793451630000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791378030000
+          },
+          "previous": {
+            "value": 1791291630000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835445630000
+          },
+          "previous": {
+            "value": 1835359230000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798812030000
+          },
+          "previous": {
+            "value": 1798725630000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772974830000
+          },
+          "previous": {
+            "value": 1772892030000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 12 * * ?",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772985600000
+          },
+          "previous": {
+            "value": 1772902800000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793552400000
+          },
+          "previous": {
+            "value": 1793462400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791302400000
+          },
+          "previous": {
+            "value": 1791216000000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835456400000
+          },
+          "previous": {
+            "value": 1835370000000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798822800000
+          },
+          "previous": {
+            "value": 1798736400000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772902800000
+          },
+          "previous": {
+            "value": 1772816400000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 ? * 1",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773028800000
+          },
+          "previous": {
+            "value": 1772859600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793505600000
+          },
+          "previous": {
+            "value": 1793419200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791345600000
+          },
+          "previous": {
+            "value": 1791259200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "value": 1835326800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1798693200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772946000000
+          },
+          "previous": {
+            "value": 1772859600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 1-31/2 * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773028800000
+          },
+          "previous": {
+            "value": 1772859600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793505600000
+          },
+          "previous": {
+            "value": 1793419200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791345600000
+          },
+          "previous": {
+            "value": 1791172800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "value": 1835240400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1798693200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773028800000
+          },
+          "previous": {
+            "value": 1772859600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 * * +1#1",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1775448000000
+          },
+          "previous": {
+            "value": 1772427600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793595600000
+          },
+          "previous": {
+            "value": 1791172800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793595600000
+          },
+          "previous": {
+            "value": 1791172800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835931600000
+          },
+          "previous": {
+            "value": 1833512400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1799038800000
+          },
+          "previous": {
+            "value": 1796619600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1775448000000
+          },
+          "previous": {
+            "value": 1772427600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 13 * +5",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773374400000
+          },
+          "previous": {
+            "value": 1770958800000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1794546000000
+          },
+          "previous": {
+            "value": 1773374400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1794546000000
+          },
+          "previous": {
+            "value": 1773374400000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1855022400000
+          },
+          "previous": {
+            "value": 1818129600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1818129600000
+          },
+          "previous": {
+            "value": 1794546000000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773374400000
+          },
+          "previous": {
+            "value": 1770958800000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 13 * 5",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773374400000
+          },
+          "previous": {
+            "value": 1772773200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793941200000
+          },
+          "previous": {
+            "value": 1793332800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791518400000
+          },
+          "previous": {
+            "value": 1790913600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835672400000
+          },
+          "previous": {
+            "value": 1835067600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1798174800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773374400000
+          },
+          "previous": {
+            "value": 1772773200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 * * 7",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773547200000
+          },
+          "previous": {
+            "value": 1772341200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793505600000
+          },
+          "previous": {
+            "value": 1792900800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791691200000
+          },
+          "previous": {
+            "value": 1791086400000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835845200000
+          },
+          "previous": {
+            "value": 1835240400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798952400000
+          },
+          "previous": {
+            "value": 1798347600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772946000000
+          },
+          "previous": {
+            "value": 1772341200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 * * 5-7",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773374400000
+          },
+          "previous": {
+            "value": 1772859600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793505600000
+          },
+          "previous": {
+            "value": 1793419200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791518400000
+          },
+          "previous": {
+            "value": 1791086400000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835672400000
+          },
+          "previous": {
+            "value": 1835240400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1798347600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772946000000
+          },
+          "previous": {
+            "value": 1772859600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 9 8 3 *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772974800000
+          },
+          "previous": {
+            "value": 1741442400000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1804514400000
+          },
+          "previous": {
+            "value": 1772974800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1804514400000
+          },
+          "previous": {
+            "value": 1772974800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1836136800000
+          },
+          "previous": {
+            "value": 1804514400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1804514400000
+          },
+          "previous": {
+            "value": 1772974800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772974800000
+          },
+          "previous": {
+            "value": 1741442400000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 2 8 3 *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772953200000
+          },
+          "previous": {
+            "value": 1741417200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1804489200000
+          },
+          "previous": {
+            "value": 1772953200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1804489200000
+          },
+          "previous": {
+            "value": 1772953200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1836111600000
+          },
+          "previous": {
+            "value": 1804489200000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1804489200000
+          },
+          "previous": {
+            "value": 1772953200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772953200000
+          },
+          "previous": {
+            "value": 1741417200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "5* * * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772946300000
+          },
+          "previous": {
+            "value": 1772942700000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793502300000
+          },
+          "previous": {
+            "value": 1793498700000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791302700000
+          },
+          "previous": {
+            "value": 1791299100000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835395500000
+          },
+          "previous": {
+            "value": 1835391900000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798761900000
+          },
+          "previous": {
+            "value": 1798758300000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772903100000
+          },
+          "previous": {
+            "value": 1772899500000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 1,L * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774929600000
+          },
+          "previous": {
+            "value": 1772341200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793505600000
+          },
+          "previous": {
+            "value": 1793419200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793419200000
+          },
+          "previous": {
+            "value": 1790827200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835413200000
+          },
+          "previous": {
+            "value": 1832994000000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798779600000
+          },
+          "previous": {
+            "value": 1798693200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774929600000
+          },
+          "previous": {
+            "value": 1772341200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "2026-10-10T10:00:00",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1791640800000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791640800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791640800000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791640800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791640800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1791640800000
+          },
+          "previous": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "2026-10-10T10:00:00Z",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1791626400000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791626400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791626400000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791626400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791626400000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1791626400000
+          },
+          "previous": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "2026-12-31T23:59:59+08:00",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1798732799000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798732799000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798732799000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1798732799000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1798732799000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1798732799000
+          },
+          "previous": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "* * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "60 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "* 24 * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 32 * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 * 13 *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 * * 8",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "a b c d e",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "5/10 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "1-2-3 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "* * * * * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "@reboot",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 L-5 * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 * * 1#6",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 * * 1#0",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "12:30 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 * * L",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "*/0 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "*/61 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 W * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 1-5W * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "America/New_York",
+      "expression": "0 0 0 1 1 * */5",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "* * * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772946060000
+          },
+          "previous": {
+            "value": 1772945940000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793502060000
+          },
+          "previous": {
+            "value": 1793501940000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791300060000
+          },
+          "previous": {
+            "value": 1791299940000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835395260000
+          },
+          "previous": {
+            "value": 1835395140000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798761600000
+          },
+          "previous": {
+            "value": 1798761540000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772900040000
+          },
+          "previous": {
+            "value": 1772899980000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 9 * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773018000000
+          },
+          "previous": {
+            "value": 1772931600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793581200000
+          },
+          "previous": {
+            "value": 1793494800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791334800000
+          },
+          "previous": {
+            "value": 1791248400000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835398800000
+          },
+          "previous": {
+            "value": 1835312400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798765200000
+          },
+          "previous": {
+            "value": 1798678800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772931600000
+          },
+          "previous": {
+            "value": 1772845200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "*/15 * * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772946900000
+          },
+          "previous": {
+            "value": 1772945100000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793502900000
+          },
+          "previous": {
+            "value": 1793501100000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791300600000
+          },
+          "previous": {
+            "value": 1791299700000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835396100000
+          },
+          "previous": {
+            "value": 1835394300000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798761600000
+          },
+          "previous": {
+            "value": 1798760700000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772900100000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "*/7 * * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772946420000
+          },
+          "previous": {
+            "value": 1772945760000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793502420000
+          },
+          "previous": {
+            "value": 1793501760000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791300060000
+          },
+          "previous": {
+            "value": 1791299640000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835395620000
+          },
+          "previous": {
+            "value": 1835394960000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798761600000
+          },
+          "previous": {
+            "value": 1798761360000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772900040000
+          },
+          "previous": {
+            "value": 1772899620000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 L * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774886400000
+          },
+          "previous": {
+            "value": 1772208000000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1795968000000
+          },
+          "previous": {
+            "value": 1793376000000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793376000000
+          },
+          "previous": {
+            "value": 1790697600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1838044800000
+          },
+          "previous": {
+            "value": 1835366400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1801324800000
+          },
+          "previous": {
+            "value": 1798646400000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774886400000
+          },
+          "previous": {
+            "value": 1772208000000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 LW * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774886400000
+          },
+          "previous": {
+            "value": 1772121600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1795968000000
+          },
+          "previous": {
+            "value": 1793289600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793289600000
+          },
+          "previous": {
+            "value": 1790697600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1838044800000
+          },
+          "previous": {
+            "value": 1835366400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1801152000000
+          },
+          "previous": {
+            "value": 1798646400000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774886400000
+          },
+          "previous": {
+            "value": 1772121600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 15W * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773590400000
+          },
+          "previous": {
+            "value": 1771171200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1794758400000
+          },
+          "previous": {
+            "value": 1791993600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791993600000
+          },
+          "previous": {
+            "value": 1789401600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1836662400000
+          },
+          "previous": {
+            "value": 1834156800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1799942400000
+          },
+          "previous": {
+            "value": 1797264000000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773590400000
+          },
+          "previous": {
+            "value": 1771171200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 1W * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774972800000
+          },
+          "previous": {
+            "value": 1772380800000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793548800000
+          },
+          "previous": {
+            "value": 1790784000000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793548800000
+          },
+          "previous": {
+            "value": 1790784000000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835452800000
+          },
+          "previous": {
+            "value": 1832947200000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1801411200000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774972800000
+          },
+          "previous": {
+            "value": 1772380800000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 * * 5L",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774540800000
+          },
+          "previous": {
+            "value": 1772121600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1795708800000
+          },
+          "previous": {
+            "value": 1793289600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793289600000
+          },
+          "previous": {
+            "value": 1790265600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1838044800000
+          },
+          "previous": {
+            "value": 1835020800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1801152000000
+          },
+          "previous": {
+            "value": 1798128000000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774540800000
+          },
+          "previous": {
+            "value": 1772121600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 * * 1#2",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772985600000
+          },
+          "previous": {
+            "value": 1770566400000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1794153600000
+          },
+          "previous": {
+            "value": 1791734400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791734400000
+          },
+          "previous": {
+            "value": 1789315200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1836489600000
+          },
+          "previous": {
+            "value": 1834070400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1799596800000
+          },
+          "previous": {
+            "value": 1797177600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772985600000
+          },
+          "previous": {
+            "value": 1770566400000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 * * 1#5",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774800000000
+          },
+          "previous": {
+            "value": 1766937600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1795968000000
+          },
+          "previous": {
+            "value": 1788105600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1795968000000
+          },
+          "previous": {
+            "value": 1788105600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1843142400000
+          },
+          "previous": {
+            "value": 1832860800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1806249600000
+          },
+          "previous": {
+            "value": 1795968000000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774800000000
+          },
+          "previous": {
+            "value": 1766937600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 1,15 * 1",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772985600000
+          },
+          "previous": {
+            "value": 1772380800000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793548800000
+          },
+          "previous": {
+            "value": 1793462400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791734400000
+          },
+          "previous": {
+            "value": 1791129600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835452800000
+          },
+          "previous": {
+            "value": 1835280000000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798992000000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772985600000
+          },
+          "previous": {
+            "value": 1772380800000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 31 2 *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "30 2 * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772994600000
+          },
+          "previous": {
+            "value": 1772908200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793557800000
+          },
+          "previous": {
+            "value": 1793471400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791311400000
+          },
+          "previous": {
+            "value": 1791225000000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835461800000
+          },
+          "previous": {
+            "value": 1835375400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798828200000
+          },
+          "previous": {
+            "value": 1798741800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772908200000
+          },
+          "previous": {
+            "value": 1772821800000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "30 1 * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772991000000
+          },
+          "previous": {
+            "value": 1772904600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793554200000
+          },
+          "previous": {
+            "value": 1793467800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791307800000
+          },
+          "previous": {
+            "value": 1791221400000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835458200000
+          },
+          "previous": {
+            "value": 1835371800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798824600000
+          },
+          "previous": {
+            "value": 1798738200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772904600000
+          },
+          "previous": {
+            "value": 1772818200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 29 2 *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1835366400000
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1835366400000
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1835366400000
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1961596800000
+          },
+          "previous": {
+            "value": 1835366400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1835366400000
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1835366400000
+          },
+          "previous": {
+            "error": "Cannot read properties of undefined (reading '0')"
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "5 4 * * sun",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773518700000
+          },
+          "previous": {
+            "value": 1772913900000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1794081900000
+          },
+          "previous": {
+            "value": 1793477100000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791662700000
+          },
+          "previous": {
+            "value": 1791057900000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835813100000
+          },
+          "previous": {
+            "value": 1835208300000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798920300000
+          },
+          "previous": {
+            "value": 1798315500000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772913900000
+          },
+          "previous": {
+            "value": 1772309100000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 22 * * 1-5",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773064800000
+          },
+          "previous": {
+            "value": 1772805600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793628000000
+          },
+          "previous": {
+            "value": 1793368800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791381600000
+          },
+          "previous": {
+            "value": 1791295200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835445600000
+          },
+          "previous": {
+            "value": 1835359200000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798812000000
+          },
+          "previous": {
+            "value": 1798725600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773064800000
+          },
+          "previous": {
+            "value": 1772805600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 1 jan *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": 1767196800000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": 1767196800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": 1767196800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1861891200000
+          },
+          "previous": {
+            "value": 1830268800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1830268800000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": 1767196800000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 9 * jan-mar mon-fri",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773018000000
+          },
+          "previous": {
+            "value": 1772758800000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798765200000
+          },
+          "previous": {
+            "value": 1774918800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798765200000
+          },
+          "previous": {
+            "value": 1774918800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835398800000
+          },
+          "previous": {
+            "value": 1835312400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798765200000
+          },
+          "previous": {
+            "value": 1774918800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773018000000
+          },
+          "previous": {
+            "value": 1772758800000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "@daily",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772985600000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793548800000
+          },
+          "previous": {
+            "value": 1793462400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791302400000
+          },
+          "previous": {
+            "value": 1791216000000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835452800000
+          },
+          "previous": {
+            "value": 1835366400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798819200000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772985600000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "@weekly",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773504000000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1794067200000
+          },
+          "previous": {
+            "value": 1793462400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791648000000
+          },
+          "previous": {
+            "value": 1791043200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835798400000
+          },
+          "previous": {
+            "value": 1835193600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798905600000
+          },
+          "previous": {
+            "value": 1798300800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773504000000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "@monthly",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774972800000
+          },
+          "previous": {
+            "value": 1772294400000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1796054400000
+          },
+          "previous": {
+            "value": 1793462400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793462400000
+          },
+          "previous": {
+            "value": 1790784000000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835452800000
+          },
+          "previous": {
+            "value": 1832947200000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1801411200000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774972800000
+          },
+          "previous": {
+            "value": 1772294400000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "@yearly",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": 1767196800000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": 1767196800000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": 1767196800000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1861891200000
+          },
+          "previous": {
+            "value": 1830268800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1830268800000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": 1767196800000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 0 1 1 * 2027",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 0 1 1 * 2027,2030",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1893427200000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1893427200000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1798732800000
+          },
+          "previous": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "*/10 * * * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772946010000
+          },
+          "previous": {
+            "value": 1772945990000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793502010000
+          },
+          "previous": {
+            "value": 1793501990000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791300010000
+          },
+          "previous": {
+            "value": 1791299990000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835395210000
+          },
+          "previous": {
+            "value": 1835395190000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798761580000
+          },
+          "previous": {
+            "value": 1798761560000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772900010000
+          },
+          "previous": {
+            "value": 1772899990000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "30 0 9 * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773018030000
+          },
+          "previous": {
+            "value": 1772931630000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793581230000
+          },
+          "previous": {
+            "value": 1793494830000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791334830000
+          },
+          "previous": {
+            "value": 1791248430000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835398830000
+          },
+          "previous": {
+            "value": 1835312430000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798765230000
+          },
+          "previous": {
+            "value": 1798678830000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772931630000
+          },
+          "previous": {
+            "value": 1772845230000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 12 * * ?",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773028800000
+          },
+          "previous": {
+            "value": 1772942400000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793505600000
+          },
+          "previous": {
+            "value": 1793419200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791345600000
+          },
+          "previous": {
+            "value": 1791259200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835409600000
+          },
+          "previous": {
+            "value": 1835323200000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798776000000
+          },
+          "previous": {
+            "value": 1798689600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772942400000
+          },
+          "previous": {
+            "value": 1772856000000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 ? * 1",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772985600000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793548800000
+          },
+          "previous": {
+            "value": 1793462400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791302400000
+          },
+          "previous": {
+            "value": 1791216000000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835452800000
+          },
+          "previous": {
+            "value": 1835366400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798819200000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772985600000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 1-31/2 * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772985600000
+          },
+          "previous": {
+            "value": 1772812800000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793635200000
+          },
+          "previous": {
+            "value": 1793462400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791302400000
+          },
+          "previous": {
+            "value": 1791129600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835452800000
+          },
+          "previous": {
+            "value": 1835366400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798905600000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772985600000
+          },
+          "previous": {
+            "value": 1772812800000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 * * +1#1",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1775404800000
+          },
+          "previous": {
+            "value": 1772380800000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793548800000
+          },
+          "previous": {
+            "value": 1791129600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793548800000
+          },
+          "previous": {
+            "value": 1791129600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835884800000
+          },
+          "previous": {
+            "value": 1833465600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798992000000
+          },
+          "previous": {
+            "value": 1796572800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1775404800000
+          },
+          "previous": {
+            "value": 1772380800000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 13 * +5",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773331200000
+          },
+          "previous": {
+            "value": 1770912000000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1794499200000
+          },
+          "previous": {
+            "value": 1773331200000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1794499200000
+          },
+          "previous": {
+            "value": 1773331200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1854979200000
+          },
+          "previous": {
+            "value": 1818086400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1818086400000
+          },
+          "previous": {
+            "value": 1794499200000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773331200000
+          },
+          "previous": {
+            "value": 1770912000000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 13 * 5",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773331200000
+          },
+          "previous": {
+            "value": 1772726400000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793894400000
+          },
+          "previous": {
+            "value": 1793289600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791475200000
+          },
+          "previous": {
+            "value": 1790870400000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835625600000
+          },
+          "previous": {
+            "value": 1835020800000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1799337600000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773331200000
+          },
+          "previous": {
+            "value": 1772726400000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 * * 7",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773504000000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1794067200000
+          },
+          "previous": {
+            "value": 1793462400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791648000000
+          },
+          "previous": {
+            "value": 1791043200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835798400000
+          },
+          "previous": {
+            "value": 1835193600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798905600000
+          },
+          "previous": {
+            "value": 1798300800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773504000000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 * * 5-7",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1773331200000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793894400000
+          },
+          "previous": {
+            "value": 1793462400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791475200000
+          },
+          "previous": {
+            "value": 1791043200000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835625600000
+          },
+          "previous": {
+            "value": 1835193600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798819200000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1773331200000
+          },
+          "previous": {
+            "value": 1772899200000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 9 8 3 *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1804467600000
+          },
+          "previous": {
+            "value": 1772931600000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1804467600000
+          },
+          "previous": {
+            "value": 1772931600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1804467600000
+          },
+          "previous": {
+            "value": 1772931600000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1836090000000
+          },
+          "previous": {
+            "value": 1804467600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1804467600000
+          },
+          "previous": {
+            "value": 1772931600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772931600000
+          },
+          "previous": {
+            "value": 1741395600000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 2 8 3 *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1804442400000
+          },
+          "previous": {
+            "value": 1772906400000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1804442400000
+          },
+          "previous": {
+            "value": 1772906400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1804442400000
+          },
+          "previous": {
+            "value": 1772906400000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1836064800000
+          },
+          "previous": {
+            "value": 1804442400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1804442400000
+          },
+          "previous": {
+            "value": 1772906400000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772906400000
+          },
+          "previous": {
+            "value": 1741370400000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "5* * * * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1772946300000
+          },
+          "previous": {
+            "value": 1772942700000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1793502300000
+          },
+          "previous": {
+            "value": 1793498700000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791302700000
+          },
+          "previous": {
+            "value": 1791299100000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835395500000
+          },
+          "previous": {
+            "value": 1835391900000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1798761900000
+          },
+          "previous": {
+            "value": 1798758300000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1772903100000
+          },
+          "previous": {
+            "value": 1772899500000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 1,L * *",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1774886400000
+          },
+          "previous": {
+            "value": 1772294400000
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1795968000000
+          },
+          "previous": {
+            "value": 1793462400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1793376000000
+          },
+          "previous": {
+            "value": 1790784000000
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": 1835452800000
+          },
+          "previous": {
+            "value": 1835366400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": 1801324800000
+          },
+          "previous": {
+            "value": 1798732800000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1774886400000
+          },
+          "previous": {
+            "value": 1772294400000
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "2026-10-10T10:00:00",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1791597600000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791597600000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791597600000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791597600000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791597600000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1791597600000
+          },
+          "previous": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "2026-10-10T10:00:00Z",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1791626400000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791626400000
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1791626400000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791626400000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1791626400000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1791626400000
+          },
+          "previous": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "2026-12-31T23:59:59+08:00",
+      "valid": true,
+      "runs": [
+        {
+          "from": 1772946000000,
+          "next": {
+            "value": 1798732799000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1793502000000,
+          "next": {
+            "value": 1798732799000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1791300000000,
+          "next": {
+            "value": 1798732799000
+          },
+          "previous": {
+            "value": null
+          }
+        },
+        {
+          "from": 1835395200000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1798732799000
+          }
+        },
+        {
+          "from": 1798761570000,
+          "next": {
+            "value": null
+          },
+          "previous": {
+            "value": 1798732799000
+          }
+        },
+        {
+          "from": 1772900000000,
+          "next": {
+            "value": 1798732799000
+          },
+          "previous": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "* * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "60 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "* 24 * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 32 * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 * 13 *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 * * 8",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "a b c d e",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "5/10 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "1-2-3 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "* * * * * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "@reboot",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 L-5 * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 * * 1#6",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 * * 1#0",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "12:30 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 * * L",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "*/0 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "*/61 * * * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 W * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 1-5W * *",
+      "valid": false,
+      "runs": []
+    },
+    {
+      "zone": "Asia/Shanghai",
+      "expression": "0 0 0 1 1 * */5",
+      "valid": false,
+      "runs": []
+    }
+  ]
+}

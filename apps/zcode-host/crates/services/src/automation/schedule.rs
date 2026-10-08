@@ -75,7 +75,7 @@ pub fn compute_next_run_at(
     cron_expr: &str,
     from: i64,
 ) -> Result<Option<i64>, String> {
-    Ok(Cron::parse(cron_expr, zone)?.next_run(zone, from))
+    Cron::parse(cron_expr, zone)?.next_run(zone, from)
 }
 
 /// `buildRelativeDelaySchedule`：返回兼容展示用的 cron 与锚定服务端时钟的一次性规则。
@@ -120,7 +120,7 @@ pub fn compute_initial_next_run_at(
         return Ok(next_run_at);
     }
     let cron = Cron::parse(cron_expr, zone)?;
-    let previous_run = cron.previous_run(zone, from);
+    let previous_run = cron.previous_run(zone, from)?;
     let target_age = previous_run
         .filter(|previous| from >= *previous && from - previous <= ONE_SHOT_STALE_TARGET_WINDOW_MS)
         .map(|previous| from - previous);
