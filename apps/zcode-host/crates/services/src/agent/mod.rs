@@ -9,6 +9,7 @@ pub mod runtime;
 pub mod schema;
 pub mod service;
 pub mod session;
+pub mod session_events;
 pub mod sessions_index;
 pub mod wire;
 
