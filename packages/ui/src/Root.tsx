@@ -199,6 +199,7 @@ function RootInner({
   const markOAuthSuccess = useZCodeStore((state) => state.markOAuthSuccess);
   const {
     settings: appSettings,
+    error: appSettingsError,
     refresh: refreshAppSettings,
     update: updateAppSettings,
   } = useSettings();
@@ -427,6 +428,8 @@ function RootInner({
     providerFamilyDomainMigrationComplete,
     modelSelectionViewHydrated:
       rootProviderAvailability.hydrated || rootModelSelectionRead.state.status === "error",
+    // 读取失败也结束等待，沿用失败时的既有判定，避免启动门禁永久停在 loading。
+    appSettingsHydrated: appSettings !== null || appSettingsError !== null,
   });
   const providerAvailabilityLoginEntryGuardEnabled =
     shouldEnableProviderAvailabilityLoginEntryGuard();

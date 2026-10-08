@@ -23,7 +23,7 @@
 // 由单实例锁把 argv（例如 zcode:// deep link）转交给已运行的实例后退出。
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
@@ -377,7 +377,14 @@ async function launchApp({ temp, home, cli, env = {}, args = [] }) {
     await waitForCdp(cdpPort, electron);
     const { chromium } = require("playwright-core");
     const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
-    return { page: await appPage(browser), stop, secondInstance };
+    const page = await appPage(browser);
+    // Renderer console 落到临时目录：失败时能看到 UI 自己的判断日志（CDP 接上之前的输出会缺失）。
+    const consoleLog = createWriteStream(join(temp, "renderer-console.log"), { flags: "a" });
+    page.on("console", (message) => {
+      consoleLog.write(`[${new Date().toISOString()}] [${message.type()}] ${message.text()}\n`);
+    });
+    exited.then(() => consoleLog.end());
+    return { page, stop, secondInstance };
   } catch (error) {
     await stop();
     throw error;

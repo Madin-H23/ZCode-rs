@@ -46,6 +46,16 @@
    - 每个 workspace 只在状态变化时发送；连接处于 `saturated` 时新用到的 workspace 立即补发 `saturated`。
 4. CLI 收到 `saturated` 后暂停向该连接投递帧（合并缓冲），`drained` 后刷新，必要时走快照恢复（`app-server/src/routes.rs` `flow`）。
 
+### 2.4 reload 后的 provider 启动门禁
+
+`resilience-reload` 在并发负载下约 1/8 落到登录引导页（2026-10-09 定位）。根因在 Renderer，与 Host 实现无关，Node Host 同样可能发生：
+
+1. Root 的 provider 启动门禁只检查一次，判据是 `!providerFamilyDomain || (!user && !hasUsableProvider)`，`providerFamilyDomain` 来自 `useSettings` 的设置快照。
+2. 门禁的“等待”原先只看两件事：provider family 迁移完成、模型选择视图已加载。迁移流程自己发一次 `settingService.get()`，`useSettings` 另发一次；Host 并发应答，顺序不保证。迁移那次先回来时，门禁在设置快照仍是 `null` 的时候检查，误判为没有 provider family，打开登录页并停在那里。
+3. **规则**：设置快照加载完成（或读取失败）之前，provider 启动同步保持 pending，门禁不检查。读取失败时结束等待，沿用失败时的既有行为，避免永久停在 loading。
+
+证据：临时在门禁里打印判据后并发压测，失败那次 reload 后 `providerFamilyDomain: null`、`hasUsableProvider: true`；同一轮通过的运行都是 `"zai"`。
+
 ## 3. 状态所有者
 
 | 状态                                             | 唯一所有者                                                  |
@@ -131,6 +141,7 @@ Renderer 读慢 → TCP 缓冲满 → ws 写任务 send 挂起 → FlowGauge 积
 | 启动重试真实 App：迁移失败页 → 等 30 s 以上 → 移除故障 → Retry → 进入主界面；Exit 退出 App          | E2E `resilience-startup`                                                                |
 | CLI 崩溃 → 懒重启：只杀本次隔离运行的 CLI，再发消息成功                                             | E2E `resilience-cli-crash`                                                              |
 | Renderer reload → 重新 attach，会话仍能流式                                                         | E2E `resilience-reload`                                                                 |
+| 设置快照加载前 provider 启动门禁保持 pending                                                        | `packages/ui/test/rootStartupGate.test.ts`；`resilience-reload` 并发压测                |
 | AskUserQuestion：模型提问，用户在界面作答，模型继续                                                 | E2E `resilience-ask-user`                                                               |
 | 图片附件经 attachmentBegin/Chunk/Commit 上传并被模型收到                                            | E2E `resilience-attachment`                                                             |
 | Rust Host 崩溃 → 自动重启 → App 再次可用                                                            | E2E `resilience-host-crash`                                                             |

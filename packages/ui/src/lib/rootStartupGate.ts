@@ -18,6 +18,8 @@ interface FallbackWorkspaceCreateState {
 interface ProviderStartupSyncState {
   providerFamilyDomainMigrationComplete: boolean;
   modelSelectionViewHydrated: boolean;
+  /** 设置快照已加载或读取失败；门禁的 providerFamilyDomain 来自它。 */
+  appSettingsHydrated: boolean;
 }
 
 interface ProviderStartupResolutionState {
@@ -55,5 +57,12 @@ export function shouldOpenFallbackWorkspaceAfterCreate(
 }
 
 export function isProviderStartupSyncPending(state: ProviderStartupSyncState): boolean {
-  return !state.providerFamilyDomainMigrationComplete || !state.modelSelectionViewHydrated;
+  // Bugfix：provider 启动门禁只检查一次，判据里的 providerFamilyDomain 来自设置快照。迁移流程
+  // 自己读一次设置后就会结束等待，而 useSettings 的那次读取可能更晚返回（Host 并发应答、顺序不保证），
+  // reload 后门禁会用 null 的设置误开登录页并停在那里。设置快照就绪前保持 pending。
+  return (
+    !state.providerFamilyDomainMigrationComplete ||
+    !state.modelSelectionViewHydrated ||
+    !state.appSettingsHydrated
+  );
 }
