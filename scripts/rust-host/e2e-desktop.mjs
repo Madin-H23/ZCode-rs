@@ -53,27 +53,88 @@ async function freePort() {
   return port;
 }
 
-/** 每个 chat/completions 请求都回同一段 SSE 流。 */
-async function startMockModel() {
+export const WRITTEN_REPLY = "The mock model wrote the file";
+
+function sseChunk(delta, finish) {
+  return `data: ${JSON.stringify({
+    id: "mock",
+    object: "chat.completion.chunk",
+    created: 0,
+    model: "mock-model",
+    choices: [{ index: 0, delta, finish_reason: finish }],
+    ...(finish ? { usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } } : {}),
+  })}\n\n`;
+}
+
+function lastUserText(messages) {
+  const user = [...messages].reverse().find((message) => message.role === "user");
+  return typeof user?.content === "string" ? user.content : JSON.stringify(user?.content ?? "");
+}
+
+/**
+ * 按最后一条用户消息选择场景（带 tools 的主对话请求才会走工具场景）：
+ * - 含 "write file"：先回一个 Write 工具调用（需要用户批准），工具结果回来后回 WRITTEN_REPLY；
+ * - 含 "long task"：慢速流，用来测 Stop；
+ * - 其他：一次性回 MOCK_REPLY。
+ */
+async function startMockModel(workspace) {
   const requests = [];
   const server = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => (body += chunk));
-    request.on("end", () => {
+    request.on("end", async () => {
       requests.push({ url: request.url, body });
-      const chunk = (delta, finish) =>
-        JSON.stringify({
-          id: "mock",
-          object: "chat.completion.chunk",
-          created: 0,
-          model: "mock-model",
-          choices: [{ index: 0, delta, finish_reason: finish }],
-          ...(finish ? { usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } } : {}),
-        });
+      let parsed = {};
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        // 非 JSON 请求按默认场景回答
+      }
+      const messages = parsed.messages ?? [];
+      const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0;
+      const text = lastUserText(messages);
       response.writeHead(200, { "content-type": "text/event-stream" });
+      if (hasTools && messages.at(-1)?.role === "tool") {
+        response.end(
+          sseChunk({ role: "assistant", content: WRITTEN_REPLY }, null) +
+            sseChunk({}, "stop") +
+            "data: [DONE]\n\n",
+        );
+        return;
+      }
+      if (hasTools && text.includes("write file")) {
+        const call = {
+          index: 0,
+          id: "call_write_1",
+          type: "function",
+          function: {
+            name: "Write",
+            arguments: JSON.stringify({
+              file_path: join(workspace, "hello.txt"),
+              content: "hi from e2e\n",
+            }),
+          },
+        };
+        response.end(
+          sseChunk({ role: "assistant", tool_calls: [call] }, null) +
+            sseChunk({}, "tool_calls") +
+            "data: [DONE]\n\n",
+        );
+        return;
+      }
+      if (hasTools && text.includes("long task")) {
+        response.write(sseChunk({ role: "assistant", content: "Working" }, null));
+        for (let index = 0; index < 300 && !response.destroyed; index += 1) {
+          await sleep(200);
+          response.write(sseChunk({ content: "." }, null));
+        }
+        response.end(sseChunk({}, "stop") + "data: [DONE]\n\n");
+        return;
+      }
       response.end(
-        `data: ${chunk({ role: "assistant", content: MOCK_REPLY }, null)}\n\n` +
-          `data: ${chunk({}, "stop")}\n\ndata: [DONE]\n\n`,
+        sseChunk({ role: "assistant", content: MOCK_REPLY }, null) +
+          sseChunk({}, "stop") +
+          "data: [DONE]\n\n",
       );
     });
   });
@@ -100,8 +161,8 @@ async function seedProfile(home, workspace, baseUrl) {
                 group: "standard-personal",
                 access: { type: "api-key", apiKey: "sk-e2e" },
                 api: { type: "openai-chat-completions", baseUrl },
-                personalModelIds: ["mock-model"],
-                modelOrder: ["mock-model"],
+                personalModelIds: ["mock-model", "mock-model-2"],
+                modelOrder: ["mock-model", "mock-model-2"],
               },
             },
           ],
@@ -109,6 +170,7 @@ async function seedProfile(home, workspace, baseUrl) {
         modelConfigRules: {
           providerModelRules: [
             { providerId: "mock-provider", modelId: "mock-model", config: { enabled: true } },
+            { providerId: "mock-provider", modelId: "mock-model-2", config: { enabled: true } },
           ],
           manualProviderModelRules: [],
         },
@@ -177,7 +239,7 @@ async function main() {
     });
   }
 
-  const model = await startMockModel();
+  const model = await startMockModel(workspace);
   await seedProfile(home, workspace, model.baseUrl);
   const cdpPort = await freePort();
   const electronBinary = require("electron");
@@ -200,6 +262,11 @@ async function main() {
       ZCODE_DESKTOP_SESSION_DATA_DIR: join(temp, "electron-session"),
       ZCODE_DESKTOP_APPLICATION_NAME: "ZCode Rust Host E2E",
       ZCODE_DISABLE_FIXED_REMOTE_DEBUGGING_PORT: "1",
+      // 测试实例不对外上报：遥测、ARMS 与 OTLP 端点一律置空（显式空值覆盖 dotenv）。
+      ZCODE_TELEMETRY_REPORT_ENDPOINT: "",
+      ZCODE_ARMS_RUM_ENDPOINT: "",
+      OTEL_EXPORTER_OTLP_ENDPOINT: "",
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "",
       ELECTRON_RENDERER_URL: "",
     },
     stdio: ["ignore", "inherit", "inherit"],
@@ -228,7 +295,14 @@ async function main() {
       return;
     }
     const { runCoreFlow } = await import("./e2e-desktop-flow.mjs");
-    await runCoreFlow({ page, shots, model, workspace, mockReply: MOCK_REPLY });
+    await runCoreFlow({
+      page,
+      shots,
+      model,
+      workspace,
+      mockReply: MOCK_REPLY,
+      writtenReply: WRITTEN_REPLY,
+    });
     console.info("[e2e] core flow passed");
   } catch (error) {
     failed = true;
