@@ -1,5 +1,7 @@
 //! `system` channel（packages/services/src/system/systemService.ts、integratedTerminalShells.ts）。
-//! `probeIntranet` 依赖 HTTP 探测，随远端 / 内网能力一起移植，暂由契约 stub 应答。
+//! `probeIntranet` 的 TCP / HTTP 探测在 [`intranet_probe`]。
+mod intranet_probe;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -97,6 +99,10 @@ pub fn service(user_home: PathBuf, vars: BTreeMap<String, String>) -> ServiceBui
         .method("listIntegratedTerminalShells", move |_, _| {
             let shells = integrated_terminal_shells(&vars, cfg!(windows));
             async move { Ok(Reply::Value(Value::Array(shells))) }
+        })
+        .method("probeIntranet", |_, args| async move {
+            let request: Value = args.get(0, "request")?;
+            Ok(Reply::Value(intranet_probe::probe(&request).await))
         })
 }
 

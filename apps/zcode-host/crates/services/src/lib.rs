@@ -21,7 +21,9 @@ pub mod file;
 pub mod file_watcher;
 pub mod git;
 pub mod main_bridge;
+pub mod media_preview;
 pub mod off_peak;
+pub mod prompt_attachment_transfer;
 pub mod providers;
 pub mod settings;
 pub mod settings_sync;
@@ -33,6 +35,7 @@ pub mod tasks_index;
 pub mod terminal;
 #[cfg(test)]
 mod testing;
+pub mod workspace;
 
 use main_bridge::MainBridge;
 use support::env::ProcessEnv;
@@ -120,6 +123,7 @@ fn database_phase(phase: tasks_index::StoragePhase) -> Option<&'static str> {
 
 pub struct Installed {
     agent: agent::AgentRuntime,
+    workspace: workspace::Workspace,
     /// 观察者只被弱引用的生命周期任务持有，必须留在这里才能存活。
     _observer: Arc<agent::sessions_index::SessionsIndexObserver>,
     _controller: Arc<tasks::controller::Controller>,
@@ -130,8 +134,9 @@ pub struct Installed {
 }
 
 impl Installed {
-    /// Host 退出：回收全部 CLI 进程树（有上限，不会无限等待）。
+    /// Host 退出：回收终端与全部 CLI 进程树（有上限，不会无限等待）。
     pub async fn shutdown(&self) {
+        self.workspace.shutdown();
         self.agent.dispose_all().await;
     }
 }
@@ -183,12 +188,6 @@ pub fn install(
         &context.environment.vars,
         &context.init.runtime_process_env_patch,
     );
-    registry.implement(git::service(git::repo::GitRepo::new(&child_env)));
-    registry.implement(file_watcher::service(file_watcher::FileWatchers::new()));
-    registry.implement(terminal::service(terminal::Terminals::new(
-        child_env.clone(),
-        settings.clone(),
-    )));
 
     let environment = &context.environment;
     let agent = agent::AgentRuntime::new(
@@ -323,6 +322,22 @@ pub fn install(
         router,
     );
 
+    // ── workspace ──
+    // git（提交信息生成回调 Agent）、git-checkpoint、media-preview（Main 授权路径）、
+    // prompt-attachment-transfer；见 docs/specs/rust-host-workspace.md。
+    let workspace = workspace::install(
+        workspace::WorkspaceDeps {
+            environment: &context.environment,
+            child_env: &child_env,
+            settings: settings.clone(),
+            agent: agent.clone(),
+            providers: providers.clone(),
+            bridge: bridge.clone(),
+        },
+        registry,
+        router,
+    );
+
     // ── extensions ──
     extensions::install(
         registry,
@@ -348,6 +363,7 @@ pub fn install(
     );
     Installed {
         agent,
+        workspace,
         _observer: observer,
         _controller: controller,
         _syncer: syncer,

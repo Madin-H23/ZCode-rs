@@ -1163,10 +1163,42 @@ impl AgentChannel {
                     )
                     .await
             }),
-            // 本地播放源需要媒体路径授权，Rust Host 暂不提供；UI 回退到分块读取。
+            // 本地 desktop 才问 CLI 播放源；local_path 先经 Main 授权换成规范路径
+            // （Node `attachmentPreviewSourceV4`，rust-host-workspace.md §2.3）。
             "attachmentPreviewSourceV4" => Box::pin(async move {
                 scope.assert_ready()?;
-                Ok(Reply::Value(json!({"kind": "chunked"})))
+                let remote = params["remoteSessionId"]
+                    .as_str()
+                    .is_some_and(|id| !id.is_empty());
+                if scope.client_mode != ClientMode::DesktopContinuous || remote {
+                    return Ok(Reply::Value(json!({"kind": "chunked"})));
+                }
+                let extra = Map::from_iter([(
+                    "clientMode".to_owned(),
+                    json!(client_mode_str(scope.client_mode)),
+                )]);
+                let fields = ["sessionId", "ref", "target", "attachmentIndex"];
+                let Reply::RawJson(raw) = scope
+                    .read_only("v4/attachment/previewSource", params, &fields, extra)
+                    .await?
+                else {
+                    return Err(fault("proto.invalidPreviewSource"));
+                };
+                let mut source: Value =
+                    serde_json::from_str(&raw).map_err(|_| fault("proto.invalidPreviewSource"))?;
+                let Some(local_path) = source["path"]
+                    .as_str()
+                    .filter(|_| source["kind"] == "local_path")
+                else {
+                    return Ok(Reply::Value(source));
+                };
+                let Some(authorize) = scope.runtime.extensions().media_path_authorizer() else {
+                    return Err(fault(
+                        "fault.attachment.previewPathAuthorizationUnavailable",
+                    ));
+                };
+                source["path"] = json!(authorize(local_path.to_owned()).await?);
+                Ok(Reply::Value(source))
             }),
             // 其他区域登记的成员（例如 automation，见 extensions.rs `register_member`）。
             name => match runtime.extensions().member(name) {

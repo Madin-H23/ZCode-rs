@@ -61,6 +61,9 @@ pub struct NotificationContext {
     pub params: Value,
 }
 
+/// 本地媒体路径授权（Main 规范化并登记路径后返回规范路径），见 rust-host-workspace.md §2.3。
+pub type MediaPathAuthorizer =
+    Arc<dyn Fn(String) -> BoxFuture<'static, Result<String, RpcError>> + Send + Sync>;
 pub type UseHook = Arc<
     dyn Fn(Arc<AgentProcess>, UseReason) -> BoxFuture<'static, Result<(), RpcError>> + Send + Sync,
 >;
@@ -115,6 +118,7 @@ pub struct Extensions {
     dynamic_workflow: tokio::sync::OnceCell<bool>,
     members: RwLock<HashMap<String, MemberHandler>>,
     notification_hooks: RwLock<HashMap<String, NotificationHook>>,
+    media_path_authorizer: RwLock<Option<MediaPathAuthorizer>>,
 }
 
 fn read<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
@@ -214,6 +218,14 @@ impl Extensions {
 
     pub fn notification_hook(&self, method: &str) -> Option<NotificationHook> {
         read(&self.notification_hooks).get(method).cloned()
+    }
+
+    pub fn set_media_path_authorizer(&self, authorizer: MediaPathAuthorizer) {
+        *write(&self.media_path_authorizer) = Some(authorizer);
+    }
+
+    pub fn media_path_authorizer(&self) -> Option<MediaPathAuthorizer> {
+        read(&self.media_path_authorizer).clone()
     }
 }
 
