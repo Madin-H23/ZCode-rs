@@ -432,3 +432,83 @@ pub fn random_hex(bytes: usize) -> String {
     getrandom::fill(&mut buffer).expect("operating system random source unavailable");
     buffer.iter().map(|byte| format!("{byte:02x}")).collect()
 }
+
+#[cfg(test)]
+mod remote_scope_tests {
+    use super::*;
+    use std::time::Duration;
+
+    struct Sink(Mutex<Vec<HostToMain>>);
+
+    impl ControlSink for Sink {
+        fn send(&self, message: HostToMain) {
+            self.0.lock().unwrap().push(message);
+        }
+    }
+
+    fn core() -> (HostCore, Arc<Sink>) {
+        let sink = Arc::new(Sink(Mutex::new(Vec::new())));
+        let core = HostCore::new(
+            HostConfig {
+                ws_port: 4242,
+                environment: zcode_host_services::HostEnvironment::default(),
+            },
+            sink.clone(),
+        );
+        (core, sink)
+    }
+
+    fn meta(scope: AttachmentScope, client_mode: ClientMode) -> AttachmentMeta {
+        AttachmentMeta {
+            attachment_id: "a1".into(),
+            client_mode,
+            scope,
+        }
+    }
+
+    #[test]
+    fn remote_scopes_need_an_initialized_host_and_a_known_session() {
+        let (core, _) = core();
+        let remote = AttachmentScope::Remote {
+            remote_session_id: "s1".into(),
+            workspace_path: "/w".into(),
+            workspace_identity: "remote:docker:c:/w".into(),
+        };
+        assert!(matches!(
+            core.issue_endpoint(meta(remote, ClientMode::WebRemoteReplayable)),
+            AttachmentEndpointResult::Failed { error, .. } if error == "Rust Host services are not initialized"
+        ));
+        assert!(matches!(
+            core.issue_endpoint(meta(AttachmentScope::Local, ClientMode::DesktopContinuous)),
+            AttachmentEndpointResult::Issued { url, .. } if url == "ws://127.0.0.1:4242/rpc"
+        ));
+    }
+
+    #[tokio::test]
+    async fn closing_signals_end_the_forwarded_inbound_stream() {
+        let (to_core, inbound) = mpsc::unbounded_channel();
+        let (close, closed) = watch::channel(false);
+        let (_other, other) = watch::channel(false);
+        let mut forwarded = closable(inbound, vec![other, closed]);
+        to_core.send(vec![1]).unwrap();
+        assert_eq!(forwarded.recv().await, Some(vec![1]));
+        close.send_replace(true);
+        let ended = tokio::time::timeout(Duration::from_secs(1), forwarded.recv())
+            .await
+            .expect("forwarder stops");
+        assert_eq!(ended, None);
+    }
+
+    #[test]
+    fn detach_closes_every_connection_of_the_attachment() {
+        let (core, _) = core();
+        let (first, mut first_rx) = watch::channel(false);
+        let (second, mut second_rx) = watch::channel(false);
+        core.lock_connections()
+            .insert("a1".into(), vec![first, second]);
+        core.detach("a1");
+        assert!(*first_rx.borrow_and_update());
+        assert!(*second_rx.borrow_and_update());
+        assert!(core.lock_connections().is_empty());
+    }
+}
