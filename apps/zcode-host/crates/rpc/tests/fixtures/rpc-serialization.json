@@ -1,0 +1,147 @@
+{
+  "values": [
+    {
+      "name": "int-zero",
+      "value": 0,
+      "hex": "0600"
+    },
+    {
+      "name": "int-small",
+      "value": 1,
+      "hex": "0601"
+    },
+    {
+      "name": "int-127",
+      "value": 127,
+      "hex": "067f"
+    },
+    {
+      "name": "int-128",
+      "value": 128,
+      "hex": "068001"
+    },
+    {
+      "name": "int-300",
+      "value": 300,
+      "hex": "06ac02"
+    },
+    {
+      "name": "int-negative",
+      "value": -1,
+      "hex": "06ffffffff0f"
+    },
+    {
+      "name": "int-max",
+      "value": 2147483647,
+      "hex": "06ffffffff07"
+    },
+    {
+      "name": "int-min",
+      "value": -2147483648,
+      "hex": "068080808008"
+    },
+    {
+      "name": "int-beyond-int32",
+      "value": 2147483648,
+      "hex": "050a32313437343833363438"
+    },
+    {
+      "name": "int-integral-float",
+      "value": 3,
+      "hex": "0603"
+    },
+    {
+      "name": "float",
+      "value": 1.5,
+      "hex": "0503312e35"
+    },
+    {
+      "name": "string",
+      "value": "hello",
+      "hex": "010568656c6c6f"
+    },
+    {
+      "name": "string-unicode",
+      "value": "中文🙂",
+      "hex": "010ae4b8ade69687f09f9982"
+    },
+    {
+      "name": "string-empty",
+      "value": "",
+      "hex": "0100"
+    },
+    {
+      "name": "null",
+      "value": null,
+      "hex": "05046e756c6c"
+    },
+    {
+      "name": "true",
+      "value": true,
+      "hex": "050474727565"
+    },
+    {
+      "name": "false",
+      "value": false,
+      "hex": "050566616c7365"
+    },
+    {
+      "name": "array-empty",
+      "value": [],
+      "hex": "0400"
+    },
+    {
+      "name": "array-nested",
+      "value": [
+        1,
+        "a",
+        [
+          2,
+          null
+        ],
+        {
+          "k": "v"
+        }
+      ],
+      "hex": "040406010101610402060205046e756c6c05097b226b223a2276227d"
+    },
+    {
+      "name": "object",
+      "value": {
+        "a": 1,
+        "b": [
+          1,
+          2
+        ],
+        "c": {
+          "d": "中"
+        }
+      },
+      "hex": "05217b2261223a312c2262223a5b312c325d2c2263223a7b2264223a22e4b8ad227d7d"
+    },
+    {
+      "name": "undefined",
+      "value": {
+        "$undefined": true
+      },
+      "hex": "00"
+    }
+  ],
+  "bytes": {
+    "topLevel": "0205000102faff",
+    "nested": "05427b2264617461223a7b225f5f7a636f64655f7270635f6e65737465645f75696e743861727261795f7631223a747275652c22626173653634223a2261476b68227d7d"
+  },
+  "messages": {
+    "initialize": "040106c80100",
+    "successObject": "040206c901060705117b226f6b223a747275652c226e223a337d",
+    "successUndefined": "040206c901060800",
+    "promiseError": "040206ca01060905217b226d657373616765223a22626f6f6d222c226e616d65223a224572726f72227d",
+    "promiseErrorWithCode": "040206ca01060a05657b226d657373616765223a226e6f7420696d706c656d656e7465643a2073657474696e672e676574222c226e616d65223a224e6f74496d706c656d656e746564222c22636f6465223a226661756c742e686f73742e6e6f74496d706c656d656e746564227d",
+    "eventFire": "040206cc0106ac0205307b22746f706963223a22636f6e766572736174696f6e2f7331222c22737562736372697074696f6e4964223a2278227d",
+    "requestPromise": "040406640605010773657474696e6701036765740400",
+    "requestCall": "040406640606010466696c65010c726561645465787446696c65040105217b2270617468223a222f746d702f612e747874222c226c656e677468223a31307d",
+    "requestListen": "040406660607010b7a636f64652d6167656e74011a6f6e44796e616d6963436f6e766572736174696f6e4672616d6505167b22776f726b737061636550617468223a222f77227d",
+    "requestCancel": "04020665060600",
+    "requestDispose": "04020667060700"
+  }
+}

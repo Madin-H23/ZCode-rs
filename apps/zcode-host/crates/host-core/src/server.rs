@@ -1,0 +1,298 @@
+//! 单个 attachment 上的 `@zcode/rpc` 服务端语义（`packages/rpc/src/channelServer.ts`）。
+//!
+//! 与 Node 版的有意差异：未知 channel 立即报错，不做 1000 ms 等待；订阅失败只记日志
+//! （Node 版此时异常逃出消息处理器，同样不会应答）。
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use futures_util::StreamExt;
+use tokio::sync::{mpsc, watch};
+use tokio::task::AbortHandle;
+use zcode_host_rpc::codec::{self, RESPONSE_EVENT_FIRE, RESPONSE_PROMISE_SUCCESS};
+use zcode_host_rpc::{RequestKind, RpcError, RpcValue, read_request};
+
+use crate::channel::{CallContext, ChannelRegistry, Reply};
+use crate::log;
+
+type Active = Arc<Mutex<HashMap<i32, AbortHandle>>>;
+
+pub(crate) async fn serve(
+    registry: Arc<ChannelRegistry>,
+    context: CallContext,
+    mut ready: watch::Receiver<bool>,
+    mut inbound: mpsc::UnboundedReceiver<Vec<u8>>,
+    outbound: mpsc::UnboundedSender<Vec<u8>>,
+) {
+    if ready.wait_for(|ready| *ready).await.is_err() {
+        return;
+    }
+    let _ = outbound.send(codec::initialize());
+    log::debug(format!("attachment {} initialized", context.attachment_id));
+
+    let active: Active = Arc::new(Mutex::new(HashMap::new()));
+    while let Some(message) = inbound.recv().await {
+        let request = match read_request(&message) {
+            Ok(request) => request,
+            Err(error) => {
+                log::warn(format!("dropping malformed rpc message: {error}"));
+                continue;
+            }
+        };
+        match request.kind {
+            RequestKind::Promise => {
+                let args = match request.body {
+                    RpcValue::Array(items) => items,
+                    RpcValue::Undefined => Vec::new(),
+                    other => vec![other],
+                };
+                let Some(channel) = registry.get(&request.channel) else {
+                    let error = unknown_channel(&request.channel);
+                    let _ = outbound.send(codec::promise_error(request.id, &error));
+                    continue;
+                };
+                let call = channel.call(&context, &request.name, args);
+                let (id, outbound, tracked) = (request.id, outbound.clone(), active.clone());
+                let task = tokio::spawn(async move {
+                    let response = match call.await {
+                        Ok(reply) => encode_reply(RESPONSE_PROMISE_SUCCESS, id, reply),
+                        Err(error) => codec::promise_error(id, &error),
+                    };
+                    let _ = outbound.send(response);
+                    lock(&tracked).remove(&id);
+                });
+                track(&active, request.id, task.abort_handle());
+            }
+            RequestKind::EventListen => {
+                let Some(channel) = registry.get(&request.channel) else {
+                    log::warn(format!("listen on unknown channel {}", request.channel));
+                    continue;
+                };
+                let mut events = match channel.listen(&context, &request.name, request.body) {
+                    Ok(events) => events,
+                    Err(error) => {
+                        log::warn(format!(
+                            "listen {}.{} rejected: {}",
+                            request.channel, request.name, error.message
+                        ));
+                        continue;
+                    }
+                };
+                let (id, outbound) = (request.id, outbound.clone());
+                let task = tokio::spawn(async move {
+                    while let Some(event) = events.next().await {
+                        if outbound
+                            .send(encode_reply(RESPONSE_EVENT_FIRE, id, event))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                });
+                track(&active, request.id, task.abort_handle());
+            }
+            RequestKind::PromiseCancel | RequestKind::EventDispose => {
+                if let Some(handle) = lock(&active).remove(&request.id) {
+                    handle.abort();
+                }
+            }
+        }
+    }
+
+    // 连接关闭：取消这条连接上所有进行中的调用和订阅。
+    for (_, handle) in lock(&active).drain() {
+        handle.abort();
+    }
+    log::debug(format!("attachment {} closed", context.attachment_id));
+}
+
+fn unknown_channel(channel: &str) -> RpcError {
+    RpcError::new(
+        "Unknown channel",
+        format!("Channel name '{channel}' is not registered in the Rust Host"),
+    )
+}
+
+fn encode_reply(kind: i32, id: i32, reply: Reply) -> Vec<u8> {
+    match reply {
+        Reply::Undefined => codec::response_undefined(kind, id),
+        Reply::Value(value) => codec::response_value(kind, id, &value),
+        Reply::RawJson(raw) => codec::raw_response(kind, id, &raw).unwrap_or_else(|error| {
+            codec::promise_error(id, &RpcError::new("Error", error.to_string()))
+        }),
+    }
+}
+
+fn track(active: &Active, id: i32, handle: AbortHandle) {
+    // 任务可能在登记前就已结束并尝试移除自己；结束了的句柄 abort 是空操作，留在表里到连接关闭。
+    lock(active).insert(id, handle);
+}
+
+fn lock(active: &Active) -> std::sync::MutexGuard<'_, HashMap<i32, AbortHandle>> {
+    active
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contract::{ChannelContract, Contract, Member, MemberKind};
+    use serde_json::{Value, json};
+    use std::time::Duration;
+    use zcode_host_control::ClientMode;
+    use zcode_host_rpc::Reader;
+
+    fn contract() -> Contract {
+        let member = |name: &str, kind| Member {
+            name: name.into(),
+            kind,
+        };
+        Contract {
+            channels: vec![
+                ChannelContract {
+                    channel: "setting".into(),
+                    members: vec![
+                        member("get", MemberKind::Method),
+                        member("onDidUpdate", MemberKind::Event),
+                    ],
+                },
+                ChannelContract {
+                    channel: "settings-sync".into(),
+                    members: vec![member("getFirstRunPromptState", MemberKind::Method)],
+                },
+            ],
+        }
+    }
+
+    fn request(header: Value, body: Option<Value>) -> Vec<u8> {
+        let mut out = Vec::new();
+        codec::write_value(&mut out, &header);
+        match body {
+            Some(body) => codec::write_value(&mut out, &body),
+            None => codec::write_undefined(&mut out),
+        }
+        out
+    }
+
+    fn decode(message: &[u8]) -> (Value, RpcValue) {
+        let mut reader = Reader::new(message);
+        let header = reader.value().unwrap().into_json();
+        (header, reader.value().unwrap())
+    }
+
+    struct Harness {
+        ready: watch::Sender<bool>,
+        to_server: mpsc::UnboundedSender<Vec<u8>>,
+        from_server: mpsc::UnboundedReceiver<Vec<u8>>,
+    }
+
+    fn start() -> Harness {
+        let (ready, ready_rx) = watch::channel(false);
+        let (to_server, inbound) = mpsc::unbounded_channel();
+        let (outbound, from_server) = mpsc::unbounded_channel();
+        let context = CallContext {
+            attachment_id: "a1".into(),
+            client_mode: ClientMode::DesktopContinuous,
+        };
+        tokio::spawn(serve(
+            Arc::new(ChannelRegistry::from_contract(contract())),
+            context,
+            ready_rx,
+            inbound,
+            outbound,
+        ));
+        Harness {
+            ready,
+            to_server,
+            from_server,
+        }
+    }
+
+    async fn next(harness: &mut Harness) -> (Value, RpcValue) {
+        let message = tokio::time::timeout(Duration::from_secs(1), harness.from_server.recv())
+            .await
+            .expect("server answered within 1s")
+            .expect("server still open");
+        decode(&message)
+    }
+
+    #[tokio::test]
+    async fn initialize_waits_for_ready() {
+        let mut harness = start();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), harness.from_server.recv())
+                .await
+                .is_err()
+        );
+        harness.ready.send_replace(true);
+        assert_eq!(next(&mut harness).await.0, json!([200]));
+    }
+
+    #[tokio::test]
+    async fn stub_methods_answer_immediately() {
+        let mut harness = start();
+        harness.ready.send_replace(true);
+        next(&mut harness).await;
+
+        harness
+            .to_server
+            .send(request(json!([100, 1, "setting", "get"]), Some(json!([]))))
+            .unwrap();
+        let (header, body) = next(&mut harness).await;
+        assert_eq!(header, json!([202, 1]));
+        let body = body.into_json();
+        assert_eq!(body["name"], "NotImplemented");
+        assert_eq!(body["code"], "fault.host.notImplemented");
+
+        harness
+            .to_server
+            .send(request(
+                json!([100, 2, "settings-sync", "getFirstRunPromptState"]),
+                Some(json!([])),
+            ))
+            .unwrap();
+        let (header, body) = next(&mut harness).await;
+        assert_eq!(header, json!([201, 2]));
+        assert_eq!(body.into_json(), json!({"handled": true}));
+
+        harness
+            .to_server
+            .send(request(json!([100, 3, "nope", "x"]), Some(json!([]))))
+            .unwrap();
+        let (header, body) = next(&mut harness).await;
+        assert_eq!(header, json!([202, 3]));
+        assert_eq!(body.into_json()["name"], "Unknown channel");
+
+        harness
+            .to_server
+            .send(request(
+                json!([100, 4, "setting", "missing"]),
+                Some(json!([])),
+            ))
+            .unwrap();
+        let (header, body) = next(&mut harness).await;
+        assert_eq!(header, json!([202, 4]));
+        assert_eq!(body.into_json()["message"], "Method not found: missing");
+    }
+
+    #[tokio::test]
+    async fn listen_is_accepted_without_reply() {
+        let mut harness = start();
+        harness.ready.send_replace(true);
+        next(&mut harness).await;
+        harness
+            .to_server
+            .send(request(json!([102, 5, "setting", "onDidUpdate"]), None))
+            .unwrap();
+        harness
+            .to_server
+            .send(request(json!([103, 5]), None))
+            .unwrap();
+        // 订阅没有应答；之后的调用照常应答，说明连接没有被订阅卡住。
+        harness
+            .to_server
+            .send(request(json!([100, 6, "setting", "get"]), Some(json!([]))))
+            .unwrap();
+        assert_eq!(next(&mut harness).await.0, json!([202, 6]));
+    }
+}

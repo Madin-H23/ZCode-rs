@@ -1,0 +1,2209 @@
+{
+  "source": "packages/client/src/remoteServiceAccess.ts",
+  "channels": [
+    {
+      "channel": "bots",
+      "interface": "IBotsService",
+      "members": [
+        {
+          "name": "beginFeishuRegistration",
+          "kind": "method"
+        },
+        {
+          "name": "beginWeixinRegistration",
+          "kind": "method"
+        },
+        {
+          "name": "createBindCode",
+          "kind": "method"
+        },
+        {
+          "name": "deleteBot",
+          "kind": "method"
+        },
+        {
+          "name": "getBotStates",
+          "kind": "method"
+        },
+        {
+          "name": "getConfig",
+          "kind": "method"
+        },
+        {
+          "name": "getStatus",
+          "kind": "method"
+        },
+        {
+          "name": "getUserConfigOptions",
+          "kind": "method"
+        },
+        {
+          "name": "handleInboundMessage",
+          "kind": "method"
+        },
+        {
+          "name": "handleProviderCallback",
+          "kind": "method"
+        },
+        {
+          "name": "handleProviderCallbackResponse",
+          "kind": "method"
+        },
+        {
+          "name": "listBots",
+          "kind": "method"
+        },
+        {
+          "name": "listWorkspaceRefs",
+          "kind": "method"
+        },
+        {
+          "name": "pollFeishuRegistration",
+          "kind": "method"
+        },
+        {
+          "name": "pollWeixinRegistration",
+          "kind": "method"
+        },
+        {
+          "name": "removeBotSecret",
+          "kind": "method"
+        },
+        {
+          "name": "resetBotState",
+          "kind": "method"
+        },
+        {
+          "name": "saveBot",
+          "kind": "method"
+        },
+        {
+          "name": "saveConfig",
+          "kind": "method"
+        },
+        {
+          "name": "syncAppRuntimePreferences",
+          "kind": "method"
+        },
+        {
+          "name": "testBot",
+          "kind": "method"
+        },
+        {
+          "name": "watchAutomationRun",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "broadcast",
+      "interface": "IBroadcastService",
+      "members": [
+        {
+          "name": "acquireClaim",
+          "kind": "method"
+        },
+        {
+          "name": "commitClaim",
+          "kind": "method"
+        },
+        {
+          "name": "onMessage",
+          "kind": "event"
+        },
+        {
+          "name": "releaseClaim",
+          "kind": "method"
+        },
+        {
+          "name": "send",
+          "kind": "method"
+        },
+        {
+          "name": "tryClaim",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "client-config",
+      "interface": "IClientConfigService",
+      "members": [
+        {
+          "name": "getSnapshot",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "client-scenes",
+      "interface": "IClientScenesService",
+      "members": [
+        {
+          "name": "list",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "coding-plan-subscription",
+      "interface": "ICodingPlanSubscriptionService",
+      "members": [
+        {
+          "name": "batchPreview",
+          "kind": "method"
+        },
+        {
+          "name": "bindStripeCard",
+          "kind": "method"
+        },
+        {
+          "name": "calculateEnterpriseOrder",
+          "kind": "method"
+        },
+        {
+          "name": "cancelEnterpriseOrder",
+          "kind": "method"
+        },
+        {
+          "name": "checkEnterpriseOrderStatus",
+          "kind": "method"
+        },
+        {
+          "name": "checkPayment",
+          "kind": "method"
+        },
+        {
+          "name": "checkPaypalSupport",
+          "kind": "method"
+        },
+        {
+          "name": "checkPendingOrders",
+          "kind": "method"
+        },
+        {
+          "name": "continueEnterpriseOrderPayment",
+          "kind": "method"
+        },
+        {
+          "name": "createEnterpriseOrder",
+          "kind": "method"
+        },
+        {
+          "name": "createPaypalSetupToken",
+          "kind": "method"
+        },
+        {
+          "name": "createSign",
+          "kind": "method"
+        },
+        {
+          "name": "getDynamicWorkflowClientConfig",
+          "kind": "method"
+        },
+        {
+          "name": "getEnterpriseBalance",
+          "kind": "method"
+        },
+        {
+          "name": "getEnterprisePendingOrders",
+          "kind": "method"
+        },
+        {
+          "name": "getEnterprisePricing",
+          "kind": "method"
+        },
+        {
+          "name": "getForceUpdateConfig",
+          "kind": "method"
+        },
+        {
+          "name": "getModelContextBudgetStrategy",
+          "kind": "method"
+        },
+        {
+          "name": "getOffPeakClientConfig",
+          "kind": "method"
+        },
+        {
+          "name": "getStartPlanPreview",
+          "kind": "method"
+        },
+        {
+          "name": "getStaticProducts",
+          "kind": "method"
+        },
+        {
+          "name": "getStaticTeamProducts",
+          "kind": "method"
+        },
+        {
+          "name": "payStripe",
+          "kind": "method"
+        },
+        {
+          "name": "preview",
+          "kind": "method"
+        },
+        {
+          "name": "productInfo",
+          "kind": "method"
+        },
+        {
+          "name": "queryStripeCards",
+          "kind": "method"
+        },
+        {
+          "name": "subscribePaypal",
+          "kind": "method"
+        },
+        {
+          "name": "unbindStripeCard",
+          "kind": "method"
+        },
+        {
+          "name": "updateSign",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "commands",
+      "interface": "ICommandsService",
+      "members": [
+        {
+          "name": "deleteCommandFile",
+          "kind": "method"
+        },
+        {
+          "name": "getPrimaryUserCommandsDirectory",
+          "kind": "method"
+        },
+        {
+          "name": "list",
+          "kind": "method"
+        },
+        {
+          "name": "setCommandEnabled",
+          "kind": "method"
+        },
+        {
+          "name": "updateCommandFile",
+          "kind": "method"
+        },
+        {
+          "name": "writeCommandFile",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "conversation-share",
+      "interface": "IConversationShareService",
+      "members": [
+        {
+          "name": "getCapabilities",
+          "kind": "method"
+        },
+        {
+          "name": "getContinuation",
+          "kind": "method"
+        },
+        {
+          "name": "getImportedConversation",
+          "kind": "method"
+        },
+        {
+          "name": "getPreview",
+          "kind": "method"
+        },
+        {
+          "name": "importShare",
+          "kind": "method"
+        },
+        {
+          "name": "onDynamicImportProgress",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicPublishProgress",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "preflight",
+          "kind": "method"
+        },
+        {
+          "name": "publish",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "credential",
+      "interface": "ICredentialService",
+      "members": [
+        {
+          "name": "delete",
+          "kind": "method"
+        },
+        {
+          "name": "load",
+          "kind": "method"
+        },
+        {
+          "name": "save",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "cua-permission",
+      "interface": "ICuaPermissionService",
+      "members": [
+        {
+          "name": "getStatus",
+          "kind": "method"
+        },
+        {
+          "name": "restartHelper",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "feedback",
+      "interface": "IFeedbackService",
+      "members": [
+        {
+          "name": "attachLogsFromExport",
+          "kind": "method"
+        },
+        {
+          "name": "cancelCreate",
+          "kind": "method"
+        },
+        {
+          "name": "cancelUpload",
+          "kind": "method"
+        },
+        {
+          "name": "cleanupPreparedLogArchive",
+          "kind": "method"
+        },
+        {
+          "name": "comment",
+          "kind": "method"
+        },
+        {
+          "name": "create",
+          "kind": "method"
+        },
+        {
+          "name": "get",
+          "kind": "method"
+        },
+        {
+          "name": "getDeviceSnapshot",
+          "kind": "method"
+        },
+        {
+          "name": "list",
+          "kind": "method"
+        },
+        {
+          "name": "onDynamicUploadProgress",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "prepareCompactLogArchive",
+          "kind": "method"
+        },
+        {
+          "name": "revealLogArchive",
+          "kind": "method"
+        },
+        {
+          "name": "uploadAttachment",
+          "kind": "method"
+        },
+        {
+          "name": "uploadAttachmentData",
+          "kind": "method"
+        },
+        {
+          "name": "uploadAttachmentWithProgress",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "file",
+      "interface": "IFileService",
+      "members": [
+        {
+          "name": "applyWorkspaceFileSearchIgnoreTransform",
+          "kind": "method"
+        },
+        {
+          "name": "checkFilesExist",
+          "kind": "method"
+        },
+        {
+          "name": "createDefaultWorkspace",
+          "kind": "method"
+        },
+        {
+          "name": "createScratchWorkspace",
+          "kind": "method"
+        },
+        {
+          "name": "ensureConversationWorkspace",
+          "kind": "method"
+        },
+        {
+          "name": "listWorkspaceFilesLength",
+          "kind": "method"
+        },
+        {
+          "name": "listWorkspaceFilesRange",
+          "kind": "method"
+        },
+        {
+          "name": "readBinaryPreview",
+          "kind": "method"
+        },
+        {
+          "name": "readFileRange",
+          "kind": "method"
+        },
+        {
+          "name": "readMediaPreview",
+          "kind": "method"
+        },
+        {
+          "name": "readTextFile",
+          "kind": "method"
+        },
+        {
+          "name": "readWorkspaceFileSearchIgnore",
+          "kind": "method"
+        },
+        {
+          "name": "readdir",
+          "kind": "method"
+        },
+        {
+          "name": "resolvePath",
+          "kind": "method"
+        },
+        {
+          "name": "searchWorkspaceFiles",
+          "kind": "method"
+        },
+        {
+          "name": "stat",
+          "kind": "method"
+        },
+        {
+          "name": "writeWorkspaceFileSearchIgnore",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "file-watcher",
+      "interface": "IFileWatcherService",
+      "members": [
+        {
+          "name": "disposeAll",
+          "kind": "method"
+        },
+        {
+          "name": "onDynamicChange",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "unwatch",
+          "kind": "method"
+        },
+        {
+          "name": "watch",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "git",
+      "interface": "IGitService",
+      "members": [
+        {
+          "name": "commit",
+          "kind": "method"
+        },
+        {
+          "name": "createBranchAndSwitch",
+          "kind": "method"
+        },
+        {
+          "name": "discardPaths",
+          "kind": "method"
+        },
+        {
+          "name": "generateCommitMessage",
+          "kind": "method"
+        },
+        {
+          "name": "getBranchComparison",
+          "kind": "method"
+        },
+        {
+          "name": "getChanges",
+          "kind": "method"
+        },
+        {
+          "name": "getCommitGraph",
+          "kind": "method"
+        },
+        {
+          "name": "getDiff",
+          "kind": "method"
+        },
+        {
+          "name": "getIdentity",
+          "kind": "method"
+        },
+        {
+          "name": "getIgnoredPaths",
+          "kind": "method"
+        },
+        {
+          "name": "getLocalBranches",
+          "kind": "method"
+        },
+        {
+          "name": "getRepositorySummary",
+          "kind": "method"
+        },
+        {
+          "name": "getWorkspaceRepositoryInfo",
+          "kind": "method"
+        },
+        {
+          "name": "push",
+          "kind": "method"
+        },
+        {
+          "name": "refresh",
+          "kind": "method"
+        },
+        {
+          "name": "stagePaths",
+          "kind": "method"
+        },
+        {
+          "name": "switchBranch",
+          "kind": "method"
+        },
+        {
+          "name": "unstagePaths",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "git-checkpoint",
+      "interface": "IGitCheckpointService",
+      "members": [
+        {
+          "name": "createCheckpoint",
+          "kind": "method"
+        },
+        {
+          "name": "deleteCheckpoint",
+          "kind": "method"
+        },
+        {
+          "name": "diffCheckpoints",
+          "kind": "method"
+        },
+        {
+          "name": "restoreBetweenCheckpoints",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "hooks",
+      "interface": "IHooksService",
+      "members": [
+        {
+          "name": "grantWorkspaceHookTrust",
+          "kind": "method"
+        },
+        {
+          "name": "loadHooks",
+          "kind": "method"
+        },
+        {
+          "name": "saveHooks",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "mcp-sync",
+      "interface": "IMcpSyncService",
+      "members": [
+        {
+          "name": "checkRemoteUserMcpWriteAccess",
+          "kind": "method"
+        },
+        {
+          "name": "exportMcpServers",
+          "kind": "method"
+        },
+        {
+          "name": "importMcpServers",
+          "kind": "method"
+        },
+        {
+          "name": "listLocalUserMcpCandidates",
+          "kind": "method"
+        },
+        {
+          "name": "listRemoteUserMcpStatuses",
+          "kind": "method"
+        },
+        {
+          "name": "listWorkspaceMcpServerStatuses",
+          "kind": "method"
+        },
+        {
+          "name": "loadMcpFromUserDirectory",
+          "kind": "method"
+        },
+        {
+          "name": "saveMcpToUserDirectory",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "media-preview",
+      "interface": "IMediaPreviewService",
+      "members": [
+        {
+          "name": "prepare",
+          "kind": "method"
+        },
+        {
+          "name": "refreshPlaybackUrl",
+          "kind": "method"
+        },
+        {
+          "name": "release",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "memory",
+      "interface": "IMemoryService",
+      "members": [
+        {
+          "name": "listProjectMemories",
+          "kind": "method"
+        },
+        {
+          "name": "readProjectMemoryFile",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "model-selection",
+      "interface": "IModelSelectionService",
+      "members": [
+        {
+          "name": "getView",
+          "kind": "method"
+        },
+        {
+          "name": "onDidChange",
+          "kind": "event"
+        }
+      ]
+    },
+    {
+      "channel": "oauth",
+      "interface": "IOAuthService",
+      "members": [
+        {
+          "name": "cancelPending",
+          "kind": "method"
+        },
+        {
+          "name": "getActiveProvider",
+          "kind": "method"
+        },
+        {
+          "name": "getProviders",
+          "kind": "method"
+        },
+        {
+          "name": "handleCallback",
+          "kind": "method"
+        },
+        {
+          "name": "logout",
+          "kind": "method"
+        },
+        {
+          "name": "logoutAll",
+          "kind": "method"
+        },
+        {
+          "name": "pollPendingOAuth",
+          "kind": "method"
+        },
+        {
+          "name": "refreshToken",
+          "kind": "method"
+        },
+        {
+          "name": "restoreCachedSession",
+          "kind": "method"
+        },
+        {
+          "name": "restoreCachedSessionState",
+          "kind": "method"
+        },
+        {
+          "name": "restoreSession",
+          "kind": "method"
+        },
+        {
+          "name": "startOAuth",
+          "kind": "method"
+        },
+        {
+          "name": "startOAuthWithPolling",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "off-peak-task",
+      "interface": "IOffPeakTaskService",
+      "members": [
+        {
+          "name": "cancelTask",
+          "kind": "method"
+        },
+        {
+          "name": "continueTask",
+          "kind": "method"
+        },
+        {
+          "name": "createTask",
+          "kind": "method"
+        },
+        {
+          "name": "deleteHistory",
+          "kind": "method"
+        },
+        {
+          "name": "deleteTask",
+          "kind": "method"
+        },
+        {
+          "name": "get",
+          "kind": "method"
+        },
+        {
+          "name": "getCodingPlanSupport",
+          "kind": "method"
+        },
+        {
+          "name": "getTakeNumberAvailability",
+          "kind": "method"
+        },
+        {
+          "name": "list",
+          "kind": "method"
+        },
+        {
+          "name": "pauseTask",
+          "kind": "method"
+        },
+        {
+          "name": "updateTask",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "onboarding-record",
+      "interface": "IOnboardingRecordService",
+      "members": [
+        {
+          "name": "appendRecord",
+          "kind": "method"
+        },
+        {
+          "name": "claimAnonymousRecord",
+          "kind": "method"
+        },
+        {
+          "name": "clearRecords",
+          "kind": "method"
+        },
+        {
+          "name": "dismissOnboarding",
+          "kind": "method"
+        },
+        {
+          "name": "getLatestEntry",
+          "kind": "method"
+        },
+        {
+          "name": "getRecords",
+          "kind": "method"
+        },
+        {
+          "name": "shouldOnboard",
+          "kind": "method"
+        },
+        {
+          "name": "syncSettingsFromRecord",
+          "kind": "method"
+        },
+        {
+          "name": "updateRecordPreferences",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "plugin-management",
+      "interface": "IPluginManagementService",
+      "members": [
+        {
+          "name": "addPluginMarketplace",
+          "kind": "method"
+        },
+        {
+          "name": "cancelPluginOperation",
+          "kind": "method"
+        },
+        {
+          "name": "configurePlugin",
+          "kind": "method"
+        },
+        {
+          "name": "describePlugin",
+          "kind": "method"
+        },
+        {
+          "name": "getPluginReferenceCatalog",
+          "kind": "method"
+        },
+        {
+          "name": "getPluginsOverview",
+          "kind": "method"
+        },
+        {
+          "name": "installPlugin",
+          "kind": "method"
+        },
+        {
+          "name": "listPlugins",
+          "kind": "method"
+        },
+        {
+          "name": "onDynamicPluginOperationProgress",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "removePluginMarketplace",
+          "kind": "method"
+        },
+        {
+          "name": "resetPluginConfig",
+          "kind": "method"
+        },
+        {
+          "name": "resolveSuggestedPluginReference",
+          "kind": "method"
+        },
+        {
+          "name": "restoreBuiltinPlugin",
+          "kind": "method"
+        },
+        {
+          "name": "setPluginEnabled",
+          "kind": "method"
+        },
+        {
+          "name": "uninstallPlugin",
+          "kind": "method"
+        },
+        {
+          "name": "updatePlugin",
+          "kind": "method"
+        },
+        {
+          "name": "updatePluginMarketplace",
+          "kind": "method"
+        },
+        {
+          "name": "validatePlugin",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "plugin-sync",
+      "interface": "IPluginSyncService",
+      "members": [
+        {
+          "name": "checkRemoteUserPluginWriteAccess",
+          "kind": "method"
+        },
+        {
+          "name": "exportMarketplaceSourceArchive",
+          "kind": "method"
+        },
+        {
+          "name": "exportPluginsArchive",
+          "kind": "method"
+        },
+        {
+          "name": "importMarketplaceSourceArchive",
+          "kind": "method"
+        },
+        {
+          "name": "importPluginsArchive",
+          "kind": "method"
+        },
+        {
+          "name": "listLocalUserPluginCandidates",
+          "kind": "method"
+        },
+        {
+          "name": "listRemoteUserPluginStatuses",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "plugins",
+      "interface": "IPluginsService",
+      "members": [
+        {
+          "name": "addMarketplace",
+          "kind": "method"
+        },
+        {
+          "name": "getOverview",
+          "kind": "method"
+        },
+        {
+          "name": "installPlugin",
+          "kind": "method"
+        },
+        {
+          "name": "removeMarketplace",
+          "kind": "method"
+        },
+        {
+          "name": "setPluginEnabled",
+          "kind": "method"
+        },
+        {
+          "name": "uninstallPlugin",
+          "kind": "method"
+        },
+        {
+          "name": "updateMarketplace",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "prompt-attachment-transfer",
+      "interface": "IPromptAttachmentTransferService",
+      "members": [
+        {
+          "name": "adopt",
+          "kind": "method"
+        },
+        {
+          "name": "cancel",
+          "kind": "method"
+        },
+        {
+          "name": "cleanup",
+          "kind": "method"
+        },
+        {
+          "name": "onDynamicProgress",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "stage",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "provider-provisioning-target",
+      "interface": "IProviderProvisioningTargetService",
+      "members": [
+        {
+          "name": "apply",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "provider-settings",
+      "interface": "IProviderSettingsService",
+      "members": [
+        {
+          "name": "addPersonalModel",
+          "kind": "method"
+        },
+        {
+          "name": "createPersonalProvider",
+          "kind": "method"
+        },
+        {
+          "name": "deletePersonalModel",
+          "kind": "method"
+        },
+        {
+          "name": "deletePersonalProvider",
+          "kind": "method"
+        },
+        {
+          "name": "getView",
+          "kind": "method"
+        },
+        {
+          "name": "onDidChange",
+          "kind": "event"
+        },
+        {
+          "name": "refresh",
+          "kind": "method"
+        },
+        {
+          "name": "renamePersonalModel",
+          "kind": "method"
+        },
+        {
+          "name": "reorderPersonalModels",
+          "kind": "method"
+        },
+        {
+          "name": "reorderPersonalProviders",
+          "kind": "method"
+        },
+        {
+          "name": "resolveModelConfig",
+          "kind": "method"
+        },
+        {
+          "name": "savePersonalModelDraft",
+          "kind": "method"
+        },
+        {
+          "name": "savePersonalProviderOverlay",
+          "kind": "method"
+        },
+        {
+          "name": "setPersonalModelEnabled",
+          "kind": "method"
+        },
+        {
+          "name": "testModelConnectivity",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "setting",
+      "interface": "ISettingService",
+      "members": [
+        {
+          "name": "ensureDefaultProject",
+          "kind": "method"
+        },
+        {
+          "name": "get",
+          "kind": "method"
+        },
+        {
+          "name": "update",
+          "kind": "method"
+        },
+        {
+          "name": "updateDataBaseDir",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "settings-sync",
+      "interface": "ISettingsSyncService",
+      "members": [
+        {
+          "name": "copyClaudeAgentsFileToZcodeAgentsFile",
+          "kind": "method"
+        },
+        {
+          "name": "detect",
+          "kind": "method"
+        },
+        {
+          "name": "getClaudeAgentsFileMigrationStatus",
+          "kind": "method"
+        },
+        {
+          "name": "getFirstRunPromptState",
+          "kind": "method"
+        },
+        {
+          "name": "importSelected",
+          "kind": "method"
+        },
+        {
+          "name": "markFirstRunPromptHandled",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "skill-sync",
+      "interface": "ISkillSyncService",
+      "members": [
+        {
+          "name": "checkRemoteUserSkillWriteAccess",
+          "kind": "method"
+        },
+        {
+          "name": "exportSkillsArchive",
+          "kind": "method"
+        },
+        {
+          "name": "importSkillsArchive",
+          "kind": "method"
+        },
+        {
+          "name": "listLocalUserSkillCandidates",
+          "kind": "method"
+        },
+        {
+          "name": "listRemoteUserSkillStatuses",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "skills",
+      "interface": "ISkillsService",
+      "members": [
+        {
+          "name": "buildPromptContext",
+          "kind": "method"
+        },
+        {
+          "name": "copyToCommon",
+          "kind": "method"
+        },
+        {
+          "name": "deleteSkill",
+          "kind": "method"
+        },
+        {
+          "name": "list",
+          "kind": "method"
+        },
+        {
+          "name": "removeFromCommon",
+          "kind": "method"
+        },
+        {
+          "name": "setEnabled",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "subagents",
+      "interface": "ISubagentsService",
+      "members": [
+        {
+          "name": "createAgent",
+          "kind": "method"
+        },
+        {
+          "name": "deleteAgent",
+          "kind": "method"
+        },
+        {
+          "name": "getPrimaryUserAgentsDirectory",
+          "kind": "method"
+        },
+        {
+          "name": "list",
+          "kind": "method"
+        },
+        {
+          "name": "setBuiltInModelOverride",
+          "kind": "method"
+        },
+        {
+          "name": "setEnabled",
+          "kind": "method"
+        },
+        {
+          "name": "setPluginAgentModelOverride",
+          "kind": "method"
+        },
+        {
+          "name": "updateAgent",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "system",
+      "interface": "ISystemService",
+      "members": [
+        {
+          "name": "info",
+          "kind": "method"
+        },
+        {
+          "name": "listIntegratedTerminalShells",
+          "kind": "method"
+        },
+        {
+          "name": "probeIntranet",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "terminal",
+      "interface": "ITerminalService",
+      "members": [
+        {
+          "name": "create",
+          "kind": "method"
+        },
+        {
+          "name": "dispose",
+          "kind": "method"
+        },
+        {
+          "name": "onDynamicData",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicExit",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "resize",
+          "kind": "method"
+        },
+        {
+          "name": "write",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "usage-stats",
+      "interface": "IUsageStatsService",
+      "members": [
+        {
+          "name": "getAppUsageSnapshot",
+          "kind": "method"
+        },
+        {
+          "name": "getCodingPlanResetStatus",
+          "kind": "method"
+        },
+        {
+          "name": "getCodingPlanUsageSnapshot",
+          "kind": "method"
+        },
+        {
+          "name": "getEntitlementSnapshot",
+          "kind": "method"
+        },
+        {
+          "name": "getSnapshot",
+          "kind": "method"
+        },
+        {
+          "name": "markCodingPlanResetHistoryRead",
+          "kind": "method"
+        },
+        {
+          "name": "requestCodingPlanResetOpportunity",
+          "kind": "method"
+        },
+        {
+          "name": "useCodingPlanReset",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "window-controller",
+      "interface": "IWindowControllerService",
+      "members": [
+        {
+          "name": "deleteArchivedTask",
+          "kind": "method"
+        },
+        {
+          "name": "deleteArchivedTasks",
+          "kind": "method"
+        },
+        {
+          "name": "listTaskList",
+          "kind": "method"
+        },
+        {
+          "name": "mutateTask",
+          "kind": "method"
+        },
+        {
+          "name": "onDynamicControllerFrame",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "resyncControllerV4",
+          "kind": "method"
+        },
+        {
+          "name": "subscribeControllerV4",
+          "kind": "method"
+        },
+        {
+          "name": "unsubscribeControllerV4",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "zcode-agent",
+      "interface": "IZCodeAgentService",
+      "members": [
+        {
+          "name": "addPluginMarketplace",
+          "kind": "method"
+        },
+        {
+          "name": "attachmentAbortV4",
+          "kind": "method"
+        },
+        {
+          "name": "attachmentBeginV4",
+          "kind": "method"
+        },
+        {
+          "name": "attachmentChunkV4",
+          "kind": "method"
+        },
+        {
+          "name": "attachmentCommitV4",
+          "kind": "method"
+        },
+        {
+          "name": "attachmentPreviewSourceV4",
+          "kind": "method"
+        },
+        {
+          "name": "attachmentReadV4",
+          "kind": "method"
+        },
+        {
+          "name": "backgroundBashOutputV4",
+          "kind": "method"
+        },
+        {
+          "name": "cancelPluginOperation",
+          "kind": "method"
+        },
+        {
+          "name": "closeSession",
+          "kind": "method"
+        },
+        {
+          "name": "collectLocalRuntimeChildProcesses",
+          "kind": "method"
+        },
+        {
+          "name": "compactSession",
+          "kind": "method"
+        },
+        {
+          "name": "configurePlugin",
+          "kind": "method"
+        },
+        {
+          "name": "conversationAttachmentReadV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationAttachmentStatV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationFileChangesV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationFileRewindPreviewV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationPlansV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationRowsRangeV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationWorkflowRunArtifactDataV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationWorkflowRunArtifactReadV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationWorkflowRunArtifactsV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationWorkflowRunEventsV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationWorkflowRunNodeResultV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationWorkflowRunWorkspaceV4",
+          "kind": "method"
+        },
+        {
+          "name": "conversationWorkflowRunsV4",
+          "kind": "method"
+        },
+        {
+          "name": "createAutomation",
+          "kind": "method"
+        },
+        {
+          "name": "createSession",
+          "kind": "method"
+        },
+        {
+          "name": "deleteAutomation",
+          "kind": "method"
+        },
+        {
+          "name": "deleteAutomationRun",
+          "kind": "method"
+        },
+        {
+          "name": "deleteSavedWorkflow",
+          "kind": "method"
+        },
+        {
+          "name": "describePlugin",
+          "kind": "method"
+        },
+        {
+          "name": "disposeAll",
+          "kind": "method"
+        },
+        {
+          "name": "disposeWorkspace",
+          "kind": "method"
+        },
+        {
+          "name": "generateWorkspaceText",
+          "kind": "method"
+        },
+        {
+          "name": "getAppUsageStats",
+          "kind": "method"
+        },
+        {
+          "name": "getPluginReferenceCatalog",
+          "kind": "method"
+        },
+        {
+          "name": "getPluginsOverview",
+          "kind": "method"
+        },
+        {
+          "name": "getSavedWorkflow",
+          "kind": "method"
+        },
+        {
+          "name": "getSkillReferenceCatalog",
+          "kind": "method"
+        },
+        {
+          "name": "getStorageStartupState",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskTokenUsage",
+          "kind": "method"
+        },
+        {
+          "name": "getWorkspaceRuntimeIdentity",
+          "kind": "method"
+        },
+        {
+          "name": "goalSession",
+          "kind": "method"
+        },
+        {
+          "name": "grantWorkspaceHookTrust",
+          "kind": "method"
+        },
+        {
+          "name": "hasActiveCuaOperationTurn",
+          "kind": "method"
+        },
+        {
+          "name": "helloConversationV4",
+          "kind": "method"
+        },
+        {
+          "name": "initialize",
+          "kind": "method"
+        },
+        {
+          "name": "initializeConversationV4",
+          "kind": "method"
+        },
+        {
+          "name": "installPlugin",
+          "kind": "method"
+        },
+        {
+          "name": "listAllAutomations",
+          "kind": "method"
+        },
+        {
+          "name": "listAutomationRuns",
+          "kind": "method"
+        },
+        {
+          "name": "listAutomations",
+          "kind": "method"
+        },
+        {
+          "name": "listMcpServerStatuses",
+          "kind": "method"
+        },
+        {
+          "name": "listPlugins",
+          "kind": "method"
+        },
+        {
+          "name": "listSavedWorkflowRuns",
+          "kind": "method"
+        },
+        {
+          "name": "listSavedWorkflows",
+          "kind": "method"
+        },
+        {
+          "name": "listSessionSubagents",
+          "kind": "method"
+        },
+        {
+          "name": "listSessions",
+          "kind": "method"
+        },
+        {
+          "name": "moveSavedWorkflow",
+          "kind": "method"
+        },
+        {
+          "name": "onAgentRuntimeLifecycle",
+          "kind": "event"
+        },
+        {
+          "name": "onAgentRuntimeRestarted",
+          "kind": "event"
+        },
+        {
+          "name": "onDynamicConversationFrame",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicConversationTelemetryFact",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicCuaPermissionObservation",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicLocalTtftFacts",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicMcpResourceSamples",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicMcpTelemetry",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicPluginOperationProgress",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicProcessResourceSample",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicSessionEvent",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicSessionRuntimePreferencesRequest",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicSessionsIndexFrame",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicStorageStartupState",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicToolExecResource",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicWorkspaceConfigFrame",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "prepareStorage",
+          "kind": "method"
+        },
+        {
+          "name": "queryConversationCommandsV4",
+          "kind": "method"
+        },
+        {
+          "name": "readSession",
+          "kind": "method"
+        },
+        {
+          "name": "readSessionDebug",
+          "kind": "method"
+        },
+        {
+          "name": "readSessionEvents",
+          "kind": "method"
+        },
+        {
+          "name": "readSessionMessages",
+          "kind": "method"
+        },
+        {
+          "name": "readWorkspacePresentation",
+          "kind": "method"
+        },
+        {
+          "name": "removePluginMarketplace",
+          "kind": "method"
+        },
+        {
+          "name": "resetPluginConfig",
+          "kind": "method"
+        },
+        {
+          "name": "resolveSuggestedPluginReference",
+          "kind": "method"
+        },
+        {
+          "name": "respondSessionRuntimePreferences",
+          "kind": "method"
+        },
+        {
+          "name": "restartAutomation",
+          "kind": "method"
+        },
+        {
+          "name": "restoreBuiltinPlugin",
+          "kind": "method"
+        },
+        {
+          "name": "resumeSession",
+          "kind": "method"
+        },
+        {
+          "name": "resyncConversationV4",
+          "kind": "method"
+        },
+        {
+          "name": "resyncSessionsIndexV4",
+          "kind": "method"
+        },
+        {
+          "name": "resyncWorkspaceConfigV4",
+          "kind": "method"
+        },
+        {
+          "name": "runAutomationNow",
+          "kind": "method"
+        },
+        {
+          "name": "sendConversationCommandV4",
+          "kind": "method"
+        },
+        {
+          "name": "sendPrompt",
+          "kind": "method"
+        },
+        {
+          "name": "setAutomationEnabled",
+          "kind": "method"
+        },
+        {
+          "name": "setConnectionFlowStateV4",
+          "kind": "method"
+        },
+        {
+          "name": "setMode",
+          "kind": "method"
+        },
+        {
+          "name": "setModel",
+          "kind": "method"
+        },
+        {
+          "name": "setPluginEnabled",
+          "kind": "method"
+        },
+        {
+          "name": "setThoughtLevel",
+          "kind": "method"
+        },
+        {
+          "name": "subscribeConversationV4",
+          "kind": "method"
+        },
+        {
+          "name": "subscribeSessionsIndexV4",
+          "kind": "method"
+        },
+        {
+          "name": "subscribeWorkspaceConfigV4",
+          "kind": "method"
+        },
+        {
+          "name": "syncAppRuntimePreferences",
+          "kind": "method"
+        },
+        {
+          "name": "testModelConnectivity",
+          "kind": "method"
+        },
+        {
+          "name": "uninstallPlugin",
+          "kind": "method"
+        },
+        {
+          "name": "unsubscribeConversationV4",
+          "kind": "method"
+        },
+        {
+          "name": "unsubscribeSessionsIndexV4",
+          "kind": "method"
+        },
+        {
+          "name": "unsubscribeWorkspaceConfigV4",
+          "kind": "method"
+        },
+        {
+          "name": "updateAutomation",
+          "kind": "method"
+        },
+        {
+          "name": "updatePlugin",
+          "kind": "method"
+        },
+        {
+          "name": "updatePluginMarketplace",
+          "kind": "method"
+        },
+        {
+          "name": "updateSavedWorkflowMeta",
+          "kind": "method"
+        },
+        {
+          "name": "validatePlugin",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "zcode-session",
+      "interface": "IZCodeSessionService",
+      "members": [
+        {
+          "name": "closeDeferredDraftSession",
+          "kind": "method"
+        },
+        {
+          "name": "closeSession",
+          "kind": "method"
+        },
+        {
+          "name": "createSession",
+          "kind": "method"
+        },
+        {
+          "name": "getWorkspaceRuntimeIdentity",
+          "kind": "method"
+        },
+        {
+          "name": "initializeWorkspace",
+          "kind": "method"
+        },
+        {
+          "name": "listSessions",
+          "kind": "method"
+        },
+        {
+          "name": "promoteDeferredDraftSession",
+          "kind": "method"
+        },
+        {
+          "name": "readSession",
+          "kind": "method"
+        },
+        {
+          "name": "readSessionEvents",
+          "kind": "method"
+        },
+        {
+          "name": "readSessionMessages",
+          "kind": "method"
+        },
+        {
+          "name": "readWorkspacePresentation",
+          "kind": "method"
+        },
+        {
+          "name": "resumeSession",
+          "kind": "method"
+        },
+        {
+          "name": "setMode",
+          "kind": "method"
+        },
+        {
+          "name": "setModel",
+          "kind": "method"
+        },
+        {
+          "name": "setThoughtLevel",
+          "kind": "method"
+        }
+      ]
+    },
+    {
+      "channel": "zcode-task",
+      "interface": "IZCodeTaskService",
+      "members": [
+        {
+          "name": "applyGroupedTaskViewOrder",
+          "kind": "method"
+        },
+        {
+          "name": "archiveStaleTasks",
+          "kind": "method"
+        },
+        {
+          "name": "archiveTask",
+          "kind": "method"
+        },
+        {
+          "name": "archiveWorkspaceTasks",
+          "kind": "method"
+        },
+        {
+          "name": "branchTaskFromPrompt",
+          "kind": "method"
+        },
+        {
+          "name": "cancelTaskCommand",
+          "kind": "method"
+        },
+        {
+          "name": "closeTask",
+          "kind": "method"
+        },
+        {
+          "name": "compactSession",
+          "kind": "method"
+        },
+        {
+          "name": "createTask",
+          "kind": "method"
+        },
+        {
+          "name": "createTaskGroup",
+          "kind": "method"
+        },
+        {
+          "name": "deleteArchivedTask",
+          "kind": "method"
+        },
+        {
+          "name": "deleteArchivedTasks",
+          "kind": "method"
+        },
+        {
+          "name": "deleteTask",
+          "kind": "method"
+        },
+        {
+          "name": "deleteTaskGroup",
+          "kind": "method"
+        },
+        {
+          "name": "deliverSessionMessage",
+          "kind": "method"
+        },
+        {
+          "name": "enqueueTaskCommand",
+          "kind": "method"
+        },
+        {
+          "name": "getModelTrajectory",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskConfigOptions",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskMeta",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskModelSelection",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskNativeSessionLogFile",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskSessionFilePath",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskSnapshot",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskSnapshotBody",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskSnapshotRef",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskSnapshotToolCallsSlice",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskSnapshotWithEtag",
+          "kind": "method"
+        },
+        {
+          "name": "getTaskTokenUsage",
+          "kind": "method"
+        },
+        {
+          "name": "goalSession",
+          "kind": "method"
+        },
+        {
+          "name": "importClaudeSessions",
+          "kind": "method"
+        },
+        {
+          "name": "initialize",
+          "kind": "method"
+        },
+        {
+          "name": "listArchivedTasks",
+          "kind": "method"
+        },
+        {
+          "name": "listDeletedTaskIds",
+          "kind": "method"
+        },
+        {
+          "name": "listGroupedTaskViewStructure",
+          "kind": "method"
+        },
+        {
+          "name": "listPinnedTaskIds",
+          "kind": "method"
+        },
+        {
+          "name": "listPinnedTasks",
+          "kind": "method"
+        },
+        {
+          "name": "listTaskList",
+          "kind": "method"
+        },
+        {
+          "name": "listTasks",
+          "kind": "method"
+        },
+        {
+          "name": "onDynamicStreamEvent",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicTaskEvent",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicTaskReady",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicTaskTerminalOutcome",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onDynamicWorkspaceEvent",
+          "kind": "dynamicEvent"
+        },
+        {
+          "name": "onError",
+          "kind": "event"
+        },
+        {
+          "name": "promoteTaskCommand",
+          "kind": "method"
+        },
+        {
+          "name": "releaseWorkspacePreparation",
+          "kind": "method"
+        },
+        {
+          "name": "renameTask",
+          "kind": "method"
+        },
+        {
+          "name": "renameTaskGroup",
+          "kind": "method"
+        },
+        {
+          "name": "respondElicitation",
+          "kind": "method"
+        },
+        {
+          "name": "respondPermission",
+          "kind": "method"
+        },
+        {
+          "name": "restartWorkspaceProcess",
+          "kind": "method"
+        },
+        {
+          "name": "resumeTask",
+          "kind": "method"
+        },
+        {
+          "name": "scanImportableClaudeSessions",
+          "kind": "method"
+        },
+        {
+          "name": "sendPrompt",
+          "kind": "method"
+        },
+        {
+          "name": "sendSessionMessageDeliveryResult",
+          "kind": "method"
+        },
+        {
+          "name": "setAssistantMessageFeedback",
+          "kind": "method"
+        },
+        {
+          "name": "setAutomationSessionConfig",
+          "kind": "method"
+        },
+        {
+          "name": "setConfigOption",
+          "kind": "method"
+        },
+        {
+          "name": "setMode",
+          "kind": "method"
+        },
+        {
+          "name": "setModel",
+          "kind": "method"
+        },
+        {
+          "name": "setTaskPinned",
+          "kind": "method"
+        },
+        {
+          "name": "setTaskUnread",
+          "kind": "method"
+        },
+        {
+          "name": "stopGeneration",
+          "kind": "method"
+        },
+        {
+          "name": "unarchiveTask",
+          "kind": "method"
+        },
+        {
+          "name": "updateTaskGroupColor",
+          "kind": "method"
+        }
+      ]
+    }
+  ]
+}
