@@ -328,6 +328,7 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
             provisioning: ProvisioningSource::for_test(home.path()),
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),
+            realtime: None,
         },
         &mut router,
     );
@@ -521,6 +522,7 @@ async fn remote_resource_facts_reach_main() {
             provisioning: ProvisioningSource::for_test(home.path()),
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),
+            realtime: None,
         },
         &mut router,
     );
@@ -586,6 +588,7 @@ async fn remote_attachments_route_usage_and_share_like_node() {
             provisioning: ProvisioningSource::for_test(home.path()),
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),
+            realtime: None,
         },
         &mut router,
     );

@@ -4,8 +4,10 @@
 //! [`RemoteWorkspaces`] 是本模块对 Host 其余部分的唯一入口：
 //! - Main 的远端控制消息（connect / cancel / bind / dispose / provider-provisioning-execute）；
 //! - host-core 为 `scope.kind = "remote"` 的 attachment 解析 scoped channel 表并登记断开租约；
+//! - Bot 远端运行时（[`bots::RemoteBotRuntime`]，§2.9）；
 //! - Host 退出时释放全部远端连接。
 pub mod agent_scope;
+pub mod bots;
 pub mod media;
 pub mod provisioning;
 pub mod registry;
@@ -17,7 +19,7 @@ pub mod transport;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -29,6 +31,7 @@ use zcode_host_control::{ClientMode, ControlRouter, ControlSink, HostToMain, Log
 use zcode_host_kit::{ChannelRegistry, RpcValue, log};
 
 use crate::settings::SettingStore;
+use crate::tasks::realtime::TaskRealtimeBridge;
 use agent_scope::RemoteAgentChannel;
 use provisioning::ProvisioningSource;
 use registry::{
@@ -47,6 +50,10 @@ pub struct RemoteHandle {
     /// 每条 attachment 连接一个 scope，按 `CallContext.connection` 区分。
     pub agent: Arc<RemoteAgentChannel>,
     pub tracker: Arc<tasks::TaskTracker>,
+    /// zcode-task wrapper（附件物化、运行中任务、realtime 镜像），attachment 与 Bot 共用。
+    pub tasks: Arc<tasks::RemoteTaskOps>,
+    /// 远端 attachment 的 `bots` channel 背后的 Bots 实例（第一次 attach 时建，§2.9.8）。
+    bots: OnceLock<Arc<crate::bots::service::Bots>>,
     background: Vec<AbortHandle>,
 }
 
@@ -62,7 +69,13 @@ impl RegistryHandle for RemoteHandle {
         }
         self.tracker.dispose();
         let connection = self.connection.clone();
-        Box::pin(async move { connection.dispose().await })
+        let bots = self.bots.get().cloned();
+        Box::pin(async move {
+            if let Some(bots) = bots {
+                bots.shutdown().await;
+            }
+            connection.dispose().await
+        })
     }
 }
 
@@ -74,6 +87,8 @@ pub struct RemoteConfig {
     /// `ZCODE_REMOTE_MEDIA_RANGE_PREVIEW_ENABLED !== "0"`。
     pub media_range_enabled: bool,
     pub wsl_idle_ttl: Duration,
+    /// tasks 区域的 task realtime bridge（InitLocal 带 hostId 时才有），远端 sendPrompt 镜像用。
+    pub realtime: Option<Arc<TaskRealtimeBridge>>,
 }
 
 /// host-core 拿到的远端 attachment：channel 表与断开信号（session 断线、释放或换代时置 true）。
@@ -101,6 +116,10 @@ pub struct RemoteWorkspaces {
     background: Mutex<Vec<AbortHandle>>,
     /// requestId → 连接日志是否仍在上报（连接 settle 后停止，同 `remoteConnectionProgressContext`）。
     progress: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    /// Bot 远端运行时（注入本地 Bots 的 `RemoteBots`）。
+    bots_runtime: Arc<bots::RemoteBotRuntime>,
+    /// 本地 Bots（automation 区域安装后绑定）；远端 attachment 的 Bots 实例从它派生。
+    local_bots: OnceLock<Arc<crate::bots::service::Bots>>,
 }
 
 fn raw(message: Value) -> HostToMain {
@@ -130,6 +149,7 @@ impl RemoteWorkspaces {
             let settings = config.settings.clone();
             let control = config.control.clone();
             let progress_for_connect = progress.clone();
+            let realtime = config.realtime.clone();
             let owner = weak.clone();
             let mut options = RegistryOptions::new(Arc::new(move |request: ConnectRequest| {
                 let (transport, settings, control, progress, owner) = (
@@ -139,8 +159,12 @@ impl RemoteWorkspaces {
                     progress_for_connect.clone(),
                     owner.clone(),
                 );
+                let realtime = realtime.clone();
                 Box::pin(async move {
-                    connect_handle(transport, settings, control, progress, owner, request).await
+                    connect_handle(
+                        transport, settings, control, progress, owner, realtime, request,
+                    )
+                    .await
                 }) as BoxFuture<'static, _>
             }));
             options.release_workspace = Some(Arc::new(|handle: Arc<RemoteHandle>, context| {
@@ -183,6 +207,12 @@ impl RemoteWorkspaces {
             });
             options.wsl_idle_ttl = config.wsl_idle_ttl;
             let registry = RemoteRegistry::new(options);
+            let bots_runtime = bots::RemoteBotRuntime::new(
+                weak.clone(),
+                config.settings.clone(),
+                config.provisioning.credentials.clone(),
+                crate::main_bridge::MainBridge::new(config.control.clone()),
+            );
             Self {
                 sources: sources::RemoteSources::new(registry.clone()),
                 registry,
@@ -193,12 +223,35 @@ impl RemoteWorkspaces {
                 leases: Mutex::new(Vec::new()),
                 background: Mutex::new(Vec::new()),
                 progress,
+                bots_runtime,
+                local_bots: OnceLock::new(),
             }
         })
     }
 
     pub fn registry(&self) -> &RemoteRegistry<RemoteHandle> {
         &self.registry
+    }
+
+    /// 注入本地 Bots 的远端运行时（`bots::install` 经 `automation::Area::with_remote_bots`）。
+    pub fn bots_runtime(&self) -> Arc<bots::RemoteBotRuntime> {
+        self.bots_runtime.clone()
+    }
+
+    /// automation 区域装好本地 Bots 后绑定；之后的远端 attachment 才有按连接的 Bots 实例。
+    pub fn bind_bots(&self, local: Arc<crate::bots::service::Bots>) {
+        let _ = self.local_bots.set(local);
+    }
+
+    /// 远端 attachment 的 Bots 实例：每条连接一个，第一次需要时从本地 Bots 派生。
+    fn connection_bots(&self, handle: &RemoteHandle) -> Option<Arc<crate::bots::service::Bots>> {
+        let local = self.local_bots.get()?;
+        Some(
+            handle
+                .bots
+                .get_or_init(|| bots::connection_bots(local, handle))
+                .clone(),
+        )
     }
 
     /// window-controller 的远端 source（测试与 install 用）。
@@ -264,6 +317,7 @@ impl RemoteWorkspaces {
 
     /// 登记 Main → Host 的远端控制消息。
     pub fn register_control(self: &Arc<Self>, router: &mut ControlRouter) {
+        self.bots_runtime.register(router);
         let remote = self.clone();
         router.on("connect-remote-workspace", move |message| {
             remote.clone().on_connect(message)
@@ -550,13 +604,19 @@ impl RemoteWorkspaces {
         registry.register(
             "zcode-task",
             tasks::RemoteTaskChannel::new(
-                client.clone(),
-                backend.clone(),
-                handle.tracker.clone(),
+                handle.tasks.clone(),
                 self.sources.clone(),
                 scope.clone(),
             ),
         );
+        // 远端集合的 bots 绑定该连接的远端 zcode-task（`runStartupBackgroundTasks:false`）；未实现的
+        // 成员回落到本地 Host 的同名 channel。
+        if let Some(bots) = self.connection_bots(&handle) {
+            registry.register(
+                "bots",
+                crate::bots::service::channel(bots).build(local.get("bots")),
+            );
+        }
         registry.register(
             "zcode-session",
             tasks::RemoteSessionChannel::new(client.clone(), backend),
@@ -628,6 +688,7 @@ async fn connect_handle(
     control: Arc<dyn ControlSink>,
     progress: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     owner: std::sync::Weak<RemoteWorkspaces>,
+    realtime: Option<Arc<TaskRealtimeBridge>>,
     request: ConnectRequest,
 ) -> Result<Arc<RemoteHandle>, String> {
     let current = settings.get().await;
@@ -713,8 +774,16 @@ async fn connect_handle(
             }
         }),
     );
+    let tasks = tasks::RemoteTaskOps::new(
+        connection.client.clone(),
+        connection.backend.clone(),
+        tracker.clone(),
+        realtime,
+    );
     Ok(Arc::new(RemoteHandle {
         tracker,
+        tasks,
+        bots: OnceLock::new(),
         agent: RemoteAgentChannel::new(connection.client.clone()),
         connection,
         target: request.target,
@@ -730,6 +799,7 @@ pub fn install(
     context: &crate::ServiceContext,
     sources: provisioning::ProvisioningSources,
     controller: &Arc<crate::tasks::controller::Controller>,
+    realtime: Option<Arc<TaskRealtimeBridge>>,
     router: &mut ControlRouter,
 ) -> Arc<RemoteWorkspaces> {
     let environment = &context.environment;
@@ -770,6 +840,7 @@ pub fn install(
             media_range_enabled: non_empty("ZCODE_REMOTE_MEDIA_RANGE_PREVIEW_ENABLED").as_deref()
                 != Some("0"),
             wsl_idle_ttl: Duration::from_secs(60),
+            realtime,
         },
         router,
     );
@@ -891,6 +962,8 @@ fn runtime_preferences_bridge(
     .abort_handle()
 }
 
+#[cfg(test)]
+mod bots_tests;
 #[cfg(test)]
 mod fake_remote;
 #[cfg(test)]

@@ -73,6 +73,8 @@ pub struct Area {
     pub bot_delivery: OnceLock<Arc<dyn BotDelivery>>,
     /// 账号栈（[`Area::with_account`]）；没有时闲时任务只有 mock 凭据。
     pub account: Option<AccountLink>,
+    /// Bot 远端运行时（[`Area::with_remote_bots`]，远端区域提供）；没有时远端上下文视为未连接。
+    pub remote_bots: Arc<dyn crate::bots::RemoteBots>,
 }
 
 impl Area {
@@ -104,12 +106,19 @@ impl Area {
             oauth,
             bot_delivery: OnceLock::new(),
             account: None,
+            remote_bots: Arc::new(crate::bots::NoRemote),
         }
     }
 
     /// 接入账号栈的请求期鉴权与来源头（install 时由 account 区域提供）。
     pub fn with_account(mut self, account: AccountLink) -> Self {
         self.account = Some(account);
+        self
+    }
+
+    /// 接入远端区域的 Bot 远端运行时（docs/specs/rust-host-remote.md §2.9）。
+    pub fn with_remote_bots(mut self, remote: Arc<dyn crate::bots::RemoteBots>) -> Self {
+        self.remote_bots = remote;
         self
     }
 }
@@ -121,6 +130,11 @@ pub struct AreaHandle {
 }
 
 impl AreaHandle {
+    /// 本地 Bots（远端区域据此派生远端 attachment 的 Bots 实例）。
+    pub fn bots(&self) -> Option<&Arc<crate::bots::service::Bots>> {
+        self.bots.as_ref()
+    }
+
     /// Host 退出（`Installed::shutdown`，CLI 回收之前）：bots 停通道运行时并释放跨进程运行锁
     /// （Node `disposeServiceResourcesAndWait` 里的 `IBotsService.disposeAllAndWait`）；有上限。
     pub async fn shutdown(&self) {

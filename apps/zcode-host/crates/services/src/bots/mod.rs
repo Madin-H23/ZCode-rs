@@ -21,7 +21,7 @@ pub mod store;
 pub mod stream;
 pub mod telegram;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -171,7 +171,7 @@ pub trait RemoteBots: Send + Sync {
     }
 }
 
-/// 远端区域合并之前的实现：没有远端运行时，远端上下文一律视为未连接。
+/// 没有远端区域时的实现（单测、只装 automation 的组合）：远端上下文一律视为未连接。
 pub struct NoRemote;
 
 impl RemoteBots for NoRemote {
@@ -716,7 +716,8 @@ pub fn install(
             area: area.clone(),
             client_id: format!("host-bots-{}", crate::automation::driver::uuid_v7()),
         }),
-        remote: Arc::new(NoRemote),
+        // 远端 workspace 的 Bot 运行时由远端区域实现（rust-host-remote.md §2.9），经 Area 注入。
+        remote: area.remote_bots.clone(),
         attachments_dir: dir.join("bot-attachments"),
         // Rust Host 只作为桌面本地 Host 运行，总是负责 Bot 长连接与轮询；desktop-attached 远端 Host
         // 是 Node zcode-server，自己按 runStartupBackgroundTasks 决定（docs/specs/rust-host-bots.md §2.3）。

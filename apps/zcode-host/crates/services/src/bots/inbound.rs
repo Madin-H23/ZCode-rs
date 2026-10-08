@@ -2,6 +2,7 @@
 //! `/bind`、`/help`、`/status`、`/new`、`/stop`、`/reconnect`、普通消息与附件）。
 //!
 //! 选择命令在 [`super::selection`]，问答与权限在 [`super::interaction`]，回复流水线在 [`super::watch`]。
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
@@ -30,6 +31,47 @@ use crate::agent::WorkspaceTarget;
 use crate::automation::driver::{SendText, uuid_v7};
 
 const INBOUND_DEDUPE_TTL_MS: i64 = 2 * 60_000;
+/// 同一聊天与 workspace 的 `/reconnect` 结束后 3 s 内不再执行（`REMOTE_RECONNECT_DEDUPE_TTL_MS`）。
+const RECONNECT_DEDUPE_TTL_MS: i64 = 3_000;
+/// 同一条 provider 消息的 `/reconnect` 2 分钟内只执行一次（`REMOTE_RECONNECT_DELIVERY_DEDUPE_TTL_MS`）。
+const RECONNECT_DELIVERY_DEDUPE_TTL_MS: i64 = 2 * 60_000;
+
+/// `/reconnect` 的两层幂等状态（Node `recentRemoteReconnectDeliveryAtByKey`、
+/// `pendingRemoteReconnectsByKey`、`recentRemoteReconnectAtByKey`）。
+#[derive(Default)]
+pub(crate) struct Reconnects {
+    /// provider 消息投递键 → 登记时间。
+    delivered: HashMap<String, i64>,
+    /// 命令键（bot + provider + 聊天 + workspace）→ (登记 id, 在途重连)，结束时置 true。
+    pending: HashMap<String, (u64, tokio::sync::watch::Receiver<bool>)>,
+    /// 命令键 → 上次重连结束的时间。
+    recent: HashMap<String, i64>,
+    next_id: u64,
+}
+
+/// 一次在途重连的登记：结束（包括调用方被取消）时移除并唤醒等待者，不会留下永远“在途”的键。
+struct PendingReconnect<'a> {
+    bots: &'a Bots,
+    key: String,
+    id: u64,
+    done: tokio::sync::watch::Sender<bool>,
+}
+
+impl Drop for PendingReconnect<'_> {
+    fn drop(&mut self) {
+        {
+            let mut reconnects = guard(&self.bots.reconnects);
+            if reconnects
+                .pending
+                .get(&self.key)
+                .is_some_and(|(id, _)| *id == self.id)
+            {
+                reconnects.pending.remove(&self.key);
+            }
+        }
+        self.done.send_replace(true);
+    }
+}
 /// Bot 硬锁 yolo 运行模式。
 const BOT_FORCED_MODE: &str = "yolo";
 const MAX_ATTACHMENTS: usize = 4;
@@ -1209,7 +1251,9 @@ impl Bots {
             .await
     }
 
-    /// `/reconnect`：本地项目不需要重连；远端交给 [`super::RemoteBots`]（当前没有远端运行时）。
+    /// `/reconnect`（`handleReconnect`）：本地项目不需要重连；远端交给 [`super::RemoteBots`]。顺序与两层
+    /// 幂等同 Node：provider 消息投递去重 → 同聊天同 workspace 在途合并、3 s 去重 → 已连接回状态 →
+    /// “正在重连” → 重连。
     async fn handle_reconnect(self: &Arc<Self>, inbound: &Inbound) -> Result<Vec<Value>> {
         let actor = &inbound.actor;
         let auth = match self.authorize(inbound, "workspace").await? {
@@ -1233,16 +1277,101 @@ impl Bots {
                 ),
             ));
         }
+        let now = now_ms();
+        let chat = format!(
+            "{}::{}::{}",
+            actor.bot_id,
+            actor.provider,
+            actor.reply_target()
+        );
+        // provider 会重投同一条消息；/reconnect 有副作用，执行前就按消息 id 登记，不随失败释放。
+        let delivery_key = actor
+            .provider_message_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(|id| format!("{chat}::{id}"));
+        let command_key = format!("{chat}::{}", context_key(&auth.context));
+        let pending = {
+            let mut reconnects = guard(&self.reconnects);
+            reconnects
+                .delivered
+                .retain(|_, at| now - *at < RECONNECT_DELIVERY_DEDUPE_TTL_MS);
+            reconnects
+                .recent
+                .retain(|_, at| now - *at < RECONNECT_DEDUPE_TTL_MS);
+            if let Some(key) = &delivery_key {
+                if reconnects.delivered.contains_key(key) {
+                    return Ok(Vec::new());
+                }
+                reconnects.delivered.insert(key.clone(), now);
+            }
+            reconnects
+                .pending
+                .get(&command_key)
+                .map(|(_, pending)| pending.clone())
+        };
+        // 同一聊天与 workspace 已在重连：等它结束，不再重复回复（避免“已连接”和“正在重连”互相打架）。
+        if let Some(mut pending) = pending {
+            let _ = pending.wait_for(|done| *done).await;
+            return Ok(Vec::new());
+        }
+        if guard(&self.reconnects).recent.contains_key(&command_key) {
+            return Ok(Vec::new());
+        }
         if self.remote_connected(&auth.context).await {
             return self.status_reply(actor, &auth.context, locale).await;
         }
-        // “正在重连”是即时提示：在真正重连前发出，发送失败不能中断重连。
+        let registration = {
+            let mut reconnects = guard(&self.reconnects);
+            match reconnects.pending.get(&command_key) {
+                Some((_, other)) => Err(other.clone()),
+                None => {
+                    reconnects.next_id += 1;
+                    let id = reconnects.next_id;
+                    let (done, receiver) = tokio::sync::watch::channel(false);
+                    reconnects
+                        .pending
+                        .insert(command_key.clone(), (id, receiver));
+                    Ok(PendingReconnect {
+                        bots: self,
+                        key: command_key.clone(),
+                        id,
+                        done,
+                    })
+                }
+            }
+        };
+        let registration = match registration {
+            Ok(registration) => registration,
+            Err(mut other) => {
+                let _ = other.wait_for(|done| *done).await;
+                return Ok(Vec::new());
+            }
+        };
+        let result = self.perform_reconnect(inbound, &auth, &path, locale).await;
+        if result.is_ok() {
+            guard(&self.reconnects).recent.insert(command_key, now_ms());
+        }
+        drop(registration);
+        result
+    }
+
+    /// “正在重连”是即时提示：在真正重连前发出，发送失败不能中断重连。
+    async fn perform_reconnect(
+        self: &Arc<Self>,
+        inbound: &Inbound,
+        auth: &Auth,
+        path: &str,
+        locale: Option<&str>,
+    ) -> Result<Vec<Value>> {
+        let actor = &inbound.actor;
         let starting = plain(
             actor,
             msg(
                 locale,
                 "remoteReconnectStarting",
-                &[("workspacePath", &path)],
+                &[("workspacePath", path)],
             ),
         );
         if let Err(error) = self.send_outbound(&auth.bot, &starting[0]).await {
@@ -1261,7 +1390,7 @@ impl Bots {
                 msg(
                     locale,
                     "remoteReconnectFailed",
-                    &[("workspacePath", &path), ("message", &message)],
+                    &[("workspacePath", path), ("message", &message)],
                 ),
             )),
             Ok(()) => {

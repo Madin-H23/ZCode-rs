@@ -15,7 +15,7 @@ use zcode_host_kit::EventHub;
 use super::providers::{Endpoints, Providers};
 use super::service::{Bots, BotsDeps};
 use super::store::BotsRepo;
-use super::{FinalReply, NoRemote, TaskPort};
+use super::{FinalReply, NoRemote, RemoteBots, TaskPort};
 use crate::account::credential::CredentialStore;
 use crate::agent::WorkspaceTarget;
 use crate::automation::driver::{SendText, TerminalOutcome};
@@ -627,6 +627,17 @@ pub fn bots_in(
     tasks: Arc<dyn TaskPort>,
     background: bool,
 ) -> Arc<Bots> {
+    bots_with_remote(dir, origin, tasks, Arc::new(NoRemote), background)
+}
+
+/// 同 [`bots_in`]，注入给定的远端运行时。
+pub fn bots_with_remote(
+    dir: &std::path::Path,
+    origin: &str,
+    tasks: Arc<dyn TaskPort>,
+    remote: Arc<dyn RemoteBots>,
+    background: bool,
+) -> Arc<Bots> {
     let config_dir = dir.join(".zcode").join("v2");
     std::fs::create_dir_all(&config_dir).unwrap();
     if !config_dir.join("setting.json").exists() {
@@ -644,7 +655,7 @@ pub fn bots_in(
         providers: Arc::new(Providers::new(Endpoints::local(origin)).unwrap()),
         settings: SettingStore::new(dir),
         tasks,
-        remote: Arc::new(NoRemote),
+        remote,
         attachments_dir: config_dir.join("bot-attachments"),
         background,
     });
