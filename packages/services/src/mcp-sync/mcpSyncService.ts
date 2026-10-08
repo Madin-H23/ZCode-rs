@@ -1,8 +1,8 @@
 /* eslint-disable max-lines -- MCP 同步服务集中维护用户目录读写、远端导入和 filesystem 路径改写，拆分会增加远端配置同步回归面。 */
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, posix, win32 } from "node:path";
+import { dirname, join, posix, win32 } from "node:path";
 import type {
   LoadCliMcpFromUserDirectoryRequest,
   LoadCliMcpFromUserDirectoryResult,
@@ -20,6 +20,7 @@ import type {
 } from "@zcode/shared";
 import type { IMcpSyncService } from "./mcpSync.js";
 import { checkRemoteSyncDirectoryWriteAccess } from "../remote-sync/remoteSyncWriteAccess.js";
+import { updateJsonRecordFileLocked } from "../fs/cliConfigFile.js";
 
 type McpConfigKeyName = "mcp.servers" | "mcpServers";
 
@@ -63,7 +64,6 @@ const ENABLED_KEY = "enabled";
 // 一直是 enabled，导致同一条 server 出现两套口径、停用后仍被 agent 拉起。
 // 现在读写逻辑一律只认 enabled，这里只保留一次性迁移；存量配置清空后整块删除。
 const LEGACY_ENABLE_KEY = "enable";
-const SECRET_CONFIG_FILE_MODE = 0o600;
 const DIRECTORY_MCP_DESCRIPTORS: readonly DirectoryMcpDescriptor[] = [
   ZCODE_MCP_DESCRIPTOR,
   AGENTS_MCP_DESCRIPTOR,
@@ -249,25 +249,26 @@ async function saveMcpToUserDirectory(payload: SaveCliMcpToUserDirectoryRequest)
   }
 
   const scope: Exclude<McpScope, "common"> = payload.projectPath ? "workspace" : "user";
-  const existingServers = await readDirectoryServersFromFile(
-    ZCODE_MCP_DESCRIPTOR,
-    scope,
-    payload.projectPath,
-  );
-  const nextServers = Object.fromEntries(
-    existingServers.map((server) => [server.name, server.config as Record<string, unknown>]),
-  );
-
-  if (payload.action === "upsert") {
-    if (!payload.config) {
-      throw new Error("Missing MCP config for upsert action");
-    }
-    nextServers[payload.name] = payload.config as Record<string, unknown>;
-  } else {
-    delete nextServers[payload.name];
+  // 先读一次：保留旧 enable 字段迁移这一既有副作用。
+  await readDirectoryServersFromFile(ZCODE_MCP_DESCRIPTOR, scope, payload.projectPath);
+  if (payload.action === "upsert" && !payload.config) {
+    throw new Error("Missing MCP config for upsert action");
   }
 
-  await writeZCodeServersToFile(scope, nextServers, payload.projectPath);
+  // server map 必须在锁内从最新内容重算：修复前用锁外读到的旧列表整体覆盖，
+  // 会把其他写入方（Main、Rust Host、CLI）同时新增的 server 丢掉。
+  const filePath = buildDirectoryConfigPath(ZCODE_MCP_DESCRIPTOR, scope, payload.projectPath);
+  await updateMcpConfigFile(filePath, (current) => {
+    const nextServers = migrateLegacyEnableFlag(
+      readServerMapFromJson(current, ZCODE_MCP_DESCRIPTOR.configKeyName),
+    ).servers;
+    if (payload.action === "upsert") {
+      nextServers[payload.name] = payload.config as Record<string, unknown>;
+    } else {
+      delete nextServers[payload.name];
+    }
+    return writeServerMapToJson(current, ZCODE_MCP_DESCRIPTOR.configKeyName, nextServers);
+  });
 }
 
 function sortMcpRecords(records: UserMcpRecord[]): UserMcpRecord[] {
@@ -320,23 +321,32 @@ async function readDirectoryServersFromFile(
   }));
 }
 
-async function writeZCodeServersToFile(
-  scope: Exclude<McpScope, "common">,
-  servers: Record<string, Record<string, unknown>>,
-  workspacePath?: string,
+/** 锁内的严格解析：JSON 损坏时报错，绝不当成空对象覆盖 provider、MCP 和 secret 配置。 */
+function parseMcpConfigText(filePath: string, raw: string | null): Record<string, unknown> {
+  if (raw === null) {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (error) {
+    throw new Error(`无法解析 MCP 配置文件 ${filePath}: ${formatErrorMessage(error)}`);
+  }
+  if (!isRecord(parsed)) {
+    throw new Error(`MCP 配置文件 ${filePath} 必须是 JSON 对象`);
+  }
+  return parsed;
+}
+
+/**
+ * MCP 配置（含 `~/.zcode/cli/config.json`）由 Main、CLI 与 Node / Rust Host 共同写入：
+ * 读改写整体持跨进程锁，锁内原子替换（0600）。修复前读与写之间不持锁，并发时会丢更新。
+ */
+async function updateMcpConfigFile(
+  filePath: string,
+  mutate: (current: Record<string, unknown>) => Record<string, unknown> | false,
 ): Promise<void> {
-  const filePath = buildDirectoryConfigPath(ZCODE_MCP_DESCRIPTOR, scope, workspacePath);
-  const current = (await readJsonObject(filePath)) ?? {};
-  const next = writeServerMapToJson(current, ZCODE_MCP_DESCRIPTOR.configKeyName, servers);
-  await writeTextAtomic(filePath, `${JSON.stringify(next, null, 2)}\n`);
-}
-
-async function readUserCliConfig(): Promise<Record<string, unknown>> {
-  return (await readJsonObject(getUserZcodeMcpConfigPath())) ?? {};
-}
-
-async function writeUserCliConfig(config: Record<string, unknown>): Promise<void> {
-  await writeTextAtomic(getUserZcodeMcpConfigPath(), `${JSON.stringify(config, null, 2)}\n`);
+  await updateJsonRecordFileLocked(filePath, mutate, (raw) => parseMcpConfigText(filePath, raw));
 }
 
 function removeLegacyMcpEnabledOverride(
@@ -376,11 +386,10 @@ async function cleanupLegacyMcpEnabledOverride(
   location: SettingsDirectoryLocation,
   name: string,
 ): Promise<void> {
-  const userConfig = await readUserCliConfig();
-  const result = removeLegacyMcpEnabledOverride(userConfig, location, name);
-  if (result.changed) {
-    await writeUserCliConfig(result.config);
-  }
+  await updateMcpConfigFile(getUserZcodeMcpConfigPath(), (userConfig) => {
+    const result = removeLegacyMcpEnabledOverride(userConfig, location, name);
+    return result.changed ? result.config : false;
+  });
 }
 
 async function writeServerEnabledToFile(
@@ -392,24 +401,28 @@ async function writeServerEnabledToFile(
   const scope: Exclude<McpScope, "common"> = location.scope === "project" ? "workspace" : "user";
   const workspacePath = scope === "workspace" ? location.projectPath : undefined;
   const filePath = buildDirectoryConfigPath(descriptor, scope, workspacePath);
-  const current = (await readJsonObject(filePath)) ?? {};
-  const serverMap = readServerMapFromJson(current, descriptor.configKeyName);
-  const currentServer = serverMap[name];
-  if (!isRecord(currentServer)) {
-    return;
-  }
-  // MCP 自身已有 mcp.servers/mcpServers 结构；禁用状态写在 server 配置对象内，
-  // 避免把目录路径写到 mcp 顶层后和真实 MCP 配置混在一起。
-  const nextServerMap = {
-    ...serverMap,
-    [name]: setServerEnabled(currentServer as McpServerConfig, enabled) as Record<string, unknown>,
-  };
-  let next = writeServerMapToJson(current, descriptor.configKeyName, nextServerMap);
-  const legacyCleanup = removeLegacyMcpEnabledOverride(next, location, name);
-  if (legacyCleanup.changed) {
-    next = legacyCleanup.config;
-  }
-  await writeTextAtomic(filePath, `${JSON.stringify(next, null, 2)}\n`);
+  await updateMcpConfigFile(filePath, (current) => {
+    const serverMap = readServerMapFromJson(current, descriptor.configKeyName);
+    const currentServer = serverMap[name];
+    if (!isRecord(currentServer)) {
+      return false;
+    }
+    // MCP 自身已有 mcp.servers/mcpServers 结构；禁用状态写在 server 配置对象内，
+    // 避免把目录路径写到 mcp 顶层后和真实 MCP 配置混在一起。
+    const nextServerMap = {
+      ...serverMap,
+      [name]: setServerEnabled(currentServer as McpServerConfig, enabled) as Record<
+        string,
+        unknown
+      >,
+    };
+    let next = writeServerMapToJson(current, descriptor.configKeyName, nextServerMap);
+    const legacyCleanup = removeLegacyMcpEnabledOverride(next, location, name);
+    if (legacyCleanup.changed) {
+      next = legacyCleanup.config;
+    }
+    return next;
+  });
 }
 
 async function readUserMcpRecordsFromFile(
@@ -509,8 +522,11 @@ async function readServerMapWithLegacyMigration(
   }
 
   try {
-    const next = writeServerMapToJson(parsed, configKeyName, migration.servers);
-    await writeTextAtomic(filePath, `${JSON.stringify(next, null, 2)}\n`);
+    // 回写在锁内基于最新内容重新迁移，不能用锁外读到的旧对象覆盖并发修改。
+    await updateMcpConfigFile(filePath, (current) => {
+      const fresh = migrateLegacyEnableFlag(readServerMapFromJson(current, configKeyName));
+      return fresh.changed ? writeServerMapToJson(current, configKeyName, fresh.servers) : false;
+    });
   } catch (error) {
     console.warn("[mcp-sync] legacy enable migration failed:", filePath, formatErrorMessage(error));
   }
@@ -563,67 +579,66 @@ async function importMcpServers(params: {
   remoteWorkspacePath?: string;
 }): Promise<McpSyncImportResult> {
   const targetPath = getUserZcodeMcpConfigPath();
-  const current = (await readJsonObject(targetPath)) ?? {};
-  const targetServers = readServerMapFromJson(current, ZCODE_MCP_DESCRIPTOR.configKeyName);
+  // 已有记录先在锁外读（可能触发自身持锁的旧字段迁移）；合并与写入在同一把锁内完成。
   const existingByName = await collectEffectiveUserMcpRecordByName();
   const results: McpSyncImportResult["results"] = [];
-  let changed = false;
+  await updateMcpConfigFile(targetPath, (current) => {
+    const targetServers = readServerMapFromJson(current, ZCODE_MCP_DESCRIPTOR.configKeyName);
+    let changed = false;
 
-  for (const server of params.servers) {
-    const nameKey = normalizeMcpNameKey(server.name);
-    const existingTarget = targetServers[server.name];
-    if (existingTarget) {
-      results.push({ name: server.name, status: "skipped", path: targetPath });
-      continue;
+    for (const server of params.servers) {
+      const nameKey = normalizeMcpNameKey(server.name);
+      const existingTarget = targetServers[server.name];
+      if (existingTarget) {
+        results.push({ name: server.name, status: "skipped", path: targetPath });
+        continue;
+      }
+
+      const existing = existingByName.get(nameKey);
+      if (existing) {
+        results.push({
+          name: server.name,
+          status: "skipped",
+          path: existing.path,
+        });
+        continue;
+      }
+
+      try {
+        const rewrittenConfig = rewriteFilesystemMcpConfig(
+          server.name,
+          setServerEnabled(cloneMcpConfig(server.config), server.enabled),
+          {
+            localHomeDir: params.localHomeDir,
+            localWorkspacePath: params.localWorkspacePath,
+            remoteHomeDir: resolveUserHomeDir(),
+            remoteWorkspacePath: params.remoteWorkspacePath,
+          },
+        );
+        targetServers[server.name] = rewrittenConfig as Record<string, unknown>;
+        existingByName.set(nameKey, {
+          name: server.name,
+          config: rewrittenConfig,
+          enabled: server.enabled,
+          source: "zcode",
+          path: targetPath,
+        });
+        results.push({ name: server.name, status: "synced", path: targetPath });
+        changed = true;
+      } catch (error) {
+        results.push({
+          name: server.name,
+          status: "failed",
+          path: targetPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
-    const existing = existingByName.get(nameKey);
-    if (existing) {
-      results.push({
-        name: server.name,
-        status: "skipped",
-        path: existing.path,
-      });
-      continue;
-    }
-
-    try {
-      const rewrittenConfig = rewriteFilesystemMcpConfig(
-        server.name,
-        setServerEnabled(cloneMcpConfig(server.config), server.enabled),
-        {
-          localHomeDir: params.localHomeDir,
-          localWorkspacePath: params.localWorkspacePath,
-          remoteHomeDir: resolveUserHomeDir(),
-          remoteWorkspacePath: params.remoteWorkspacePath,
-        },
-      );
-      targetServers[server.name] = rewrittenConfig as Record<string, unknown>;
-      existingByName.set(nameKey, {
-        name: server.name,
-        config: rewrittenConfig,
-        enabled: server.enabled,
-        source: "zcode",
-        path: targetPath,
-      });
-      results.push({ name: server.name, status: "synced", path: targetPath });
-      changed = true;
-    } catch (error) {
-      results.push({
-        name: server.name,
-        status: "failed",
-        path: targetPath,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  if (changed) {
-    await writeTextAtomic(
-      targetPath,
-      `${JSON.stringify(writeServerMapToJson(current, ZCODE_MCP_DESCRIPTOR.configKeyName, targetServers), null, 2)}\n`,
-    );
-  }
+    return changed
+      ? writeServerMapToJson(current, ZCODE_MCP_DESCRIPTOR.configKeyName, targetServers)
+      : false;
+  });
 
   return { results };
 }
@@ -803,24 +818,4 @@ function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-async function writeTextAtomic(filePath: string, content: string): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true });
-  const tempPath = join(
-    dirname(filePath),
-    `${basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`,
-  );
-  try {
-    // 远端 MCP 配置会持久化 env/header/token 等 secret；
-    // 临时文件权限不能依赖远端 umask，否则 rename 后 config.json 可能被同组或其他用户读取。
-    await writeFile(tempPath, content, {
-      encoding: "utf-8",
-      mode: SECRET_CONFIG_FILE_MODE,
-    });
-    await rename(tempPath, filePath);
-  } catch (error) {
-    await rm(tempPath, { force: true });
-    throw error;
-  }
 }

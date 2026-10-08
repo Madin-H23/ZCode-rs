@@ -1,15 +1,5 @@
 /* eslint-disable max-lines -- skill 发现 + 校验 + 状态 + 通用目录管理在同一服务里聚合，分层后跳转成本更高 */
-import {
-  access,
-  appendFile,
-  cp,
-  mkdir,
-  realpath,
-  rm,
-  readFile,
-  readdir,
-  writeFile,
-} from "node:fs/promises";
+import { access, appendFile, cp, mkdir, realpath, rm, readFile, readdir } from "node:fs/promises";
 import { existsSync, type Dirent } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
@@ -29,6 +19,7 @@ import { DEFAULT_ENABLED_OFFICIAL_PLUGIN_IDS } from "@zcode/shared";
 import type { ISkillsService } from "./skills.js";
 import { SKILL_FILE_NAME, walkSkillMarkdownPaths } from "./skillDiscoveryWalk.js";
 import { readInstalledPluginRoots } from "#src/plugins/installedPluginRoots.js";
+import { updateJsonRecordFileLocked } from "#src/fs/cliConfigFile.js";
 
 interface DiscoverResult {
   skills: SkillSummary[];
@@ -558,8 +549,11 @@ async function readSkillEnabledMap(): Promise<Record<string, boolean>> {
   return readSkillEnabledMapFromConfig(await readCliConfigFile());
 }
 
-async function writeSkillEnabledMap(next: Record<string, boolean>): Promise<void> {
-  const config = await readCliConfigFile();
+/** 把启用覆盖写回 config 对象（原地修改）。 */
+function applySkillEnabledMap(
+  config: Record<string, unknown>,
+  next: Record<string, boolean>,
+): Record<string, unknown> {
   const skillsConfig = isObjectRecord(config.skills) ? config.skills : {};
   for (const [path, enable] of Object.entries(next).sort(([left], [right]) =>
     left.localeCompare(right),
@@ -579,8 +573,7 @@ async function writeSkillEnabledMap(next: Record<string, boolean>): Promise<void
   } else {
     delete config.skills;
   }
-  await mkdir(SKILL_CLI_SETTINGS_DIR, { recursive: true });
-  await writeFile(SKILL_CLI_CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
+  return config;
 }
 
 interface SkillRootDescriptor {
@@ -1070,9 +1063,13 @@ export function createSkillsService(options?: SkillsServiceOptions): ISkillsServ
         if (!skill) {
           throw new Error(`Skill not found: ${params.skillId}`);
         }
-        const enabledByPath = await readSkillEnabledMap();
-        enabledByPath[normalizeSkillConfigPath(skill.path)] = params.enabled;
-        await writeSkillEnabledMap(enabledByPath);
+        // config.json 由 Main、CLI 与 Node / Rust Host 共同写入：读改写整体持跨进程锁，
+        // 避免并发时用旧快照覆盖对方刚写入的字段（修复前这里是不持锁的原地 writeFile）。
+        await updateJsonRecordFileLocked(SKILL_CLI_CONFIG_FILE, (config) => {
+          const enabledByPath = readSkillEnabledMapFromConfig(config);
+          enabledByPath[normalizeSkillConfigPath(skill.path)] = params.enabled;
+          return applySkillEnabledMap(config, enabledByPath);
+        });
       };
 
       const queued = writeQueue.then(runUpdate, runUpdate);

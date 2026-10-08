@@ -16,6 +16,7 @@ pub mod bots;
 pub mod broadcast;
 pub mod conversation_share;
 pub mod cua_permission;
+pub mod extensions;
 pub mod file;
 pub mod file_watcher;
 pub mod git;
@@ -320,6 +321,16 @@ pub fn install(
         ),
         registry,
         router,
+    );
+
+    // ── extensions ──
+    extensions::install(
+        registry,
+        &agent,
+        extensions::Roots::new(
+            &context.environment.user_home,
+            &context.environment.data_base_dir,
+        ),
     );
 
     agent::session::warm_up(

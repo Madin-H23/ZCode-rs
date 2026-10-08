@@ -4,6 +4,7 @@
  * This subpath must not be imported by renderer/browser bundles.
  */
 export { acquireFileLock } from "./node/atomicFileLock.js";
+export { updateTextFileLocked } from "./node/lockedTextFile.js";
 export { scanOfficialPluginCacheRoots } from "./node/officialPluginCache.js";
 export {
   migrateUserSubagentMarkdown,

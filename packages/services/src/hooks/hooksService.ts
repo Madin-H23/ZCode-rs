@@ -19,6 +19,7 @@ import {
   type WorkspaceHooksConfig,
 } from "@zcode/shared/workspace-hook-discovery";
 import { parseWorkspaceHookTrustStoreContent } from "@zcode/shared/workspace-hook-trust-store-file";
+import { withFileLock } from "@zcode/shared/node";
 import { createServiceLogger, type ServiceLogger } from "#src/logger/serviceLogger.js";
 import type { IHooksService } from "./hooks.js";
 import { atomicWriteWorkspaceHookConfig } from "./workspaceHookConfigMutation.js";
@@ -272,15 +273,19 @@ async function writeZCodeHooksConfig(
   hooks: Hook[],
 ): Promise<void> {
   const configPath = getConfigPath("zcode", workspacePath);
-  const existingConfig = (await readJsonFile<ZCodeConfigFile>(configPath)) ?? {};
-  const enabled = resolveNextRootEnabled(existingConfig.hooks?.enabled, hooks);
-  await atomicWriteWorkspaceHookConfig(configPath, {
-    ...existingConfig,
-    hooks: {
-      ...existingConfig.hooks,
-      ...(enabled !== undefined ? { enabled } : {}),
-      events: toZCodeHooksEvents(hooks),
-    },
+  // 用户级是 `~/.zcode/cli/config.json`，Main、CLI 与 Node / Rust Host 都会写：读改写整体持
+  // 跨进程锁，修复前锁外读、锁外写会用旧快照覆盖其他写入方刚写入的字段。
+  await withFileLock(configPath, async () => {
+    const existingConfig = (await readJsonFile<ZCodeConfigFile>(configPath)) ?? {};
+    const enabled = resolveNextRootEnabled(existingConfig.hooks?.enabled, hooks);
+    await atomicWriteWorkspaceHookConfig(configPath, {
+      ...existingConfig,
+      hooks: {
+        ...existingConfig.hooks,
+        ...(enabled !== undefined ? { enabled } : {}),
+        events: toZCodeHooksEvents(hooks),
+      },
+    });
   });
 }
 
