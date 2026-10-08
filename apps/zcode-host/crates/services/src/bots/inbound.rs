@@ -1239,7 +1239,11 @@ impl Bots {
         // “正在重连”是即时提示：在真正重连前发出，发送失败不能中断重连。
         let starting = plain(
             actor,
-            msg(locale, "remoteReconnectStarting", &[("workspacePath", &path)]),
+            msg(
+                locale,
+                "remoteReconnectStarting",
+                &[("workspacePath", &path)],
+            ),
         );
         if let Err(error) = self.send_outbound(&auth.bot, &starting[0]).await {
             log::warn(format!(
