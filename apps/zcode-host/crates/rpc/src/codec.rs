@@ -368,7 +368,20 @@ pub struct RpcError {
     /// 透传键 `code`：Host 自身的错误是字符串，CLI 业务错误是 JSON-RPC 数字码。
     pub code: Option<Box<Value>>,
     pub data: Option<Box<Value>>,
+    /// 其余透传键（`kind`、`status`、`retryAfterMs`、`detail`、`details`、`taskId`、`traceId`）。
+    pub fields: Option<Box<Map<String, Value>>>,
 }
+
+/// `ChannelServer` / `ChannelClient` 的 9 个透传键中，除 `code`、`data` 之外的部分。
+const PASSTHROUGH_FIELDS: [&str; 7] = [
+    "kind",
+    "status",
+    "retryAfterMs",
+    "detail",
+    "details",
+    "taskId",
+    "traceId",
+];
 
 impl RpcError {
     pub fn new(name: impl Into<String>, message: impl Into<String>) -> Self {
@@ -377,7 +390,22 @@ impl RpcError {
             message: message.into(),
             code: None,
             data: None,
+            fields: None,
         }
+    }
+
+    /// 设置一个透传键；不是透传键的名字会被忽略（ChannelClient 不会还原它）。
+    pub fn with_field(mut self, key: &str, value: impl Into<Value>) -> Self {
+        if PASSTHROUGH_FIELDS.contains(&key) {
+            self.fields
+                .get_or_insert_with(Default::default)
+                .insert(key.to_owned(), value.into());
+        }
+        self
+    }
+
+    pub fn field(&self, key: &str) -> Option<&Value> {
+        self.fields.as_deref().and_then(|fields| fields.get(key))
     }
 
     pub fn with_code(mut self, code: impl Into<Value>) -> Self {
@@ -407,6 +435,11 @@ impl RpcError {
         }
         if let Some(data) = &self.data {
             object.insert("data".into(), Value::clone(data));
+        }
+        if let Some(fields) = &self.fields {
+            for (key, value) in fields.iter() {
+                object.insert(key.clone(), value.clone());
+            }
         }
         Value::Object(object)
     }
@@ -438,4 +471,101 @@ pub fn base64_encode(bytes: &[u8]) -> String {
         }
     }
     out
+}
+
+// ---- 客户端方向（`channelClient.ts`）：请求编码与响应解析 ----
+
+/// 数组标签与长度；元素由调用方逐个写入。
+pub fn write_array_header(out: &mut Vec<u8>, length: usize) {
+    out.push(ARRAY);
+    write_length(out, length);
+}
+
+/// 按收到时的标签原样写回一个值（转发用）。`Json` 一律走 Object 标签，与解码前相同；
+/// 二进制统一写 Buffer 标签（TS 侧解出 `Uint8Array`）。
+pub fn write_rpc_value(out: &mut Vec<u8>, value: &RpcValue) {
+    match value {
+        RpcValue::Undefined => write_undefined(out),
+        RpcValue::String(text) => write_string(out, text),
+        RpcValue::Bytes(bytes) => write_bytes(out, bytes),
+        RpcValue::Array(items) => {
+            write_array_header(out, items.len());
+            for item in items {
+                write_rpc_value(out, item);
+            }
+        }
+        RpcValue::Json(json) => write_json_bytes(out, json.to_string().as_bytes()),
+        RpcValue::Int(number) => write_int(out, *number),
+    }
+}
+
+/// `[type, id, channel, name]` + body：call（100）的 body 是参数数组，listen（102）是单个参数。
+pub fn encode_request(kind: i32, id: i32, channel: &str, name: &str, body: &RpcValue) -> Vec<u8> {
+    let mut out = Vec::new();
+    write_array_header(&mut out, 4);
+    write_int(&mut out, kind);
+    write_int(&mut out, id);
+    write_string(&mut out, channel);
+    write_string(&mut out, name);
+    write_rpc_value(&mut out, body);
+    out
+}
+
+/// `[101, id]` 取消调用或 `[103, id]` 退订，body 为 undefined。
+pub fn encode_cancel(kind: i32, id: i32) -> Vec<u8> {
+    let mut out = Vec::new();
+    response_header(&mut out, kind, id);
+    write_undefined(&mut out);
+    out
+}
+
+/// 一条响应：`[200]`、`[201|202|203|204, id]` 加 body。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Response {
+    pub kind: i32,
+    pub id: Option<i32>,
+    pub body: RpcValue,
+}
+
+pub fn read_response(message: &[u8]) -> Result<Response> {
+    let mut reader = Reader::new(message);
+    let RpcValue::Array(items) = reader.value()? else {
+        bail!("rpc response header is not an array");
+    };
+    let Some(kind) = items.first().and_then(RpcValue::as_int) else {
+        bail!("rpc response without type");
+    };
+    let id = items.get(1).and_then(RpcValue::as_int);
+    let body = if reader.is_empty() {
+        RpcValue::Undefined
+    } else {
+        reader.value()?
+    };
+    Ok(Response { kind, id, body })
+}
+
+impl RpcError {
+    /// `[202]` 载荷还原（`ChannelClient` 的 PromiseError 分支）：message、name 与透传键。
+    pub fn from_payload(payload: &Value) -> Self {
+        let text = |key: &str| payload.get(key).and_then(Value::as_str).unwrap_or_default();
+        let mut error = RpcError::new(
+            match text("name") {
+                "" => "Error",
+                name => name,
+            },
+            text("message"),
+        );
+        if let Some(code) = payload.get("code").filter(|code| !code.is_null()) {
+            error = error.with_code(code.clone());
+        }
+        if let Some(data) = payload.get("data").filter(|data| !data.is_null()) {
+            error = error.with_data(data.clone());
+        }
+        for key in PASSTHROUGH_FIELDS {
+            if let Some(value) = payload.get(key).filter(|value| !value.is_null()) {
+                error = error.with_field(key, value.clone());
+            }
+        }
+        error
+    }
 }
