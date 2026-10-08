@@ -62,7 +62,7 @@ R2 只实现了 `zcode-agent` 的 V4 核心成员。本规格补齐 agent 子系
 | `collectLocalRuntimeChildProcesses`                                                    | 枚举三个 lane 的存活、存储已就绪进程，各发 `process/childProcesses`（800 ms，观察型：超时不回收），失败时该进程 children 为空                                                                        |
 | `getAppUsageStats`                                                                     | 任一已运行的 chat 进程上 `v4/usage/stats`；没有时回 `no_active_workspace`                                                                                                                           |
 | `getTaskTokenUsage`                                                                    | 只读 client，`v4/conversation/usage`                                                                                                                                                                 |
-| `generateWorkspaceText`                                                                | 写 client + `GenerateText` 钩子；`requestTimeoutMs` 生效；调用被取消（RPC promise cancel）时发 `workspace/cancelGenerateText {operationId}`（5 s，超时不回收）                                      |
+| `generateWorkspaceText`                                                                | 写 client + `GenerateText` 钩子；`requestTimeoutMs` 生效；调用 future 被丢弃（RPC 取消或连接关闭）时发 `workspace/cancelGenerateText {operationId}`（5 s，观察型：超时不回收）                     |
 | `testModelConnectivity`                                                                | 写 client + `TestModelConnectivity` 钩子；`provider/testModelConnectivity`                                                                                                                          |
 | `conversationWorkflowRun{Events,Artifacts,ArtifactData,ArtifactRead,Workspace,NodeResult}V4` | 只读 client 透传，可选字段缺省不发                                                                                                                                                             |
 | `backgroundBashOutputV4`                                                               | 握手后；existing-only；`-32601` → `{kind:"unsupported"}`，runtime 不可用 → `{kind:"unavailable"}`                                                                                                   |
@@ -102,7 +102,8 @@ Main 已有 CDP 执行器（`desktopHostProcess.ts` 处理 `browser-execute-requ
    - 结果按 requestId 关联，迟到结果丢弃；
    - 录制完成且原命令带 `outputPath`（`recordingStatus`）：把 Main 的临时录制文件复制到 workspace 下的 `outputPath`（见第 5 节）；未带 `outputPath` 时去掉结果里的 `recording.artifact`。
 3. **环境收集**（`collectBrowserAmbientContext`）：list → 找 `type:"iab"` 的后端 → 并发执行 `list`、`listUserTabs` → 合并 tab id；没有 tab 时不写；`currentUrl` 只接受 about/http/https，去掉用户名密码，长度 ≤ 4096。任何失败都只返回空，不阻断发送。
-4. Host 退出时在途请求以 `backend_unavailable`、`sideEffect:"uncertain"` 结束。
+4. 桥被释放（`dispose`）时在途请求以 `backend_unavailable`、`sideEffect:"uncertain"` 结束；Host 退出时 CLI 进程树一并回收。
+5. `interaction/browserExecute` 的参数按 `zcodeBrowserExecuteParamsSchema` 校验（strict、`trim().min(1)`），`command` 只检查是对象且带字符串 `method`；完整的 `browserCommandSchema` 由 Main 校验（见第 5 节）。
 
 ### 2.6 legacy 会话事件（`onDynamicSessionEvent`）
 
@@ -280,6 +281,18 @@ get_client(target)：进程 applied < latest.v ─► lock(prefs) ─► 推 lat
 | 新进程偏好补推失败后，下一次 getReadOnlyClient 重新登记并补推              | 进程记住已推版本，下次取 client 时补推                        | 结果相同                                                                                     |
 | `listMcpServerStatuses` 在 `mcp/list` 超时后由 process manager 回收再重试   | 同；超时由 `AgentProcess::request` 关闭连接，下一次请求懒启动 | —                                                                                            |
 | 发给 Renderer 的 telemetry/TTFT/CUA 事实用 zod 校验                         | 用等价的键白名单与类型检查                                     | 规则逐字段对应 TS schema，测试用 TS 生成的样本对照                                           |
+| `interaction/browserExecute` 先用完整 `browserCommandSchema` 校验，非法回 `-32602` | 只检查 `command.method`；命令细节由 Main 校验，非法命令被 Main 丢弃后按超时结束 | 命令 schema 很大且只有 Main 执行它；CLI 生成的命令本身经 CLI schema 约束 |
+| `generateWorkspaceText` 只在调用方带 AbortSignal 时生成 operationId 并在 abort 时取消 | 总是带 operationId；调用 future 被丢弃时取消 | RPC 调用方无法传 AbortSignal；调用方已离开时继续生成只浪费模型调用 |
+| `zcode-agent.initialize` 失败结果 | 同 Node：带 `protocolName` / `protocolVersion` | R2 曾省略，这里补齐 |
+
+### 5.1 Rust CLI 的已知限制（CLI 侧，Node Host 同样受影响）
+
+E2E 与集成测试用的是 Rust CLI；它与两个控制面 lane 的组合有两处不兼容，均不在 Host 范围内（CLI 与协议不改）：
+
+1. Rust CLI 只接受自己 cwd 对应的 workspace 参数（`validate_workspace`：`Workspace identity mismatch`）。控制面 lane 的 cwd 是 `plugin-workspace`，UI 传真实 workspace 时 `plugins/*`、`mcp/list` 失败。TS CLI 接受任意 workspace，按协议参数做 workspace-scope 判定。
+2. Rust CLI 对同一 cwd 持有独占锁（`Workspace runtime is already owned or cannot be locked`），plugin-management 与 mcp-status 两个 lane 不能同时存活。
+
+集成测试因此以 `plugin-workspace` 本身为目标，并先回收 plugin lane 再查询 MCP；插件商店、MCP 设置页的桌面 E2E 要等 Rust CLI 支持后再加。
 
 ## 6. 验收
 
@@ -294,4 +307,6 @@ get_client(target)：进程 applied < latest.v ─► lock(prefs) ─► 推 lat
   - 会话库准备：协议、reuse、失败分类、首帧超时；
   - zcode-session：草稿不写库、API 重试运行态、filesystem MCP 追加。
 - `cargo test -p zcode-host-services --test agent_cli`（真实 Rust CLI + 本地 mock 模型）：legacy createSession / readSession、workspace-config 订阅、插件列表（plugin lane）、MCP 状态（mcp-status lane）、技能目录、`--prepare-storage`。
-- 桌面 E2E：`agent-plugins`（设置页插件列表经 plugin lane 加载）、`agent-startup`（启动页经过 `preparing_session_storage` 后进入主界面）。
+- `cargo test -p zcode-host --test agent_startup`（真实 Rust CLI）：Host 启动依次经过 `preparing_host_storage`、`preparing_session_storage`（首帧 checking，最后一个目录 `finalDatabase:true`）、`starting_services`、`ready`。
+- `pnpm exec tsx scripts/rust-host/agent-schema-fixtures.ts --check`：Rust 的 TTFT / telemetry / CUA 校验与 TS zod 对拍样本一致（`scripts/rust-host/test.mjs` 先跑它）。
+- 桌面 E2E `agent-subsystem`：Main 的启动状态镜像在 `ready` 时带会话库的 `migrationBaselines`（经过了 `preparing_session_storage`）；Composer 输入 `/` 后菜单列出 workspace 技能（`getSkillReferenceCatalog` 经 chat lane），菜单项可点击。`core` 场景回归通过。
