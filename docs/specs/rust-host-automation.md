@@ -120,7 +120,7 @@ UI runAutomationNow ─► runNow（BEGIN IMMEDIATE 抢锁 + 插 manual run）
 2. **`off-peak-task` channel 的 11 个成员**：语义同 `OffPeakTaskService`。`createTask` 先校验（标题、prompt、workspace 非空，权限是六档之一）→ 用当前 Registry 解析固定的 Off-Peak Provider 与模型 → 绑定会话预检 → `POST /ticket` → 成功才落库；失败只回稳定分类 `{ok:false, failureStage, errorCategory, errorCode, providerName}`（3101 / 3103 / network / invalid_response / local_persist / client_validation）。`cancelTask` 先落终态再停 loop（V4 `stop`），再后台核销；`continueTask` 票活着只恢复，票已废才重取号；`updateTask` 只允许 queued / paused；`list` / `get` 只派生模型诊断，不写库。
 3. **轮询同步**：tokio 定时器驱动。每个周期先补报未核销终态（4xx 当作幂等 ack），无票的 queued 补取号，再 `POST /ticket/status` 写回快照（ready → schedulable、位次、废票重取号）；翻为可派发时发 `off-peak-scheduler-wake-request`。间隔取服务端 `next_poll_after`，钳制在 5 s – 5 min，失败按 10 s 起指数退避。没有任务时也按 5 min 重排（TS 的 `finally` 如此，注释所说“不重排”与代码不符，以代码为准）。
 4. **凭据与灰度**：`ZCODE_OFFPEAK_MOCK=1` 时与 Node 相同，用确定性的 mock 凭据（bigmodel-personal），服务端 origin 是进程内 mock 网关；`coding-plan-subscription.getOffPeakClientConfig` 由本区域包一层，在 mock 模式下按 `resolveOffPeakClientConfig` 的 mock 分支返回（有隐藏的 Off-Peak Provider 模型即 enabled），其余情况原样交给 coding-plan 的实现。非 mock 时 origin 是 `ZCODE_BASE_URL` / `ZCODE_ENDPOINT_ORIGIN`（缺省 `https://zcode.z.ai`）。
-5. **mock 网关**：`127.0.0.1`，端口 `ZCODE_OFFPEAK_MOCK_PORT` 或固定 45197，被占用时复用已有实例；`ZCODE_OFFPEAK_MOCK_*` 的延迟、额度、429 注入、`capture` / `invalid-ticket` 场景与 Node 相同；状态机同 1.4 节的描述（take → queued → ready → active → expired / settled，轮询时懒惰推进）。
+5. **mock 网关**：`127.0.0.1`，端口 `ZCODE_OFFPEAK_MOCK_PORT` 或固定 45197，被占用时复用已有实例；`ZCODE_OFFPEAK_MOCK_*` 的延迟、额度、429 注入、`capture` / `invalid-ticket` 场景与 Node 相同；状态机为 take → queued → ready → active → expired / settled，在轮询与 messages 请求时懒惰推进。
 6. **`off-peak-run` 派发**：无票 → transient；模型不可解析或凭据不可用 → `failureKind:"permanent"`。三个分支：resume（续跑同一会话，发固定续跑提示词）、bound-first-run（恢复绑定会话，先检查已删除（permanent）/ 正忙（transient），再设权限模式）、init（新建会话，`persistence:"deferred"`，盖 `offPeakTaskId`）。V4 sendText 携带闲时 Selection、`modelExecution`（`memoryExtraction:"skip"`、`selectionScope:"execution"`、逐请求鉴权头、`subagents`）、`offPeakTaskId`、`offPeakRunType`，denylist 含 `CronCreate`、`OffPeakCreate`。终态：succeeded → completed，其余 → failed；回写失败（已终态）只记日志；会话置未读。
 7. **反向请求** `offPeak/create|list`：参数按 strict schema 校验（-32602 + 固定文案）；灰度关闭或模型不在白名单时回 `{ok:false, …, errorCode:"offpeak_disabled" | "model_not_allowed"}`；省略模型取白名单末位，档位取模型最高档；兜底异常只回 `-32603 Internal off-peak service error`。`list` 只给本 workspace 最近 20 条的协议最小面。
 8. **工具面**：本地 workspace（非远端 identity、无 remoteSessionId）在会话工作前推送一次 `workspace/updateOffPeakToolPolicy {enabled:true}`（每代进程一次，经 `add_use_hook`；-32601 静默），Host 自己发的 `session/create`、`session/resume` 带 `offPeakToolEnabled:true`。
@@ -157,7 +157,27 @@ sessions-index：会话 running → 终态 ─► markTerminal ─► 会话置�
 
 ## 8. conversation-share
 
-见 [rust-host-automation-share.md](rust-host-automation-share.md)（实现时补充）。
+模块：`conversation_share/`（`client.rs` 服务端客户端、`integrity.rs` 规范化摘要、`import.rs` 导入、`errors.rs` 错误契约）。
+
+### 8.1 规则
+
+1. **连接门禁**（conversationShareAttachmentService.ts）：desktop-continuous 全部可用；web-remote-replayable 只能能力发现与预览，`preflight`、`publish`、`importShare`、`getContinuation` 回 `{kind:"feature_disabled"}`（“Conversation sharing is only available from Desktop”），导入副本读回 `null`，进度事件不触发。
+2. **错误契约**：`ConversationShareClientError` 与 `ConversationShareServiceError` 经 RPC 透传键（`kind`、`status`、`code`、`retryAfterMs`、`details`）到 Renderer；ServiceError 的 `details` 只含脱敏字段（requestId、reasonCode、诊断白名单、最多 5 条 issue）。为此 `RpcError` 增加了透传键（`rpc` crate，增量改动）。
+3. **HTTP**：base 为 `<ZCode origin>/api/v1`。`required` 端点（capabilities、preparation、upload、confirm）没有 token 时在发请求前以 `authentication_required`（status 401）失败；`optional` 端点（preview、continuation）照常请求。错误按业务码映射 kind（3001–3215），非 JSON 的 5xx 归 network，空 401 归 authentication_required，未知业务码保留 msg 归 unknown。成功响应必须是 `{code:0, msg, data}`。
+4. **完整性**：continuation 对服务端原样发来的 rows 与去掉签名 URL 字段的 artifacts 计算规范化 JSON（键按 UTF-16 排序、数字按 JS 序列化）的 sha256，与 `integrity` 比对；不一致报 `invalid_contract`。版本高于本端时报 `unsupported_schema_version`。rows 按已知 kind 保留，未知 kind 计入 `unsupportedRowCount`。
+5. **导入**：按 (shareCode, workspace) 去重（已完成的回 `reused:true`，在途的合并）；在目标 workspace 的 `.zcode-share/<shareId>/` 下写 marker → staging 下载（120 s 超时、Content-Length 预检、size + sha256 校验）→ rename → 写原样 rows 的只读副本 → 格式化 shared context Markdown → CLI `session/create`（`importedHistory.source:"sharedContext"`，标题加“来自分享：”/“From Share: ”前缀）→ 写入 tasks-index 顶部并广播 → 删 marker。会话提交之前失败只删本次 import-owned 目录；完成索引写在默认 conversation workspace 的 `.zcode-share-imports.json`（串行、原子写）。启动时清理默认 workspace 里没有对应会话的残留导入。远端或缺省目标回落到默认 conversation workspace，并带 `fallbackReason`。
+
+### 8.2 有意与 Node 不同之处
+
+| Node 行为                                                                               | Rust Host                                     | 理由                                                        |
+| --------------------------------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------- |
+| token 来自 OAuth 凭据库（zcode JWT）                                                    | token provider 恒为空                         | Rust Host 还没有账号（R4）；接入后替换 `TokenProvider`      |
+| 登录后 preflight 做行选择、结构检查、结果物发现；publish 做公开投影、上传、confirm 轮询 | 能力发现（需要登录）之后报 `feature_disabled` | 没有 token 时这些步骤不可达，也无法验证；随 R4 一起移植     |
+| preflight / publish 经可信连接的 zcode-agent scope 读行（需要 V4 握手）                 | 尚未使用（同上）                              | 同上                                                        |
+| rows 用完整的 `conversationRowSchema` 解码（zod 剥离未知字段）                          | 按已知 kind 保留原样行                        | 渲染与格式化只读已知字段；完整性校验本来就基于原样值        |
+| 导入会话的 `session/create` 带 `offPeakToolEnabled`                                     | 不带                                          | Rust CLI 拒绝导入会话携带工具面参数；工作区级策略推送已覆盖 |
+| HTTP-date 形式的 `Retry-After`                                                          | 只解析整数秒                                  | 3215 的退避提示；日期形式罕见                               |
+| 文件名 `normalize("NFKC")`                                                              | 不做 NFKC                                     | 只影响兼容字符的落盘文件名                                  |
 
 ## 9. cua-permission
 
