@@ -138,7 +138,12 @@ sequenceDiagram
 
 - `cargo test`（`apps/zcode-host`）：checkpoint 全流程（创建、diff、冲突拒绝、force、删除、manifest 格式与 Node 一致）、提交信息生成（mock 生成器 + 真实 git 仓库）、规则函数、媒体预览（URL 编码与 `URLSearchParams` 一致、Main 授权往返）、附件传输、内网探测（127.0.0.1 上的 TCP 与 HTTP mock）、file 边界。
 - 交叉检查：`cargo clippy --all-targets --target x86_64-pc-windows-msvc` 与 `--target x86_64-unknown-linux-gnu`（C 依赖用占位编译器跳过，只检查 Rust 代码）。
-- 桌面 E2E（真实 Electron + Rust Host + Rust CLI + mock 模型）：
-  - `workspace-commit-message`：Git 面板生成提交信息（经 CLI `workspace/generateText`）并提交；
-  - `workspace-media-preview`：Open file 打开视频，`zcode-media://` URL 经 Main 授权后返回原始字节；
-  - `workspace-rewind`：Agent 写文件后编辑消息并回退工作区，文件改动被撤销。
+- 桌面 E2E（真实 Electron + Rust Host + Rust CLI + mock 模型），与 `core` 一起通过：
+  - `workspace-commit-message`：会话状态面板的 Git 入口 → Generate message（经 CLI `workspace/generateText`，mock 模型收到含分支与改动文件的 prompt，返回带围栏的文本被去装饰）→ Commit，HEAD 标题即生成的信息；
+  - `workspace-media-preview`：命令中心 Files 范围打开 `media/clip.wav`，`<audio>` 的 src 是 Main 授权后的规范路径（`/private/var/…`）的 `zcode-media://` URL，并读出 0.5 s 时长；
+  - `workspace-rewind`：Agent 用 Write 写文件后编辑这条消息并选 “Reset chat + files”，文件被撤销、编辑后的消息重新发送。git-checkpoint 在本地 desktop 没有 UI 调用方，由集成测试覆盖。
+
+## 7. 已知限制
+
+- CLI 的文件检查点要求路径没有经过符号链接（`canonicalize(path) == path`）；macOS 临时目录 `/var` → `/private/var` 下的 workspace 会被判为 “current file unreadable”。这是 CLI 的行为，与 Host 无关；E2E 用规范路径写文件。
+- 交叉目标只做了 Rust 代码的 clippy（C 依赖 sqlite、ring 用占位编译器跳过）；Windows ConPTY 与 Linux inotify 的运行时行为仍需在对应系统上跑一遍 E2E。
