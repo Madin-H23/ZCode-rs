@@ -95,7 +95,9 @@ fn apply_op(
         "renameGroup" => {
             groups::rename_task_group(conn, now, &group_id, op["title"].as_str().unwrap_or(""))?
         }
-        "updateColor" => groups::update_task_group_color(conn, now, &group_id, op["color"].as_str())?,
+        "updateColor" => {
+            groups::update_task_group_color(conn, now, &group_id, op["color"].as_str())?
+        }
         "deleteGroup" => {
             groups::delete_task_group(conn, &group_id)?;
             Value::Null

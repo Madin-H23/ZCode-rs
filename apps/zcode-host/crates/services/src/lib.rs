@@ -210,6 +210,7 @@ pub fn install(
     registry.implement(agent::session::service(agent.clone()));
     let observer = agent::sessions_index::SessionsIndexObserver::start(agent.clone());
 
+    // ── tasks ──
     // 侧栏：syncer 与 controller 必须先挂上观察者，再预热拉起 CLI，否则会错过首份快照。
     let workspace_events = tasks::WorkspaceEvents::new();
     let task_service = tasks::service::TaskService::new(
@@ -218,9 +219,16 @@ pub fn install(
         agent.clone(),
     );
     registry.implement(tasks::service::service(task_service.clone()));
+    let task_context = tasks::context::TaskContext::new(
+        storage.tasks_index.clone(),
+        task_service.clone(),
+        agent.clone(),
+        settings.clone(),
+    );
+    registry.implement(tasks::index_members::service(task_context.clone()));
     let syncer = tasks::syncer::start(&observer, agent.clone(), task_service.clone());
     let controller = tasks::controller::Controller::start(
-        Arc::new(task_service),
+        Arc::new(task_context.clone()),
         observer.clone(),
         workspace_events,
     );

@@ -32,6 +32,12 @@ await run(process.execPath, [
   "scripts/rust-host/tasks-index-fixtures.ts",
   "--check",
 ]);
+await run(process.execPath, [
+  "--import",
+  "tsx",
+  "scripts/rust-host/tasks-index-groups-fixtures.ts",
+  "--check",
+]);
 await run("cargo", ["fmt", "--all", "--manifest-path", manifest, "--check"]);
 await run("cargo", [
   "clippy",

@@ -112,3 +112,24 @@ impl TasksIndex {
         .await
     }
 }
+
+impl TasksIndex {
+    /// 按裸 taskId 找一行未删除的 meta（多个 workspace 同名时取最近更新的）；task target 登记的兜底。
+    pub async fn find_task_meta_by_id(&self, task_id: String) -> anyhow::Result<Option<Value>> {
+        self.call(move |conn, _| {
+            use rusqlite::OptionalExtension as _;
+            let row = conn
+                .query_row(
+                    &format!(
+                        "{}\n        WHERE task_id = ? AND deleted = 0\n        ORDER BY updated_at DESC\n        LIMIT 1",
+                        task_list::SELECT_LIST_ROW
+                    ),
+                    [&task_id],
+                    super::repo::read_task_row,
+                )
+                .optional()?;
+            Ok(row.map(|row| super::meta::row_to_meta(&row).to_value()))
+        })
+        .await
+    }
+}

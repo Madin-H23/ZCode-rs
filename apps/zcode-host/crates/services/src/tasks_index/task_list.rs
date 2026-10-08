@@ -165,7 +165,7 @@ pub(crate) fn row_to_list_item(row: &TaskRow, search: Option<&str>) -> Map<Strin
     item
 }
 
-const SELECT_LIST_ROW: &str = "SELECT
+pub(super) const SELECT_LIST_ROW: &str = "SELECT
           workspace_key,
           workspace_path,
           workspace_identity,

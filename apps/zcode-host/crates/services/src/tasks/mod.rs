@@ -3,7 +3,9 @@
 //!
 //! 数据所有者：tasks-index.sqlite 的行（membership、未读、标题覆盖）归 Host；会话的实时活性归 CLI
 //! （经 sessions-index）；window-controller 只是两者在内存里的投影，不持久化任何东西。
+pub mod context;
 pub mod controller;
+pub mod index_members;
 pub mod meta;
 pub mod repo;
 pub mod service;
@@ -48,4 +50,24 @@ pub trait TaskSource: Send + Sync {
         task_id: String,
         mutation: Value,
     ) -> BoxFuture<'static, Result<(), RpcError>>;
+    /// 全文搜索：zcode-task `listTaskList`（query 只含该 source 的 scope）。
+    fn search(&self, _query: Value) -> BoxFuture<'static, Result<Value, RpcError>> {
+        Box::pin(async { Err(RpcError::new("Error", "task search is unavailable")) })
+    }
+    /// zcode-task `deleteArchivedTask`。
+    fn delete_archived(
+        &self,
+        _target: WorkspaceTarget,
+        _task_id: String,
+    ) -> BoxFuture<'static, Result<bool, RpcError>> {
+        Box::pin(async { Err(RpcError::new("Error", "archived deletion is unavailable")) })
+    }
+    /// zcode-task `deleteArchivedTasks`。
+    fn delete_archived_batch(
+        &self,
+        _target: WorkspaceTarget,
+        _task_ids: Vec<String>,
+    ) -> BoxFuture<'static, Result<Value, RpcError>> {
+        Box::pin(async { Err(RpcError::new("Error", "archived deletion is unavailable")) })
+    }
 }
