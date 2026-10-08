@@ -32,6 +32,15 @@ libc = "0.2"
 notify = "8.2"
 portable-pty = "0.9"
 regex = "1"
+# 外部集成（bots、conversation-share、off-peak）的出站 HTTP；与 CLI 同版本、同特性，算法统一用 ring。
+reqwest = { version = "0.13", default-features = false, features = [
+  "json",
+  "rustls-no-provider",
+] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# automation 的 cron 按本地时区计算下次触发（与 croner 相同）。
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+sha2 = "0.10"
 # 与 Node Host 共用 tasks-index.sqlite；bundled 固定 SQLite 版本，不依赖系统库。
 rusqlite = { version = "0.37", features = ["bundled"] }
 url = "2"

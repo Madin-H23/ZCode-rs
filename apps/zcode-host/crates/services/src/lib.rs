@@ -11,11 +11,16 @@ use zcode_host_kit::ChannelRegistry;
 
 pub mod account;
 pub mod agent;
+pub mod automation;
+pub mod bots;
 pub mod broadcast;
+pub mod conversation_share;
+pub mod cua_permission;
 pub mod file;
 pub mod file_watcher;
 pub mod git;
 pub mod main_bridge;
+pub mod off_peak;
 pub mod providers;
 pub mod settings;
 pub mod store;
@@ -117,6 +122,7 @@ pub struct Installed {
     _observer: Arc<agent::sessions_index::SessionsIndexObserver>,
     _controller: Arc<tasks::controller::Controller>,
     _syncer: tokio::task::JoinHandle<()>,
+    _automation: automation::AreaHandle,
     /// 至少保留一个句柄，否则 tasks-index 线程与连接随之关闭。
     _storage: Storage,
 }
@@ -220,11 +226,28 @@ pub fn install(
     registry.implement(tasks::service::service(task_service.clone()));
     let syncer = tasks::syncer::start(&observer, agent.clone(), task_service.clone());
     let controller = tasks::controller::Controller::start(
-        Arc::new(task_service),
+        Arc::new(task_service.clone()),
         observer.clone(),
         workspace_events,
     );
     registry.implement(tasks::controller::service(controller.clone()));
+
+    // ── automation ──（R6：automation、闲时任务、bots、conversation-share、cua-permission）
+    let automation = automation::install(
+        automation::Area {
+            context: context.clone(),
+            bridge: bridge.clone(),
+            settings: settings.clone(),
+            providers: providers.clone(),
+            agent: agent.clone(),
+            observer: observer.clone(),
+            tasks: task_service,
+            tasks_index: storage.tasks_index.clone(),
+            bot_delivery: Default::default(),
+        },
+        registry,
+        router,
+    );
 
     agent::session::warm_up(
         agent.clone(),
@@ -244,6 +267,7 @@ pub fn install(
         _observer: observer,
         _controller: controller,
         _syncer: syncer,
+        _automation: automation,
         _storage: storage,
     }
 }

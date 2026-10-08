@@ -1,0 +1,19 @@
+//! 外部集成（bots、conversation-share、闲时任务服务端）共用的出站 HTTP 客户端。
+//!
+//! 与 CLI 相同：reqwest + rustls（ring）。不读取 shell 的 `HTTP(S)_PROXY`；不自动跟随重定向
+//! 由调用方按需打开。测试只连 127.0.0.1 上的 mock 服务。
+use std::time::Duration;
+
+use anyhow::Context as _;
+
+/// 构建客户端；`timeout` 为整个请求的上限。
+pub fn client(timeout: Duration) -> anyhow::Result<reqwest::Client> {
+    // rustls-no-provider 不自动选择算法；与 CLI 一致统一使用 ring（重复安装是无害的空操作）。
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::builder()
+        .no_proxy()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(timeout)
+        .build()
+        .context("build http client")
+}
