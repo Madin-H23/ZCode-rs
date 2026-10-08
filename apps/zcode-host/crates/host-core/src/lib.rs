@@ -60,6 +60,8 @@ struct StartupReporter {
     attempt_id: String,
     started_at: u64,
     sequence: AtomicU64,
+    /// 会话库准备上报的迁移事实（docs/specs/rust-host-agent.md §2.11），之后的状态一直带着。
+    migrations: Mutex<zcode_host_services::agent::storage_prep::MigrationFacts>,
 }
 
 impl StartupReporter {
@@ -70,18 +72,65 @@ impl StartupReporter {
             attempt_id: random_hex(16),
             started_at: now_ms(),
             sequence: AtomicU64::new(0),
+            migrations: Mutex::default(),
         }
     }
 
     fn state(&self, phase: &'static str) -> DatabaseStartupState {
-        DatabaseStartupState::new(
+        let mut state = DatabaseStartupState::new(
             self.startup_id.clone(),
             self.attempt_id.clone(),
             self.sequence.fetch_add(1, Ordering::SeqCst),
             self.started_at,
             now_ms(),
             phase,
-        )
+        );
+        let migrations = self
+            .migrations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.migration = migrations.aggregate();
+        let baselines = migrations.baselines();
+        if !baselines.is_empty() {
+            state.migration_baselines = Some(baselines);
+        }
+        state
+    }
+
+    /// `preparing_session_storage`：None 是进入新目录（checking），Some 是该目录的数据库阶段。
+    fn send_session(&self, progress: Option<zcode_host_services::agent::storage_prep::Progress>) {
+        let Some(progress) = progress else {
+            self.send("preparing_session_storage", Some("checking"));
+            return;
+        };
+        self.migrations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .record(&progress.database_id, progress.migration.as_ref());
+        let mut state = self.state("preparing_session_storage");
+        state.database_phase = Some(progress.database_phase);
+        state.current_migration = progress.migration;
+        state.final_database = Some(progress.final_database);
+        self.control
+            .send(HostToMain::DatabaseStartupState { state });
+    }
+
+    fn fail_session(&self, error: zcode_host_services::agent::storage_prep::PrepareError) {
+        if let Some((database_id, facts)) = &error.migration {
+            self.migrations
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .record(database_id, Some(facts));
+        }
+        let mut state = self.state("failed");
+        state.failed_phase = Some("preparing_session_storage");
+        state.error_code = Some(error.error_code);
+        state.sqlite_code = error.sqlite_code;
+        state.system_code = error.system_code;
+        state.migration_id = error.migration_id;
+        state.current_migration = error.migration.map(|(_, facts)| facts);
+        self.control
+            .send(HostToMain::DatabaseStartupState { state });
     }
 
     fn send(&self, phase: &'static str, database_phase: Option<&'static str>) {
@@ -201,6 +250,19 @@ impl HostCore {
                 return;
             }
         };
+        // 会话库准备（docs/specs/rust-host-agent.md §2.11）：失败停在这里，attachment 继续挂起。
+        let session_reporter = reporter.clone();
+        if let Err(error) = zcode_host_services::agent::storage_prep::prepare_for_init(
+            &self.inner.config.environment,
+            &init,
+            &move |progress| session_reporter.send_session(progress),
+        )
+        .await
+        {
+            log::error(format!("session storage startup failed: {error}"));
+            reporter.fail_session(error);
+            return;
+        }
         reporter.send("starting_services", None);
         let context = Arc::new(ServiceContext {
             environment: self.inner.config.environment.clone(),

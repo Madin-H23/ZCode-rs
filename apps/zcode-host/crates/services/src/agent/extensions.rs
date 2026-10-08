@@ -2,15 +2,21 @@
 //! 不直接修改 runtime 与 channel 的代码：
 //! - 反向请求：按方法名登记 CLI → Host 请求的处理器（优先于内置默认应答）；
 //! - spawn 环境：启动 CLI 前追加环境变量（在设置页网络变量之后、命令自带变量之前）；
-//! - 使用前钩子：会话被订阅、新建、读取 presentation 之前执行（例如同步 Account Config）。
+//! - 使用前钩子：会话被订阅、新建、读取 presentation 之前执行（例如同步 Account Config）；
+//! - 通知总线：三个 lane 的 CLI 通知（V4 帧除外）与可观察的反向请求，按到达顺序广播；
+//! - 进程事件：CLI 进程生命周期与进程诊断，已是 Main 控制消息的形状；
+//! - 功能门禁：闲时工具、动态工作流（docs/specs/rust-host-agent.md §2.7）。
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use futures_util::future::BoxFuture;
 use serde_json::Value;
 use zcode_host_kit::RpcError;
 
-use super::runtime::{AgentProcess, WorkspaceTarget};
+use zcode_host_kit::EventHub;
+
+use super::runtime::{AgentProcess, Lane, WorkspaceTarget};
 
 /// 一次 CLI 反向请求的上下文。
 #[derive(Debug, Clone)]
@@ -48,13 +54,47 @@ pub enum UseReason {
     CreateSession,
     ReadPresentation,
     SessionRead,
+    /// legacy `resumeSession`（Node `session_resume`）。
+    SessionResume,
+    /// `generateWorkspaceText`（Node `workspace_generate_text`）。
+    GenerateText,
+    /// `testModelConnectivity`（Node `provider_test_model_connectivity`）。
+    TestModelConnectivity,
 }
+
+/// 一条 CLI 通知（或只供观察的反向请求），带来源进程的身份。
+#[derive(Debug, Clone)]
+pub struct AgentNotification {
+    pub target: WorkspaceTarget,
+    pub workspace_key: String,
+    pub generation: u64,
+    pub lane: Lane,
+    pub method: String,
+    pub params: Value,
+    /// true：CLI 以反向请求发出（权限、提问），这里只是旁路观察，应答仍由 runtime 决定。
+    pub request: bool,
+}
+
+/// CLI 进程生命周期 / 诊断事件，`message` 已是 Main 控制消息（`agent-process-*`）。
+#[derive(Debug, Clone)]
+pub struct ProcessEvent {
+    pub lane: Lane,
+    pub message: Value,
+}
+
+pub type DynamicWorkflowGate =
+    Arc<dyn Fn() -> BoxFuture<'static, Result<bool, String>> + Send + Sync>;
 
 #[derive(Default)]
 pub struct Extensions {
     reverse: RwLock<HashMap<String, ReverseHandler>>,
     env: RwLock<Vec<EnvContributor>>,
     use_hooks: RwLock<Vec<UseHook>>,
+    notifications: EventHub<Arc<AgentNotification>>,
+    process_events: EventHub<Arc<ProcessEvent>>,
+    off_peak_tools: AtomicBool,
+    dynamic_workflow_gate: RwLock<Option<DynamicWorkflowGate>>,
+    dynamic_workflow: tokio::sync::OnceCell<bool>,
 }
 
 fn read<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
@@ -90,6 +130,52 @@ impl Extensions {
 
     pub fn use_hooks(&self) -> Vec<UseHook> {
         read(&self.use_hooks).clone()
+    }
+
+    /// 三个 lane 的 CLI 通知（V4 帧除外），按到达顺序。
+    pub fn notifications(&self) -> &EventHub<Arc<AgentNotification>> {
+        &self.notifications
+    }
+
+    pub fn process_events(&self) -> &EventHub<Arc<ProcessEvent>> {
+        &self.process_events
+    }
+
+    /// 闲时任务服务可用时由它登记（Node：resolveOffPeakClientConfig 与 resolveOffPeakTaskService 都注入）。
+    pub fn enable_off_peak_tools(&self) {
+        self.off_peak_tools.store(true, Ordering::SeqCst);
+    }
+
+    /// isOffPeakToolSupported：门禁已登记且是本地 workspace。
+    pub fn off_peak_tools_for(&self, target: &WorkspaceTarget) -> bool {
+        self.off_peak_tools.load(Ordering::SeqCst) && target.is_local()
+    }
+
+    /// 动态工作流灰度的判定函数；只在首次需要时调用一次。
+    pub fn set_dynamic_workflow_gate(&self, gate: DynamicWorkflowGate) {
+        *write(&self.dynamic_workflow_gate) = Some(gate);
+    }
+
+    /// resolveDynamicWorkflowGate：Host 进程内只判定一次；失败按关闭处理且不重试。
+    pub async fn dynamic_workflow_enabled(&self) -> bool {
+        let gate = read(&self.dynamic_workflow_gate).clone();
+        let Some(gate) = gate else {
+            return false;
+        };
+        *self
+            .dynamic_workflow
+            .get_or_init(|| async move {
+                match gate().await {
+                    Ok(enabled) => enabled,
+                    Err(error) => {
+                        zcode_host_kit::log::warn(format!(
+                            "dynamic workflow gate failed, treated as disabled: {error}"
+                        ));
+                        false
+                    }
+                }
+            })
+            .await
     }
 }
 

@@ -118,5 +118,9 @@ impl ServiceChannel for BuiltService {
         if let Some(closed) = &self.closed {
             closed(context);
         }
+        // 叠在其他实现之上时（同一 channel 分多处注册），下层按连接持有的状态也要清理。
+        if let Some(fallback) = &self.fallback {
+            fallback.connection_closed(context);
+        }
     }
 }
