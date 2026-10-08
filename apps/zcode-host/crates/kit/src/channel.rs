@@ -24,6 +24,8 @@ pub enum Reply {
     Value(Value),
     /// 已是 JSON 文本（CLI result、V4 帧），原样写入 Object 标签。
     RawJson(String),
+    /// 顶层二进制（RPC Buffer 标签，Renderer 收到 Uint8Array）。
+    Bytes(Vec<u8>),
 }
 
 impl Reply {

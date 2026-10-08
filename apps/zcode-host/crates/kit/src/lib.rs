@@ -16,4 +16,5 @@ pub use channel::{
     ServiceChannel, StubChannel,
 };
 pub use events::{EventHub, replies};
+pub use zcode_host_rpc::codec::base64_encode;
 pub use zcode_host_rpc::{RpcError, RpcValue};

@@ -335,6 +335,14 @@ pub fn response_undefined(kind: i32, id: i32) -> Vec<u8> {
     out
 }
 
+/// kind 为 PromiseSuccess 或 EventFire，body 为顶层二进制。
+pub fn response_bytes(kind: i32, id: i32, bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len() + 16);
+    response_header(&mut out, kind, id);
+    write_bytes(&mut out, bytes);
+    out
+}
+
 pub fn success_value(id: i32, value: &Value) -> Vec<u8> {
     response_value(RESPONSE_PROMISE_SUCCESS, id, value)
 }

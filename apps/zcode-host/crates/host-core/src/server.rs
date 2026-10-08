@@ -119,6 +119,7 @@ fn encode_reply(kind: i32, id: i32, reply: Reply) -> Vec<u8> {
     match reply {
         Reply::Undefined => codec::response_undefined(kind, id),
         Reply::Value(value) => codec::response_value(kind, id, &value),
+        Reply::Bytes(bytes) => codec::response_bytes(kind, id, &bytes),
         Reply::RawJson(raw) => codec::raw_response(kind, id, &raw).unwrap_or_else(|error| {
             codec::promise_error(id, &RpcError::new("Error", error.to_string()))
         }),

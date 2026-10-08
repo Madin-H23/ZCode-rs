@@ -11,10 +11,12 @@ use zcode_host_kit::ChannelRegistry;
 
 pub mod account;
 pub mod broadcast;
+pub mod file;
 pub mod main_bridge;
 pub mod providers;
 pub mod settings;
 pub mod store;
+pub mod system;
 
 use main_bridge::MainBridge;
 
@@ -25,6 +27,8 @@ pub struct HostEnvironment {
     pub home_dir: PathBuf,
     /// 业务数据根：`ZCODE_DATA_BASE_DIR`，否则 `HOME`（`~/.zcode/v2` 在它下面）。
     pub data_base_dir: PathBuf,
+    /// Node `os.homedir()`：`HOME`，Windows 上为 `USERPROFILE`；不受上面两个覆盖影响。
+    pub user_home: PathBuf,
     /// Host 自身的环境变量（Main 启动 Host 时给的），子进程环境以它为底。
     pub vars: BTreeMap<String, String>,
 }
@@ -43,7 +47,8 @@ impl HostEnvironment {
             .unwrap_or_default();
         Self {
             home_dir: non_empty("ZCODE_DESKTOP_HOME_DIR").unwrap_or_else(|| user_home.clone()),
-            data_base_dir: non_empty("ZCODE_DATA_BASE_DIR").unwrap_or(user_home),
+            data_base_dir: non_empty("ZCODE_DATA_BASE_DIR").unwrap_or_else(|| user_home.clone()),
+            user_home,
             vars,
         }
     }
@@ -90,6 +95,20 @@ pub fn install(
     registry.implement(account::onboarding_record_service());
     registry.implement(account::usage_stats_service());
     registry.implement(account::coding_plan_service(providers.clone()));
+
+    registry.implement(file::service(file::FileServiceConfig {
+        conversation_workspace: context
+            .environment
+            .data_base_dir
+            .join(".zcode")
+            .join("workspace")
+            .join("default"),
+        user_home: context.environment.user_home.clone(),
+    }));
+    registry.implement(system::service(
+        context.environment.user_home.clone(),
+        context.environment.vars.clone(),
+    ));
 }
 
 #[cfg(test)]
