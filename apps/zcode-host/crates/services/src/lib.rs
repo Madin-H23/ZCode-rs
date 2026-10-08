@@ -18,6 +18,7 @@ pub mod git;
 pub mod main_bridge;
 pub mod providers;
 pub mod settings;
+pub mod settings_sync;
 pub mod store;
 pub mod support;
 pub mod system;
@@ -234,6 +235,11 @@ pub fn install(
     registry.implement(account::usage_stats_service());
     registry.implement(account::coding_plan_service(providers.clone()));
     account.register_provider_writes(registry, &providers, &agent);
+    registry.implement(settings_sync::service(settings_sync::SettingsSync::new(
+        settings.clone(),
+        &context.environment.vars,
+        &context.environment.user_home,
+    )));
     account.attach_agent(&agent, &context);
     account.start(broadcaster);
 
