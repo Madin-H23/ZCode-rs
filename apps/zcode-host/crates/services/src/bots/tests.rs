@@ -660,11 +660,19 @@ async fn feishu_long_connection_binds_then_streams_a_card_reply() {
         "{card}"
     );
 
-    bots.dispose().await;
+    let lock = super::runtime_lock::lock_path(
+        &dir.path().join(".zcode/v2"),
+        "feishu-websocket",
+        "cli_0123456789abcdef",
+    );
+    assert!(lock.is_dir());
+    bots.shutdown().await;
     assert_eq!(
         bots.runtime_status("feishu-1").unwrap()["message"],
         "Feishu WebSocket is stopped."
     );
+    // Host 退出立即释放长连接锁，不等租约过期。
+    assert!(!lock.exists());
 }
 
 #[tokio::test]

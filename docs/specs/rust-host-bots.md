@@ -51,7 +51,9 @@ R6 首版只做了飞书 / Lark 长连接、20 个成员和终态摘要回推。
 2. **Telegram 轮询**：缺 token 报 `Telegram bot token is missing.` 并退出。循环：拿 `telegram-polling/<sha256(token)>` 运行锁（他人持有：idle + `bots.runtime.telegramLongPollingHandledElsewhere`，10 s 后重试；锁 IO 失败 error，5 s 后重试）→ `deleteWebhook {drop_pending_updates:false}` → `getUpdates {timeout:25, offset?, allowed_updates:["message","callback_query"]}`（40 s 截止）。409 报 `Telegram token is already used by another polling client.` 等 10 s，其他非 2xx 报 `Telegram getUpdates failed: HTTP <s>` 等 5 s；`ok !== true` 报 description 等 5 s。每条 update 交给 `processProviderCallback("telegram", {botId, update})`，`ok:false` 视为失败；**成功后才**把 offset 写成 `update_id + 1`（`bot-state.v3.json`；没有上下文时按首个允许的 workspace 建一条草稿上下文）。异常时 `bots.runtime.telegramPollingFailedRetrying`，释放锁后 5 s 重试。启用的 Bot 对齐时先 `setMyCommands`（`help/status/new/project/model/mode/think/reply/bind` 按命令策略过滤，英文描述同 Node）。
 3. **微信轮询**：锁 `weixin-polling/<sha256(token)>`；`POST /ilink/bot/getupdates {get_updates_buf}`（90 s 截止）。消息逐条交给 `processProviderCallback("weixin", {botId, messages:[{id, text, from, chatId, displayName, context_token, attachments}], buf?})`，失败即中断本批；整批成功后才写 `weixinGetUpdatesBuf`。异常时 `Weixin polling failed: <msg>`，5 s 后重试。
 4. **飞书长连接**：同 R6（`rust-host-automation.md` 7.1 第 8–10 条）。
-5. **停止**：`stopPolling` / `stopWebSocket` 通知停止并等待请求退出、锁释放，再把状态改为 idle（`...Stopped`）。Host 退出时 `dispose` 等三个运行时全部收尾。desktop-attached 远端 Host（`background=false`）不起任何运行时，也不同步 Telegram 命令。
+5. **停止**：`stopPolling` / `stopWebSocket` 通知停止并等待请求退出、锁释放，再把状态改为 idle（`...Stopped`）。
+6. **Host 退出**（Node `disposeServiceResourcesAndWait` → `IBotsService.disposeAllAndWait`）：Main 发 `dispose` 后 `Installed::shutdown` 在 `agent.dispose_all()` 之前调用 automation `AreaHandle::shutdown` → `Bots::shutdown`。顺序：置关闭标记（之后的配置对齐不再登记新运行时，判断与登记在同一把表锁里）→ 中止会话订阅（退订）→ 停 typing（飞书删 reaction，后台尽力）→ 清临时交互卡、运行中任务、/status 进展、入站去重与串行队列 → 同时停 Telegram / 微信长轮询与飞书长连接，打断进行中的请求，各自释放跨进程运行锁。等待上限 1 s：Main 在 dispose 3.5 s 后强杀 Host，大部分时间要留给 CLI 进程树回收；正常情况下收尾只要几毫秒，只有正在处理入站消息时才会等满。超时只记 warn，Host 退出后持有者进程不在，其他进程拿锁时按进程存活检查立即接管。重复调用直接返回。
+7. **后台运行时总是开启**：Rust Host 只作为桌面本地 Host 运行，`bots::install` 固定 `background = true`，负责 Bot 长连接、轮询与 Telegram 命令同步。desktop-attached 远端 Host 是 Node `zcode-server`，按它自己的 `runStartupBackgroundTasks` 决定，不经过 Rust Host。`background = false` 分支（不起运行时、不同步命令）只为与 Node 结构对齐保留，测试用它关闭自动对齐。
 
 ### 2.4 入站
 
@@ -107,15 +109,26 @@ R6 首版只做了飞书 / Lark 长连接、20 个成员和终态摘要回推。
 
 Telegram（`getFile` + 文件下载）、飞书（`im/v1/messages/<id>/resources/<key>`）、微信（CDN 下载 + AES-128-ECB 解密）、Webhook（`dataBase64` / `localPath` / `downloadUrl`）。每条消息最多 4 个，超过 5 MB 回 `attachmentTooLarge`，下载失败回 `attachmentDownloadUnavailable`，30 s 截止。缓存到 `<appConfig>/bot-attachments/<botId>/<messageId>/<sha256前16>-<文件名>`；图片和音频作为 prompt 附件（`session/send`），其余只在 prompt 里写本地路径（文案同 Node）。
 
+### 2.9 Host 发起的会话创建与恢复
+
+Bot 代用户发起的 `session/create` 与 `session/resume` 都带工具面参数（`offPeakToolEnabled`、`dynamicWorkflowEnabled`），与 Node `buildSessionCreateParams` / `buildSessionResumeParams` 相同，取值统一来自 `Extensions::session_tool_flags(target)`（docs/specs/rust-host-integration.md §2.4；Off-Peak 只给本地 workspace，门禁关闭时不写字段）：
+
+| 场景                                                                                 | 请求                               | 参数来源                                        |
+| ------------------------------------------------------------------------------------ | ---------------------------------- | ----------------------------------------------- |
+| 新任务的首条消息（草稿态或 `/new` 之后）建会话                                       | `session/create`（yolo、deferred） | automation `TaskDriver::create_session`（已带） |
+| 任务态普通消息前恢复会话                                                             | `session/resume`                   | `TaskDriver::resume_session`（已带）            |
+| 任务态 `/model` 选定后收口、`/think` 设档位后收口                                    | `session/resume`                   | `TaskDriver`（已带）                            |
+| `/new` 继承当前任务配置、任务态 `/model` / `/think` 读选项（`getTaskConfigOptions`） | `session/resume`                   | `bots::resume_params`（Bot 直接发，同源拼入）   |
+
 ## 3. 状态所有者
 
-| 状态                                                                                                 | 唯一所有者                                                      |
-| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | -------------- | ---------------- | ------------------------ |
-| Bot 配置、聊天上下文（草稿 / 任务 / 待答问答 / 待答权限 / 游标）                                     | `bot-config.v3.json`、`bot-state.v3.json`（与 Node 同文件同锁） |
-| 通道凭据                                                                                             | account 的 `CredentialStore`（`credentials.json`）              |
-| 某个 token / 应用的连接归属                                                                          | `bots-runtime-locks/<telegram-polling                           | weixin-polling | feishu-websocket | lark-websocket>/` 目录锁 |
-| 待选项、task / workspace 候选、绑定码、入站去重、typing 句柄、流式卡片句柄、运行中任务、/status 进展 | `Bots`（内存，Host 退出即丢，同 Node）                          |
-| 会话行、交互、终态                                                                                   | CLI；Bot 只读 V4 帧与 `session/read`                            |
+| 状态                                                                                                 | 唯一所有者                                                                                        |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Bot 配置、聊天上下文（草稿 / 任务 / 待答问答 / 待答权限 / 游标）                                     | `bot-config.v3.json`、`bot-state.v3.json`（与 Node 同文件同锁）                                   |
+| 通道凭据                                                                                             | account 的 `CredentialStore`（`credentials.json`）                                                |
+| 某个 token / 应用的连接归属                                                                          | `bots-runtime-locks/<telegram-polling\|weixin-polling\|feishu-websocket\|lark-websocket>/` 目录锁 |
+| 待选项、task / workspace 候选、绑定码、入站去重、typing 句柄、流式卡片句柄、运行中任务、/status 进展 | `Bots`（内存，Host 退出时 `Bots::shutdown` 清掉，同 Node）                                        |
+| 会话行、交互、终态                                                                                   | CLI；Bot 只读 V4 帧与 `session/read`                                                              |
 
 ## 4. 会话读取（有意的偏差）
 
@@ -169,21 +182,36 @@ Node Bot 通过 legacy 任务快照与事件流（`getTaskSnapshot`、`onDynamic
   │   task_complete ─► 终态卡片 / 剩余正文 / 兜底文案 ─► 退订、停 typing、清运行中
 ```
 
+Host 退出（第 2.3 节第 6 条）：
+
+```text
+Main ── dispose ──► Host  Installed::shutdown
+  workspace.shutdown()（终端）
+  remote.shutdown()
+  automation AreaHandle::shutdown ─► Bots::shutdown（≤ 1 s）
+      closed = true ─────────────────── 之后 start_polling / start_websocket 直接返回
+      abort 会话订阅（后台 v4/conversation/unsubscribe）、停 typing、清内存状态
+      stop ─► Telegram / 微信长轮询、飞书长连接（打断进行中的请求）
+            └► 各自 RuntimeLock::release（删 bots-runtime-locks/<ns>/<hash>.lock）
+  agent.dispose_all()（CLI 进程树，≤ 3 s）
+Host 退出 ◄── Main 3.5 s 后强杀兜底
+```
+
 ## 6. 有意与 Node 不同之处
 
-| Node 行为                                                                                            | Rust Host                                                                                           | 理由                                                                       |
-| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| 读 legacy 任务快照与事件流                                                                           | `session/read` + V4 帧适配（第 4 节）                                                               | Rust Host 不提供 legacy 快照成员；V4 是 CLI 的权威投影                     |
-| `bots:task`、`bots:task-stream` 广播                                                                 | 不发                                                                                                | Renderer 直接订阅 V4 会话，侧栏由 tasks syncer 的任务事件驱动              |
-| 权限请求摘要用 `getPermissionRequestPreview`                                                         | 用 V4 交互的 `summary` 与 detail 里的 command / path                                                | V4 交互已带 CLI 生成的摘要；Bot 会话硬锁 yolo，正常不出现权限请求          |
-| `/status` 的已工作时长读任务快照消息                                                                 | 读 `session/read` 消息（不做可见性过滤与连续助手消息合并）                                          | 只影响少数边界上的时长与进展取值                                           |
-| 首发配置失败时删除临时任务（`applyDraftConfigOptions`）                                              | 建会话时直接带 `mode: yolo`，没有单独的配置步骤                                                     | 结果相同（任务硬锁 yolo），没有中间态                                      |
-| 远端 workspace 的 Bot 运行时、`/reconnect`                                                           | 远端上下文视为未连接（第 7 节）                                                                     | 远端在另一个区域                                                           |
-| 开放平台 / Telegram / iLink 基址固定                                                                 | `ZCODE_FEISHU_OPEN_BASE_URL`、`ZCODE_TELEGRAM_API_BASE_URL`、`ZCODE_WEIXIN_ILINK_BASE_URL` 等可覆盖 | 只供测试与 E2E 指向 127.0.0.1 mock                                         |
-| `/new` 继承模型时用 `parseBotModelOptionValue` 解析 `provider/model$level`，`$level` 留在 modelId 里 | 先去掉 `$level` 后缀（档位另由思考档位带上）                                                        | Node 的写法让 `/new` 之后的下一条消息必然解析模型失败（Node 缺陷，已报告） |
-| `listWorkspaceRefs` 5 s 缓存                                                                         | 每次读设置                                                                                          | 设置读取本身已缓存                                                         |
-| 微信 CDN 附件用 Node `crypto` 的 AES-128-ECB 解密                                                    | `bots/aes.rs` 按 FIPS-197 自实现解密                                                                | 依赖树里没有可用的分组密码实现；用标准测试向量校验                         |
-| 入站去重、待选项、typing 等内存状态在 Host 退出前 `disposeAllAndWait`                                | Host 退出时进程结束，运行锁靠 30 s 租约与进程存活检查回收（同 R6）                                  | Host 关闭路径没有 Bot 的异步收尾钩子；锁的跨进程语义不变                   |
+| Node 行为                                                                                            | Rust Host                                                                                           | 理由                                                                              |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 读 legacy 任务快照与事件流                                                                           | `session/read` + V4 帧适配（第 4 节）                                                               | Rust Host 不提供 legacy 快照成员；V4 是 CLI 的权威投影                            |
+| `bots:task`、`bots:task-stream` 广播                                                                 | 不发                                                                                                | Renderer 直接订阅 V4 会话，侧栏由 tasks syncer 的任务事件驱动                     |
+| 权限请求摘要用 `getPermissionRequestPreview`                                                         | 用 V4 交互的 `summary` 与 detail 里的 command / path                                                | V4 交互已带 CLI 生成的摘要；Bot 会话硬锁 yolo，正常不出现权限请求                 |
+| `/status` 的已工作时长读任务快照消息                                                                 | 读 `session/read` 消息（不做可见性过滤与连续助手消息合并）                                          | 只影响少数边界上的时长与进展取值                                                  |
+| 首发配置失败时删除临时任务（`applyDraftConfigOptions`）                                              | 建会话时直接带 `mode: yolo`，没有单独的配置步骤                                                     | 结果相同（任务硬锁 yolo），没有中间态                                             |
+| 远端 workspace 的 Bot 运行时、`/reconnect`                                                           | 远端上下文视为未连接（第 7 节）                                                                     | 远端在另一个区域                                                                  |
+| 开放平台 / Telegram / iLink 基址固定                                                                 | `ZCODE_FEISHU_OPEN_BASE_URL`、`ZCODE_TELEGRAM_API_BASE_URL`、`ZCODE_WEIXIN_ILINK_BASE_URL` 等可覆盖 | 只供测试与 E2E 指向 127.0.0.1 mock                                                |
+| `/new` 继承模型时用 `parseBotModelOptionValue` 解析 `provider/model$level`，`$level` 留在 modelId 里 | 先去掉 `$level` 后缀（档位另由思考档位带上）                                                        | Node 的写法让 `/new` 之后的下一条消息必然解析模型失败（Node 缺陷，已报告）        |
+| `listWorkspaceRefs` 5 s 缓存                                                                         | 每次读设置                                                                                          | 设置读取本身已缓存                                                                |
+| 微信 CDN 附件用 Node `crypto` 的 AES-128-ECB 解密                                                    | `bots/aes.rs` 按 FIPS-197 自实现解密                                                                | 依赖树里没有可用的分组密码实现；用标准测试向量校验                                |
+| `disposeAllAndWait` 等三个运行时全部收尾，不设上限                                                   | `Bots::shutdown` 最多等 1 s，超时只记 warn                                                          | Main 3.5 s 后强杀 Host，CLI 进程树回收优先；Host 退出后锁按进程存活检查立即可接管 |
 
 ## 7. 远端 workspace 接缝
 
@@ -201,4 +229,6 @@ Node Bot 通过 legacy 任务快照与事件流（`getTaskSnapshot`、`onDynamic
   - V4 投影器：快照基线、row.delta 与 upsert 求差、工具状态与 inputStreaming、交互出现与消失、终态与失败、resync；
   - 选择命令：workspace / model 两级 / think / mode / task / reply / cancel / stop / `/new` 继承；问答按钮推进与提交、过期 token；automation 回推与订阅失败时的终态兜底。
 - `cargo test -p zcode-host-services --test bots_cli`（`ZCODE_TEST_CLI_RUST_BINARY`）：真实 Rust CLI + mock 模型，Bot 的订阅与投影器从真实帧得到正文 chunk、Bash 工具调用与完成、轮次收口，第二轮不重放上一轮。
+- Host 退出：`bots::tests_channels::shutdown_releases_runtime_locks_without_waiting_for_the_lease`（Telegram 与微信长轮询挂着时 shutdown 立即返回、锁目录删除、别的持有者马上拿到锁，之后的对齐不再起运行时）、飞书长连接测试断言锁在 shutdown 后删除；`cargo test -p zcode-host --test bots_shutdown`（真实 zcode-host：预置 Telegram Bot，长轮询挂在 127.0.0.1 mock 上，Main 发 `dispose` 后 3 s 内正常退出且 `telegram-polling` 锁已删除）。
+- 工具面参数：`bots::tests_commands::bot_initiated_resume_carries_session_tool_flags`（Bot 直接发的 resume 参数在门禁打开时带两个字段，远端只带动态工作流，门禁关闭时不写）。
 - E2E `automation-bots`：隔离 App 预置一个已绑定的 Telegram Bot（Bot API mock 在 127.0.0.1），Host 启动即同步菜单并长轮询；mock 投递一条消息，Host 建会话（yolo）、Rust CLI 跑 mock 模型，断言 mock 的 sendMessage 收到回复、typing 已发、offset 提交为 2，侧栏出现 Bot 创建的任务并能打开看到同一段回复。

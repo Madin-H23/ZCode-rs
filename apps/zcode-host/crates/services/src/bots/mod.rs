@@ -47,7 +47,7 @@ use crate::agent::runtime::FrameKind;
 use crate::agent::wire::{Assembled, Assembler};
 use crate::agent::{AgentProcess, AgentRuntime, WorkspaceTarget};
 use crate::automation::driver::{CreateSession, ResumeSession, SendText, TerminalOutcome};
-use crate::automation::{Area, BotDelivery, Keepalive};
+use crate::automation::{Area, BotDelivery};
 use crate::tasks::repo::RepoFilter;
 
 pub fn now_ms() -> i64 {
@@ -214,6 +214,21 @@ async fn ready_client(
         .get_ready_client(target)
         .await
         .map_err(|error| error.message)
+}
+
+/// Bot 直接发起的 `session/resume`（`getTaskConfigOptions`：`/new` 继承配置、任务态 `/model`、
+/// `/think` 读选项）的参数。Node 经 `resumeSnapshot` → `buildSessionResumeParams` 带上工具面参数
+/// （Off-Peak、动态工作流）；缺了它恢复出来的会话会丢工具簇，所以与 automation driver 同源注入。
+pub(crate) async fn resume_params(
+    agent: &AgentRuntime,
+    target: &WorkspaceTarget,
+    task_id: &str,
+) -> Value {
+    let mut params = Map::new();
+    params.insert("sessionId".into(), json!(task_id));
+    params.insert("workspace".into(), target.workspace_ref());
+    params.extend(agent.extensions().session_tool_flags(target).await);
+    Value::Object(params)
 }
 
 impl AreaPort {
@@ -445,7 +460,7 @@ impl TaskPort for AreaPort {
             let snapshot = process
                 .request_value(
                     "session/resume",
-                    &json!({"sessionId": task_id, "workspace": target.workspace_ref()}),
+                    &resume_params(&agent, &target, &task_id).await,
                 )
                 .await
                 .map_err(|error| error.message)?;
@@ -674,11 +689,13 @@ impl BotDelivery for Delivery {
     }
 }
 
+/// 安装 `bots` channel 并按配置启动通道运行时；返回的 [`service::Bots`] 由 automation 的
+/// `AreaHandle` 持有，Host 退出时经它调用 [`service::Bots::shutdown`]。
 pub fn install(
     area: &Arc<Area>,
     registry: &mut ChannelRegistry,
     _router: &mut ControlRouter,
-) -> Option<Keepalive> {
+) -> Option<Arc<service::Bots>> {
     let environment = &area.context.environment;
     let dir = environment.app_config_dir();
     let providers =
@@ -701,7 +718,8 @@ pub fn install(
         }),
         remote: Arc::new(NoRemote),
         attachments_dir: dir.join("bot-attachments"),
-        // desktop-attached 远端 Host 不抢跑 Bot 长连接与轮询（同 Node runStartupBackgroundTasks）。
+        // Rust Host 只作为桌面本地 Host 运行，总是负责 Bot 长连接与轮询；desktop-attached 远端 Host
+        // 是 Node zcode-server，自己按 runStartupBackgroundTasks 决定（docs/specs/rust-host-bots.md §2.3）。
         background: true,
     });
     let _ = area
@@ -709,5 +727,5 @@ pub fn install(
         .set(Arc::new(Delivery { bots: bots.clone() }));
     registry.implement(service::channel(bots.clone()));
     bots.schedule_refresh();
-    Some(Box::new(bots))
+    Some(bots)
 }

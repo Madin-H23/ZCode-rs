@@ -130,7 +130,7 @@ pub struct Installed {
     _observer: Arc<agent::sessions_index::SessionsIndexObserver>,
     _controller: Arc<tasks::controller::Controller>,
     _syncer: tokio::task::JoinHandle<()>,
-    _automation: automation::AreaHandle,
+    automation: automation::AreaHandle,
     remote: Arc<remote::RemoteWorkspaces>,
     /// 至少保留一个句柄，否则 tasks-index 线程与连接随之关闭。
     _storage: Storage,
@@ -141,6 +141,8 @@ impl Installed {
     pub async fn shutdown(&self) {
         self.workspace.shutdown();
         self.remote.shutdown().await;
+        // Bot 通道运行时在 CLI 之前收尾：停长轮询 / 长连接并立即释放跨进程运行锁。
+        self.automation.shutdown().await;
         self.agent.dispose_all().await;
     }
 
@@ -391,7 +393,7 @@ pub fn install(
         _observer: observer,
         _controller: controller,
         _syncer: syncer,
-        _automation: automation,
+        automation,
         remote,
         _storage: storage,
     }

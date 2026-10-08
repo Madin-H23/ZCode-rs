@@ -342,3 +342,48 @@ async fn streaming_card_failures_back_off_then_open_the_circuit() {
         "{status:?}"
     );
 }
+
+/// `/new` 继承配置、任务态 `/model`、`/think` 读选项时 Bot 自己发的 `session/resume` 与 Node
+/// `buildSessionResumeParams` 一样带工具面参数（Off-Peak 只给本地 workspace，动态工作流不分）。
+/// 建会话、首条消息前的 resume、setModel 收口与设思考档位走 automation driver，已带同一组参数。
+#[tokio::test]
+async fn bot_initiated_resume_carries_session_tool_flags() {
+    use crate::agent::{AgentRuntime, AgentRuntimeConfig, WorkspaceTarget};
+
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = AgentRuntime::new(
+        AgentRuntimeConfig {
+            base_env: Default::default(),
+            command_vars: Default::default(),
+            search_roots: Vec::new(),
+            fallback_cwd: None,
+        },
+        crate::settings::SettingStore::new(dir.path()),
+        crate::providers::ProviderRuntime::new(None, dir.path().join("provider_config.json")),
+    );
+    let local = WorkspaceTarget::local("/tmp/ws-bot".to_owned());
+    // 门禁都关时不写字段。
+    assert_eq!(
+        super::resume_params(&runtime, &local, "t1").await,
+        json!({"sessionId": "t1", "workspace": local.workspace_ref()})
+    );
+    runtime.extensions().enable_off_peak_tools();
+    runtime
+        .extensions()
+        .set_dynamic_workflow_gate(Arc::new(|| Box::pin(async { Ok(true) })));
+    assert_eq!(
+        super::resume_params(&runtime, &local, "t1").await,
+        json!({"sessionId": "t1", "workspace": local.workspace_ref(),
+               "offPeakToolEnabled": true, "dynamicWorkflowEnabled": true})
+    );
+    let remote = WorkspaceTarget {
+        workspace_path: "/repo".into(),
+        workspace_identity: Some("remote:ssh:h:22:u:/repo".into()),
+        remote_session_id: None,
+    };
+    assert_eq!(
+        super::resume_params(&runtime, &remote, "t2").await,
+        json!({"sessionId": "t2", "workspace": remote.workspace_ref(),
+               "dynamicWorkflowEnabled": true})
+    );
+}
