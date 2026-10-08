@@ -1,0 +1,709 @@
+{
+  "cases": [
+    {
+      "name": "ttft valid",
+      "schema": "localTtftFacts",
+      "input": {
+        "version": 1,
+        "observationId": "123e4567-e89b-42d3-a456-426614174000",
+        "instanceId": "cli-1",
+        "commandId": "cmd-1",
+        "receivedAt": 10,
+        "details": [{ "id": "d1", "stage": "context", "start": 1, "end": 2, "source": "cli" }]
+      },
+      "valid": true
+    },
+    {
+      "name": "ttft unknown key",
+      "schema": "localTtftFacts",
+      "input": {
+        "version": 1,
+        "observationId": "123e4567-e89b-42d3-a456-426614174000",
+        "instanceId": "cli-1",
+        "commandId": "cmd-1",
+        "receivedAt": 10,
+        "details": [{ "id": "d1", "stage": "context", "start": 1, "end": 2, "source": "cli" }],
+        "prompt": "x"
+      },
+      "valid": false
+    },
+    {
+      "name": "ttft bad uuid",
+      "schema": "localTtftFacts",
+      "input": {
+        "version": 1,
+        "observationId": "nope",
+        "instanceId": "cli-1",
+        "commandId": "cmd-1",
+        "receivedAt": 10,
+        "details": [{ "id": "d1", "stage": "context", "start": 1, "end": 2, "source": "cli" }]
+      },
+      "valid": false
+    },
+    {
+      "name": "ttft version 2",
+      "schema": "localTtftFacts",
+      "input": {
+        "version": 2,
+        "observationId": "123e4567-e89b-42d3-a456-426614174000",
+        "instanceId": "cli-1",
+        "commandId": "cmd-1",
+        "receivedAt": 10,
+        "details": [{ "id": "d1", "stage": "context", "start": 1, "end": 2, "source": "cli" }]
+      },
+      "valid": false
+    },
+    {
+      "name": "ttft detail end before start",
+      "schema": "localTtftFacts",
+      "input": {
+        "version": 1,
+        "observationId": "123e4567-e89b-42d3-a456-426614174000",
+        "instanceId": "cli-1",
+        "commandId": "cmd-1",
+        "receivedAt": 10,
+        "details": [{ "id": "d", "stage": "mcp", "start": 5, "end": 1, "source": "cli" }]
+      },
+      "valid": false
+    },
+    {
+      "name": "ttft detail unknown stage",
+      "schema": "localTtftFacts",
+      "input": {
+        "version": 1,
+        "observationId": "123e4567-e89b-42d3-a456-426614174000",
+        "instanceId": "cli-1",
+        "commandId": "cmd-1",
+        "receivedAt": 10,
+        "details": [{ "id": "d", "stage": "other", "start": 1, "source": "cli" }]
+      },
+      "valid": false
+    },
+    {
+      "name": "ttft identifier too long",
+      "schema": "localTtftFacts",
+      "input": {
+        "version": 1,
+        "observationId": "123e4567-e89b-42d3-a456-426614174000",
+        "instanceId": "cli-1",
+        "commandId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "receivedAt": 10,
+        "details": [{ "id": "d1", "stage": "context", "start": 1, "end": 2, "source": "cli" }]
+      },
+      "valid": false
+    },
+    {
+      "name": "ttft negative time",
+      "schema": "localTtftFacts",
+      "input": {
+        "version": 1,
+        "observationId": "123e4567-e89b-42d3-a456-426614174000",
+        "instanceId": "cli-1",
+        "commandId": "cmd-1",
+        "receivedAt": -1,
+        "details": [{ "id": "d1", "stage": "context", "start": 1, "end": 2, "source": "cli" }]
+      },
+      "valid": false
+    },
+    {
+      "name": "ttft revision float",
+      "schema": "localTtftFacts",
+      "input": {
+        "version": 1,
+        "observationId": "123e4567-e89b-42d3-a456-426614174000",
+        "instanceId": "cli-1",
+        "commandId": "cmd-1",
+        "receivedAt": 10,
+        "details": [{ "id": "d1", "stage": "context", "start": 1, "end": 2, "source": "cli" }],
+        "revision": 1.5
+      },
+      "valid": false
+    },
+    {
+      "name": "ttft full optional",
+      "schema": "localTtftFacts",
+      "input": {
+        "version": 1,
+        "observationId": "123e4567-e89b-42d3-a456-426614174000",
+        "instanceId": "cli-1",
+        "commandId": "cmd-1",
+        "receivedAt": 10,
+        "details": [{ "id": "d1", "stage": "context", "start": 1, "end": 2, "source": "cli" }],
+        "sendMode": "queued",
+        "outputKind": "tool",
+        "terminal": "rejected",
+        "truncated": true
+      },
+      "valid": true
+    },
+    {
+      "name": "ttft not object",
+      "schema": "localTtftFacts",
+      "input": [
+        {
+          "version": 1,
+          "observationId": "123e4567-e89b-42d3-a456-426614174000",
+          "instanceId": "cli-1",
+          "commandId": "cmd-1",
+          "receivedAt": 10,
+          "details": [{ "id": "d1", "stage": "context", "start": 1, "end": 2, "source": "cli" }]
+        }
+      ],
+      "valid": false
+    },
+    {
+      "name": "cua valid",
+      "schema": "cuaPermissionObservation",
+      "input": {
+        "schemaVersion": 1,
+        "eventId": "e1",
+        "eventSeq": 0,
+        "occurredAt": 5,
+        "sessionId": "s1",
+        "toolCallId": "t1",
+        "permissionStatus": {
+          "schemaVersion": 1,
+          "platform": "darwin",
+          "grantOwner": "dev.zcode.app",
+          "accessibility": "granted",
+          "screenRecording": "unknown"
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "cua nested unknown key",
+      "schema": "cuaPermissionObservation",
+      "input": {
+        "schemaVersion": 1,
+        "eventId": "e1",
+        "eventSeq": 0,
+        "occurredAt": 5,
+        "sessionId": "s1",
+        "toolCallId": "t1",
+        "permissionStatus": {
+          "schemaVersion": 1,
+          "platform": "darwin",
+          "grantOwner": "dev.zcode.app",
+          "accessibility": "granted",
+          "screenRecording": "unknown",
+          "extra": 1
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "cua wrong platform",
+      "schema": "cuaPermissionObservation",
+      "input": {
+        "schemaVersion": 1,
+        "eventId": "e1",
+        "eventSeq": 0,
+        "occurredAt": 5,
+        "sessionId": "s1",
+        "toolCallId": "t1",
+        "permissionStatus": {
+          "schemaVersion": 1,
+          "platform": "win32",
+          "grantOwner": "dev.zcode.app",
+          "accessibility": "granted",
+          "screenRecording": "unknown"
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "cua empty turn",
+      "schema": "cuaPermissionObservation",
+      "input": {
+        "schemaVersion": 1,
+        "eventId": "e1",
+        "eventSeq": 0,
+        "occurredAt": 5,
+        "sessionId": "s1",
+        "toolCallId": "t1",
+        "permissionStatus": {
+          "schemaVersion": 1,
+          "platform": "darwin",
+          "grantOwner": "dev.zcode.app",
+          "accessibility": "granted",
+          "screenRecording": "unknown"
+        },
+        "turnId": ""
+      },
+      "valid": false
+    },
+    {
+      "name": "cua negative seq",
+      "schema": "cuaPermissionObservation",
+      "input": {
+        "schemaVersion": 1,
+        "eventId": "e1",
+        "eventSeq": -1,
+        "occurredAt": 5,
+        "sessionId": "s1",
+        "toolCallId": "t1",
+        "permissionStatus": {
+          "schemaVersion": 1,
+          "platform": "darwin",
+          "grantOwner": "dev.zcode.app",
+          "accessibility": "granted",
+          "screenRecording": "unknown"
+        }
+      },
+      "valid": false
+    },
+    {
+      "name": "fact turnStarted",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "turn.started",
+        "inputSource": "workflow_launch"
+      },
+      "valid": true
+    },
+    {
+      "name": "fact modelRequest",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "model.request.status",
+        "requestId": "r1",
+        "status": "model_request_completed",
+        "providerId": "p",
+        "modelId": "m",
+        "providerHostname": "api.example.test",
+        "transport": "sse",
+        "attempt": 0,
+        "maxAttempts": 3,
+        "durationMs": 12.5
+      },
+      "valid": true
+    },
+    {
+      "name": "fact streamChunk",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "stream.chunk",
+        "channel": "text",
+        "chunkLength": 4,
+        "firstChunk": true
+      },
+      "valid": true
+    },
+    {
+      "name": "fact toolLifecycle",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "tool.lifecycle",
+        "phase": "completed",
+        "toolCallId": "tc",
+        "performance": { "totalMs": 3, "commandHash": "0123456789abcdef", "workspaceKind": "local" }
+      },
+      "valid": true
+    },
+    {
+      "name": "fact permission",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "permission.lifecycle",
+        "phase": "resolved",
+        "toolCallId": "tc"
+      },
+      "valid": true
+    },
+    {
+      "name": "fact usage",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "usage.delta",
+        "inputTokens": 1,
+        "outputTokens": 2,
+        "totalTokens": 3,
+        "reasoningTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "fact subagent",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "subagent.lifecycle",
+        "phase": "spawned",
+        "agentId": "a",
+        "childSessionId": "c",
+        "background": false
+      },
+      "valid": true
+    },
+    {
+      "name": "fact workflow",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "workflow.lifecycle",
+        "phase": "actor-spawned",
+        "runId": "run",
+        "agentId": "a",
+        "childSessionId": "c"
+      },
+      "valid": true
+    },
+    {
+      "name": "fact turnTerminal",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "turn.terminal",
+        "status": "success",
+        "toolCallCount": 2
+      },
+      "valid": true
+    },
+    {
+      "name": "fact compaction",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "compaction.terminal",
+        "operationId": "op",
+        "status": "completed",
+        "trigger": "auto",
+        "attempt": 1
+      },
+      "valid": true
+    },
+    {
+      "name": "fact unknown kind",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "other"
+      },
+      "valid": false
+    },
+    {
+      "name": "fact unknown key",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "stream.chunk",
+        "channel": "text",
+        "chunkLength": 4,
+        "firstChunk": true,
+        "text": "secret"
+      },
+      "valid": false
+    },
+    {
+      "name": "fact hostname with port",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "model.request.status",
+        "requestId": "r1",
+        "status": "model_request_completed",
+        "providerId": "p",
+        "modelId": "m",
+        "providerHostname": "api.example.test:443",
+        "transport": "sse",
+        "attempt": 0,
+        "maxAttempts": 3,
+        "durationMs": 12.5
+      },
+      "valid": false
+    },
+    {
+      "name": "fact hostname ipv6",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "model.request.status",
+        "requestId": "r1",
+        "status": "model_request_completed",
+        "providerId": "p",
+        "modelId": "m",
+        "providerHostname": "[::1]",
+        "transport": "sse",
+        "attempt": 0,
+        "maxAttempts": 3,
+        "durationMs": 12.5
+      },
+      "valid": true
+    },
+    {
+      "name": "fact hostname with space",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "model.request.status",
+        "requestId": "r1",
+        "status": "model_request_completed",
+        "providerId": "p",
+        "modelId": "m",
+        "providerHostname": " a",
+        "transport": "sse",
+        "attempt": 0,
+        "maxAttempts": 3,
+        "durationMs": 12.5
+      },
+      "valid": false
+    },
+    {
+      "name": "fact automation and offpeak",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "turn.started",
+        "inputSource": "workflow_launch",
+        "automationId": "a",
+        "offPeakTaskId": "o"
+      },
+      "valid": false
+    },
+    {
+      "name": "fact offpeak run type without task",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "turn.started",
+        "inputSource": "workflow_launch",
+        "offPeakRunType": "init"
+      },
+      "valid": false
+    },
+    {
+      "name": "fact offpeak run type with task",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "turn.started",
+        "inputSource": "workflow_launch",
+        "offPeakRunType": "resume",
+        "offPeakTaskId": "o"
+      },
+      "valid": true
+    },
+    {
+      "name": "fact actor spawned without child",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "workflow.lifecycle",
+        "phase": "actor-spawned",
+        "runId": "run",
+        "agentId": "a"
+      },
+      "valid": false
+    },
+    {
+      "name": "fact run settled without status",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "workflow.lifecycle",
+        "phase": "run-settled",
+        "runId": "run",
+        "agentId": "a",
+        "childSessionId": "c"
+      },
+      "valid": false
+    },
+    {
+      "name": "fact run settled with status",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "workflow.lifecycle",
+        "phase": "run-settled",
+        "runId": "run",
+        "agentId": "a",
+        "childSessionId": "c",
+        "status": "stopped",
+        "stopReason": "user"
+      },
+      "valid": true
+    },
+    {
+      "name": "fact bad command hash",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "tool.lifecycle",
+        "phase": "completed",
+        "toolCallId": "tc",
+        "performance": { "commandHash": "0123456789ABCDEF" }
+      },
+      "valid": false
+    },
+    {
+      "name": "fact nested performance unknown",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "tool.lifecycle",
+        "phase": "completed",
+        "toolCallId": "tc",
+        "performance": { "argv": ["rm"] }
+      },
+      "valid": false
+    },
+    {
+      "name": "fact compaction attempt zero",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "compaction.terminal",
+        "operationId": "op",
+        "status": "completed",
+        "trigger": "auto",
+        "attempt": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "fact memory flag",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "usage.delta",
+        "inputTokens": 1,
+        "outputTokens": 2,
+        "totalTokens": 3,
+        "reasoningTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "memoryEnabled": true,
+        "turnId": "t"
+      },
+      "valid": true
+    },
+    {
+      "name": "fact empty session",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "",
+        "kind": "usage.delta",
+        "inputTokens": 1,
+        "outputTokens": 2,
+        "totalTokens": 3,
+        "reasoningTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0
+      },
+      "valid": false
+    }
+  ]
+}
