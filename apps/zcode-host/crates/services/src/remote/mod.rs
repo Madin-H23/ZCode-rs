@@ -819,4 +819,8 @@ fn runtime_preferences_bridge(
 }
 
 #[cfg(test)]
+mod fake_remote;
+#[cfg(test)]
 mod registry_tests;
+#[cfg(test)]
+mod remote_tests;

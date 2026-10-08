@@ -28,12 +28,15 @@ const SESSION_CHANNEL: &str = "zcode-session";
 
 type ReportFn = Arc<dyn Fn(&str, Option<&str>, u64) + Send + Sync>;
 
+/// (workspacePath, workspaceIdentity)
+type Context = (String, Option<String>);
+
 #[derive(Default)]
 struct TrackerState {
     /// taskId → (workspacePath, workspaceIdentity)
     metas: HashMap<String, (String, Option<String>)>,
     /// workspaceKey → (上下文, 运行中的 taskId)
-    active: HashMap<String, ((String, Option<String>), HashSet<String>)>,
+    active: HashMap<String, (Context, HashSet<String>)>,
     ready: HashMap<String, AbortHandle>,
     workspaces: HashMap<String, AbortHandle>,
 }

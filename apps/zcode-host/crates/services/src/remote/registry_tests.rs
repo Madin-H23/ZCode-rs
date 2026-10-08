@@ -52,16 +52,13 @@ impl RegistryHandle for FakeHandle {
 }
 
 type Responder = oneshot::Sender<Result<Arc<FakeHandle>, String>>;
+type ReleaseResponder = oneshot::Sender<Result<(), String>>;
+type ConnectCall = (String, watch::Receiver<bool>, Option<Responder>);
 
 #[derive(Default)]
 struct Fake {
-    connects: Mutex<Vec<(String, watch::Receiver<bool>, Option<Responder>)>>,
-    releases: Mutex<
-        Vec<(
-            WorkspaceContext,
-            Option<oneshot::Sender<Result<(), String>>>,
-        )>,
-    >,
+    connects: Mutex<Vec<ConnectCall>>,
+    releases: Mutex<Vec<(WorkspaceContext, Option<ReleaseResponder>)>>,
     closed: Mutex<Vec<SessionClosed>>,
 }
 

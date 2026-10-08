@@ -76,10 +76,12 @@ type ConnectFn<H> =
 type ReleaseFn<H> =
     Arc<dyn Fn(Arc<H>, WorkspaceContext) -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
 
+type ReleaseErrorFn = Arc<dyn Fn(&WorkspaceContext, &str) + Send + Sync>;
+
 pub struct RegistryOptions<H> {
     pub connect: ConnectFn<H>,
     pub release_workspace: Option<ReleaseFn<H>>,
-    pub on_release_error: Arc<dyn Fn(&WorkspaceContext, &str) + Send + Sync>,
+    pub on_release_error: ReleaseErrorFn,
     pub on_session_closed: Arc<dyn Fn(SessionClosed) + Send + Sync>,
     pub create_id: Arc<dyn Fn() -> String + Send + Sync>,
     pub wsl_idle_ttl: Duration,

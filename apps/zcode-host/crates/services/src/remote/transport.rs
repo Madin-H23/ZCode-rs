@@ -60,6 +60,22 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// 测试：用现成的 rpc 客户端组装连接；`closed` 置 Some 即底层关闭。
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        client: RpcClient,
+        backend: Option<RpcClient>,
+        closed: watch::Receiver<Option<CloseEvent>>,
+    ) -> Self {
+        Self {
+            client,
+            backend,
+            hello: json!({"type": "zcode-hello"}),
+            closed,
+            disposer: Arc::new(|| -> BoxFuture<'static, ()> { Box::pin(async {}) }),
+        }
+    }
+
     /// 底层关闭时完成（只完成一次，之后立即返回同一事件）。
     pub async fn closed(&self) -> CloseEvent {
         let mut closed = self.closed.clone();
