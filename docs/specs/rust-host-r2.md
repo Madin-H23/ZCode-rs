@@ -109,17 +109,61 @@ UI                      Scope                         AgentRuntime / CLI
 │ （UI 退避重连，subscribe 懒启动第 N+1 代）
 ```
 
-## 5. 验收
+## 5. 侧栏（任务列表）
 
-- `cargo test -p zcode-host-services --test agent_cli`：用 Rust CLI 的 release 构建和本地 mock 的 OpenAI 兼容端点，走完以下流程：握手、`existing-only` 的 dormant 错误、createSession（带首条输入）、订阅、收到流式回复、订阅 sessions-index、拒绝不属于本连接的 resync、断开后回收进程。整个过程不需要真实凭据，也不读写开发者的 `~/.zcode`。
-- 单元测试覆盖：NDJSON 分行（含 U+2028）、strict 信封、存储门禁、错误码透传、进程树升级回收、stderr 脱敏、帧路由、clientHello 严格校验、代理环境、运行时偏好。
-- 真实 App：`ZCODE_DESKTOP_HOST=rust pnpm dev:desktop`，在临时 HOME 下配置 BYOK provider，手工走一遍核心流程（见第 6 节，侧栏依赖 tasks-index）。
+### 5.1 规则
 
-## 6. 剩余工作（本阶段内）
+1. **行集合只来自 tasks-index.sqlite**：与 Node 共用同一个文件（`{dataBaseDir}/.zcode/v2/tasks-index.sqlite`）、同一 schema 和迁移账本，checksum 逐字节一致。sessions-index 只给已有行叠加实时状态；没有行的会话不会出现在列表里。
+2. **启动**：Host 在 `InitLocal` 后先迁移 tasks-index，期间报告 `preparing_host_storage`，然后进入 `starting_services`，安装服务后报 `ready`。迁移失败报 `failed`，带 `failedPhase` 与 `errorCode`。
+3. **sessions-index 只订阅一次**：Node 为 syncer 和 window-controller 各开一条 CLI 订阅；两者都是 Host 内部的被动消费者，Rust Host 合并成每个 workspace 一条（`SessionsIndexObserver`）。它使用 Host 自己的 connectionId，只连已有进程，不会拉起 CLI；帧经重组后使用，遇到 seq 缺口时用 forceSnapshot 做 resync。Renderer 自己的订阅不受影响。
+4. **syncer**：
+   - 每代进程的第一份快照只静默写入基线，不广播。
+   - draft 会话不落库。
+   - 非终态转为终态时，先 patch 状态，再广播 `task_status_changed`（满足条件时带 `background_terminal`），然后回源。
+   - 会话首次可见时回源，同时写入 grouped 顶层顺序，广播 `task_created`。
+   - 标题变化时 patch 标题，广播 `task_title_changed`；行还不存在时改为回源。
+   - 回源指 CLI `session/read`，只读已有进程。
+5. **写入先提交，再广播**：事件先于提交，会让 UI 用旧的 membership 重拉。
+6. **zcode-task**：
+   - 三个分区（active、pinned、archived）、全局置顶 id、删除墓碑。
+   - 未读、置顶、归档、删除、改名，各自广播对应的 reason。CAS 清未读只在真的清掉时广播。
+   - `releaseWorkspacePreparation` 是空操作；`restartWorkspaceProcess` 回收该 workspace 的 CLI，下次请求时懒启动。
+7. **window-controller**：
+   - 内存投影：tasks-index 分区叠加实时摘要。
+   - 两个 topic 各有一个 `{logEpoch, seq}`，增量帧让 seq 恰好加一。订阅与 resync 都回快照。帧按连接分发。
+   - source 第一次被查询时读取分区，之后只在 workspace 事件或修改发生时强制重读。
+   - `setTaskUnread` 由 zcode-task 直接实现，不经 controller 路由（Node 的路由只是 Host 内部细节）。
 
-1. **tasks-index.sqlite**：同一文件、同一 schema 与迁移账本（checksum 必须一致），由 Host 在 `InitLocal` 时迁移并报告 `preparing_host_storage`。
-2. **index syncer**：Host 自己订阅每个 workspace 的 sessions-index，重组分片，把会话写进 tasks-index，并发出 `workspace_task_list_changed`。
-3. **zcode-task**：`listTasks`、`listPinnedTaskIds`、`listPinnedTasks`、`listArchivedTasks`、`listDeletedTaskIds`、`setTaskUnread`、`onDynamicWorkspaceEvent`、`releaseWorkspacePreparation`、`restartWorkspaceProcess`。
-4. **window-controller**：基于同一份行数据的投影。
-5. **zcode-session**：`readWorkspacePresentation`（经 `runtime/capabilities` 和 `workspace/readPresentation`）、`initializeWorkspace`。
-6. **启动预热**：对 `agentWarmupTargets` 调用 `initialize`，让 `existing-only` 的 sessions-index 一启动就能连上。
+### 5.2 有意的差异
+
+| Node 行为                                       | Rust Host                      | 理由                                                     |
+| ----------------------------------------------- | ------------------------------ | -------------------------------------------------------- |
+| syncer 与 controller 各一条 sessions-index 订阅 | 合并为一条                     | 都是 Host 内部被动消费者，减少 CLI 负担                  |
+| controller 搜索走 zcode-task 全文检索           | 标题包含匹配                   | 全文检索随 `listTaskList` 移植                           |
+| 消息可见性按完整的 projection policy 判定       | 规则近似（见 `tasks/meta.rs`） | 只影响标题兜底、搜索正文与“是否已有用户内容”，不影响渲染 |
+| 迁移失败可在启动页重试                          | 失败后需重启 App               | 重试控制随 D2 一起做                                     |
+
+## 6. 验收
+
+- `cargo test -p zcode-host-services --test agent_cli`：用 Rust CLI 的 release 构建和本地 mock 的 OpenAI 兼容端点，走完以下流程：握手、`existing-only` 的 dormant 错误、createSession（带首条输入）、订阅、收到流式回复、Host 观察者看到新会话、`readWorkspacePresentation`、订阅 sessions-index、拒绝不属于本连接的 resync、断开后回收进程。整个过程不需要真实凭据，也不读写开发者的 `~/.zcode`。
+- 单元测试覆盖：
+  - NDJSON 分行（含 U+2028）、strict 信封、存储门禁、错误码透传；
+  - 进程树升级回收、stderr 脱敏；
+  - 帧路由、分片重组（CRC32、base64）、clientHello 严格校验；
+  - 代理环境、运行时偏好；
+  - 快照到任务行的映射、syncer 的基线、终态与标题规则；
+  - controller 的帧 seq 与 mutation。
+- 真实 App：`pnpm e2e:rust-host` 启动一个完全隔离的 Electron 实例（临时 `HOME`、独立 userData、私有 CDP 端口、遥测端点置空），Main 起 Rust Host，Agent 用 Rust CLI，模型是本地 mock。已通过的场景：
+  - 发送消息并流式显示回复；
+  - Write 工具的权限弹窗，确认后写入文件，模型继续回复；
+  - 展开文件改动卡片并打开 diff；
+  - Stop 中止慢速流；
+  - 切换到第二个模型，后续请求使用新模型；
+  - 终端在 workspace 里执行命令；
+  - Review 面板列出 git 未暂存改动。
+
+## 7. 剩余工作（本阶段内）
+
+1. 接入 tasks-index.sqlite 的实现，替换 zcode-task 与 syncer 当前使用的端口。
+2. 异步启动：迁移 tasks-index，然后报 `ready`。
+3. E2E 增加侧栏断言：新会话出现在 Project 列表，未读状态与置顶生效。
