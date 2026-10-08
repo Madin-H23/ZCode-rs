@@ -9,6 +9,12 @@ const TITLE = "remember the zebra";
 const REPLY = "The quokka answer lives in the body";
 
 export const mockRules = [
+  // 标题生成请求（不带 tools）回固定标题：quokka 只出现在回复正文里，标题匹配找不到它。
+  {
+    name: "title",
+    match: ({ hasTools }) => !hasTools,
+    respond: ({ response }) => response.end(sseText(TITLE)),
+  },
   {
     name: "default",
     match: () => true,
