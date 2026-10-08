@@ -6,6 +6,7 @@
 //! - host-core 为 `scope.kind = "remote"` 的 attachment 解析 scoped channel 表并登记断开租约；
 //! - Host 退出时释放全部远端连接。
 pub mod agent_scope;
+pub mod media;
 pub mod provisioning;
 pub mod registry;
 pub mod scope;
@@ -563,7 +564,16 @@ impl RemoteWorkspaces {
                 ForwardChannel::new(backend.clone(), "prompt-attachment-transfer"),
             );
         }
-        let _ = (client_mode, self.media_range_enabled);
+        // 远端媒体按 attachment 的 clientMode 选择数据面：桌面用 Host 回环 Range，手机保持不注册。
+        if client_mode == ClientMode::DesktopContinuous && self.media_range_enabled {
+            registry.register(
+                "media-preview",
+                Arc::new(media::MediaPreviewChannel(media::MediaPreviewProxy::new(
+                    client.clone(),
+                    scope.clone(),
+                ))),
+            );
+        }
         let (close, closed) = watch::channel(false);
         self.lock_leases().push(Lease {
             attachment_id: attachment_id.to_owned(),

@@ -356,6 +356,91 @@ async fn remote_workspace_against_a_real_zcode_server() {
     .unwrap_err();
     assert_eq!(resync.message, "fault.subscription.notOwned");
 
+    // 远端媒体预览代理：Range URL 由 Host 回环代理，分块读远端 file.readFileRange。
+    let clip: Vec<u8> = (0..(2 * 1024 * 1024 + 123))
+        .map(|index| (index % 251) as u8)
+        .collect();
+    std::fs::write(workspace.join("clip.mp4"), &clip).unwrap();
+    let prepared = value(
+        call(
+            &registry,
+            &desktop,
+            "media-preview",
+            "prepare",
+            vec![json!({"path": format!("{workspace_path}/clip.mp4"), "expectedKind": "video"})],
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(prepared["kind"], "host-range-url");
+    assert_eq!(prepared["mediaType"], "video/mp4");
+    assert_eq!(prepared["size"], clip.len());
+    let url = prepared["url"].as_str().unwrap().to_owned();
+    let (status, headers, body) = http_get(&url, "GET", Some("bytes=1048570-1048580")).await;
+    assert_eq!(status, 206);
+    assert!(headers.contains(&format!(
+        "Content-Range: bytes 1048570-1048580/{}",
+        clip.len()
+    )));
+    assert_eq!(body, clip[1048570..=1048580].to_vec());
+    let (status, _, body) = http_get(&url, "GET", None).await;
+    assert_eq!(status, 200);
+    assert_eq!(body.len(), clip.len());
+    assert!(body == clip, "full body matches across 1 MiB chunks");
+    let (status, headers, _) = http_get(&url, "GET", Some("bytes=999999999-")).await;
+    assert_eq!(status, 416);
+    assert!(headers.contains(&format!("Content-Range: bytes */{}", clip.len())));
+    let wrong_kind = call(
+        &registry,
+        &desktop,
+        "media-preview",
+        "prepare",
+        vec![json!({"path": format!("{workspace_path}/clip.mp4"), "expectedKind": "audio"})],
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        wrong_kind
+            .message
+            .starts_with("Unsupported media preview format")
+    );
+    let outside = call(
+        &registry,
+        &desktop,
+        "media-preview",
+        "prepare",
+        vec![json!({"path": "/etc/hosts", "expectedKind": "video"})],
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        outside.message,
+        "Media preview path is outside remote workspace"
+    );
+    call(
+        &registry,
+        &desktop,
+        "media-preview",
+        "release",
+        vec![json!({"previewId": prepared["previewId"]})],
+    )
+    .await
+    .unwrap();
+    assert_eq!(http_get(&url, "GET", None).await.0, 404);
+    let replay = remote
+        .attach(
+            "attachment-2",
+            ClientMode::WebRemoteReplayable,
+            &scope,
+            &local,
+        )
+        .await
+        .unwrap();
+    assert!(
+        replay.registry.get("media-preview").is_none(),
+        "replayable attachments keep inline media"
+    );
+
     // Main：dispose-remote-workspace-session → attachment 断开、remote-workspace-closed{disposed}
     let mut closed = attachment.closed.clone();
     assert!(router.dispatch(
@@ -372,6 +457,29 @@ async fn remote_workspace_against_a_real_zcode_server() {
     assert!(remote.validate_scope(&scope).is_err());
     assert!(remote.attachment_ids().is_empty());
     remote.shutdown().await;
+}
+
+/// 最小 HTTP/1.1 客户端：返回 (状态码, 响应头文本, body)。
+async fn http_get(url: &str, method: &str, range: Option<&str>) -> (u16, String, Vec<u8>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let rest = url.strip_prefix("http://").unwrap();
+    let (authority, path) = rest.split_at(rest.find('/').unwrap());
+    let mut stream = tokio::net::TcpStream::connect(authority).await.unwrap();
+    let mut request = format!("{method} {path} HTTP/1.1\r\nHost: {authority}\r\n");
+    if let Some(range) = range {
+        request.push_str(&format!("Range: {range}\r\n"));
+    }
+    request.push_str("\r\n");
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    let split = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .unwrap();
+    let head = String::from_utf8_lossy(&response[..split]).into_owned();
+    let status = head.split(' ').nth(1).unwrap().parse().unwrap();
+    (status, head, response[split + 4..].to_vec())
 }
 
 fn repo_root() -> PathBuf {
