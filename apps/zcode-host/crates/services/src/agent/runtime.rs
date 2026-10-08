@@ -279,7 +279,7 @@ impl AgentProcess {
 }
 
 pub struct AgentRuntimeConfig {
-    /// 清洗后的 Host 环境 + Main 的登录 shell 补丁（runtime_env::effective_base_env）。
+    /// 清洗后的 Host 环境 + Main 的登录 shell 补丁（support::env::ProcessEnv::for_children）。
     pub base_env: BTreeMap<String, String>,
     /// 命令解析读取的变量（`ZCODE_AGENT_SERVER_*` 等），即 Host 自身环境。
     pub command_vars: BTreeMap<String, String>,

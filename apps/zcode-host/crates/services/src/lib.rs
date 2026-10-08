@@ -13,15 +13,21 @@ pub mod account;
 pub mod agent;
 pub mod broadcast;
 pub mod file;
+pub mod file_watcher;
+pub mod git;
 pub mod main_bridge;
 pub mod providers;
-pub mod runtime_env;
 pub mod settings;
 pub mod store;
+pub mod support;
 pub mod system;
 pub mod tasks;
+pub mod terminal;
+#[cfg(test)]
+mod testing;
 
 use main_bridge::MainBridge;
+use support::env::ProcessEnv;
 
 /// 进程环境快照，由 composition root 读取后传入；service 不直接读 `std::env`。
 #[derive(Debug, Clone, Default)]
@@ -130,13 +136,22 @@ pub fn install(
         context.environment.vars.clone(),
     ));
 
+    // 子进程（git、终端 shell）的基础环境：Host 环境清理后叠加登录 shell 补丁，不改写自身环境。
+    let child_env = ProcessEnv::for_children(
+        &context.environment.vars,
+        &context.init.runtime_process_env_patch,
+    );
+    registry.implement(git::service(git::repo::GitRepo::new(&child_env)));
+    registry.implement(file_watcher::service(file_watcher::FileWatchers::new()));
+    registry.implement(terminal::service(terminal::Terminals::new(
+        child_env.clone(),
+        settings.clone(),
+    )));
+
     let environment = &context.environment;
     let agent = agent::AgentRuntime::new(
         agent::AgentRuntimeConfig {
-            base_env: runtime_env::effective_base_env(
-                &environment.vars,
-                &context.init.runtime_process_env_patch,
-            ),
+            base_env: child_env.vars().clone(),
             command_vars: environment.vars.clone(),
             search_roots: environment.search_roots.clone(),
             fallback_cwd: context

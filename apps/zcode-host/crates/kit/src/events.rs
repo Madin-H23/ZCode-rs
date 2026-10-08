@@ -71,6 +71,11 @@ impl<T: Clone + Send + 'static> EventHub<T> {
         self.subscribe_inner(Some(Box::new(filter)))
     }
 
+    /// 结束现有订阅者的事件流（相当于 TS `Emitter.dispose()`）：订阅方随后收到流结束。
+    pub fn close(&self) {
+        self.lock().clear();
+    }
+
     pub fn subscriber_count(&self) -> usize {
         let mut subscribers = self.lock();
         subscribers.retain(|subscriber| !subscriber.sender.is_closed());
@@ -110,5 +115,16 @@ mod tests {
         assert_eq!(all.next().await, Some(2));
         assert_eq!(even.next().await, Some(2));
         assert_eq!(hub.subscriber_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn close_ends_existing_streams() {
+        let hub = EventHub::<u32>::new();
+        let mut events = Box::pin(hub.subscribe());
+        hub.emit(1);
+        hub.close();
+        hub.emit(2);
+        assert_eq!(events.next().await, Some(1));
+        assert_eq!(events.next().await, None);
     }
 }

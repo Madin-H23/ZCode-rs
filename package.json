@@ -51,6 +51,7 @@
     "dev:desktop:zcode-cli-rust": "node scripts/dev-desktop-zcode-cli-rust.mjs",
     "test:rust-npm": "node --test apps/zcode-cli-rust/npm/test/*.test.mjs",
     "test:rust-host": "node scripts/rust-host/test.mjs",
+    "e2e:rust-host": "node scripts/rust-host/e2e-desktop.mjs",
     "pack:rust-npm": "node scripts/pack-zcode-cli-rust-npm.mjs"
   },
   "dependencies": {
