@@ -9,9 +9,9 @@ pub mod auth;
 pub mod availability;
 pub mod cli;
 pub mod client_config;
+pub mod coding_plan;
 pub mod credential;
 pub mod endpoint;
-mod legacy_stub;
 pub mod net;
 pub mod oauth;
 pub mod oauth_adapters;
@@ -34,7 +34,6 @@ use crate::providers::ProviderRuntime;
 use crate::settings::SettingStore;
 use crate::tasks_index::{ListFilter, TasksIndex};
 
-pub use legacy_stub::coding_plan_service;
 
 /// `ZCODE_JWT_INVALID_BROADCAST_CHANNEL`。
 const JWT_INVALID_BROADCAST_CHANNEL: &str = "auth:zcode-jwt-invalid";
@@ -218,6 +217,16 @@ impl AccountStack {
                     process.request_value("v4/usage/stats", &params).await
                 })
             }),
+        )));
+    }
+
+    /// `coding-plan-subscription`（需要 provider runtime 投影闲时视图）。
+    pub fn register_coding_plan(&self, registry: &mut ChannelRegistry, runtime: &ProviderRuntime) {
+        registry.implement(coding_plan::service(coding_plan::CodingPlanSubscription::new(
+            self.api.clone(),
+            self.account_api.clone(),
+            self.credentials.clone(),
+            runtime.clone(),
         )));
     }
 

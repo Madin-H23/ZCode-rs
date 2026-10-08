@@ -648,6 +648,46 @@ impl Resolved {
         Value::Object(view)
     }
 
+    /// `buildOffPeakModelSelectionView`：只投影固定隐藏的闲时 provider。
+    pub fn off_peak_model_selection_view(&self, revision: u64) -> Value {
+        let providers: Vec<Value> = self
+            .providers
+            .iter()
+            .filter(|provider| {
+                provider.in_registry()
+                    && provider.hidden
+                    && matches!(
+                        provider.provider_id.as_str(),
+                        "account:zai-offpeak-idle-plan" | "account:bigmodel-offpeak-idle-plan"
+                    )
+            })
+            .map(|provider| {
+                let mut view = Map::new();
+                if let Some(name) = &provider.provider_name {
+                    view.insert("providerName".into(), json!(name));
+                }
+                if let Some(template) = &provider.template_id {
+                    view.insert("templateId".into(), json!(template));
+                }
+                view.insert("providerId".into(), json!(provider.provider_id));
+                view.insert("config".into(), provider.effective_config.clone());
+                view.insert(
+                    "models".into(),
+                    Value::Array(
+                        provider
+                            .models
+                            .iter()
+                            .filter(|model| model.executable)
+                            .map(|model| json!({"modelId": model.model_id, "config": model.effective_config}))
+                            .collect(),
+                    ),
+                );
+                Value::Object(view)
+            })
+            .collect();
+        json!({"revision": revision, "providers": providers})
+    }
+
     fn find_model(&self, provider_id: &str, model_id: &str) -> Option<&ModelEntry> {
         self.visible_registry()
             .find(|provider| provider.provider_id == provider_id)?
