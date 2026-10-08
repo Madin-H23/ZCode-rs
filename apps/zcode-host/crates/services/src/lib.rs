@@ -202,12 +202,6 @@ pub fn install(
         settings.clone(),
         providers.clone(),
     );
-    let fallback = registry.get(agent::service::CHANNEL);
-    registry.register(
-        agent::service::CHANNEL,
-        agent::service::AgentChannel::new(agent.clone(), fallback),
-    );
-    registry.implement(agent::session::service(agent.clone()));
     let observer = agent::sessions_index::SessionsIndexObserver::start(agent.clone());
 
     // 侧栏：syncer 与 controller 必须先挂上观察者，再预热拉起 CLI，否则会错过首份快照。
@@ -220,11 +214,39 @@ pub fn install(
     registry.implement(tasks::service::service(task_service.clone()));
     let syncer = tasks::syncer::start(&observer, agent.clone(), task_service.clone());
     let controller = tasks::controller::Controller::start(
-        Arc::new(task_service),
+        Arc::new(task_service.clone()),
         observer.clone(),
         workspace_events,
     );
     registry.implement(tasks::controller::service(controller.clone()));
+
+    // ── agent ──（docs/specs/rust-host-agent.md）
+    // 三个 lane、CLI 通知分发、浏览器控制、进程生命周期上报，以及 zcode-agent / zcode-session /
+    // plugin-management 三个 channel。AgentChannel 在最外层：连接作用域成员由它处理，其余回退到
+    // members，再回退到先前登记的实现（例如 automation 成员）与契约 stub。
+    let agent_main = MainBridge::new(context.control.clone());
+    agent::process_events::forward(agent.extensions(), agent_main.clone());
+    let agent_browser = agent::browser::BrowserBridge::new(Some(agent_main.clone()));
+    agent_browser.install(router, agent.extensions());
+    let agent_events =
+        agent::notifications::AgentEvents::start(agent.extensions(), Some(agent_main));
+    let agent_api = agent::api::AgentApi::new(
+        agent.clone(),
+        &context.environment.data_base_dir,
+        agent_events,
+        Some(agent_browser),
+    )
+    .with_tasks_index(storage.tasks_index.clone());
+    registry.implement(agent::members::agent_service(&agent_api));
+    registry.implement(agent::members::plugin_management_service(&agent_api));
+    let fallback = registry.get(agent::service::CHANNEL);
+    registry.register(
+        agent::service::CHANNEL,
+        agent::service::AgentChannel::new(agent_api.clone(), fallback),
+    );
+    registry.implement(agent::session::service(
+        agent::session::SessionService::new(agent_api, Some(task_service.clone())),
+    ));
 
     agent::session::warm_up(
         agent.clone(),

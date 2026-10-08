@@ -12,6 +12,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use zcode_host_control::ClientMode;
 use zcode_host_kit::{CallContext, Reply, RpcValue, ServiceChannel};
+use zcode_host_services::agent::api::AgentApi;
+use zcode_host_services::agent::notifications::AgentEvents;
 use zcode_host_services::agent::service::AgentChannel;
 use zcode_host_services::agent::sessions_index::{IndexEvent, SessionsIndexObserver};
 use zcode_host_services::agent::{AgentRuntime, AgentRuntimeConfig};
@@ -187,7 +189,10 @@ async fn core_chat_flow_against_rust_cli() {
         SettingStore::new(home.path()),
         providers,
     );
-    let channel = AgentChannel::new(runtime.clone(), None);
+    let events = AgentEvents::start(runtime.extensions(), None);
+    let api = AgentApi::new(runtime.clone(), home.path(), events, None);
+    let members = zcode_host_services::agent::members::agent_service(&api).build(None);
+    let channel = AgentChannel::new(api.clone(), Some(members));
     let observer = SessionsIndexObserver::start(runtime.clone());
     let mut index_events = Box::pin(observer.events().subscribe());
     let context = CallContext {
@@ -366,6 +371,138 @@ async fn core_chat_flow_against_rust_cli() {
     )
     .await;
     assert!(index["ack"]["subscriptionId"].is_string());
+
+    // ── agent 补齐（docs/specs/rust-host-agent.md §6）──
+    let workspace_params = json!({"workspacePath": workspace_path});
+    let config = call(
+        &channel,
+        &context,
+        "subscribeWorkspaceConfigV4",
+        json!({"workspacePath": workspace_path, "runtimePolicy": "existing-only"}),
+    )
+    .await;
+    assert!(config["ack"]["subscriptionId"].is_string(), "{config}");
+    let read = call(
+        &channel,
+        &context,
+        "readSession",
+        json!({"workspacePath": workspace_path, "sessionId": session_id}),
+    )
+    .await;
+    assert_eq!(read["session"]["sessionId"], session_id.as_str());
+    let listed = call(&channel, &context, "listSessions", workspace_params.clone()).await;
+    assert!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| session["sessionId"] == session_id.as_str()),
+        "{listed}"
+    );
+    let identity = call(
+        &channel,
+        &context,
+        "getWorkspaceRuntimeIdentity",
+        workspace_params.clone(),
+    )
+    .await;
+    assert_eq!(identity["generation"], 1);
+    let storage = call(
+        &channel,
+        &context,
+        "getStorageStartupState",
+        workspace_params.clone(),
+    )
+    .await;
+    assert_eq!(storage["state"]["phase"], "ready", "{storage}");
+    let skills = call(
+        &channel,
+        &context,
+        "getSkillReferenceCatalog",
+        workspace_params.clone(),
+    )
+    .await;
+    assert!(skills.is_object(), "{skills}");
+    let usage = call(
+        &channel,
+        &context,
+        "getTaskTokenUsage",
+        json!({"workspacePath": workspace_path, "sessionId": session_id}),
+    )
+    .await;
+    assert!(usage.is_object(), "{usage}");
+    // 插件与 MCP 走两个控制面 lane（工作目录在临时 home 下）。Rust CLI 只接受自己 cwd 的
+    // workspace 参数，所以这里用控制面工作目录本身作为目标（TS CLI 接受任意 workspace）。
+    let plugin_workspace = home
+        .path()
+        .join(".zcode/plugin-workspace")
+        .to_string_lossy()
+        .into_owned();
+    let plugins = call(
+        &channel,
+        &context,
+        "listPlugins",
+        json!({"workspacePath": plugin_workspace}),
+    )
+    .await;
+    assert!(plugins.is_object(), "{plugins}");
+    // Rust CLI 对同一 cwd 持有独占锁，两个控制面 lane 不能同时存活（TS CLI 没有这个限制）：
+    // 先回收 plugin lane，再在 mcp-status lane 上查询。
+    let plugin_target = WorkspaceTarget::local(plugin_workspace.clone());
+    let plugin_process = api.plugin.existing(&plugin_target).await.unwrap();
+    assert!(plugin_process.runtime_identity().get("lane").is_none());
+    api.plugin.dispose_workspace(&plugin_target).await;
+    let mut mcp = Value::Null;
+    for _ in 0..50 {
+        match channel
+            .call(
+                &context,
+                "listMcpServerStatuses",
+                args(json!({"workspacePath": plugin_workspace, "mode": "status"})),
+            )
+            .await
+        {
+            Ok(Reply::RawJson(raw)) => {
+                mcp = serde_json::from_str(&raw).unwrap();
+                break;
+            }
+            Ok(Reply::Value(value)) => {
+                mcp = value;
+                break;
+            }
+            _ => tokio::time::sleep(Duration::from_millis(200)).await,
+        }
+    }
+    assert!(mcp.is_object(), "{mcp}");
+    let mcp_process = api.mcp.existing(&plugin_target).await.unwrap();
+    assert_eq!(mcp_process.runtime_identity()["lane"], "mcp-status");
+    let children = call(
+        &channel,
+        &context,
+        "collectLocalRuntimeChildProcesses",
+        Value::Null,
+    )
+    .await;
+    let children = children.as_array().unwrap();
+    assert_eq!(children.len(), 2, "{children:?}");
+    assert!(children.iter().any(|entry| entry["lane"] == "mcp-status"));
+    // legacy 会话：草稿创建后条件关闭。
+    let draft = call(
+        &channel,
+        &context,
+        "createSession",
+        json!({"workspacePath": workspace_path, "persistence": "deferred"}),
+    )
+    .await;
+    let draft_id = draft["session"]["sessionId"].as_str().unwrap().to_owned();
+    let closed = call(
+        &channel,
+        &context,
+        "closeSession",
+        json!({"workspacePath": workspace_path, "sessionId": draft_id, "expectedPersistence": "deferred"}),
+    )
+    .await;
+    assert_eq!(closed, json!(true));
 
     // 不属于本连接的订阅不能 resync。
     let foreign = channel

@@ -26,6 +26,7 @@ use zcode_host_kit::{
     ServiceChannel, log, replies,
 };
 
+use super::api::AgentApi;
 use super::extensions::UseReason;
 use super::runtime::{
     AgentProcess, AgentRuntime, Frame, FrameKind, RUNTIME_UNAVAILABLE_CODE, RuntimePolicy,
@@ -149,6 +150,30 @@ fn copy_present(target: &mut Map<String, Value>, params: &Value, keys: &[&str]) 
     }
 }
 
+fn truthy_str(value: &Value) -> bool {
+    value.as_str().is_some_and(|text| !text.is_empty())
+}
+
+/// mergeAutomationMutationToolDenylist / mergeOffPeakMutationToolDenylist：去重并保持首次出现的顺序。
+fn merge_denylist(current: &Value, denied: &[&str]) -> Value {
+    let mut merged: Vec<Value> = current.as_array().cloned().unwrap_or_default();
+    for name in denied {
+        if !merged.iter().any(|existing| existing == name) {
+            merged.push(json!(name));
+        }
+    }
+    let mut seen = Vec::new();
+    merged.retain(|item| {
+        if seen.contains(item) {
+            false
+        } else {
+            seen.push(item.clone());
+            true
+        }
+    });
+    Value::Array(merged)
+}
+
 fn raw_reply(raw: impl AsRef<serde_json::value::RawValue>) -> Reply {
     Reply::RawJson(raw.as_ref().get().to_owned())
 }
@@ -212,6 +237,7 @@ struct Scope {
     connection_id: String,
     client_mode: ClientMode,
     runtime: AgentRuntime,
+    api: AgentApi,
     state: Mutex<ScopeState>,
 }
 
@@ -463,7 +489,10 @@ impl Scope {
                 format!("sessions-index/{workspace_key}"),
                 RuntimePolicy::from_value(params.get("runtimePolicy")),
             ),
-            FrameKind::WorkspaceConfig => return Err(fault("fault.subscription.unsupportedTopic")),
+            FrameKind::WorkspaceConfig => (
+                format!("workspace-config/{workspace_key}"),
+                RuntimePolicy::from_value(params.get("runtimePolicy")),
+            ),
         };
         let pending_id = self.begin_pending(kind, &workspace_key, &topic);
         let scope = self.clone();
@@ -501,6 +530,10 @@ impl Scope {
         cli.extend(self.connection_fields(kind == FrameKind::Conversation));
         if kind == FrameKind::Conversation {
             cli.insert("workspace".into(), target.workspace_ref());
+            // 冷订阅绕过 task adapter：旧 session 没有 durable selection 时从 tasks-index 带回思考强度。
+            if let Some(level) = self.resume_thought_level(target, topic).await {
+                cli.insert("resumeThoughtLevel".into(), json!(level));
+            }
         }
         copy_present(&mut cli, params, &["base", "visibility"]);
         let raw = process
@@ -531,6 +564,25 @@ impl Scope {
             Err(RememberError::Overflow) => {
                 self.unsubscribe_on_cli(&process, &owned).await;
                 Err(fault("fault.subscription.initialFrameStagingOverflow"))
+            }
+        }
+    }
+
+    async fn resume_thought_level(&self, target: &WorkspaceTarget, topic: &str) -> Option<String> {
+        let tasks = self.api.tasks_index.as_ref()?;
+        let session_id = topic.strip_prefix("conversation/")?;
+        match tasks.get_task_meta(&target.key(), session_id).await {
+            Ok(meta) => meta?["thoughtLevel"]
+                .as_str()
+                .map(str::trim)
+                .filter(|level| !level.is_empty())
+                .map(str::to_owned),
+            Err(error) => {
+                // 索引读取失败仍允许只读恢复。
+                log::warn(format!(
+                    "read cold resume thought hint failed for {session_id}: {error:#}"
+                ));
+                None
             }
         }
     }
@@ -647,7 +699,98 @@ impl Scope {
         {
             return Err(fault("proto.independentPlanUnsupported"));
         }
-        Ok(raw_reply(process.request("v4/command", envelope).await?))
+        let envelope = self.command_envelope(&target, envelope.clone()).await;
+        Ok(raw_reply(process.request("v4/command", &envelope).await?))
+    }
+
+    /// buildConversationCommandEnvelope + ttft 剥离 + 浏览器环境（docs/specs/rust-host-agent.md §2.3）。
+    async fn command_envelope(&self, target: &WorkspaceTarget, mut envelope: Value) -> Value {
+        let extensions = self.runtime.extensions();
+        match envelope["type"].as_str() {
+            Some("createSession") => {
+                let off_peak = extensions.off_peak_tools_for(target);
+                let dynamic_workflow = extensions.dynamic_workflow_enabled().await;
+                if let Some(payload) = envelope["payload"].as_object_mut() {
+                    if off_peak {
+                        payload.insert("offPeakToolEnabled".into(), json!(true));
+                    }
+                    if dynamic_workflow {
+                        payload.insert("dynamicWorkflowEnabled".into(), json!(true));
+                    }
+                }
+            }
+            Some("sendText") => {
+                let payload = &envelope["payload"];
+                // 只认本轮 payload：automation 派发轮禁用 Cron 变更工具，闲时派发轮禁用 OffPeakCreate。
+                let denied: &[&str] = if truthy_str(&payload["automationId"]) {
+                    &["CronCreate", "CronUpdate", "CronDelete"]
+                } else if truthy_str(&payload["offPeakTaskId"]) {
+                    &["OffPeakCreate"]
+                } else {
+                    &[]
+                };
+                if !denied.is_empty() {
+                    let merged = merge_denylist(&payload["toolDisallowlist"], denied);
+                    envelope["payload"]["toolDisallowlist"] = merged;
+                }
+            }
+            _ => {}
+        }
+        // TTFT 只允许可信桌面本地 continuous；远端 workspace 不能开启本地观测。
+        if self.client_mode != ClientMode::DesktopContinuous
+            || target
+                .workspace_identity
+                .as_deref()
+                .is_some_and(|identity| !identity.trim().is_empty())
+            || target.remote_session_id.is_some()
+        {
+            if let Some(object) = envelope.as_object_mut() {
+                object.remove("ttft");
+            }
+        }
+        if envelope["type"] == "sendText"
+            && let Some(session_id) = envelope["sessionId"].as_str().filter(|id| !id.is_empty())
+            && let Some(browser) = &self.api.browser
+            && let Some(ambient) = browser
+                .ambient_context(session_id, target, client_mode_str(self.client_mode))
+                .await
+            && envelope["payload"].is_object()
+        {
+            envelope["payload"]["browserAmbientContext"] = ambient;
+        }
+        envelope
+    }
+
+    /// `backgroundBashOutputV4`：只观察现有进程；旧 CLI / 无进程时回稳定的 kind。
+    async fn background_bash_output(&self, params: Value) -> Result<Reply, RpcError> {
+        self.assert_ready()?;
+        let target = WorkspaceTarget::from_value(&params)?;
+        let session_id = required_str(&params, "sessionId")?;
+        let work_id = required_str(&params, "workId")?;
+        let request = json!({"sessionId": session_id, "workId": work_id});
+        let process = match self
+            .runtime
+            .get_client(&target, RuntimePolicy::ExistingOnly)
+            .await
+        {
+            Ok(process) => process,
+            Err(error) if error.code_str() == Some(RUNTIME_UNAVAILABLE_CODE) => {
+                return Ok(Reply::Value(
+                    json!({"kind": "unavailable", "workId": work_id}),
+                ));
+            }
+            Err(error) => return Err(error),
+        };
+        match process
+            .request("v4/conversation/backgroundBashOutput", &request)
+            .await
+        {
+            Ok(raw) => Ok(raw_reply(raw)),
+            Err(error) if error.code_i64() == Some(-32601) => Ok(Reply::Value(
+                json!({"kind": "unsupported", "workId": work_id}),
+            )),
+            Err(error) => Err(error),
+        }
     }
 
     async fn query_commands(&self, params: Value) -> Result<Reply, RpcError> {
@@ -765,14 +908,16 @@ impl Scope {
 
 pub struct AgentChannel {
     runtime: AgentRuntime,
+    api: AgentApi,
     scopes: Mutex<HashMap<u64, Arc<Scope>>>,
     fallback: Option<Arc<dyn ServiceChannel>>,
 }
 
 impl AgentChannel {
-    pub fn new(runtime: AgentRuntime, fallback: Option<Arc<dyn ServiceChannel>>) -> Arc<Self> {
+    pub fn new(api: AgentApi, fallback: Option<Arc<dyn ServiceChannel>>) -> Arc<Self> {
         Arc::new(Self {
-            runtime,
+            runtime: api.chat.clone(),
+            api,
             scopes: Mutex::new(HashMap::new()),
             fallback,
         })
@@ -788,6 +933,7 @@ impl AgentChannel {
                     connection_id: format!("host-rpc-{}", uuid_v4()),
                     client_mode: context.client_mode,
                     runtime: self.runtime.clone(),
+                    api: self.api.clone(),
                     state: Mutex::new(ScopeState::default()),
                 })
             })
@@ -817,6 +963,45 @@ impl AgentChannel {
             "subscribeConversationV4" => Box::pin(scope.subscribe(FrameKind::Conversation, params)),
             "subscribeSessionsIndexV4" => {
                 Box::pin(scope.subscribe(FrameKind::SessionsIndex, params))
+            }
+            "subscribeWorkspaceConfigV4" => {
+                Box::pin(scope.subscribe(FrameKind::WorkspaceConfig, params))
+            }
+            "unsubscribeWorkspaceConfigV4" => {
+                Box::pin(async move { scope.unsubscribe(FrameKind::WorkspaceConfig, params).await })
+            }
+            "resyncWorkspaceConfigV4" => {
+                Box::pin(async move { scope.resync(FrameKind::WorkspaceConfig, params).await })
+            }
+            "backgroundBashOutputV4" => {
+                Box::pin(async move { scope.background_bash_output(params).await })
+            }
+            "conversationAttachmentReadV4" | "conversationAttachmentStatV4" => {
+                let (cli_method, fields): (&str, &'static [&'static str]) =
+                    if method == "conversationAttachmentReadV4" {
+                        (
+                            "v4/conversation/attachmentRead",
+                            &[
+                                "sessionId",
+                                "ref",
+                                "target",
+                                "attachmentIndex",
+                                "offset",
+                                "limit",
+                            ],
+                        )
+                    } else {
+                        (
+                            "v4/conversation/attachmentStat",
+                            &["sessionId", "ref", "target", "attachmentIndex"],
+                        )
+                    };
+                Box::pin(async move {
+                    scope.assert_ready()?;
+                    scope
+                        .read_only(cli_method, params, fields, Map::new())
+                        .await
+                })
             }
             "unsubscribeConversationV4" => {
                 Box::pin(async move { scope.unsubscribe(FrameKind::Conversation, params).await })
@@ -975,6 +1160,9 @@ impl ServiceChannel for AgentChannel {
             "onDynamicSessionsIndexFrame" => self
                 .scope(context)
                 .frame_events(FrameKind::SessionsIndex, &arg.into_json()),
+            "onDynamicWorkspaceConfigFrame" => self
+                .scope(context)
+                .frame_events(FrameKind::WorkspaceConfig, &arg.into_json()),
             "onAgentRuntimeLifecycle" => Ok(replies(self.runtime.lifecycle().subscribe())),
             "onAgentRuntimeRestarted" => Ok(replies(self.runtime.restarted().subscribe())),
             _ => match &self.fallback {
