@@ -122,7 +122,11 @@ async fn failed_startup_retries_with_a_new_attempt() {
     }))
     .await;
     let issued = host.recv().await;
-    let mut request = issued["url"].as_str().unwrap().into_client_request().unwrap();
+    let mut request = issued["url"]
+        .as_str()
+        .unwrap()
+        .into_client_request()
+        .unwrap();
     let protocols = format!(
         "zcode-rpc.v1, zcode-cap.{}",
         issued["capability"].as_str().unwrap()

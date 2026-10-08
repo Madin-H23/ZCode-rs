@@ -18,7 +18,9 @@ export const mockRules = [
     respond: ({ response, messages }) => {
       const result = toolResultText(messages);
       response.end(
-        sseText(result.includes("Blue") ? "ANSWER_BLUE_OK" : `ANSWER_UNEXPECTED ${result.slice(0, 200)}`),
+        sseText(
+          result.includes("Blue") ? "ANSWER_BLUE_OK" : `ANSWER_UNEXPECTED ${result.slice(0, 200)}`,
+        ),
       );
     },
   },

@@ -26,7 +26,10 @@ export async function cliProcesses(workspace) {
   );
 }
 
-export async function waitFor(check, { timeout = 30_000, interval = 250, what = "condition" } = {}) {
+export async function waitFor(
+  check,
+  { timeout = 30_000, interval = 250, what = "condition" } = {},
+) {
   const deadline = Date.now() + timeout;
   for (;;) {
     const value = await check();
@@ -68,7 +71,9 @@ export function kill(pid, signal = "SIGKILL") {
 
 /** 业务界面可用：输入框真实可点击（hit-test），不是只看可见性。 */
 export async function waitUsable(page, timeout = 90_000) {
-  const input = page.locator('textarea[placeholder*="Ask ZCode"], [contenteditable="true"]').first();
+  const input = page
+    .locator('textarea[placeholder*="Ask ZCode"], [contenteditable="true"]')
+    .first();
   await input.waitFor({ state: "visible", timeout });
   await input.click({ trial: true, timeout });
   return input;

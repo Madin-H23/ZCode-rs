@@ -76,7 +76,10 @@ export async function run({ page, shots, model }) {
   await page.keyboard.type("please describe the image");
   await page.keyboard.press("Enter");
   try {
-    await page.getByText(/IMAGE_RECEIVED_OK|NO_IMAGE_IN_REQUEST/).first().waitFor({ timeout: 60_000 });
+    await page
+      .getByText(/IMAGE_RECEIVED_OK|NO_IMAGE_IN_REQUEST/)
+      .first()
+      .waitFor({ timeout: 60_000 });
   } finally {
     await page.screenshot({ path: join(shots, "02-after-send.png") });
     // 发送失败时展开错误详情，便于定位是哪个调用失败。

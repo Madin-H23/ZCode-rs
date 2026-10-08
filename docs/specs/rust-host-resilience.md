@@ -136,3 +136,19 @@ Renderer 读慢 → TCP 缓冲满 → ws 写任务 send 挂起 → FlowGauge 积
 | Rust Host 崩溃 → 自动重启 → App 再次可用                                                            | E2E `resilience-host-crash`                                                             |
 | 流控：积压超过高水位发 saturated、回落发 drained；scope 去重、补发、closed 之后不再发送             | `zcode-host` 的 `FlowGauge` 单元测试；`agent/flow.rs` 单元测试                          |
 | R2 性能：4 个 workspace 同时流式时控制 RPC p95 ≤ 20 ms                                              | `crates/zcode-host/tests/control_latency.rs`（真实 Host + 真实 CLI + mock 模型，无 UI） |
+
+## 7. 结果（2026-10-09，macOS）
+
+- **R2 性能**（`control_latency.rs`，4 个 workspace 同时流式，采样窗口内每路约 90–100 帧，控制 RPC 与流式帧同一条 WebSocket，各 150 次）：
+
+  | 构建    | 调用                                           | p50     | p95     | p99     | max     |
+  | ------- | ---------------------------------------------- | ------- | ------- | ------- | ------- |
+  | release | `setting.get`                                  | 0.25 ms | 0.36 ms | 0.42 ms | 0.42 ms |
+  | release | `queryConversationCommandsV4{clock}`（经 CLI） | 0.20 ms | 0.30 ms | 0.38 ms | 0.44 ms |
+  | debug   | `setting.get`                                  | 1.60 ms | 3.62 ms | 5.01 ms | 5.06 ms |
+  | debug   | `queryConversationCommandsV4{clock}`（经 CLI） | 0.82 ms | 2.17 ms | 3.07 ms | 3.16 ms |
+
+  均远低于 20 ms 的预算。
+
+- **E2E**：`resilience-host-crash`、`resilience-startup`、`resilience-cli-crash`、`resilience-reload`、`resilience-ask-user`、`resilience-attachment` 全部通过。
+- **附件场景的注意点**：有本地路径的文件走 zero-copy，不经过上传事务；场景用内存图片（等同粘贴截图）覆盖 attachmentBegin/Chunk/Commit。图片必须是合法 PNG，CLI 会解码预处理，解码失败时模型请求里只剩 `[Attached image/*: …]` 占位文本。

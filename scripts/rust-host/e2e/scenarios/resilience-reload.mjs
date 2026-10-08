@@ -16,7 +16,9 @@ export const mockRules = [
         await sleep(250);
         response.write(sseChunk({ content: ` tick-${index}` }, null));
       }
-      response.end(sseChunk({ content: " done-counting" }, null) + sseChunk({}, "stop") + "data: [DONE]\n\n");
+      response.end(
+        sseChunk({ content: " done-counting" }, null) + sseChunk({}, "stop") + "data: [DONE]\n\n",
+      );
     },
   },
   {
