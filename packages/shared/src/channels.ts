@@ -491,6 +491,8 @@ export const InternalChannels = {
   ServicePort: "zcode:service-port",
   /** main → renderer 下发 Rust Host 的 WebSocket endpoint（docs/specs/rust-host-r0.md §4.2） */
   ServiceEndpoint: "zcode:service-endpoint",
+  /** main → renderer：Rust Host 意外退出后的自动重启进度（docs/specs/rust-host-resilience.md §2.1） */
+  HostConnectionState: "zcode:host-connection-state",
   /** main → renderer 转发窗口 Host 的 scoped MessagePort */
   ScopedServicePort: "zcode:scoped-service-port",
   /** renderer → main：scoped MessagePort 已注册，可安全切换 attachment */

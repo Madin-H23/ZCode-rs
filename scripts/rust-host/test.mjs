@@ -46,7 +46,11 @@ await run("cargo", ["test", "--manifest-path", manifest]);
 await run("cargo", ["build", "--manifest-path", manifest]);
 
 // 用 Renderer 实际使用的客户端连接真实二进制；测试放在 client 包内，按公开入口导入 @zcode/shared。
-const tests = ["packages/client/test/rustHostConnection.test.ts"];
+const tests = [
+  "packages/client/test/rustHostConnection.test.ts",
+  // Main 的自动重启策略（纯逻辑，docs/specs/rust-host-resilience.md §2.1）。
+  "packages/desktop/test/rustHostRestartPolicy.test.ts",
+];
 await run(process.execPath, ["--import", "tsx", "--test", ...tests], {
   ...process.env,
   ZCODE_RUST_HOST_BINARY: binary,

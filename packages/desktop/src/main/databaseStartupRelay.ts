@@ -29,6 +29,11 @@ export function getDatabaseStartupPortPayload(
   return databaseStartupId ? { databaseStartupId } : undefined;
 }
 
+/** 解除窗口当前的启动中继绑定；Rust Host 自动重启在 reload 前调用（rust-host-resilience.md §4.1）。 */
+export function releaseDatabaseStartupRelay(win: BrowserWindow): void {
+  windowBindings.get(win)?.();
+}
+
 export function bindDatabaseStartupRelay(
   win: BrowserWindow,
   child: UtilityProcess,

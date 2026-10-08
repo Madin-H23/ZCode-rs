@@ -107,6 +107,13 @@ const zhCN: Record<string, string> = {
   "startup.global.error.unsupported_runtime":
     "当前配置的 Agent 不支持独立存储准备。请恢复配套的 Agent 后重新打开 ZCode。",
 
+  "startup.hostConnection.reconnecting": "正在重新连接 ZCode 服务",
+  "startup.hostConnection.help": "ZCode 本地服务意外退出，正在重新启动。就绪后窗口会自动重新加载。",
+  "startup.hostConnection.attempt": "第 {attempt}/{max} 次重启",
+  "startup.hostConnection.failed": "ZCode 服务已停止",
+  "startup.hostConnection.failedHelp":
+    "本地服务多次意外退出。可以重新加载以再次启动，或退出后重新打开 ZCode。",
+  "startup.hostConnection.reload": "重新加载",
   "startup.database.checking": "正在检查历史数据",
   "startup.database.waiting_for_lock": "数据库正被其他进程使用，正在等待",
   "startup.database.migrating": "正在升级历史数据",

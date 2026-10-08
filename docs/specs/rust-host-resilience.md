@@ -115,24 +115,24 @@ Renderer 读慢 → TCP 缓冲满 → ws 写任务 send 挂起 → FlowGauge 积
 
 ## 5. 有意与 Node Host 不同之处
 
-| Node Host                                                                         | Rust Host                                                    | 理由                                                                                                |
-| --------------------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| Host 退出后不恢复，界面停在最后状态                                               | Main 有界自动重启，Renderer 显示断开/重启状态                | D2 已定为自动重启                                                                                   |
-| 本地 MessagePort 在 `init-local` 时一并交付                                       | endpoint 在每次尝试 ready 时签发                             | capability 30 s 过期；拉起时签发会让长迁移和延迟重试拿到过期凭据                                    |
-| 桌面 Renderer 不发 MessagePort 流控边带（`sendFlowState` 没有调用方），从不被暂停 | 按 WebSocket 发送积压发 `saturated` / `drained`              | 积压可以在 Host 侧直接观测；暂停后由 CLI 合并缓冲，避免 Host 无界堆积帧                             |
+| Node Host                                                                         | Rust Host                                                   | 理由                                                                                                  |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Host 退出后不恢复，界面停在最后状态                                               | Main 有界自动重启，Renderer 显示断开/重启状态               | D2 已定为自动重启                                                                                     |
+| 本地 MessagePort 在 `init-local` 时一并交付                                       | endpoint 在每次尝试 ready 时签发                            | capability 30 s 过期；拉起时签发会让长迁移和延迟重试拿到过期凭据                                      |
+| 桌面 Renderer 不发 MessagePort 流控边带（`sendFlowState` 没有调用方），从不被暂停 | 按 WebSocket 发送积压发 `saturated` / `drained`             | 积压可以在 Host 侧直接观测；暂停后由 CLI 合并缓冲，避免 Host 无界堆积帧                               |
 | 启动失败后的 `retry` 由 Node `DatabaseStartupCoordinator` 处理                    | 同样语义，由 `host-core` 实现；`starting_services` 不会失败 | Rust 的服务安装是同步的，没有可失败的步骤；该阶段失败不可重试的规则照搬，便于今后出现可失败步骤时沿用 |
 
 ## 6. 验收
 
-| 场景                                                                                       | 验证方式                                                                                  |
-| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| 重启策略：退避序列、60 s 内第 4 次放弃、窗口外的退出不计入                                 | `packages/desktop/test/rustHostRestartPolicy.test.ts`（node:test）                        |
-| 启动重试：失败 → retry（错误 attemptId 被忽略）→ 新 attemptId、sequence 递增 → ready；snapshot 重发 | `crates/zcode-host/tests/startup_retry.rs`（真实二进制）                                  |
-| 启动重试真实 App：迁移失败页 → 等 30 s 以上 → 移除故障 → Retry → 进入主界面；Exit 退出 App | E2E `resilience-startup`                                                                  |
-| CLI 崩溃 → 懒重启：只杀本次隔离运行的 CLI，再发消息成功                                     | E2E `resilience-cli-crash`                                                                |
-| Renderer reload → 重新 attach，会话仍能流式                                                 | E2E `resilience-reload`                                                                   |
-| AskUserQuestion：模型提问，用户在界面作答，模型继续                                         | E2E `resilience-ask-user`                                                                 |
-| 图片附件经 attachmentBegin/Chunk/Commit 上传并被模型收到                                    | E2E `resilience-attachment`                                                               |
-| Rust Host 崩溃 → 自动重启 → App 再次可用                                                    | E2E `resilience-host-crash`                                                               |
-| 流控：积压超过高水位发 saturated、回落发 drained；scope 去重、补发、closed 之后不再发送     | `zcode-host` 的 `FlowGauge` 单元测试；`agent/flow.rs` 单元测试                            |
-| R2 性能：4 个 workspace 同时流式时控制 RPC p95 ≤ 20 ms                                      | `crates/zcode-host/tests/control_latency.rs`（真实 Host + 真实 CLI + mock 模型，无 UI）   |
+| 场景                                                                                                | 验证方式                                                                                |
+| --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 重启策略：退避序列、60 s 内第 4 次放弃、窗口外的退出不计入                                          | `packages/desktop/test/rustHostRestartPolicy.test.ts`（node:test）                      |
+| 启动重试：失败 → retry（错误 attemptId 被忽略）→ 新 attemptId、sequence 递增 → ready；snapshot 重发 | `crates/zcode-host/tests/startup_retry.rs`（真实二进制）                                |
+| 启动重试真实 App：迁移失败页 → 等 30 s 以上 → 移除故障 → Retry → 进入主界面；Exit 退出 App          | E2E `resilience-startup`                                                                |
+| CLI 崩溃 → 懒重启：只杀本次隔离运行的 CLI，再发消息成功                                             | E2E `resilience-cli-crash`                                                              |
+| Renderer reload → 重新 attach，会话仍能流式                                                         | E2E `resilience-reload`                                                                 |
+| AskUserQuestion：模型提问，用户在界面作答，模型继续                                                 | E2E `resilience-ask-user`                                                               |
+| 图片附件经 attachmentBegin/Chunk/Commit 上传并被模型收到                                            | E2E `resilience-attachment`                                                             |
+| Rust Host 崩溃 → 自动重启 → App 再次可用                                                            | E2E `resilience-host-crash`                                                             |
+| 流控：积压超过高水位发 saturated、回落发 drained；scope 去重、补发、closed 之后不再发送             | `zcode-host` 的 `FlowGauge` 单元测试；`agent/flow.rs` 单元测试                          |
+| R2 性能：4 个 workspace 同时流式时控制 RPC p95 ≤ 20 ms                                              | `crates/zcode-host/tests/control_latency.rs`（真实 Host + 真实 CLI + mock 模型，无 UI） |
