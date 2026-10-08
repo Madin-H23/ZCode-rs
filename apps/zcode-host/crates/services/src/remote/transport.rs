@@ -464,6 +464,17 @@ async fn read_connector(mut stdout: ChildStdout, sinks: ConnectorSinks) {
     });
 }
 
+/// 缺少连接器配置时的传输：建连明确失败，不静默回退。
+pub struct UnavailableTransport;
+
+impl Transport for UnavailableTransport {
+    fn connect(&self, _params: ConnectParams) -> BoxFuture<'static, Result<Connection, String>> {
+        Box::pin(async {
+            Err("远程连接器不可用：Main 未提供 ZCODE_REMOTE_CONNECTOR_PATH 或 ZCODE_HOST_NODE_EXEC_PATH".into())
+        })
+    }
+}
+
 // ---- 测试传输：直接拉起说 hello 协议的命令 ----
 
 #[derive(Debug, Clone)]

@@ -70,6 +70,14 @@ pub enum ClientMode {
 pub enum AttachmentScope {
     #[serde(rename = "local")]
     Local,
+    /// 远端 workspace 的 logical session（`windowHostAttachmentScopeSchema` 的 remote 分支，
+    /// docs/specs/rust-host-remote.md §2.4）。
+    #[serde(rename = "remote", rename_all = "camelCase")]
+    Remote {
+        remote_session_id: String,
+        workspace_path: String,
+        workspace_identity: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -295,6 +303,26 @@ mod tests {
             message,
             MainToHost::InvalidIssueAttachmentEndpoint { request_id, .. } if request_id == "r1"
         ));
+    }
+
+    #[test]
+    fn remote_scope_requires_session_and_workspace() {
+        let message = parse_main_to_host(
+            r#"{"type":"issue-attachment-endpoint","requestId":"r1","attachmentId":"a","clientMode":"web-remote-replayable","scope":{"kind":"remote","remoteSessionId":"s1","workspacePath":"/w","workspaceIdentity":"remote:docker:c:/w"}}"#,
+        )
+        .unwrap();
+        let MainToHost::IssueAttachmentEndpoint(request) = message else {
+            panic!("expected a valid request");
+        };
+        assert_eq!(
+            request.scope,
+            AttachmentScope::Remote {
+                remote_session_id: "s1".into(),
+                workspace_path: "/w".into(),
+                workspace_identity: "remote:docker:c:/w".into(),
+            }
+        );
+        assert_eq!(request.client_mode, ClientMode::WebRemoteReplayable);
     }
 
     #[test]

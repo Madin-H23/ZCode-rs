@@ -26,16 +26,20 @@ print_stdout = "deny"
 
 [workspace.dependencies]
 anyhow = "1"
+base64 = "0.22"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 getrandom = "0.3"
 libc = "0.2"
 notify = "8.2"
 portable-pty = "0.9"
 regex = "1"
+# 凭据 AES-256-GCM（enc:v1，与 Node node:crypto 逐字节兼容）。
+ring = "0.17"
 # 与 Node Host 共用 tasks-index.sqlite；bundled 固定 SQLite 版本，不依赖系统库。
 rusqlite = { version = "0.37", features = ["bundled"] }
 url = "2"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
 serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.28"

@@ -75,7 +75,7 @@ fn client_mode_str(mode: ClientMode) -> &'static str {
 }
 
 /// `clientHelloSchema`（strict）；返回 `(clientId, workflowRunDeltas)`。
-fn parse_client_hello(value: &Value) -> Result<(String, bool), RpcError> {
+pub(crate) fn parse_client_hello(value: &Value) -> Result<(String, bool), RpcError> {
     let invalid = |detail: &str| fault(&format!("invalid clientHello: {detail}"));
     let object = value
         .as_object()

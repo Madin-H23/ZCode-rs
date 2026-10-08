@@ -118,6 +118,7 @@ pub struct Installed {
     _observer: Arc<agent::sessions_index::SessionsIndexObserver>,
     _controller: Arc<tasks::controller::Controller>,
     _syncer: tokio::task::JoinHandle<()>,
+    remote: Arc<remote::RemoteWorkspaces>,
     /// 至少保留一个句柄，否则 tasks-index 线程与连接随之关闭。
     _storage: Storage,
 }
@@ -125,7 +126,13 @@ pub struct Installed {
 impl Installed {
     /// Host 退出：回收全部 CLI 进程树（有上限，不会无限等待）。
     pub async fn shutdown(&self) {
+        self.remote.shutdown().await;
         self.agent.dispose_all().await;
+    }
+
+    /// 远端 workspace：host-core 用它签发并接入 `scope.kind = "remote"` 的 attachment。
+    pub fn remote(&self) -> &Arc<remote::RemoteWorkspaces> {
+        &self.remote
     }
 }
 
@@ -227,6 +234,9 @@ pub fn install(
     );
     registry.implement(tasks::controller::service(controller.clone()));
 
+    // ── remote ──
+    let remote = remote::install(&context, settings.clone(), router);
+
     agent::session::warm_up(
         agent.clone(),
         context
@@ -245,6 +255,7 @@ pub fn install(
         _observer: observer,
         _controller: controller,
         _syncer: syncer,
+        remote,
         _storage: storage,
     }
 }
