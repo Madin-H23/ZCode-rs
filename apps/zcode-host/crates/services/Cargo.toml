@@ -39,6 +39,7 @@ zip.workspace = true
 zcode-cli-domain.workspace = true
 zcode-host-control.workspace = true
 zcode-host-kit.workspace = true
+zcode-host-rpc.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

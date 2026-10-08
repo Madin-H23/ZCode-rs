@@ -2476,7 +2476,9 @@ name = "zcode-host-rpc"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "futures-util",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2513,6 +2515,7 @@ dependencies = [
  "zcode-cli-domain",
  "zcode-host-control",
  "zcode-host-kit",
+ "zcode-host-rpc",
  "zip",
 ]
 

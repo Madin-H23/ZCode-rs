@@ -321,7 +321,7 @@ async function connectRemoteUnchecked(
   };
 }
 
-async function resolveRemoteRuntimeNetwork(
+export async function resolveRemoteRuntimeNetwork(
   backend: IRemoteBackend,
   network: RemoteRuntimeNetworkOptions | undefined,
   log: (...args: unknown[]) => void,
@@ -356,7 +356,7 @@ async function resolveRemoteRuntimeNetwork(
   }
 }
 
-function buildRemoteServerCommand(
+export function buildRemoteServerCommand(
   options: ConnectOptions | undefined,
   remoteRuntimeNetwork: RemoteRuntimeNetworkOptions | undefined,
 ): string {

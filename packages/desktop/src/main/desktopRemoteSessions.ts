@@ -14,6 +14,7 @@ import {
   resolveWorkspaceKey,
   type RemoteTarget,
   type ProviderProvisioningTrigger,
+  type ScopedServiceEndpointPayload,
   type WindowHostRemoteWorkspaceDescriptor,
 } from "@zcode/shared";
 import type {
@@ -23,6 +24,7 @@ import type {
 } from "./desktopRemoteUsageArmsTelemetry.js";
 import type { RemoteAssetDirs } from "./desktopRuntimeEnv.js";
 import { ProviderProvisioningEnvironmentCoordinator } from "./providerProvisioningEnvironmentCoordinator.js";
+import { asRustHostProcess } from "./rustDesktopHost.js";
 
 interface RemoteWorkspaceSessionContext {
   workspacePath: string;
@@ -253,7 +255,6 @@ export function createRemoteWorkspaceSessionManager(options: {
         `远程 descriptor 缺少 workspace scope，sessionId=${descriptor.remoteSessionId}`,
       );
     }
-    const { port1, port2 } = createMessageChannel();
     const attachmentId = randomUUID();
     const previousAttachmentId = route.rendererAttachmentId;
     const superseded = route.pendingRendererAttachment;
@@ -292,6 +293,40 @@ export function createRemoteWorkspaceSessionManager(options: {
         reject,
       };
 
+      const scope = {
+        kind: "remote" as const,
+        remoteSessionId: descriptor.remoteSessionId,
+        workspacePath: descriptor.workspacePath!,
+        workspaceIdentity: descriptor.workspaceIdentity!,
+      };
+      const rustHost = asRustHostProcess(child);
+      if (rustHost) {
+        // Rust Host（开发开关）：Renderer 经 WebSocket 直连远端 scope，不经 MessagePort
+        // （docs/specs/rust-host-remote.md §4.2）。ready ACK 与超时沿用同一条 pending 记录。
+        void rustHost
+          .requestServiceEndpoint({ attachmentId, clientMode: "desktop-continuous", scope })
+          .then((endpoint) => {
+            if (route.pendingRendererAttachment?.attachmentId !== attachmentId) return;
+            if (win.isDestroyed() || win.webContents.isDestroyed()) {
+              throw new Error("窗口已关闭，无法 attachment 远程 workspace");
+            }
+            const payload: ScopedServiceEndpointPayload = {
+              attachmentId,
+              sessionId: descriptor.remoteSessionId,
+              target: descriptor.target,
+              ...endpoint,
+            };
+            win.webContents.send(InternalChannels.ScopedServiceEndpoint, payload);
+          })
+          .catch((error: unknown) => {
+            if (route.pendingRendererAttachment?.attachmentId !== attachmentId) return;
+            clearTimeout(timeout);
+            route.pendingRendererAttachment = undefined;
+            reject(error instanceof Error ? error : new Error(String(error)));
+          });
+        return;
+      }
+      const { port1, port2 } = createMessageChannel();
       try {
         child.postMessage(
           {
@@ -299,12 +334,7 @@ export function createRemoteWorkspaceSessionManager(options: {
             requestId: randomUUID(),
             attachmentId,
             clientMode: "desktop-continuous",
-            scope: {
-              kind: "remote",
-              remoteSessionId: descriptor.remoteSessionId,
-              workspacePath: descriptor.workspacePath,
-              workspaceIdentity: descriptor.workspaceIdentity,
-            },
+            scope,
           },
           [port2],
         );

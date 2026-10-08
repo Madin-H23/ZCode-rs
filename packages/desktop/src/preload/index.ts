@@ -2,6 +2,7 @@ import {
   databaseStartupControlSchema,
   databaseStartupStateSchema,
   databaseStartupPortPayloadSchema,
+  scopedServiceEndpointPayloadSchema,
   serviceEndpointPayloadSchema,
   hostConnectionStatePayloadSchema,
 } from "@zcode/shared";
@@ -850,6 +851,13 @@ ipcRenderer.on(InternalChannels.HostConnectionState, (_event, payload: unknown) 
   const parsed = hostConnectionStatePayloadSchema.safeParse(payload);
   if (parsed.success)
     window.postMessage({ type: InternalChannels.HostConnectionState, payload: parsed.data }, "*");
+});
+
+// Rust Host 远端 scope 的 endpoint（docs/specs/rust-host-remote.md §4.2）：校验后只转发给本窗口页面。
+ipcRenderer.on(InternalChannels.ScopedServiceEndpoint, (_event, payload: unknown) => {
+  const parsed = scopedServiceEndpointPayloadSchema.safeParse(payload);
+  if (parsed.success)
+    window.postMessage({ type: InternalChannels.ScopedServiceEndpoint, ...parsed.data }, "*");
 });
 
 ipcRenderer.on(

@@ -1,4 +1,9 @@
-import { InternalChannels, type RemoteTarget } from "@zcode/shared";
+import {
+  InternalChannels,
+  scopedServiceEndpointPayloadSchema,
+  type RemoteTarget,
+  type ScopedServiceEndpointPayload,
+} from "@zcode/shared";
 
 export interface RemoteWorkspaceServicePortRegistration {
   attachmentId: string;
@@ -24,6 +29,25 @@ export function parseRemoteWorkspaceServicePortMessage(
   const target = "target" in event.data ? (event.data.target as RemoteTarget | null) : null;
   if (!port || !attachmentId || !sessionId || !target) return null;
   return { attachmentId, port, sessionId, target };
+}
+
+/** Rust Host 的远端 scope endpoint（docs/specs/rust-host-remote.md §4.2）；preload 已校验，这里再校验一次。 */
+export type RemoteWorkspaceServiceEndpointRegistration = ScopedServiceEndpointPayload;
+
+export function parseRemoteWorkspaceServiceEndpointMessage(
+  event: MessageEvent,
+): RemoteWorkspaceServiceEndpointRegistration | null {
+  if (
+    event.source !== window ||
+    typeof event.data !== "object" ||
+    event.data === null ||
+    event.data.type !== InternalChannels.ScopedServiceEndpoint
+  ) {
+    return null;
+  }
+  const { type: _type, ...payload } = event.data as Record<string, unknown>;
+  const parsed = scopedServiceEndpointPayloadSchema.safeParse(payload);
+  return parsed.success ? parsed.data : null;
 }
 
 export function notifyRemoteWorkspaceServicePortReady(

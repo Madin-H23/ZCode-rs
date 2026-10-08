@@ -25,6 +25,7 @@ pub mod media_preview;
 pub mod off_peak;
 pub mod prompt_attachment_transfer;
 pub mod providers;
+pub mod remote;
 pub mod settings;
 pub mod settings_sync;
 pub mod store;
@@ -129,6 +130,7 @@ pub struct Installed {
     _controller: Arc<tasks::controller::Controller>,
     _syncer: tokio::task::JoinHandle<()>,
     _automation: automation::AreaHandle,
+    remote: Arc<remote::RemoteWorkspaces>,
     /// 至少保留一个句柄，否则 tasks-index 线程与连接随之关闭。
     _storage: Storage,
 }
@@ -137,7 +139,13 @@ impl Installed {
     /// Host 退出：回收终端与全部 CLI 进程树（有上限，不会无限等待）。
     pub async fn shutdown(&self) {
         self.workspace.shutdown();
+        self.remote.shutdown().await;
         self.agent.dispose_all().await;
+    }
+
+    /// 远端 workspace：host-core 用它签发并接入 `scope.kind = "remote"` 的 attachment。
+    pub fn remote(&self) -> &Arc<remote::RemoteWorkspaces> {
+        &self.remote
     }
 }
 
@@ -347,6 +355,8 @@ pub fn install(
             &context.environment.data_base_dir,
         ),
     );
+    // ── remote ──
+    let remote = remote::install(&context, settings.clone(), &controller, router);
 
     agent::session::warm_up(
         agent.clone(),
@@ -368,6 +378,7 @@ pub fn install(
         _controller: controller,
         _syncer: syncer,
         _automation: automation,
+        remote,
         _storage: storage,
     }
 }
