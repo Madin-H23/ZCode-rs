@@ -15,8 +15,10 @@
 //!      └────────── oneshot 结果 ◄──────┘
 //! 其他 Host / Node Host ──────────► 同一文件（WAL；写锁串行）
 //! ```
+pub mod automation_repo;
 mod legacy_selection;
 mod meta;
+pub mod off_peak_repo;
 mod repo;
 mod schema;
 mod startup;
