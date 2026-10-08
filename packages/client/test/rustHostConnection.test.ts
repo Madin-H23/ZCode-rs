@@ -121,19 +121,28 @@ test("renderer client gets immediate stub replies from the Rust Host", async () 
     });
 
     const started = performance.now();
-    await assert.rejects(connection.services.feedbackService.list(), (error: Error) => {
-      assert.equal(error.name, "NotImplemented");
-      assert.equal((error as Error & { code?: string }).code, "fault.host.notImplemented");
-      return true;
-    });
+    // 桌面本地 Host 不实现 provider-provisioning-target（Node 只在远端 / server 目标注册），一直是契约 stub。
+    const envelope = {} as Parameters<
+      typeof connection.services.providerProvisioningTargetService.apply
+    >[0];
+    await assert.rejects(
+      connection.services.providerProvisioningTargetService.apply(envelope),
+      (error: Error) => {
+        assert.equal(error.name, "NotImplemented");
+        assert.equal((error as Error & { code?: string }).code, "fault.host.notImplemented");
+        return true;
+      },
+    );
     assert.ok(performance.now() - started < 100, "stub reply within 100 ms");
 
     // 已实现的 service：临时 home 下返回默认设置。
     assert.equal((await connection.services.settingService.get()).locale, "zh-CN");
 
-    assert.deepEqual(await connection.services.settingsSyncService.getFirstRunPromptState(), {
-      handled: true,
-    });
+    // 已移植：新 profile 尚未处理首次迁移提示。
+    assert.equal(
+      (await connection.services.settingsSyncService.getFirstRunPromptState()).handled,
+      false,
+    );
     // 订阅被接受且不报错；之后的调用照常应答。
     const subscription = connection.services.zcodeAgentService.onDynamicConversationFrame({
       workspacePath: "/w",

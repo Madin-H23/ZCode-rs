@@ -57,6 +57,8 @@ pub struct Area {
     pub observer: Arc<SessionsIndexObserver>,
     pub tasks: Arc<TaskService>,
     pub tasks_index: TasksIndex,
+    /// credentials.json 的唯一读写入口（account 区域所有；bots 读应用凭据也走它）。
+    pub credentials: crate::account::credential::CredentialStore,
     /// bots 安装时登记；没有登记（或 Bot 未配置）时 automation 不做回推。
     pub bot_delivery: OnceLock<Arc<dyn BotDelivery>>,
 }
@@ -72,6 +74,7 @@ impl Area {
         observer: Arc<SessionsIndexObserver>,
         tasks: Arc<TaskService>,
         tasks_index: TasksIndex,
+        credentials: crate::account::credential::CredentialStore,
     ) -> Self {
         let driver = driver::TaskDriver::start(agent.clone(), tasks.clone(), &observer);
         Self {
@@ -84,6 +87,7 @@ impl Area {
             observer,
             tasks,
             tasks_index,
+            credentials,
             bot_delivery: OnceLock::new(),
         }
     }

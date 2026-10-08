@@ -333,7 +333,7 @@ pub struct Resolved {
 
 /// 未登录时 account provider 的状态（account-provider-resolution.ts）。
 fn logged_out_account_state(config: &Value) -> Value {
-    if config["access"]["mode"].as_str() == Some("offpeak-idle-plan") {
+    if config["access"]["mode"].as_str() == Some("off-peak") {
         json!({"availability": "unavailable", "entitled": false})
     } else {
         json!({"availability": "unavailable", "entitled": false, "unavailableReason": "not-connected", "current": false})
@@ -347,7 +347,13 @@ fn template_of<'a>(templates: &'a [Value], id: Option<&str>) -> Option<&'a Value
         .find(|template| template["templateId"] == id)
 }
 
-pub fn resolve(builtin: &Value, personal: &Value) -> Resolved {
+/// 三层解析：内置 → 账号 overlay（只作用于内置 provider，去掉 group）→ 个人。
+/// 账号层缺失时 account provider 一律按未授权处理（fail-closed）。
+pub fn resolve(
+    builtin: &Value,
+    personal: &Value,
+    account_layer: Option<&super::AccountLayer>,
+) -> Resolved {
     let templates: Vec<Value> = array(&builtin["providerConfigRules"]["templateRules"]).to_vec();
     let mut builtin_ids = Vec::new();
     let mut personal_ids = Vec::new();
@@ -362,9 +368,18 @@ pub fn resolve(builtin: &Value, personal: &Value) -> Resolved {
         }
         builtin_ids.push(id.to_owned());
         let mut next = rule.clone();
-        // 未登录：account provider 一律不可用（无授权）。
         if next["config"]["access"]["type"] == "zhipu-account" {
-            next["config"]["access"]["entitled"] = Value::Bool(false);
+            match account_layer.and_then(|layer| layer.providers.get(id)) {
+                Some(overlay_config) => {
+                    let mut overlay_config = overlay_config.clone();
+                    if let Some(object) = overlay_config.as_object_mut() {
+                        object.remove("group");
+                    }
+                    overlay(&mut next["config"], &overlay_config);
+                }
+                // 账号层未发布或没有该 provider 的结果：不授权。
+                None => next["config"]["access"]["entitled"] = Value::Bool(false),
+            }
         }
         let template = template_of(&templates, next["templateId"].as_str());
         let missing = next["templateId"].is_string() && template.is_none();
@@ -426,7 +441,12 @@ pub fn resolve(builtin: &Value, personal: &Value) -> Resolved {
         let enabled = account || rule["enabled"] != false;
         let issues = provider_issues(config, *missing_template);
         let entitled = !account || config["access"]["entitled"] == true;
-        let executable = enabled && entitled && issues.is_empty();
+        let account_states = account_layer.map(|layer| &layer.states);
+        // 非当前账号连接保留设置展示，但不向 Registry 发布模型（off-peak 不定义 current）。
+        let account_current = account_states
+            .and_then(|states| states.get(&id))
+            .is_none_or(|state| state["current"] != false);
+        let executable = enabled && entitled && account_current && issues.is_empty();
         let hidden = config["visibility"] == "hidden";
         let template = template_of(&templates, rule["templateId"].as_str());
         let base_url = config["api"]["baseUrl"]
@@ -511,7 +531,10 @@ pub fn resolve(builtin: &Value, personal: &Value) -> Resolved {
             builtin_config: builtin_config.clone(),
             personal_config: personal_config.clone(),
             effective_config: config.clone(),
-            account_state: account.then(|| logged_out_account_state(config)),
+            account_state: match account_states {
+                Some(states) => states.get(&id).cloned(),
+                None => account.then(|| logged_out_account_state(config)),
+            },
             provider_id: id,
             issues,
             enabled,
@@ -525,6 +548,58 @@ pub fn resolve(builtin: &Value, personal: &Value) -> Resolved {
         templates,
         default_selection: personal["defaultModelSelection"].clone(),
     }
+}
+
+/// 单个模型的有效配置：内置规则 + 个人精确规则按层覆盖
+/// （`ModelConfigRules.composeEffective(builtin, personal).resolve(...)`）。
+pub fn effective_model_config(
+    builtin_rules: &Value,
+    personal_rules: Option<&Value>,
+    provider_id: &str,
+    template_id: Option<&str>,
+    model_id: &str,
+    api_type: &str,
+    base_url: &str,
+) -> Value {
+    let mut model_rules = rules(builtin_rules, false);
+    if let Some(personal) = personal_rules {
+        model_rules.extend(rules(personal, true));
+    }
+    let base_url = base_url.trim_end_matches('/');
+    let mut effective = json!({});
+    for rule_entry in &model_rules {
+        let value = &rule_entry.value;
+        if value.get("providerId").is_some()
+            && (value["providerId"] != provider_id || value["modelId"] != model_id)
+        {
+            continue;
+        }
+        if value.get("templateId").is_some()
+            && (value["templateId"].as_str() != template_id || value["modelId"] != model_id)
+        {
+            continue;
+        }
+        if rule_entry
+            .model
+            .as_ref()
+            .is_some_and(|re| !re.is_match(model_id))
+            || rule_entry
+                .api
+                .as_ref()
+                .is_some_and(|re| !re.is_match(api_type))
+            || rule_entry
+                .url
+                .as_ref()
+                .is_some_and(|re| !re.is_match(base_url))
+        {
+            continue;
+        }
+        if rule_entry.manual {
+            clear_manual(&mut effective);
+        }
+        overlay(&mut effective, &value["config"]);
+    }
+    effective
 }
 
 fn reasoning_levels(model: &ModelEntry) -> Vec<String> {
@@ -580,6 +655,46 @@ impl Resolved {
             }
         }
         Value::Object(view)
+    }
+
+    /// `buildOffPeakModelSelectionView`：只投影固定隐藏的闲时 provider。
+    pub fn off_peak_model_selection_view(&self, revision: u64) -> Value {
+        let providers: Vec<Value> = self
+            .providers
+            .iter()
+            .filter(|provider| {
+                provider.in_registry()
+                    && provider.hidden
+                    && matches!(
+                        provider.provider_id.as_str(),
+                        "account:zai-offpeak-idle-plan" | "account:bigmodel-offpeak-idle-plan"
+                    )
+            })
+            .map(|provider| {
+                let mut view = Map::new();
+                if let Some(name) = &provider.provider_name {
+                    view.insert("providerName".into(), json!(name));
+                }
+                if let Some(template) = &provider.template_id {
+                    view.insert("templateId".into(), json!(template));
+                }
+                view.insert("providerId".into(), json!(provider.provider_id));
+                view.insert("config".into(), provider.effective_config.clone());
+                view.insert(
+                    "models".into(),
+                    Value::Array(
+                        provider
+                            .models
+                            .iter()
+                            .filter(|model| model.executable)
+                            .map(|model| json!({"modelId": model.model_id, "config": model.effective_config}))
+                            .collect(),
+                    ),
+                );
+                Value::Object(view)
+            })
+            .collect();
+        json!({"revision": revision, "providers": providers})
     }
 
     fn find_model(&self, provider_id: &str, model_id: &str) -> Option<&ModelEntry> {
@@ -795,7 +910,7 @@ mod tests {
 
     #[test]
     fn nothing_configured_lists_no_selectable_models() {
-        let resolved = resolve(&builtin(), &json!({}));
+        let resolved = resolve(&builtin(), &json!({}), None);
         let view = resolved.model_selection_view(1, None);
         assert_eq!(view["providers"], json!([]));
         assert!(view.get("preferredSelection").is_none());
@@ -812,7 +927,7 @@ mod tests {
 
     #[test]
     fn byok_provider_is_selectable_with_builtin_catch_all_rules() {
-        let resolved = resolve(&builtin(), &byok());
+        let resolved = resolve(&builtin(), &byok(), None);
         let view = resolved.model_selection_view(1, None);
         let providers = view["providers"].as_array().unwrap();
         assert_eq!(providers.len(), 1);
@@ -857,7 +972,7 @@ mod tests {
         let mut personal = byok();
         personal["providerConfigRules"]["providerRules"][0]["config"]["access"]["apiKey"] =
             json!(" ");
-        let resolved = resolve(&builtin(), &personal);
+        let resolved = resolve(&builtin(), &personal, None);
         assert_eq!(
             resolved.model_selection_view(1, None)["providers"],
             json!([])

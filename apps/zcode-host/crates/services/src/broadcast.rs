@@ -36,8 +36,35 @@ fn validate_message(message: Value) -> Result<Value, RpcError> {
     Ok(message)
 }
 
+/// Host 内部发广播（例如账号的 `auth:zcode-jwt-invalid`）：与 `send` 相同，先本地触发
+/// onMessage，再交给 Main 转发到其他窗口。
+#[derive(Clone)]
+pub struct Broadcaster {
+    messages: EventHub<Value>,
+    bridge: MainBridge,
+}
+
+impl Broadcaster {
+    pub fn send(&self, message: Value) {
+        self.messages.emit(message.clone());
+        self.bridge
+            .post(json!({"type": "broadcast", "message": message}));
+    }
+}
+
 pub fn service(bridge: MainBridge, router: &mut ControlRouter) -> ServiceBuilder {
+    service_with_sender(bridge, router).0
+}
+
+pub fn service_with_sender(
+    bridge: MainBridge,
+    router: &mut ControlRouter,
+) -> (ServiceBuilder, Broadcaster) {
     let messages = EventHub::<Value>::new();
+    let broadcaster = Broadcaster {
+        messages: messages.clone(),
+        bridge: bridge.clone(),
+    };
     {
         let messages = messages.clone();
         router.on("broadcast", move |envelope| {
@@ -70,7 +97,7 @@ pub fn service(bridge: MainBridge, router: &mut ControlRouter) -> ServiceBuilder
     let try_bridge = bridge.clone();
     let send_messages = messages.clone();
 
-    ServiceBuilder::new("broadcast")
+    let builder = ServiceBuilder::new("broadcast")
         .method("send", move |_, args| {
             let result = args
                 .get::<Value>(0, "message")
@@ -120,7 +147,8 @@ pub fn service(bridge: MainBridge, router: &mut ControlRouter) -> ServiceBuilder
                 Ok(Reply::from(Value::Bool(true)))
             }
         })
-        .event("onMessage", move |_, _| Ok(replies(messages.subscribe())))
+        .event("onMessage", move |_, _| Ok(replies(messages.subscribe())));
+    (builder, broadcaster)
 }
 
 fn post_claim(bridge: &MainBridge, kind: &str, lease: &Lease) {

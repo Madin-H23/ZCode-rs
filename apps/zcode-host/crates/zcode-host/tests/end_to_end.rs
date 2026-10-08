@@ -239,8 +239,12 @@ async fn renderer_attachment_gets_initialize_and_immediate_stub_replies() {
     assert_eq!(rpc.next().await.0, json!([200]));
 
     let started = Instant::now();
-    rpc.send(json!([100, 1, "feedback", "list"]), Some(json!([])))
-        .await;
+    // desktop-local Host 不注册 provider-provisioning-target（与 Node 相同），始终是 contract 桩。
+    rpc.send(
+        json!([100, 1, "provider-provisioning-target", "apply"]),
+        Some(json!([{}])),
+    )
+    .await;
     let (header, body) = rpc.next().await;
     assert!(
         started.elapsed() < Duration::from_millis(100),
@@ -259,7 +263,8 @@ async fn renderer_attachment_gets_initialize_and_immediate_stub_replies() {
     .await;
     let (header, body) = rpc.next().await;
     assert_eq!(header, json!([201, 2]));
-    assert_eq!(body.into_json(), json!({"handled": true}));
+    // 真实实现：临时 home 下首启导入提示尚未处理。
+    assert_eq!(body.into_json(), json!({"handled": false}));
 
     // 已实现的 service：临时 home 下没有设置文件，返回默认值。
     rpc.send(json!([100, 9, "setting", "get"]), Some(json!([])))

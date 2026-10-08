@@ -16,6 +16,7 @@
 //   run(context)           必需；context = { page, shots, model, workspace, home, temp, relaunch }
 //   mockRules              可选；按顺序匹配的 mock 模型规则 { name, match(request), respond(request) }
 //   seed(context)          可选；在启动 App 之前补充隔离 profile（context = { home, workspace, temp }）
+//   env(context)           可选；返回追加给 Electron 进程树的环境变量（例如指向场景自己的 mock 后端）
 //   env(context)           可选；返回追加给 App 进程树的环境变量（不能覆盖隔离用的 HOME 等键）
 //   args(context)          可选；返回追加给 Electron 的命令行参数
 // run(context) 另可用 context.secondInstance(args)：以同一隔离环境再启动一次 App，
@@ -63,6 +64,18 @@ async function freePort() {
   const { port } = server.address();
   server.close();
   return port;
+}
+
+/** 离线的 ZCode 控制面：所有请求 404（JSON），等同于控制面不可用。 */
+async function startOfflineControlPlane() {
+  const server = createServer((request, response) => {
+    request.resume();
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ code: 404, msg: "offline control plane" }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  return { server, origin: `http://127.0.0.1:${server.address().port}` };
 }
 
 /** mock 模型：每个请求按场景规则顺序匹配，第一条命中的规则负责应答。 */
@@ -150,6 +163,24 @@ async function seedProfile(home, workspace, baseUrl) {
       providerFamilyDomainMigrated: true,
     }),
   );
+  // 已关闭过新手引导的本机记录（未登录身份）：Host 的 onboarding-record 据此不再弹出引导，
+  // 与老用户启动时一致。需要验证引导的场景可在 seed() 里删除或改写它。
+  await writeFile(
+    join(config, "onboarding-record.json"),
+    JSON.stringify({
+      version: 2,
+      deviceMid: "e2e-device",
+      entries: [],
+      decisions: [
+        {
+          userId: null,
+          status: "dismissed",
+          reason: "user_closed",
+          decidedAt: new Date().toISOString(),
+        },
+      ],
+    }),
+  );
   await mkdir(workspace, { recursive: true });
   await writeFile(join(workspace, "README.md"), "# e2e workspace\n");
   // 一个已提交的 git 仓库，供 Git 状态与改动面板使用；配置只在临时 HOME 内生效。
@@ -201,7 +232,13 @@ async function runScenario(name, cli) {
   const model = await startMockModel(workspace, scenario.mockRules ?? []);
   await seedProfile(home, workspace, model.baseUrl);
   await scenario.seed?.({ home, workspace, temp });
-  const env = (await scenario.env?.({ home, workspace, temp })) ?? {};
+  // Host 启动即检查内置 Provider 配置的 CDN 更新（与 Node Host 相同）：ZCode 控制面默认指向本地
+  // 一律 404 的桩，不访问真实服务；场景可以用 env() 换成自己的 mock 后端。
+  const controlPlane = await startOfflineControlPlane();
+  const env = {
+    ZCODE_BASE_URL: controlPlane.origin,
+    ...(await scenario.env?.({ home, workspace, temp })),
+  };
   const args = (await scenario.args?.({ home, workspace, temp })) ?? [];
   let app;
   let failed = false;
@@ -236,6 +273,7 @@ async function runScenario(name, cli) {
   } finally {
     await app?.stop();
     model.server.close();
+    controlPlane.server.close();
     if (!options.keep && !failed) await rm(temp, { recursive: true, force: true });
     else console.info(`[e2e:${name}] kept ${temp}`);
   }

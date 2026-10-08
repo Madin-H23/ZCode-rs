@@ -23,6 +23,7 @@ pub mod main_bridge;
 pub mod off_peak;
 pub mod providers;
 pub mod settings;
+pub mod settings_sync;
 pub mod store;
 pub mod support;
 pub mod system;
@@ -142,7 +143,8 @@ pub fn install(
 ) -> Installed {
     let bridge = MainBridge::new(context.control.clone());
     let settings = settings::SettingStore::new(&context.environment.home_dir);
-    registry.implement(broadcast::service(bridge.clone(), router));
+    let (broadcast_service, broadcaster) = broadcast::service_with_sender(bridge.clone(), router);
+    registry.implement(broadcast_service);
     registry.implement(settings::service(settings.clone()));
 
     let providers = providers::ProviderRuntime::new(
@@ -160,11 +162,6 @@ pub fn install(
     providers.start_polling();
     registry.implement(providers::provider_settings_service(providers.clone()));
     registry.implement(providers::model_selection_service(providers.clone()));
-
-    registry.implement(account::oauth_service(&context.environment.vars));
-    registry.implement(account::onboarding_record_service());
-    registry.implement(account::usage_stats_service());
-    registry.implement(account::coding_plan_service(providers.clone()));
 
     registry.implement(file::service(file::FileServiceConfig {
         conversation_workspace: context
@@ -258,6 +255,27 @@ pub fn install(
     );
     registry.implement(tasks::controller::service(controller.clone()));
 
+    // ── account ──
+    // 账号栈（docs/specs/rust-host-account.md）：凭据、ApiClient、OAuth、账号 provider overlay、
+    // CLI 集成，以及账号增值 channel。必须在预热拉起 CLI 之前登记 CLI 扩展点。
+    let account = account::AccountStack::new(&context, &settings, &providers);
+    account.register(
+        registry,
+        storage.tasks_index.clone(),
+        context.environment.app_config_dir(),
+    );
+    account.register_coding_plan(registry, &providers);
+    account.register_provider_writes(registry, &providers, &agent);
+    account.register_feedback(registry, &context, bridge.clone(), router);
+    registry.implement(settings_sync::service(settings_sync::SettingsSync::new(
+        settings.clone(),
+        &context.environment.vars,
+        &context.environment.user_home,
+    )));
+    account.attach_agent(&agent, &context);
+    account.start(broadcaster);
+    account::telemetry::start_host_resource_samples(context.control.clone());
+
     // ── agent ──（docs/specs/rust-host-agent.md）
     // 三个 lane、CLI 通知分发、浏览器控制、进程生命周期上报，以及 zcode-agent / zcode-session /
     // plugin-management 三个 channel。AgentChannel 在最外层：连接作用域成员由它处理，其余回退到
@@ -297,6 +315,7 @@ pub fn install(
             observer.clone(),
             task_service.clone(),
             storage.tasks_index.clone(),
+            account.credentials.clone(),
         ),
         registry,
         router,

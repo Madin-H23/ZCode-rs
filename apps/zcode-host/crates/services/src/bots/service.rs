@@ -7,7 +7,6 @@ use serde_json::{Map, Value, json};
 use zcode_host_kit::{Args, Reply, RpcError, ServiceBuilder, log};
 
 use super::TaskPort;
-use super::credentials::CredentialStore;
 use super::feishu::api::{AppCredentials, FeishuApi};
 use super::model::{
     self, ALL_BOT_WORKSPACES, BOT_BIND_CODE_TTL_MS, is_feishu, normalize_allowed_workspaces,
@@ -16,6 +15,7 @@ use super::model::{
 use super::now_ms;
 use super::runtime::Runtimes;
 use super::store::BotsRepo;
+use crate::account::credential::CredentialStore;
 use crate::settings::SettingStore;
 
 /// 第一次读取应用名称可能因飞书同步延迟失败：扫码创建后按 0 / 800 / 1800 ms 重试。
@@ -347,7 +347,7 @@ impl Bots {
             self.credentials
                 .save(&key, value)
                 .await
-                .map_err(anyhow_error)?;
+                .map_err(|error| error.to_rpc())?;
             bot["credentialRef"] = json!(key);
         }
         if let Some(value) = text(params, "webhookSecretValue")
@@ -358,7 +358,7 @@ impl Bots {
             self.credentials
                 .save(&key, value)
                 .await
-                .map_err(anyhow_error)?;
+                .map_err(|error| error.to_rpc())?;
             bot["webhookSecretRef"] = json!(key);
         }
         if (credential.is_some() || text(&bot, "name").unwrap_or_default().trim().is_empty())
@@ -429,7 +429,7 @@ impl Bots {
                 self.credentials
                     .delete(reference)
                     .await
-                    .map_err(anyhow_error)?;
+                    .map_err(|error| error.to_rpc())?;
             }
         }
         Ok(next_bot)
@@ -470,7 +470,7 @@ impl Bots {
                 self.credentials
                     .delete(reference)
                     .await
-                    .map_err(anyhow_error)?;
+                    .map_err(|error| error.to_rpc())?;
             }
         }
         Ok(())

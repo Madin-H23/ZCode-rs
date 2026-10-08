@@ -3,7 +3,6 @@
 //!
 //! 只实现飞书 / Lark 通道；Telegram、Webhook、微信的传输层与微信扫码注册仍由 stub 应答
 //! `NotImplemented`（见 spec 的偏差表）。
-pub mod credentials;
 pub mod delivery;
 pub mod feishu;
 pub mod inbound;
@@ -283,13 +282,6 @@ pub fn install(
 ) -> Option<Keepalive> {
     let environment = &area.context.environment;
     let dir = environment.app_config_dir();
-    let cipher = credentials::CredentialCipher::new(
-        environment
-            .vars
-            .get("ZCODE_CREDENTIAL_SECRET")
-            .map(String::as_str),
-        &environment.user_home,
-    );
     let api =
         match feishu::api::FeishuApi::new(feishu::api::Endpoints::from_vars(&environment.vars)) {
             Ok(api) => Arc::new(api),
@@ -300,7 +292,8 @@ pub fn install(
         };
     let bots = service::Bots::new(service::BotsDeps {
         repo: store::BotsRepo::new(dir.clone()),
-        credentials: credentials::CredentialStore::new(&dir, cipher),
+        // 合并 account 区域后统一走它的凭据存储：同一文件只有一个写入方，写入也会广播凭据变更。
+        credentials: area.credentials.clone(),
         api,
         settings: area.settings.clone(),
         tasks: Arc::new(AreaPort { area: area.clone() }),

@@ -47,6 +47,20 @@ pub type EnvContributor =
     Arc<dyn Fn(WorkspaceTarget) -> BoxFuture<'static, BTreeMap<String, String>> + Send + Sync>;
 pub type MemberHandler =
     Arc<dyn Fn(Args) -> BoxFuture<'static, Result<Reply, RpcError>> + Send + Sync>;
+
+/// CLI → Host 通知的处理器（例如 `interaction/providerRuntimeHeadersCancelled`）。
+pub type NotificationHook = Arc<dyn Fn(NotificationContext) + Send + Sync>;
+
+/// 一条 CLI 通知的上下文。
+#[derive(Debug, Clone)]
+pub struct NotificationContext {
+    pub target: WorkspaceTarget,
+    pub workspace_key: String,
+    pub generation: u64,
+    pub method: String,
+    pub params: Value,
+}
+
 pub type UseHook = Arc<
     dyn Fn(Arc<AgentProcess>, UseReason) -> BoxFuture<'static, Result<(), RpcError>> + Send + Sync,
 >;
@@ -100,6 +114,7 @@ pub struct Extensions {
     dynamic_workflow_gate: RwLock<Option<DynamicWorkflowGate>>,
     dynamic_workflow: tokio::sync::OnceCell<bool>,
     members: RwLock<HashMap<String, MemberHandler>>,
+    notification_hooks: RwLock<HashMap<String, NotificationHook>>,
 }
 
 fn read<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
@@ -190,6 +205,15 @@ impl Extensions {
 
     pub fn member(&self, name: &str) -> Option<MemberHandler> {
         read(&self.members).get(name).cloned()
+    }
+
+    /// 按方法名登记通知处理器；同名后登记的覆盖先登记的。
+    pub fn register_notification(&self, method: impl Into<String>, hook: NotificationHook) {
+        write(&self.notification_hooks).insert(method.into(), hook);
+    }
+
+    pub fn notification_hook(&self, method: &str) -> Option<NotificationHook> {
+        read(&self.notification_hooks).get(method).cloned()
     }
 }
 

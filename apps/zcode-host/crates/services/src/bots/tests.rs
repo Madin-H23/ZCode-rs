@@ -12,7 +12,6 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use zcode_host_kit::EventHub;
 
-use super::credentials::{CredentialCipher, CredentialStore};
 use super::feishu::api::{Endpoints, FeishuApi};
 use super::feishu::frame::{Frame, METHOD_CONTROL, METHOD_DATA};
 use super::feishu::{card_markdown, parse_callback, split_text, strip_mentions};
@@ -23,6 +22,7 @@ use super::model::{
 use super::service::{Bots, BotsDeps};
 use super::store::BotsRepo;
 use super::{FinalReply, TaskPort};
+use crate::account::credential::CredentialStore;
 use crate::agent::WorkspaceTarget;
 use crate::automation::driver::{SendText, TerminalOutcome};
 use crate::off_peak::gateway::{read_request, write_json};
@@ -147,53 +147,26 @@ fn feishu_messages_parse_like_the_provider() {
     assert_eq!(split_text(&"字".repeat(1901)).len(), 2);
 }
 
+/// Bot 应用凭据经 account 的共享存储读写（加解密与 Node 的互通由 account 区域的测试覆盖）。
 #[tokio::test]
-async fn credentials_interoperate_with_node() {
-    let fixture = &parity()["credential"];
-    let cipher = CredentialCipher::new(fixture["secret"].as_str(), std::path::Path::new("/unused"));
-    let encrypted = fixture["encrypted"].as_str().unwrap();
-    assert_eq!(cipher.decrypt(encrypted).unwrap(), fixture["plain"]);
-    let again = cipher.encrypt("v").unwrap();
-    assert!(again.starts_with("enc:v1:"));
-    assert_eq!(cipher.decrypt(&again).unwrap(), "v");
-    assert_eq!(cipher.decrypt("plain-legacy").unwrap(), "plain-legacy");
-    assert!(
-        cipher
-            .decrypt("enc:v1:a.b")
-            .unwrap_err()
-            .to_string()
-            .contains("密文格式非法")
-    );
-
+async fn bot_credentials_use_the_shared_store() {
     let dir = tempfile::tempdir().unwrap();
-    let store = CredentialStore::new(dir.path(), CredentialCipher::new(Some("s"), dir.path()));
+    let store = CredentialStore::new(dir.path(), "s");
     store.save("bot:a:credential", "secret-1").await.unwrap();
-    store.save("other", "x").await.unwrap();
     assert_eq!(
         store.load("bot:a:credential").await.unwrap().as_deref(),
         Some("secret-1")
     );
-    store.delete("bot:a:credential").await.unwrap();
-    assert_eq!(store.load("bot:a:credential").await.unwrap(), None);
-    let file = dir.path().join("credentials.json");
-    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-    assert!(saved["other"].as_str().unwrap().starts_with("enc:v1:"));
-    std::fs::write(&file, "{broken").unwrap();
+    let saved: Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("credentials.json")).unwrap(),
+    )
+    .unwrap();
     assert!(
-        store
-            .load("other")
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("corrupt")
-    );
-    assert!(std::fs::read_dir(dir.path()).unwrap().any(|entry| {
-        entry
+        saved["bot:a:credential"]
+            .as_str()
             .unwrap()
-            .file_name()
-            .to_string_lossy()
-            .contains(".corrupt-")
-    }));
+            .starts_with("enc:v1:")
+    );
 }
 
 #[tokio::test]
@@ -508,7 +481,7 @@ fn setup(dir: &std::path::Path, origin: &str, tasks: Arc<FakeTasks>) -> Arc<Bots
     };
     let bots = Bots::new(BotsDeps {
         repo: BotsRepo::new(config_dir.clone()),
-        credentials: CredentialStore::new(&config_dir, CredentialCipher::new(Some("test"), dir)),
+        credentials: CredentialStore::new(&config_dir, "test"),
         api: Arc::new(FeishuApi::new(endpoints).unwrap()),
         settings: SettingStore::new(dir),
         tasks,
