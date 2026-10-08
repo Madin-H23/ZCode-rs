@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- 对拍场景的文件树与调用序列集中在一处，拆开后 fixture 与 Rust 测试更难对照。 */
 // Rust Host 扩展服务（docs/specs/rust-host-extensions.md §6）的对拍场景。
 // extensions-fixtures.ts 用真实 TS 服务在临时目录里执行这些调用，把输入与结果一起写进
 // fixtures/extensions-parity.json；Rust 测试在同样的文件树上复现并逐项比较。
