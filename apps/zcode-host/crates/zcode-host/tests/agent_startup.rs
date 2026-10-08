@@ -86,7 +86,10 @@ async fn startup_prepares_session_storage_with_the_cli() {
     .await;
     assert!(finished.is_ok(), "startup did not finish: {phases:?}");
     assert_eq!(session_phases.first().map(String::as_str), Some("checking"));
-    assert!(session_phases.iter().any(|phase| phase == "ready"), "{session_phases:?}");
+    assert!(
+        session_phases.iter().any(|phase| phase == "ready"),
+        "{session_phases:?}"
+    );
     let session_index = phases
         .iter()
         .position(|phase| phase == "preparing_session_storage")
@@ -99,6 +102,9 @@ async fn startup_prepares_session_storage_with_the_cli() {
         .iter()
         .position(|phase| phase == "starting_services")
         .unwrap();
-    assert!(host_index < session_index && session_index < services_index, "{phases:?}");
+    assert!(
+        host_index < session_index && session_index < services_index,
+        "{phases:?}"
+    );
     let _ = child.kill().await;
 }

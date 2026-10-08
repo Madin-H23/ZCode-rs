@@ -369,7 +369,7 @@ fn is_storage_state(params: &Value) -> bool {
         }
     }
     // failed 必须带 errorCode。
-    !(object["phase"] == "failed" && !object.contains_key("errorCode"))
+    object["phase"] != "failed" || object.contains_key("errorCode")
 }
 
 enum Frame {

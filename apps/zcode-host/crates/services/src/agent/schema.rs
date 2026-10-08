@@ -573,8 +573,9 @@ pub fn is_conversation_telemetry_fact(value: &Value) -> bool {
     // superRefine：只对通过分支校验的事实生效。
     match object["kind"].as_str() {
         Some("turn.started") => {
-            !(present("automationId") && present("offPeakTaskId"))
-                && !(object.contains_key("offPeakRunType") && !present("offPeakTaskId"))
+            let exclusive = !(present("automationId") && present("offPeakTaskId"));
+            let run_type_ok = !object.contains_key("offPeakRunType") || present("offPeakTaskId");
+            exclusive && run_type_ok
         }
         Some("workflow.lifecycle") => match object["phase"].as_str() {
             Some("actor-spawned") => present("agentId") && present("childSessionId"),

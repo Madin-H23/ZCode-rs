@@ -85,15 +85,13 @@ async fn prepares_and_reuses_the_same_database() {
 #[tokio::test]
 async fn failed_frames_and_protocol_errors_are_classified() {
     let dir = tempfile::tempdir().unwrap();
-    let failed = format!(
-        r#"printf '%s\n' '{{"method":"startup/storagePath","params":{{"path":"/tmp/x.db"}}}}'
+    let failed = r#"printf '%s\n' '{"method":"startup/storagePath","params":{"path":"/tmp/x.db"}}'
 read line
-printf '%s\n' '{{"method":"startup/storageState","params":{{"schemaVersion":1,"attemptId":"a","sequence":1,"databaseId":"db","databaseKind":"session","phase":"failed","elapsedMs":0,"errorCode":"sql_failed","sqliteCode":11,"migrationId":"0002_x"}}}}'
-exit 1"#
-    );
+printf '%s\n' '{"method":"startup/storageState","params":{"schemaVersion":1,"attemptId":"a","sequence":1,"databaseId":"db","databaseKind":"session","phase":"failed","elapsedMs":0,"errorCode":"sql_failed","sqliteCode":11,"migrationId":"0002_x"}}'
+exit 1"#;
     let mut prepared = HashSet::new();
     let error = prepare_directory(
-        &script_command(&failed),
+        &script_command(failed),
         dir.path(),
         &env(),
         &mut prepared,

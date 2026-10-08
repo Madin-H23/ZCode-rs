@@ -144,6 +144,8 @@ impl ControlRouter {
     }
 }
 
+// 启动状态只在启动阶段发送寥寥几次，不值得为变体大小装箱。
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type")]
 pub enum HostToMain {

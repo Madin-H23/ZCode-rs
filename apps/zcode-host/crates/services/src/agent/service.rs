@@ -737,16 +737,14 @@ impl Scope {
             _ => {}
         }
         // TTFT 只允许可信桌面本地 continuous；远端 workspace 不能开启本地观测。
-        if self.client_mode != ClientMode::DesktopContinuous
+        let remote_or_replayable = self.client_mode != ClientMode::DesktopContinuous
             || target
                 .workspace_identity
                 .as_deref()
                 .is_some_and(|identity| !identity.trim().is_empty())
-            || target.remote_session_id.is_some()
-        {
-            if let Some(object) = envelope.as_object_mut() {
-                object.remove("ttft");
-            }
+            || target.remote_session_id.is_some();
+        if remote_or_replayable && let Some(object) = envelope.as_object_mut() {
+            object.remove("ttft");
         }
         if envelope["type"] == "sendText"
             && let Some(session_id) = envelope["sessionId"].as_str().filter(|id| !id.is_empty())
