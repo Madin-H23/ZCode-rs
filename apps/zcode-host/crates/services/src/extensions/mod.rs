@@ -3,6 +3,7 @@
 //!
 //! 这些 channel 都是无状态的文件系统视图：每次调用重新扫描，Host 不缓存；与 Main、CLI、Node Host
 //! 共享的配置文件一律经 [`cli_config::update`] 持跨进程锁读改写。
+pub mod archive;
 pub mod cli_config;
 pub mod commands;
 pub mod fsx;
@@ -10,6 +11,7 @@ pub mod json;
 pub mod memory;
 pub mod plugin_roots;
 pub mod plugins;
+pub mod skill_sync;
 pub mod skills;
 pub mod walk;
 pub mod yaml;
@@ -104,4 +106,81 @@ where
 pub fn parse_params<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, RpcError> {
     serde_json::from_value(value)
         .map_err(|error| zcode_host_kit::args::invalid_argument("params", &error.to_string()))
+}
+
+const NESTED_BYTES_MARKER: &str = "__zcode_rpc_nested_uint8array_v1";
+
+/// 参数里的 `Uint8Array`：RPC 以 `{"__zcode_rpc_nested_uint8array_v1":true,"base64":…}` 传入；
+/// 也接受被 JSON 展开成数组或 `{"0":…}` 的旧形态。
+pub fn bytes_param(value: Option<&Value>) -> Result<Vec<u8>, RpcError> {
+    let invalid = || zcode_host_kit::args::invalid_argument("archive", "expected Uint8Array");
+    match value {
+        Some(Value::Object(map)) if map.get(NESTED_BYTES_MARKER) == Some(&Value::Bool(true)) => {
+            let text = map.get("base64").and_then(Value::as_str).ok_or_else(invalid)?;
+            crate::agent::wire::decode_base64(text).ok_or_else(invalid)
+        }
+        Some(Value::Object(map)) => (0..map.len())
+            .map(|index| {
+                map.get(&index.to_string())
+                    .and_then(Value::as_u64)
+                    .and_then(|byte| u8::try_from(byte).ok())
+                    .ok_or_else(invalid)
+            })
+            .collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                item.as_u64()
+                    .and_then(|byte| u8::try_from(byte).ok())
+                    .ok_or_else(invalid)
+            })
+            .collect(),
+        _ => Err(invalid()),
+    }
+}
+
+/// 结果对象里的 `Uint8Array`（TS 客户端按标记还原）。
+pub fn bytes_value(bytes: &[u8]) -> Value {
+    let mut map = serde_json::Map::new();
+    map.insert(NESTED_BYTES_MARKER.into(), Value::Bool(true));
+    map.insert(
+        "base64".into(),
+        Value::String(zcode_host_kit::base64_encode(bytes)),
+    );
+    Value::Object(map)
+}
+
+/// `checkRemoteSyncDirectoryWriteAccess`：建目录、排他写入探针文件再删除。
+pub async fn check_write_access(directory: &str) -> Value {
+    let marker = fsx::join(
+        directory,
+        &[&format!(
+            ".zcode-sync-preflight-{}-{}",
+            std::process::id(),
+            fsx::random_uuid()
+        )],
+    );
+    let result: Result<(), RpcError> = async {
+        fsx::mkdirp(directory).await?;
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        let mut file = options
+            .open(&marker)
+            .await
+            .map_err(|error| fsx::fs_error(&error, "open", &marker))?;
+        tokio::io::AsyncWriteExt::write_all(&mut file, b"ok")
+            .await
+            .map_err(|error| fsx::fs_error(&error, "write", &marker))?;
+        drop(file);
+        let _ = tokio::fs::remove_file(&marker).await;
+        Ok(())
+    }
+    .await;
+    match result {
+        Ok(()) => serde_json::json!({ "ok": true, "path": directory }),
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&marker).await;
+            serde_json::json!({ "ok": false, "path": directory, "error": error.message })
+        }
+    }
 }
