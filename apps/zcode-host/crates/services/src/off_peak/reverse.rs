@@ -220,11 +220,7 @@ async fn list(context: &ReverseContext, service: &Arc<OffPeakService>) -> Revers
             tasks.truncate(20);
             ReverseReply::Result(json!({"tasks": tasks.iter().map(snapshot).collect::<Vec<_>>()}))
         }
-        Err(error) => internal(
-            &context.method,
-            &context.workspace_key,
-            format!("{error:#}"),
-        ),
+        Err(error) => internal(&context.method, &context.workspace_key, error.to_string()),
     }
 }
 

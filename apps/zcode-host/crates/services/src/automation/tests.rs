@@ -228,7 +228,7 @@ impl Replay {
             workspace_path: "/tmp/ws-a".into(),
             workspace_identity: None,
         };
-        let error = |error: anyhow::Error| format!("{error:#}");
+        let error = |error: anyhow::Error| error.to_string();
         let value = match op["op"].as_str().unwrap() {
             "create" => {
                 let created = self

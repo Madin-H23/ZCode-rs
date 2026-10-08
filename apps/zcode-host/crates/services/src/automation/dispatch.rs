@@ -210,7 +210,7 @@ impl Dispatcher {
         let fixed = repo
             .get_run(&request.run_id)
             .await
-            .map_err(|error| format!("{error:#}"))?
+            .map_err(|error| error.to_string())?
             .and_then(|run| run.get("modelSelection").cloned());
         if let Some(fixed) = fixed {
             return Ok(fixed);
@@ -218,7 +218,7 @@ impl Dispatcher {
         let selection = repo
             .get_model_selection_for_dispatch(&request.automation_id, key)
             .await
-            .map_err(|error| format!("{error:#}"))?;
+            .map_err(|error| error.to_string())?;
         let providers: &ProviderRuntime = &self.area.providers;
         let (revision, resolved) = providers.snapshot().await;
         match selection {
@@ -266,7 +266,7 @@ impl Dispatcher {
             .repo()
             .fix_run_model_selection(&request.run_id, &selection)
             .await
-            .map_err(|error| format!("{error:#}"))?;
+            .map_err(|error| error.to_string())?;
         let trigger = if request.run_id.contains(":manual:") {
             "manual"
         } else {
@@ -404,7 +404,7 @@ impl Dispatcher {
                     .await
             }
             Ok(None) => Ok(()),
-            Err(error) => Err(format!("{error:#}")),
+            Err(error) => Err(error.to_string()),
         };
         // Bot 回推是 best-effort 辅助通道，失败不能阻断派发与结算。
         if let Err(error) = result {
@@ -501,7 +501,7 @@ impl Dispatcher {
             .service
             .run_now(automation_id, Some(scope))
             .await
-            .map_err(|error| format!("{error:#}"))?;
+            .map_err(|error| error.to_string())?;
         let Some(claimed) = claimed else {
             // single-flight 已拒绝重复运行：不能伪装成新 run 已入队。
             return Ok(json!({"status": "duplicate"}));

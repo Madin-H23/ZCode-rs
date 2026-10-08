@@ -230,7 +230,7 @@ impl OffPeakService {
                 .repo
                 .has_active_bound_task(&key, bound)
                 .await
-                .map_err(|error| format!("{error:#}"))?
+                .map_err(|error| error.to_string())?
         {
             return Ok(bound_failure(&provider_name));
         }
@@ -598,7 +598,7 @@ impl OffPeakService {
 
     /// 返回下次间隔；None 表示没有任务。
     async fn sync_once(self: &Arc<Self>) -> Result<Option<i64>, String> {
-        let error = |error: anyhow::Error| format!("{error:#}");
+        let error = |error: anyhow::Error| error.to_string();
         for task in self.repo.list_unsettled_terminal().await.map_err(error)? {
             self.settle_one(&task).await;
         }

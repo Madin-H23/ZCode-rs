@@ -317,7 +317,7 @@ impl OffPeakDispatcher {
         let deleted = index
             .list_deleted_task_ids(&target.key(), None)
             .await
-            .map_err(|error| transient(format!("{error:#}")))?
+            .map_err(|error| transient(error.to_string()))?
             .iter()
             .any(|id| id == session_id);
         if deleted {
@@ -328,7 +328,7 @@ impl OffPeakDispatcher {
         let running = index
             .get_task_meta(&target.key(), session_id)
             .await
-            .map_err(|error| transient(format!("{error:#}")))?
+            .map_err(|error| transient(error.to_string()))?
             .is_some_and(|meta| meta["status"] == "running");
         if running {
             return Err(transient(format!(

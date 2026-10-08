@@ -275,7 +275,7 @@ async fn handle(
             );
             let automation = match service.create(&input).await {
                 Ok(automation) => automation,
-                Err(error) => return internal(format!("{error:#}")),
+                Err(error) => return internal(error.to_string()),
             };
             if let Some(task_id) = automation["targetTaskId"].as_str() {
                 stamp_task(&index, &scope, task_id, &automation).await;
@@ -290,7 +290,7 @@ async fn handle(
                 Ok(list) => ReverseReply::Result(json!({
                     "automations": list.iter().map(to_protocol_automation).collect::<Vec<_>>(),
                 })),
-                Err(error) => internal(format!("{error:#}")),
+                Err(error) => internal(error.to_string()),
             }
         }
         "automation/checkTaskBinding" => {
@@ -300,7 +300,7 @@ async fn handle(
             let task_id = parsed["targetTaskId"].as_str().unwrap_or_default();
             match service.has_task_binding(&scope, task_id).await {
                 Ok(bound) => ReverseReply::Result(json!({"bound": bound})),
-                Err(error) => internal(format!("{error:#}")),
+                Err(error) => internal(error.to_string()),
             }
         }
         "automation/update" => {
@@ -318,7 +318,7 @@ async fn handle(
                     ReverseReply::Result(json!({"automation": to_protocol_automation(&automation)}))
                 }
                 Ok(None) => internal("Scheduled task not found in the current workspace."),
-                Err(error) => internal(format!("{error:#}")),
+                Err(error) => internal(error.to_string()),
             }
         }
         "automation/delete" => {
@@ -328,7 +328,7 @@ async fn handle(
             let automation_id = parsed["automationId"].as_str().unwrap_or_default();
             match service.delete(automation_id, Some(&scope)).await {
                 Ok(deleted) => ReverseReply::Result(json!({"deleted": deleted})),
-                Err(error) => internal(format!("{error:#}")),
+                Err(error) => internal(error.to_string()),
             }
         }
         other => ReverseReply::Error {

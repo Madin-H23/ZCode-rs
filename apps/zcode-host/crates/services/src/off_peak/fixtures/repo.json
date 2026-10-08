@@ -1,0 +1,1063 @@
+{
+  "source": "scripts/rust-host/off-peak-fixtures.ts",
+  "baseNow": 1791300000000,
+  "ops": [
+    {
+      "op": "create",
+      "params": {
+        "workspacePath": "/tmp/ws-a",
+        "title": "task op-1",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": " account:bigmodel-offpeak-idle-plan ",
+          "modelId": "GLM-5.3",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        }
+      },
+      "options": {
+        "offPeakTaskId": "op-1",
+        "serverTicketId": "t-1",
+        "queuePosition": 3,
+        "registeredAt": 1791300000000
+      }
+    },
+    {
+      "op": "create",
+      "params": {
+        "workspacePath": "/tmp/ws-a",
+        "title": "task op-2",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": " account:bigmodel-offpeak-idle-plan ",
+          "modelId": "GLM-5.3",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "workspaceIdentity": " id-b ",
+        "boundSessionId": "sess-1"
+      },
+      "options": {
+        "offPeakTaskId": "op-2",
+        "schedulable": true
+      }
+    },
+    {
+      "op": "create",
+      "params": {
+        "workspacePath": "/tmp/ws-a",
+        "title": "task op-3",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": " account:bigmodel-offpeak-idle-plan ",
+          "modelId": "GLM-5.3",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "boundSessionId": "sess-1",
+        "workspaceIdentity": " id-b "
+      },
+      "options": {
+        "offPeakTaskId": "op-3"
+      }
+    },
+    {
+      "op": "create",
+      "params": {
+        "workspacePath": "/tmp/ws-a",
+        "title": "task op-4",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {}
+        }
+      },
+      "options": {
+        "offPeakTaskId": "op-4",
+        "now": 1791300000005
+      }
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO tasks (task_id, workspace_key, workspace_path, provider, title, created_at, updated_at) VALUES ('sess-1', 'id-b', '/tmp/ws-b', 'glm', 'Bound session', 1, 1)"
+    },
+    {
+      "op": "list"
+    },
+    {
+      "op": "list",
+      "scope": {
+        "workspacePath": "/tmp/ws-b",
+        "workspaceIdentity": "id-b"
+      }
+    },
+    {
+      "op": "get",
+      "id": "op-1"
+    },
+    {
+      "op": "get",
+      "id": "missing"
+    },
+    {
+      "op": "hasActiveBoundTask",
+      "key": "id-b",
+      "session": "sess-1"
+    },
+    {
+      "op": "setPaused",
+      "id": "op-1",
+      "paused": true,
+      "now": 1791300000010
+    },
+    {
+      "op": "setPaused",
+      "id": "op-1",
+      "paused": true,
+      "now": 1791300000011
+    },
+    {
+      "op": "updateEditableFields",
+      "id": "op-1",
+      "params": {
+        "title": "renamed"
+      }
+    },
+    {
+      "op": "updateEditableFields",
+      "id": "op-1",
+      "params": {
+        "modelSelection": {
+          "providerId": "x",
+          "modelId": "y"
+        },
+        "permissionMode": "plan"
+      },
+      "now": 1791300000012
+    },
+    {
+      "op": "updateEditableFields",
+      "id": "op-1",
+      "params": {
+        "modelSelection": null
+      }
+    },
+    {
+      "op": "setPaused",
+      "id": "op-1",
+      "paused": false,
+      "now": 1791300000013
+    },
+    {
+      "op": "updateSchedulingSnapshot",
+      "id": "op-1",
+      "patch": {
+        "schedulable": true,
+        "queuePosition": null,
+        "nextPollAt": 1791300005000,
+        "now": 1791300000014
+      }
+    },
+    {
+      "op": "updateSchedulingSnapshot",
+      "id": "op-4",
+      "patch": {
+        "serverTicketId": "t-4",
+        "registeredAt": 1791300000015
+      },
+      "now": 1791300000015
+    },
+    {
+      "op": "listNonTerminal"
+    },
+    {
+      "op": "sql",
+      "sql": "UPDATE off_peak_tasks SET status = 'running', started_at = 7, conversation_id = 'c-1', claim_running = 1 WHERE off_peak_task_id = 'op-1'"
+    },
+    {
+      "op": "setPaused",
+      "id": "op-1",
+      "paused": true
+    },
+    {
+      "op": "markHistoryDeleted",
+      "id": "op-2",
+      "now": 1791300000016
+    },
+    {
+      "op": "markHistoryDeleted",
+      "id": "op-1",
+      "now": 1791300000017
+    },
+    {
+      "op": "markHistoryDeleted",
+      "id": "op-1",
+      "now": 1791300000018
+    },
+    {
+      "op": "requeueForContinuation",
+      "id": "op-1",
+      "now": 1791300000019
+    },
+    {
+      "op": "requeueForContinuation",
+      "id": "op-1",
+      "now": 1791300000020
+    },
+    {
+      "op": "markTerminal",
+      "id": "op-1",
+      "update": {
+        "status": "completed",
+        "endedAt": 1791300000021,
+        "filesChanged": 2
+      }
+    },
+    {
+      "op": "markTerminal",
+      "id": "op-1",
+      "update": {
+        "status": "failed",
+        "endedAt": 1791300000022,
+        "failureReason": "late"
+      }
+    },
+    {
+      "op": "markTerminal",
+      "id": "op-2",
+      "update": {
+        "status": "failed",
+        "endedAt": 1791300000023,
+        "failureReason": "boom",
+        "dispatchError": "x"
+      }
+    },
+    {
+      "op": "updateEditableFields",
+      "id": "op-1",
+      "params": {
+        "title": "after terminal"
+      }
+    },
+    {
+      "op": "hasActiveBoundTask",
+      "key": "id-b",
+      "session": "sess-1"
+    },
+    {
+      "op": "listUnsettledTerminal"
+    },
+    {
+      "op": "markSettled",
+      "id": "op-1",
+      "at": 1791300000024
+    },
+    {
+      "op": "markSettled",
+      "id": "op-3",
+      "at": 1791300000025
+    },
+    {
+      "op": "listUnsettledTerminal"
+    },
+    {
+      "op": "sql",
+      "sql": "UPDATE off_peak_tasks SET model_selection = 'not json' WHERE off_peak_task_id = 'op-2'"
+    },
+    {
+      "op": "get",
+      "id": "op-2"
+    },
+    {
+      "op": "delete",
+      "id": "op-4"
+    },
+    {
+      "op": "list"
+    }
+  ],
+  "results": [
+    {
+      "value": {
+        "offPeakTaskId": "op-1",
+        "serverTicketId": "t-1",
+        "title": "task op-1",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": "account:bigmodel-offpeak-idle-plan",
+          "modelId": "GLM-5.3",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "queued",
+        "queuedAt": 1791300000000,
+        "registeredAt": 1791300000000,
+        "schedulable": false,
+        "queuePosition": 3,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000000
+      }
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-2",
+        "title": "task op-2",
+        "sessionId": "sess-1",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": "account:bigmodel-offpeak-idle-plan",
+          "modelId": "GLM-5.3",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "workspaceKey": "id-b",
+        "workspacePath": "/tmp/ws-a",
+        "workspaceIdentity": " id-b ",
+        "status": "queued",
+        "queuedAt": 1791300000000,
+        "schedulable": true,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000000
+      }
+    },
+    {
+      "error": "UNIQUE constraint failed: off_peak_tasks.workspace_key, off_peak_tasks.session_id"
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-4",
+        "title": "task op-4",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m"
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "queued",
+        "queuedAt": 1791300000005,
+        "schedulable": false,
+        "createdAt": 1791300000005,
+        "updatedAt": 1791300000005
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": [
+        {
+          "offPeakTaskId": "op-4",
+          "title": "task op-4",
+          "prompt": "do it",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m"
+          },
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "status": "queued",
+          "queuedAt": 1791300000005,
+          "schedulable": false,
+          "createdAt": 1791300000005,
+          "updatedAt": 1791300000005
+        },
+        {
+          "offPeakTaskId": "op-1",
+          "serverTicketId": "t-1",
+          "title": "task op-1",
+          "prompt": "do it",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "account:bigmodel-offpeak-idle-plan",
+            "modelId": "GLM-5.3",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "status": "queued",
+          "queuedAt": 1791300000000,
+          "registeredAt": 1791300000000,
+          "schedulable": false,
+          "queuePosition": 3,
+          "createdAt": 1791300000000,
+          "updatedAt": 1791300000000
+        },
+        {
+          "offPeakTaskId": "op-2",
+          "title": "task op-2",
+          "sessionId": "sess-1",
+          "sessionTitle": "Bound session",
+          "prompt": "do it",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "account:bigmodel-offpeak-idle-plan",
+            "modelId": "GLM-5.3",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "workspaceKey": "id-b",
+          "workspacePath": "/tmp/ws-a",
+          "workspaceIdentity": " id-b ",
+          "status": "queued",
+          "queuedAt": 1791300000000,
+          "schedulable": true,
+          "createdAt": 1791300000000,
+          "updatedAt": 1791300000000
+        }
+      ]
+    },
+    {
+      "value": [
+        {
+          "offPeakTaskId": "op-2",
+          "title": "task op-2",
+          "sessionId": "sess-1",
+          "sessionTitle": "Bound session",
+          "prompt": "do it",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "account:bigmodel-offpeak-idle-plan",
+            "modelId": "GLM-5.3",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "workspaceKey": "id-b",
+          "workspacePath": "/tmp/ws-a",
+          "workspaceIdentity": " id-b ",
+          "status": "queued",
+          "queuedAt": 1791300000000,
+          "schedulable": true,
+          "createdAt": 1791300000000,
+          "updatedAt": 1791300000000
+        }
+      ]
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-1",
+        "serverTicketId": "t-1",
+        "title": "task op-1",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": "account:bigmodel-offpeak-idle-plan",
+          "modelId": "GLM-5.3",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "queued",
+        "queuedAt": 1791300000000,
+        "registeredAt": 1791300000000,
+        "schedulable": false,
+        "queuePosition": 3,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000000
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": true
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-1",
+        "serverTicketId": "t-1",
+        "title": "task op-1",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": "account:bigmodel-offpeak-idle-plan",
+          "modelId": "GLM-5.3",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "paused",
+        "queuedAt": 1791300000000,
+        "registeredAt": 1791300000000,
+        "schedulable": false,
+        "queuePosition": 3,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000010
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-1",
+        "serverTicketId": "t-1",
+        "title": "renamed",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": "account:bigmodel-offpeak-idle-plan",
+          "modelId": "GLM-5.3",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "paused",
+        "queuedAt": 1791300000000,
+        "registeredAt": 1791300000000,
+        "schedulable": false,
+        "queuePosition": 3,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000011
+      }
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-1",
+        "serverTicketId": "t-1",
+        "title": "renamed",
+        "prompt": "do it",
+        "permissionMode": "plan",
+        "modelSelection": {
+          "providerId": "x",
+          "modelId": "y"
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "paused",
+        "queuedAt": 1791300000000,
+        "registeredAt": 1791300000000,
+        "schedulable": false,
+        "queuePosition": 3,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000012
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-1",
+        "serverTicketId": "t-1",
+        "title": "renamed",
+        "prompt": "do it",
+        "permissionMode": "plan",
+        "modelSelection": {
+          "providerId": "x",
+          "modelId": "y"
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "queued",
+        "queuedAt": 1791300000000,
+        "registeredAt": 1791300000000,
+        "schedulable": false,
+        "queuePosition": 3,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000013
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": [
+        {
+          "offPeakTaskId": "op-1",
+          "serverTicketId": "t-1",
+          "title": "renamed",
+          "prompt": "do it",
+          "permissionMode": "plan",
+          "modelSelection": {
+            "providerId": "x",
+            "modelId": "y"
+          },
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "status": "queued",
+          "queuedAt": 1791300000000,
+          "registeredAt": 1791300000000,
+          "schedulable": true,
+          "nextPollAt": 1791300005000,
+          "createdAt": 1791300000000,
+          "updatedAt": 1791300000014
+        },
+        {
+          "offPeakTaskId": "op-2",
+          "title": "task op-2",
+          "sessionId": "sess-1",
+          "prompt": "do it",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "account:bigmodel-offpeak-idle-plan",
+            "modelId": "GLM-5.3",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "workspaceKey": "id-b",
+          "workspacePath": "/tmp/ws-a",
+          "workspaceIdentity": " id-b ",
+          "status": "queued",
+          "queuedAt": 1791300000000,
+          "schedulable": true,
+          "createdAt": 1791300000000,
+          "updatedAt": 1791300000000
+        },
+        {
+          "offPeakTaskId": "op-4",
+          "serverTicketId": "t-4",
+          "title": "task op-4",
+          "prompt": "do it",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m"
+          },
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "status": "queued",
+          "queuedAt": 1791300000005,
+          "registeredAt": 1791300000015,
+          "schedulable": false,
+          "createdAt": 1791300000005,
+          "updatedAt": 1791300000015
+        }
+      ]
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-2",
+        "title": "task op-2",
+        "sessionId": "sess-1",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": "account:bigmodel-offpeak-idle-plan",
+          "modelId": "GLM-5.3",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "workspaceKey": "id-b",
+        "workspacePath": "/tmp/ws-a",
+        "workspaceIdentity": " id-b ",
+        "status": "queued",
+        "queuedAt": 1791300000000,
+        "schedulable": true,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000000
+      }
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-1",
+        "serverTicketId": "t-1",
+        "title": "renamed",
+        "conversationId": "c-1",
+        "prompt": "do it",
+        "permissionMode": "plan",
+        "modelSelection": {
+          "providerId": "x",
+          "modelId": "y"
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "running",
+        "queuedAt": 1791300000000,
+        "startedAt": 7,
+        "historyDeletedAt": 1791300000017,
+        "registeredAt": 1791300000000,
+        "schedulable": true,
+        "nextPollAt": 1791300005000,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000017
+      }
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-1",
+        "serverTicketId": "t-1",
+        "title": "renamed",
+        "conversationId": "c-1",
+        "prompt": "do it",
+        "permissionMode": "plan",
+        "modelSelection": {
+          "providerId": "x",
+          "modelId": "y"
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "running",
+        "queuedAt": 1791300000000,
+        "startedAt": 7,
+        "historyDeletedAt": 1791300000017,
+        "registeredAt": 1791300000000,
+        "schedulable": true,
+        "nextPollAt": 1791300005000,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000017
+      }
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-1",
+        "serverTicketId": "t-1",
+        "title": "renamed",
+        "conversationId": "c-1",
+        "prompt": "do it",
+        "permissionMode": "plan",
+        "modelSelection": {
+          "providerId": "x",
+          "modelId": "y"
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "queued",
+        "queuedAt": 1791300000000,
+        "startedAt": 7,
+        "historyDeletedAt": 1791300000017,
+        "registeredAt": 1791300000000,
+        "schedulable": false,
+        "nextPollAt": 1791300005000,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000019
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-1",
+        "serverTicketId": "t-1",
+        "title": "renamed",
+        "conversationId": "c-1",
+        "prompt": "do it",
+        "permissionMode": "plan",
+        "modelSelection": {
+          "providerId": "x",
+          "modelId": "y"
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "completed",
+        "queuedAt": 1791300000000,
+        "startedAt": 7,
+        "endedAt": 1791300000021,
+        "filesChanged": 2,
+        "historyDeletedAt": 1791300000017,
+        "registeredAt": 1791300000000,
+        "schedulable": false,
+        "nextPollAt": 1791300005000,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000021
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-2",
+        "title": "task op-2",
+        "sessionId": "sess-1",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": "account:bigmodel-offpeak-idle-plan",
+          "modelId": "GLM-5.3",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "workspaceKey": "id-b",
+        "workspacePath": "/tmp/ws-a",
+        "workspaceIdentity": " id-b ",
+        "status": "failed",
+        "queuedAt": 1791300000000,
+        "endedAt": 1791300000023,
+        "failureReason": "boom",
+        "schedulable": false,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000023
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": false
+    },
+    {
+      "value": [
+        {
+          "offPeakTaskId": "op-1",
+          "serverTicketId": "t-1",
+          "title": "renamed",
+          "conversationId": "c-1",
+          "prompt": "do it",
+          "permissionMode": "plan",
+          "modelSelection": {
+            "providerId": "x",
+            "modelId": "y"
+          },
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "status": "completed",
+          "queuedAt": 1791300000000,
+          "startedAt": 7,
+          "endedAt": 1791300000021,
+          "filesChanged": 2,
+          "historyDeletedAt": 1791300000017,
+          "registeredAt": 1791300000000,
+          "schedulable": false,
+          "nextPollAt": 1791300005000,
+          "createdAt": 1791300000000,
+          "updatedAt": 1791300000021
+        },
+        {
+          "offPeakTaskId": "op-2",
+          "title": "task op-2",
+          "sessionId": "sess-1",
+          "prompt": "do it",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "account:bigmodel-offpeak-idle-plan",
+            "modelId": "GLM-5.3",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "workspaceKey": "id-b",
+          "workspacePath": "/tmp/ws-a",
+          "workspaceIdentity": " id-b ",
+          "status": "failed",
+          "queuedAt": 1791300000000,
+          "endedAt": 1791300000023,
+          "failureReason": "boom",
+          "schedulable": false,
+          "createdAt": 1791300000000,
+          "updatedAt": 1791300000023
+        }
+      ]
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": [
+        {
+          "offPeakTaskId": "op-2",
+          "title": "task op-2",
+          "sessionId": "sess-1",
+          "prompt": "do it",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "account:bigmodel-offpeak-idle-plan",
+            "modelId": "GLM-5.3",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "workspaceKey": "id-b",
+          "workspacePath": "/tmp/ws-a",
+          "workspaceIdentity": " id-b ",
+          "status": "failed",
+          "queuedAt": 1791300000000,
+          "endedAt": 1791300000023,
+          "failureReason": "boom",
+          "schedulable": false,
+          "createdAt": 1791300000000,
+          "updatedAt": 1791300000023
+        }
+      ]
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "offPeakTaskId": "op-2",
+        "title": "task op-2",
+        "sessionId": "sess-1",
+        "prompt": "do it",
+        "permissionMode": "yolo",
+        "modelSelectionIssue": {
+          "code": "repair-required"
+        },
+        "workspaceKey": "id-b",
+        "workspacePath": "/tmp/ws-a",
+        "workspaceIdentity": " id-b ",
+        "status": "failed",
+        "queuedAt": 1791300000000,
+        "endedAt": 1791300000023,
+        "failureReason": "boom",
+        "schedulable": false,
+        "createdAt": 1791300000000,
+        "updatedAt": 1791300000023
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": [
+        {
+          "offPeakTaskId": "op-1",
+          "serverTicketId": "t-1",
+          "title": "renamed",
+          "conversationId": "c-1",
+          "prompt": "do it",
+          "permissionMode": "plan",
+          "modelSelection": {
+            "providerId": "x",
+            "modelId": "y"
+          },
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "status": "completed",
+          "queuedAt": 1791300000000,
+          "startedAt": 7,
+          "endedAt": 1791300000021,
+          "filesChanged": 2,
+          "settledAt": 1791300000024,
+          "historyDeletedAt": 1791300000017,
+          "registeredAt": 1791300000000,
+          "schedulable": false,
+          "nextPollAt": 1791300005000,
+          "createdAt": 1791300000000,
+          "updatedAt": 1791300000024
+        },
+        {
+          "offPeakTaskId": "op-2",
+          "title": "task op-2",
+          "sessionId": "sess-1",
+          "sessionTitle": "Bound session",
+          "prompt": "do it",
+          "permissionMode": "yolo",
+          "modelSelectionIssue": {
+            "code": "repair-required"
+          },
+          "workspaceKey": "id-b",
+          "workspacePath": "/tmp/ws-a",
+          "workspaceIdentity": " id-b ",
+          "status": "failed",
+          "queuedAt": 1791300000000,
+          "endedAt": 1791300000023,
+          "failureReason": "boom",
+          "schedulable": false,
+          "createdAt": 1791300000000,
+          "updatedAt": 1791300000023
+        }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "off_peak_task_id": "op-1",
+      "server_ticket_id": "t-1",
+      "title": "renamed",
+      "conversation_id": "c-1",
+      "session_id": null,
+      "prompt": "do it",
+      "permission_mode": "plan",
+      "model": null,
+      "thought_level": null,
+      "model_selection": "{\"providerId\":\"x\",\"modelId\":\"y\"}",
+      "workspace_key": "/tmp/ws-a",
+      "workspace_path": "/tmp/ws-a",
+      "workspace_identity": null,
+      "status": "completed",
+      "queued_at": 1791300000000,
+      "started_at": 7,
+      "ended_at": 1791300000021,
+      "failure_reason": null,
+      "files_changed": 2,
+      "settled_at": 1791300000024,
+      "history_deleted_at": 1791300000017,
+      "registered_at": 1791300000000,
+      "schedulable": 0,
+      "queue_position": null,
+      "next_poll_at": 1791300005000,
+      "claim_running": 0,
+      "claimed_at": null,
+      "attempt_count": 0,
+      "last_error": null,
+      "created_at": 1791300000000,
+      "updated_at": 1791300000024
+    },
+    {
+      "off_peak_task_id": "op-2",
+      "server_ticket_id": null,
+      "title": "task op-2",
+      "conversation_id": null,
+      "session_id": "sess-1",
+      "prompt": "do it",
+      "permission_mode": "yolo",
+      "model": null,
+      "thought_level": null,
+      "model_selection": "not json",
+      "workspace_key": "id-b",
+      "workspace_path": "/tmp/ws-a",
+      "workspace_identity": " id-b ",
+      "status": "failed",
+      "queued_at": 1791300000000,
+      "started_at": null,
+      "ended_at": 1791300000023,
+      "failure_reason": "boom",
+      "files_changed": null,
+      "settled_at": null,
+      "history_deleted_at": null,
+      "registered_at": null,
+      "schedulable": 0,
+      "queue_position": null,
+      "next_poll_at": null,
+      "claim_running": 0,
+      "claimed_at": null,
+      "attempt_count": 1,
+      "last_error": "x",
+      "created_at": 1791300000000,
+      "updated_at": 1791300000023
+    }
+  ]
+}

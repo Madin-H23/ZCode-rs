@@ -279,7 +279,7 @@ impl TaskDriver {
             .repo()
             .sync_at_grouped_top(meta, None)
             .await
-            .map_err(|error| RpcError::new("Error", format!("{error:#}")))?;
+            .map_err(|error| RpcError::new("Error", error.to_string()))?;
         let task_id = outcome.meta["taskId"]
             .as_str()
             .unwrap_or_default()
@@ -315,7 +315,7 @@ impl TaskDriver {
             .repo()
             .sync(meta, Some(searchable_text(&snapshot)))
             .await
-            .map_err(|error| RpcError::new("Error", format!("{error:#}")))
+            .map_err(|error| RpcError::new("Error", error.to_string()))
     }
 
     async fn resume_snapshot(
@@ -358,7 +358,7 @@ impl TaskDriver {
             )
             .await
             .map(|_| ())
-            .map_err(|error| RpcError::new("Error", format!("{error:#}")))
+            .map_err(|error| RpcError::new("Error", error.to_string()))
     }
 
     fn envelope(

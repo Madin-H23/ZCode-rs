@@ -30,7 +30,7 @@ fn error(message: impl Into<String>) -> RpcError {
 }
 
 fn anyhow_error(error: anyhow::Error) -> RpcError {
-    RpcError::new("Error", format!("{error:#}"))
+    RpcError::new("Error", error.to_string())
 }
 
 fn params(args: &Args) -> Map<String, Value> {

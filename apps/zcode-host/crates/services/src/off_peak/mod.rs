@@ -9,6 +9,8 @@ pub mod gateway;
 pub mod models;
 pub mod reverse;
 pub mod service;
+#[cfg(test)]
+mod tests;
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -27,7 +29,7 @@ use crate::tasks_index::off_peak_repo::OffPeakRepo;
 use service::OffPeakService;
 
 fn anyhow_error(error: anyhow::Error) -> RpcError {
-    RpcError::new("Error", format!("{error:#}"))
+    RpcError::new("Error", error.to_string())
 }
 
 fn id_arg(args: &Args) -> Result<String, RpcError> {
