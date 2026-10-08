@@ -220,21 +220,41 @@ pub struct DatabaseStartupState {
     pub started_at: u64,
     pub updated_at: u64,
     pub phase: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database_phase: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_phase: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<&'static str>,
     pub disk: Vec<Value>,
 }
 
 impl DatabaseStartupState {
-    pub fn ready(startup_id: String, attempt_id: String, now_ms: u64) -> Self {
+    pub fn new(
+        startup_id: String,
+        attempt_id: String,
+        sequence: u64,
+        started_at: u64,
+        now_ms: u64,
+        phase: &'static str,
+    ) -> Self {
         Self {
             schema_version: 1,
             startup_id,
             attempt_id,
-            sequence: 0,
-            started_at: now_ms,
+            sequence,
+            started_at,
             updated_at: now_ms,
-            phase: "ready",
+            phase,
+            database_phase: None,
+            failed_phase: None,
+            error_code: None,
             disk: Vec::new(),
         }
+    }
+
+    pub fn ready(startup_id: String, attempt_id: String, now_ms: u64) -> Self {
+        Self::new(startup_id, attempt_id, 0, now_ms, now_ms, "ready")
     }
 }
 

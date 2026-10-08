@@ -224,7 +224,7 @@ impl Syncer {
             .await
             .ok_or("runtime is not running")?;
         let snapshot = process
-            .request_value("session/read", &json!({"sessionId": session_id}))
+            .observe("session/read", &json!({"sessionId": session_id}))
             .await
             .map_err(|error| error.message)?;
         if snapshot["session"]["sessionKind"] == "subagent_child" {
