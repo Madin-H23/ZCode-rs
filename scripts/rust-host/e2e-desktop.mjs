@@ -270,6 +270,10 @@ async function runScenario(name, cli) {
   } catch (error) {
     failed = true;
     console.error(`[e2e:${name}] failed:`, error);
+    // 失败现场：截图与页面文本留在临时目录，便于区分“界面卡在哪一步”。
+    await app?.page.screenshot({ path: join(shots, "failure.png") }).catch(() => undefined);
+    const text = await app?.page.evaluate(() => document.body.innerText).catch(() => undefined);
+    if (text !== undefined) await writeFile(join(shots, "failure.txt"), text);
   } finally {
     await app?.stop();
     model.server.close();
