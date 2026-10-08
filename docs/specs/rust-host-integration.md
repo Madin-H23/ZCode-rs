@@ -30,7 +30,7 @@
    4. `zcodejwttoken`（trim）为空 → 凭据缺失 `jwt`（support 原因 `jwt_missing`）。
    5. 再解析一次 Provider 与 active provider，与第一次的指纹（`JSON.stringify(provider)`）不一致则重来。
    6. Coding Plan key：`AccountRequestAuth::resolve_current(providerId, access)`（个人 key 走 CodingPlanKeys 缓存，Team 走 org/project 运行时 key）。拿不到 → 凭据缺失 `codingPlanApiKey`（support 原因 `connection_unavailable`）。
-4. **错误分类**：`OffPeakCodingPlanUnavailableError(reason)` 的消息 `off-peak selected coding plan unavailable: <reason>`；凭据缺失的消息 `off-peak requires zcode login (jwt missing)` / `off-peak requires a coding plan provider api key`。两类在派发里都是 `failureKind:"permanent"`。
+4. **错误分类**（读凭据库失败等非分类错误：`getCodingPlanSupport` 原样报错，派发按 transient，同 Node）：`OffPeakCodingPlanUnavailableError(reason)` 的消息 `off-peak selected coding plan unavailable: <reason>`；凭据缺失的消息 `off-peak requires zcode login (jwt missing)` / `off-peak requires a coding plan provider api key`。两类在派发里都是 `failureKind:"permanent"`。
 5. **请求形状**（`offPeakServerClient.ts`）：`<origin>/api/v1/off-peak<path>`，头依次为 ZCode 来源头（account 区域的 `SourceHeaders`，`HTTP-Referer` 为缺省 origin，同 `buildZCodeSourceHeaders`）、`content-type`（有 body 时）、`authorization: Bearer <jwt>`、`x-coding-plan-api-key`、BigModel Team 且 org 与 project 都有时的 `bigmodel-organization` / `bigmodel-project`，最后补 `x-request-id`。错误响应的日志只记 `bizCode`、`credentialKind`、`httpStatus`、`method`、`path`、`requestId`（优先响应头的 `x-request-id`），不记凭据。
 6. **逐请求鉴权**（`buildOffPeakRequestAuth`）：`{apiKey: jwt, headers: {Authorization, X-Coding-Plan-Api-Key, X-Off-Peak-Ticket-ID, 以及 Team 身份头}}`。
 7. **依赖注入**：automation 区域的 `Area` 增加 `with_account(AccountLink{auth, source_headers})`，install 时由 account 栈提供；没有注入（单元测试）时真实链按“没有账号 Provider”处理。
@@ -49,7 +49,7 @@
    - plugins：目标目录已存在，或目标 scope 无配置路径 → `targetExists`；目标配置的 `plugins.dirs` 已有同 id → `sameNameExists`。
    - MCP：目标配置的 `mcp.servers` 已有同名 → `sameNameExists`；目标 scope 无配置路径时记 `sameNameExists`（同 Node）。
 5. **目标**：`targetScope` 缺省取来源 scope（skills / commands 取候选自身的目标根）；`global` → `~/.zcode/{skills,commands,plugins}`、`~/.zcode/cli/config.json`；`project` → `<workspace>/.zcode/{…}`、`<workspace>/.zcode/config.json`；没有 workspace 的 `project` 记 skipped。
-6. **导入方式**：`importMode` 缺省 `symlink`。目录（skill、plugin）软链指向绝对路径（Windows 用 junction），文件（command）软链（Windows 用硬链接，失败退回复制）；`copy` 为递归复制且目标存在即失败。plugin 导入后把目标目录的绝对路径追加到配置的 `plugins.dirs`（已有则不写）；MCP 把配置合并进 `mcp.servers`。
+6. **导入方式**：`importMode` 缺省 `symlink`。目录（skill、plugin）软链指向绝对路径（Node 在 Windows 用 junction，见第 5 节），文件（command）软链（Windows 用硬链接，失败退回复制）；`copy` 为递归复制且目标存在即失败。plugin 导入后把目标目录的绝对路径追加到配置的 `plugins.dirs`（已有则不写）；MCP 把配置合并进 `mcp.servers`。
 7. **写配置**：`~/.zcode/cli/config.json` 与 `<workspace>/.zcode/config.json` 都经 extensions 区域的 `cli_config::update`（跨进程锁 + 原子写），读取宽松（坏 JSON 视为 `{}`），写出 `JSON.stringify(value, null, 2) + "\n"`。这是两份文件在 Rust Host 内唯一的写路径。
 8. **结果**：每类结果项字段与键序同 Node（`name, path, sourceScope, status, [skipReason], [version]` 等）；任务状态 `failed`（有失败）> `success`（有导入）> `skipped`。
 
@@ -64,7 +64,7 @@
 
 1. **唯一写入方**：`coding-plan-subscription` 的 `CodingPlanSubscription::dynamic_workflow_config(false)`（Node：`codingPlanSubscriptionService.getDynamicWorkflowClientConfig()`）。install 时由 integration 段把它登记为 `Extensions::set_dynamic_workflow_gate`，`enabled === true` 即开启；之后 runtime 在 Host 进程内只判定一次（失败按关闭、不重试，扩展点已有语义）。
 2. **本地覆盖**：`ZCODE_DYNAMIC_WORKFLOW_MODE`（Main 按打包类型决定后写进 Host 环境）优先于远端配置；不进入 CLI spawn 环境（CLI 不读它，Node 也只在 Host 判定）。
-3. **请求面**：门禁开启时，所有 Host 发出的会话创建 / 恢复都带 `dynamicWorkflowEnabled: true`（与 Node 经 `zcodeAgentService.createSession/resumeSession` 的统一注入相同）：agent 区域的 legacy create/resume、V4 `createSession` 信封、tasks 区域的 `createTask`（legacy 与 V4）/ `resumeTask`、automation 驱动的 create/resume；进程就绪前推送 `workspace/updateDynamicWorkflowPolicy`。导入会话（Claude 导入、对话分享导入）不带工具面参数（Rust CLI 拒绝）。会话工具面参数由 `Extensions::session_tool_flags(target)` 统一给出，调用方不各自拼。
+3. **请求面**：门禁开启时，所有 Host 发出的会话创建 / 恢复都带 `dynamicWorkflowEnabled: true`（与 Node 经 `zcodeAgentService.createSession/resumeSession` 的统一注入相同）：agent 区域的 legacy create/resume、V4 `createSession` 信封、tasks 区域的 `createTask`（legacy 与 V4）/ `resumeTask`、automation 驱动的 create/resume；进程就绪前推送 `workspace/updateDynamicWorkflowPolicy`。导入会话（Claude 导入、对话分享导入）不带工具面参数（Rust CLI 拒绝）。Host 自己发起的 create / resume（tasks、automation）从 `Extensions::session_tool_flags(target)` 取这组参数；agent 区域的 `gates` 读同一组扩展点。
 
 ### 2.5 反向请求错误带 `data`
 
@@ -132,21 +132,23 @@ UI importSelected(selections) ─► 每条 selection：重新扫描该类候选
 
 ## 5. 偏差表（本文新增）
 
-| Node 行为                                                       | Rust Host                                                   | 理由                                                         |
-| --------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------ |
-| 闲时 mock 网关准入后代理到用户 Coding Plan 的真实上游（开发用） | 回固定的 Anthropic 响应                                     | 仅开发演示；测试与 E2E 不能连真实上游                        |
-| 选中 Provider 的静态 access 不合 strict schema 时抛 ZodError    | 视为没有选中的 Provider（`connection_unavailable`）         | 只会出现在损坏的内置配置上；结果同样不可派发                 |
-| settings-sync 写 `config.json` 用无锁 `writeFile`（0644）       | 持跨进程锁、原子写、0600                                    | 与 extensions 区域的其他写入方共用一条写路径，避免并发丢更新 |
-| RPC 调用被取消（连接关闭、PromiseCancel）后仍记一条观测         | 被取消的调用不记                                            | Rust 直接中止调用 future，没有完成时间                       |
-| 契约桩（未实现成员）不存在                                      | 桩的 `NotImplemented` 应答不记遥测                          | 桩是 Rust Host 的过渡物，不是业务调用失败                    |
-| `session_create` 的 `messageId` 是派发时新生成的 traceId        | 取首条输入的 inputId（automation 为 runId，闲时为 traceId） | Rust 驱动以 inputId 作首条消息的标识；两者都唯一标识本次首发 |
+| Node 行为                                                       | Rust Host                                                   | 理由                                                                    |
+| --------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 闲时 mock 网关准入后代理到用户 Coding Plan 的真实上游（开发用） | 回固定的 Anthropic 响应                                     | 仅开发演示；测试与 E2E 不能连真实上游                                   |
+| 选中 Provider 的静态 access 不合 strict schema 时抛 ZodError    | 视为没有选中的 Provider（`connection_unavailable`）         | 只会出现在损坏的内置配置上；结果同样不可派发                            |
+| settings-sync 写 `config.json` 用无锁 `writeFile`（0644）       | 持跨进程锁、原子写、0600                                    | 与 extensions 区域的其他写入方共用一条写路径，避免并发丢更新            |
+| RPC 调用被取消（连接关闭、PromiseCancel）后仍记一条观测         | 被取消的调用不记                                            | Rust 直接中止调用 future，没有完成时间                                  |
+| 契约桩（未实现成员）不存在                                      | 桩的 `NotImplemented` 应答不记遥测                          | 桩是 Rust Host 的过渡物，不是业务调用失败                               |
+| `session_create` 的 `messageId` 是派发时新生成的 traceId        | 取首条输入的 inputId（automation 为 runId，闲时为 traceId） | Rust 驱动以 inputId 作首条消息的标识；两者都唯一标识本次首发            |
+| settings-sync 在 Windows 上用 junction 导入目录                 | 目录软链（`symlink_dir`）                                   | 标准库不提供 junction；没有开发者模式时导入记 failed，copy 模式不受影响 |
+| Codex `config.toml` 的日期时间值经 `TomlDate` 写成 ISO 字符串   | 写成 TOML 原文的日期时间字符串                              | 只影响 MCP 配置里极少见的日期字段                                       |
 
 ## 6. 验收
 
-- `cargo test -p zcode-host-services --lib off_peak::credentials`：mock、无 Provider、start plan、身份不一致、JWT 缺失、key 缺失、Team 身份头、指纹变化重试。
-- `cargo test -p zcode-host-services --test off_peak_account`：临时 HOME 的已登录 Z.ai 账号（Node 加密格式）+ 127.0.0.1 mock 后端：`getCodingPlanSupport` 为 `zai-personal`，取号请求带 JWT、Coding Plan key、来源头与 `x-request-id`；退出登录后为 `jwt_missing`。
+- `cargo test -p zcode-host-services --lib off_peak::credentials`：mock 与无账号栈、支持矩阵（个人 / Team / start plan / 无选中）、strict access、错误文案与 support 原因、Team 身份头只在组织与项目都有时发。
+- `cargo test -p zcode-host-services --test off_peak_account`：临时 HOME 的已登录 Z.ai 账号（Node 加密格式）+ 127.0.0.1 mock 后端：`getCodingPlanSupport` 为 `zai-personal`，逐请求鉴权与取号请求带 JWT、Coding Plan key、来源头与 `x-request-id`；active provider 换成另一家时为 `provider_identity_mismatch`；JWT 删除后为 `jwt_missing`，取号在发请求前失败。
 - `pnpm exec tsx scripts/rust-host/settings-sync-fixtures.ts --check` + `cargo test -p zcode-host-services --lib settings_sync`：同一棵来源树上真实 TS 服务与 Rust 的 `detect`（四类）、`importSelected`（symlink / copy、global / project、冲突、未知类别）结果和落盘文件逐项相同。
 - `pnpm exec tsx scripts/rust-host/zod-flatten-fixtures.ts --check` + `cargo test -p zcode-host-services --lib support::zod`：闲时与 automation 反向请求参数的 flatten 与 zod 4 相同。
 - `cargo test -p zcode-host-core`：RPC 观测的字段、错误分类、桩不记、200 条立即冲刷、shutdown 冲刷。
-- `cargo test -p zcode-host-services --lib`：session-create 遥测（automation 新建 / 绑定会话不报、闲时 init）、动态工作流门禁经 coding-plan 登记后 legacy / V4 / tasks / automation 的请求都带 flag、`generateCommitMessage` 经 `AgentApi`。
+- `cargo test -p zcode-host-services --lib integration`：`session-create-telemetry` 的消息形状（本地、远端 identity、非远端格式的 identity）；coding-plan 门禁（`ZCODE_DYNAMIC_WORKFLOW_MODE=alwaysOn` / `disabled`，假 CLI）开启时进程就绪前推 `workspace/updateDynamicWorkflowPolicy`、tasks 的 `session/resume` 带 `dynamicWorkflowEnabled`，关闭时都不发；`session_tool_flags` 对远端 identity 只给动态工作流。派发点（automation 只在不带 `targetTaskId` 时、闲时只在 `init` 时上报）由代码审查确认，E2E 走过这两条派发路径但不观测 Main 侧遥测。
 - 桌面 E2E：`core`、`automation-offpeak`、`workspace-commit-message`、`extensions-*`、`account-logged-in`，以及新增的 `integration-settings-sync`（设置页 → 技能 → 从其他 Agent 导入 → 选中 Claude Code 的技能 → 导入 → 技能列表出现该技能，`~/.zcode/skills` 下是指向来源的软链）。
