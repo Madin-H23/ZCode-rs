@@ -24,7 +24,8 @@ use crate::codec::{
 /// 连接关闭后所有挂起调用的错误。
 pub const CONNECTION_CLOSED: &str = "Connection closed";
 
-type Pending = oneshot::Sender<Result<RpcValue, RpcError>>;
+/// 应答 body 保持序列化形态；`call` 解码，`call_encoded` 原样交给转发方。
+type Pending = oneshot::Sender<Result<Vec<u8>, RpcError>>;
 
 #[derive(Default)]
 struct State {
@@ -33,7 +34,7 @@ struct State {
     next_id: i32,
     queued: Vec<Vec<u8>>,
     pending: HashMap<i32, Pending>,
-    listeners: HashMap<i32, mpsc::UnboundedSender<RpcValue>>,
+    listeners: HashMap<i32, mpsc::UnboundedSender<Vec<u8>>>,
 }
 
 struct Inner {
@@ -84,12 +85,12 @@ impl Inner {
     }
 
     fn on_message(&self, message: &[u8]) {
-        let response = match codec::read_response(message) {
+        let (kind, id, body) = match codec::split_response(message) {
             Ok(response) => response,
             // 无法解析的响应与 TS 一样无从对应到请求，丢弃。
             Err(_) => return,
         };
-        match response.kind {
+        match kind {
             RESPONSE_INITIALIZE => {
                 let mut state = self.lock();
                 if state.initialized || state.closed {
@@ -103,24 +104,24 @@ impl Inner {
                 self.initialized.send_replace(true);
             }
             RESPONSE_PROMISE_SUCCESS | RESPONSE_PROMISE_ERROR | RESPONSE_PROMISE_ERROR_OBJ => {
-                let Some(id) = response.id else { return };
+                let Some(id) = id else { return };
                 let Some(sender) = self.lock().pending.remove(&id) else {
                     return;
                 };
-                let result = match response.kind {
-                    RESPONSE_PROMISE_SUCCESS => Ok(response.body),
+                let result = match kind {
+                    RESPONSE_PROMISE_SUCCESS => Ok(body),
                     RESPONSE_PROMISE_ERROR => {
-                        Err(RpcError::from_payload(&response.body.into_json()))
+                        Err(RpcError::from_payload(&decode(&body).into_json()))
                     }
-                    _ => Err(error_object(response.body.into_json())),
+                    _ => Err(error_object(decode(&body).into_json())),
                 };
                 let _ = sender.send(result);
             }
             RESPONSE_EVENT_FIRE => {
-                let Some(id) = response.id else { return };
+                let Some(id) = id else { return };
                 let mut state = self.lock();
                 if let Some(listener) = state.listeners.get(&id)
-                    && listener.send(response.body).is_err()
+                    && listener.send(body).is_err()
                 {
                     state.listeners.remove(&id);
                 }
@@ -128,6 +129,13 @@ impl Inner {
             _ => {}
         }
     }
+}
+
+/// 解码一条已序列化的值；损坏的载荷按 undefined 处理（与 TS 读到截断数据时同样无法使用）。
+fn decode(body: &[u8]) -> RpcValue {
+    codec::Reader::new(body)
+        .value()
+        .unwrap_or(RpcValue::Undefined)
 }
 
 fn closed_error() -> RpcError {
@@ -210,6 +218,17 @@ impl RpcClient {
         method: &str,
         args: Vec<RpcValue>,
     ) -> impl std::future::Future<Output = Result<RpcValue, RpcError>> + Send + 'static {
+        let call = self.call_encoded(channel, method, args);
+        async move { call.await.map(|body| decode(&body)) }
+    }
+
+    /// 同 [`Self::call`]，结果保持序列化形态（转发给 Renderer 时逐字节不变）。
+    pub fn call_encoded(
+        &self,
+        channel: &str,
+        method: &str,
+        args: Vec<RpcValue>,
+    ) -> impl std::future::Future<Output = Result<Vec<u8>, RpcError>> + Send + 'static {
         let (sender, receiver) = oneshot::channel();
         let id = {
             let mut state = self.inner.lock();
@@ -247,6 +266,11 @@ impl RpcClient {
 
     /// `[102, id, channel, event]` + 单个参数。丢弃返回的流即退订。
     pub fn listen(&self, channel: &str, event: &str, arg: RpcValue) -> RpcEvents {
+        RpcEvents(self.listen_encoded(channel, event, arg))
+    }
+
+    /// 同 [`Self::listen`]，事件保持序列化形态。
+    pub fn listen_encoded(&self, channel: &str, event: &str, arg: RpcValue) -> RpcEncodedEvents {
         let (sender, receiver) = mpsc::unbounded_channel();
         let id = {
             let mut state = self.inner.lock();
@@ -268,7 +292,7 @@ impl RpcClient {
                 &arg,
             ));
         }
-        RpcEvents {
+        RpcEncodedEvents {
             receiver,
             inner: Arc::downgrade(&self.inner),
             id,
@@ -299,22 +323,35 @@ impl Drop for CancelGuard {
     }
 }
 
-/// 远端事件流；丢弃即发 `[103]`。
-pub struct RpcEvents {
-    receiver: mpsc::UnboundedReceiver<RpcValue>,
-    inner: std::sync::Weak<Inner>,
-    id: Option<i32>,
-}
+/// 远端事件流（已解码）；丢弃即发 `[103]`。
+pub struct RpcEvents(RpcEncodedEvents);
 
 impl Stream for RpcEvents {
     type Item = RpcValue;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<RpcValue>> {
+        Pin::new(&mut self.0)
+            .poll_next(cx)
+            .map(|item| item.map(|body| decode(&body)))
+    }
+}
+
+/// 远端事件流（序列化形态）；丢弃即发 `[103]`。
+pub struct RpcEncodedEvents {
+    receiver: mpsc::UnboundedReceiver<Vec<u8>>,
+    inner: std::sync::Weak<Inner>,
+    id: Option<i32>,
+}
+
+impl Stream for RpcEncodedEvents {
+    type Item = Vec<u8>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Vec<u8>>> {
         self.receiver.poll_recv(cx)
     }
 }
 
-impl Drop for RpcEvents {
+impl Drop for RpcEncodedEvents {
     fn drop(&mut self) {
         let (Some(id), Some(inner)) = (self.id, self.inner.upgrade()) else {
             return;

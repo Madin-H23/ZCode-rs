@@ -243,6 +243,11 @@ impl<'a> Reader<'a> {
         })
     }
 
+    /// 尚未读取的剩余字节（转发时原样取出一条已序列化的值）。
+    pub fn rest(&self) -> &'a [u8] {
+        &self.data[self.offset.min(self.data.len())..]
+    }
+
     pub fn is_empty(&self) -> bool {
         self.offset >= self.data.len()
     }
@@ -525,6 +530,33 @@ pub struct Response {
     pub kind: i32,
     pub id: Option<i32>,
     pub body: RpcValue,
+}
+
+/// 只解析响应头，body 保持序列化形态（标签 + 内容）原样返回；缺省的 body 视为 undefined。
+/// 远端转发用：结果与事件逐字节交给 Renderer，不经 JSON 往返（数组里的 undefined、VSBuffer
+/// 标签都保持原样）。
+pub fn split_response(message: &[u8]) -> Result<(i32, Option<i32>, Vec<u8>)> {
+    let mut reader = Reader::new(message);
+    let RpcValue::Array(items) = reader.value()? else {
+        bail!("rpc response header is not an array");
+    };
+    let Some(kind) = items.first().and_then(RpcValue::as_int) else {
+        bail!("rpc response without type");
+    };
+    let id = items.get(1).and_then(RpcValue::as_int);
+    let body = match reader.rest() {
+        [] => vec![UNDEFINED],
+        rest => rest.to_vec(),
+    };
+    Ok((kind, id, body))
+}
+
+/// kind 为 PromiseSuccess 或 EventFire，body 为已序列化的值（`split_response` 取出的形态）。
+pub fn response_encoded(kind: i32, id: i32, body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(body.len() + 16);
+    response_header(&mut out, kind, id);
+    out.extend_from_slice(body);
+    out
 }
 
 pub fn read_response(message: &[u8]) -> Result<Response> {

@@ -117,6 +117,10 @@ async fn call(channel: &AgentChannel, context: &CallContext, method: &str, value
         Reply::Value(value) => value,
         Reply::RawJson(raw) => serde_json::from_str(&raw).unwrap(),
         Reply::Bytes(_) => panic!("unexpected bytes"),
+        Reply::Encoded(body) => zcode_host_rpc::Reader::new(&body)
+            .value()
+            .unwrap()
+            .into_json(),
     }
 }
 

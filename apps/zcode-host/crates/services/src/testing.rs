@@ -33,6 +33,10 @@ pub async fn call(
         Reply::Undefined => Ok(Value::Null),
         Reply::RawJson(raw) => Ok(serde_json::from_str(&raw).unwrap_or(Value::Null)),
         Reply::Bytes(bytes) => Ok(Value::from(bytes)),
+        Reply::Encoded(body) => Ok(zcode_host_rpc::Reader::new(&body)
+            .value()
+            .map(RpcValue::into_json)
+            .unwrap_or(Value::Null)),
     }
 }
 

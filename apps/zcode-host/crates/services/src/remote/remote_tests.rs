@@ -41,6 +41,10 @@ fn reply_value(reply: Reply) -> Value {
     match reply {
         Reply::Value(value) => value,
         Reply::Undefined => Value::Null,
+        Reply::Encoded(body) => zcode_host_rpc::Reader::new(&body)
+            .value()
+            .unwrap()
+            .into_json(),
         other => panic!("unexpected reply {other:?}"),
     }
 }

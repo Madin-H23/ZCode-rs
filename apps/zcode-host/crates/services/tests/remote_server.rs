@@ -85,8 +85,14 @@ async fn call(
 fn value(reply: Reply) -> Value {
     match reply {
         Reply::Value(value) => value,
+        Reply::Encoded(body) => decoded(&body).into_json(),
         other => panic!("expected a JSON reply, got {other:?}"),
     }
+}
+
+/// 转发结果保持远端编码（Reply::Encoded）：测试里解码后比较。
+fn decoded(body: &[u8]) -> RpcValue {
+    zcode_host_rpc::Reader::new(body).value().unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -273,7 +279,10 @@ async fn remote_workspace_against_a_real_zcode_server() {
     )
     .await
     .unwrap();
-    assert_eq!(bytes, Reply::Bytes(b"remote".to_vec()));
+    let Reply::Encoded(body) = bytes else {
+        panic!("forwarded reads keep the remote encoding");
+    };
+    assert_eq!(decoded(&body), RpcValue::Bytes(b"remote".to_vec()));
     let missing = call(
         &registry,
         &desktop,

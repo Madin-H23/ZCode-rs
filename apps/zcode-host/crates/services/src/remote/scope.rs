@@ -74,8 +74,8 @@ impl ForwardChannel {
 
 impl ServiceChannel for ForwardChannel {
     fn call(&self, _context: &CallContext, method: &str, args: Vec<RpcValue>) -> CallFuture {
-        let call = self.client.call(&self.channel, method, args);
-        Box::pin(async move { call.await.map(rpc_reply) })
+        let call = self.client.call_encoded(&self.channel, method, args);
+        Box::pin(async move { call.await.map(Reply::Encoded) })
     }
 
     fn listen(
@@ -85,7 +85,9 @@ impl ServiceChannel for ForwardChannel {
         arg: RpcValue,
     ) -> Result<EventStream, RpcError> {
         Ok(Box::pin(
-            self.client.listen(&self.channel, event, arg).map(rpc_reply),
+            self.client
+                .listen_encoded(&self.channel, event, arg)
+                .map(Reply::Encoded),
         ))
     }
 }

@@ -6,6 +6,6 @@ pub mod client;
 pub mod codec;
 pub mod frame;
 
-pub use client::{RpcClient, RpcEvents};
+pub use client::{RpcClient, RpcEncodedEvents, RpcEvents};
 pub use codec::{Reader, Request, RequestKind, RpcError, RpcValue, read_request};
 pub use frame::{FrameReader, frame};
