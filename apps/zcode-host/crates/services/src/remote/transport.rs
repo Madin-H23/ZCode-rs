@@ -31,6 +31,8 @@ const FRAME_HEADER: usize = 5;
 const CONNECTOR_DISPOSE_WAIT: Duration = Duration::from_millis(6_500);
 /// 连接阶段取消后等待连接器自行退出的时间。
 const CANCEL_EXIT_WAIT: Duration = Duration::from_millis(1_500);
+/// WSL / Docker 的建连不可中断（同 Node Host）：最多再等一个远端部署锁周期，之后结束进程树。
+const CANCELLED_CONNECT_WAIT: Duration = Duration::from_secs(120);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_HANDSHAKE_DIAGNOSTIC_CHARS: usize = 2048;
 /// 单帧上限，防止损坏的长度字段让 Host 申请超大缓冲。
@@ -197,11 +199,12 @@ fn server_client(
 
 // ---- 连接器传输 ----
 
-/// 连接器的位置与环境：Electron 可执行文件（以 Node 模式运行）与 `remoteConnector.js`。
+/// 连接器的位置与环境：Electron 可执行文件（以 Node 模式运行）与参数（产品路径为
+/// `[remoteConnector.js]`）。
 #[derive(Debug, Clone)]
 pub struct ConnectorConfig {
     pub node_exec: PathBuf,
-    pub script: PathBuf,
+    pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub cwd: PathBuf,
 }
@@ -236,7 +239,7 @@ async fn connect_via_connector(
     env.insert("ELECTRON_RUN_AS_NODE".into(), "1".into());
     let command = AgentCommand {
         program: config.node_exec.clone(),
-        args: vec![config.script.to_string_lossy().into_owned()],
+        args: config.args.clone(),
         cwd: None,
         env: BTreeMap::new(),
         supports_storage_startup: false,
@@ -278,12 +281,18 @@ async fn connect_via_connector(
     let outcome = tokio::select! {
         event = control_rx => event.unwrap_or(ControlEvent::Failed("远程连接器已退出".into())),
         _ = aborted(&mut params.abort) => {
-            // 连接阶段取消：让连接器释放它独占的 backend 并退出；不退出就结束进程树。
+            // 连接阶段取消：连接器释放它独占的 backend 后退出（SSH 立即中止；WSL / Docker 与 Node Host
+            // 相同，等建连自然结束再释放）。退出等待放到后台，取消本身立即返回。
             let _ = writer.send(encode_frame(STREAM_CONTROL, br#"{"type":"dispose"}"#));
             drop(writer);
-            if !child.wait(CANCEL_EXIT_WAIT).await {
-                child.kill().await;
-            }
+            tokio::spawn(async move {
+                if !child.wait(CANCEL_EXIT_WAIT).await {
+                    log::info("remote connector is finishing an in-flight connect before exiting");
+                    if !child.wait(CANCELLED_CONNECT_WAIT).await {
+                        child.kill().await;
+                    }
+                }
+            });
             return Err("远程连接已取消".into());
         }
     };

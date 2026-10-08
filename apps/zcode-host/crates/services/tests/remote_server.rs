@@ -373,3 +373,134 @@ async fn remote_workspace_against_a_real_zcode_server() {
     assert!(remote.attachment_ids().is_empty());
     remote.shutdown().await;
 }
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../..")
+        .canonicalize()
+        .unwrap()
+}
+
+/// 产品传输 `ConnectorTransport` 的完整链路：Rust ⇄ TS 连接器（与产品相同的 `runRemoteConnector`，
+/// 只是“部署 + 启动”换成本机拉起 zcode-server.cjs）⇄ 远端 server；附件物化经连接器的 backend channel。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn connector_transport_relays_server_and_backend_channels() {
+    use zcode_host_services::remote::transport::{
+        ConnectParams, ConnectorConfig, ConnectorTransport, Transport,
+    };
+    let bundle = server_bundle();
+    let root = repo_root();
+    let script = root.join("scripts/rust-host/remote-connector-local.ts");
+    let (Some(node), true, true) = (
+        find_node(),
+        bundle.is_file(),
+        root.join("node_modules/tsx").exists(),
+    ) else {
+        eprintln!("skipping: needs node, tsx (pnpm install) and the server bundle");
+        return;
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let remote_home = temp.path().join("remote-home");
+    std::fs::create_dir_all(&remote_home).unwrap();
+    let local_file = temp.path().join("note.txt");
+    std::fs::write(&local_file, "attached").unwrap();
+    let dead = "http://127.0.0.1:9";
+    let env: BTreeMap<String, String> = [
+        ("HOME", remote_home.display().to_string()),
+        (
+            "PATH",
+            format!("/usr/bin:/bin:{}", node.parent().unwrap().display()),
+        ),
+        ("NODE_USE_ENV_PROXY", "1".into()),
+        ("HTTP_PROXY", dead.into()),
+        ("HTTPS_PROXY", dead.into()),
+        ("ZCODE_BASE_URL", dead.into()),
+        ("ZCODE_ENDPOINT_ORIGIN", dead.into()),
+        (
+            "ZCODE_SERVICE_AUTHORITY_MODE",
+            "desktop-attached-remote".into(),
+        ),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value))
+    .collect();
+    let transport = ConnectorTransport::new(ConnectorConfig {
+        node_exec: node.clone(),
+        args: vec![
+            "--import".into(),
+            "tsx".into(),
+            script.display().to_string(),
+            node.display().to_string(),
+            bundle.display().to_string(),
+        ],
+        env,
+        cwd: root.clone(),
+    });
+    let logs = Arc::new(Mutex::new(Vec::<String>::new()));
+    let sink = logs.clone();
+    let (_abort, abort) = tokio::sync::watch::channel(false);
+    let connection = tokio::time::timeout(
+        Duration::from_secs(60),
+        transport.connect(ConnectParams {
+            target: json!({"kind": "docker", "container": "local-test"}),
+            remote_assets: json!({}),
+            remote_runtime_network: None,
+            network: json!({}),
+            log: Arc::new(move |_, message| sink.lock().unwrap().push(message)),
+            abort,
+        }),
+    )
+    .await
+    .expect("connected within 60s")
+    .unwrap_or_else(|error| panic!("connect failed: {error}"));
+    assert_eq!(connection.hello["type"], "zcode-hello");
+    assert!(
+        logs.lock()
+            .unwrap()
+            .iter()
+            .any(|line| line.contains("local test connector: target=docker")),
+        "{:?}",
+        logs.lock().unwrap()
+    );
+    let info = connection
+        .client
+        .call("system", "info", vec![])
+        .await
+        .unwrap();
+    assert!(info.into_json().is_object());
+
+    let backend = connection
+        .backend
+        .as_ref()
+        .expect("connector backend channel");
+    let local_path = local_file.display().to_string();
+    let materialized = backend
+        .call(
+            "remote-backend",
+            "materializePromptAttachments",
+            vec![RpcValue::Json(json!({
+                "taskId": "t1", "traceId": "trace-1",
+                "content": format!("see {local_path}"),
+                "attachments": [{"kind": "file", "filename": "note.txt", "localPath": local_path}],
+            }))],
+        )
+        .await
+        .unwrap()
+        .into_json();
+    let remote_path = materialized["attachments"][0]["localPath"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        remote_path.contains("/.zcode/tmp/prompt-attachments/trace-1/"),
+        "{remote_path}"
+    );
+    assert_eq!(materialized["content"], format!("see {remote_path}"));
+    assert_eq!(std::fs::read_to_string(&remote_path).unwrap(), "attached");
+
+    tokio::time::timeout(Duration::from_secs(15), connection.dispose())
+        .await
+        .expect("connector exits after dispose");
+    let closed = connection.closed().await;
+    assert!(closed.exit_code.is_some() || closed.error.is_some());
+}

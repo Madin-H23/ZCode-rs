@@ -593,9 +593,9 @@ async fn connect_handle(
     let log_control = control.clone();
     let log_fn: transport::LogFn = Arc::new(move |level, message: String| {
         match level {
-            LogLevel::Info => log::info(format!("[remote] {message}")),
-            LogLevel::Warn => log::warn(format!("[remote] {message}")),
-            LogLevel::Error => log::error(format!("[remote] {message}")),
+            LogLevel::Info => log::info(format!("remote connection: {message}")),
+            LogLevel::Warn => log::warn(format!("remote connection: {message}")),
+            LogLevel::Error => log::error(format!("remote connection: {message}")),
         }
         // 共享 Host 内多个连接并发：日志只归发起这次建连的 requestId，连接 settle 后停止上报。
         if message.trim().is_empty()
@@ -663,7 +663,7 @@ pub fn install(
         (Some(node_exec), Some(script)) => Arc::new(transport::ConnectorTransport::new(
             transport::ConnectorConfig {
                 node_exec: node_exec.into(),
-                script: script.into(),
+                args: vec![script],
                 env: child_env.vars().clone(),
                 cwd: environment.user_home.clone(),
             },

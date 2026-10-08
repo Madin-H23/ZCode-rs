@@ -208,6 +208,8 @@ export default defineConfig([
     entry: {
       "host/index": "src/host/index.ts",
       "host/tasksStorageWorker": "src/host/tasksStorageWorker.ts",
+      // Rust Host 的远端连接器（docs/specs/rust-host-remote.md §2.1）。
+      "host/remoteConnector": "src/host/remoteConnectorMain.ts",
     },
     outDir: "out",
     format: "esm",
