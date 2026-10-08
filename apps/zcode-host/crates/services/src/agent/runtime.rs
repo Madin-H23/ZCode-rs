@@ -255,7 +255,11 @@ impl AgentProcess {
     /// 被动观察类请求（syncer 回源等）：超时只失败本次请求，不回收进程
     /// （对应 Node 的 `lifecycle: "observation"`），避免观察者拖垮正在运行的会话。
     pub async fn observe(&self, method: &str, params: &Value) -> Result<Value, RpcError> {
-        let raw = self.client.request(method, params).await.map_err(client_error)?;
+        let raw = self
+            .client
+            .request(method, params)
+            .await
+            .map_err(client_error)?;
         serde_json::from_str(raw.get())
             .map_err(|error| RpcError::new("Error", format!("invalid {method} result: {error}")))
     }
