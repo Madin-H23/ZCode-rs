@@ -8,7 +8,7 @@ import { ChannelServer, Emitter, ProxyChannel, VSBuffer } from "@zcode/rpc";
 import type { IRemoteBackend, StdioStream } from "@zcode/server/remote";
 import type { RemoteRuntimeNetworkOptions } from "@zcode/server/remote/connect.js";
 import type { HelloMessage, RemoteTarget, ZCodePromptAttachment } from "@zcode/shared";
-import { stringifyHostLogArg } from "./hostLog.js";
+import { shouldReportHostConsoleError, stringifyHostLogArg } from "./hostLog.js";
 import { createRemotePromptAttachmentTransferService } from "./promptAttachmentTransferService.js";
 import { materializeRemotePromptAttachments } from "./remotePromptAttachments.js";
 import {
@@ -150,6 +150,8 @@ export function runRemoteConnector(io: ConnectorIo, open: OpenRemoteServer): voi
   const forwardConsole =
     (level: "info" | "warn" | "error") =>
     (...args: unknown[]) => {
+      // 与 Node Host 相同：Node 自身的 ExperimentalWarning 等经 console.error 输出，不当作连接错误上报。
+      if (level === "error" && !shouldReportHostConsoleError(args)) return;
       const message = args.map((arg) => stringifyHostLogArg(arg)).join(" ");
       if (message.trim()) control({ type: "log", level, message });
     };
