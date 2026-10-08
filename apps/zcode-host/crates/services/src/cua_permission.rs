@@ -25,7 +25,9 @@ fn reason() -> &'static str {
 pub fn service() -> ServiceBuilder {
     ServiceBuilder::new("cua-permission")
         .method("getStatus", |_, _| async {
-            Ok(Reply::Value(json!({"available": false, "reason": reason()})))
+            Ok(Reply::Value(
+                json!({"available": false, "reason": reason()}),
+            ))
         })
         .method("restartHelper", |_, _| async {
             Ok(Reply::Value(json!({"ok": false, "reason": reason()})))
@@ -58,8 +60,17 @@ mod tests {
             client_mode: ClientMode::DesktopContinuous,
         };
         let status = channel.call(&context, "getStatus", vec![]).await.unwrap();
-        assert_eq!(status, Reply::Value(json!({"available": false, "reason": reason()})));
-        let restart = channel.call(&context, "restartHelper", vec![]).await.unwrap();
-        assert_eq!(restart, Reply::Value(json!({"ok": false, "reason": reason()})));
+        assert_eq!(
+            status,
+            Reply::Value(json!({"available": false, "reason": reason()}))
+        );
+        let restart = channel
+            .call(&context, "restartHelper", vec![])
+            .await
+            .unwrap();
+        assert_eq!(
+            restart,
+            Reply::Value(json!({"ok": false, "reason": reason()}))
+        );
     }
 }

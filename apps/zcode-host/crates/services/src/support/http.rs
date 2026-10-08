@@ -17,3 +17,24 @@ pub fn client(timeout: Duration) -> anyhow::Result<reqwest::Client> {
         .build()
         .context("build http client")
 }
+
+pub const DEFAULT_ZCODE_ENDPOINT_ORIGIN: &str = "https://zcode.z.ai";
+
+/// `resolveRuntimeZCodeEndpointOrigin`：`ZCODE_BASE_URL` 或 `ZCODE_ENDPOINT_ORIGIN` 的 origin，
+/// 缺省为正式服务。非法值与 TS 一样报错（`normalizeZCodeEndpointOrigin` 抛错）。
+pub fn zcode_api_origin(
+    vars: &std::collections::BTreeMap<String, String>,
+) -> anyhow::Result<String> {
+    let configured = ["ZCODE_BASE_URL", "ZCODE_ENDPOINT_ORIGIN"]
+        .iter()
+        .find_map(|key| {
+            vars.get(*key)
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+        });
+    match configured {
+        None => Ok(DEFAULT_ZCODE_ENDPOINT_ORIGIN.to_owned()),
+        Some(value) => crate::settings::schema::endpoint_origin(value)
+            .ok_or_else(|| anyhow::anyhow!("ZCode endpoint origin must use http or https")),
+    }
+}

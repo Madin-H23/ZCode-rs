@@ -258,6 +258,10 @@ impl TaskDriver {
         if options.automation_id.is_some() {
             params.insert("titleGenerationEnabled".into(), json!(false));
         }
+        // 本地 workspace 下发 Off-Peak 工具面（isOffPeakToolSupported）；灰度与准入在 offPeak/create 校验。
+        if crate::off_peak::dispatch::tool_supported(target) {
+            params.insert("offPeakToolEnabled".into(), json!(true));
+        }
         let snapshot = process
             .request_value("session/create", &Value::Object(params))
             .await?;
@@ -332,6 +336,10 @@ impl TaskDriver {
             .filter(|level| !level.is_empty())
         {
             params.insert("thoughtLevel".into(), json!(level));
+        }
+        // 冷恢复同样下发 Off-Peak 工具面，否则恢复出来的会话会丢掉工具簇。
+        if crate::off_peak::dispatch::tool_supported(target) {
+            params.insert("offPeakToolEnabled".into(), json!(true));
         }
         process
             .request_value("session/resume", &Value::Object(params))
@@ -592,6 +600,21 @@ impl TaskDriver {
             self.inputs().remove(&key);
         }
         result
+    }
+
+    /// `stopGeneration` → V4 stop。
+    pub async fn stop(&self, target: &WorkspaceTarget, session_id: &str) -> Result<(), RpcError> {
+        let envelope = self.envelope("stop", session_id, json!({}), None, None);
+        let process = self.client(target).await?;
+        let ack = process.request_value("v4/command", &envelope).await?;
+        match ack["status"].as_str() {
+            Some("accepted" | "duplicate" | "noop") => Ok(()),
+            _ => Err(command_error(
+                "stop",
+                &ack,
+                &format!("session={session_id}"),
+            )),
+        }
     }
 
     /// 后台完成统一置未读（失败只记日志，与 Node 的 `void setTaskUnread` 相同）。
