@@ -842,3 +842,54 @@ impl AgentApi {
         Value::Array(entries)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn invalid_params(message: &str, issues: Value) -> RpcError {
+        RpcError::new("ZCodeProtocolClientError", message)
+            .with_code(-32602)
+            .with_data(json!({"message": issues.to_string()}))
+    }
+
+    #[test]
+    fn compat_retry_only_trusts_structured_issues() {
+        let error = invalid_params(
+            "Invalid params — unrecognized keys",
+            json!([
+                {"code": "unrecognized_keys", "path": [], "keys": ["thoughtLevel", "mcpServers"]},
+                {"code": "unrecognized_keys", "path": ["model"], "keys": ["x"]},
+            ]),
+        );
+        assert_eq!(
+            unrecognized_top_level_keys(&error),
+            ["thoughtLevel", "mcpServers"]
+        );
+        assert_eq!(
+            compat_fields(&error, SESSION_CREATE_COMPAT),
+            ["thoughtLevel", "mcpServers"]
+        );
+        // 含不可省略的键（importedHistory）时不重试。
+        let strict = invalid_params(
+            "Invalid params",
+            json!([{"code": "unrecognized_keys", "path": [], "keys": ["importedHistory"]}]),
+        );
+        assert!(compat_fields(&strict, SESSION_CREATE_COMPAT).is_empty());
+        let other = RpcError::new("Error", "Invalid params").with_code(-32600);
+        assert!(unrecognized_top_level_keys(&other).is_empty());
+    }
+
+    #[test]
+    fn truthiness_and_model_format_follow_javascript() {
+        assert!(!truthy(&json!("")) && !truthy(&json!(0)) && !truthy(&json!(false)));
+        assert!(truthy(&json!("x")) && truthy(&json!([])) && truthy(&json!(1)));
+        assert_eq!(
+            format_model(
+                &json!({"providerId": "p", "modelId": "m", "options": {"reasoningLevel": "high"}})
+            ),
+            "p/m$high"
+        );
+        assert_eq!(format_model(&json!({"providerId": "p"})), "");
+    }
+}

@@ -594,6 +594,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_retry_runtime_is_remembered_and_cleared() {
+        let runtime = AgentRuntime::new(
+            crate::agent::AgentRuntimeConfig {
+                base_env: Default::default(),
+                command_vars: Default::default(),
+                search_roots: Vec::new(),
+                fallback_cwd: None,
+            },
+            crate::settings::SettingStore::new(std::path::Path::new("/nonexistent")),
+            crate::providers::ProviderRuntime::new(None, "/nonexistent/p.json".into()),
+        );
+        let api = AgentApi::new(
+            runtime,
+            std::path::Path::new("/nonexistent"),
+            Arc::new(super::super::notifications::AgentEvents::default()),
+            None,
+        );
+        let sessions = SessionService::new(api, None);
+        let snapshot = |status: &str, retry: Option<Value>| {
+            let mut runtime = json!({"eventSeq": 1});
+            if let Some(retry) = retry {
+                runtime["apiRetry"] = retry;
+            }
+            json!({"session": {"sessionId": "s", "status": status, "workspace": {"workspacePath": "/w"}}, "runtime": runtime})
+        };
+        let unknown = sessions.with_api_retry(snapshot("running", None));
+        assert!(unknown["runtime"].get("apiRetry").is_none());
+        let retry = json!({"attempt": 2});
+        sessions.with_api_retry(snapshot("running", Some(retry.clone())));
+        assert_eq!(
+            sessions.with_api_retry(snapshot("running", None))["runtime"]["apiRetry"],
+            retry
+        );
+        assert_eq!(
+            sessions.with_api_retry(snapshot("completed", None))["runtime"]["apiRetry"],
+            Value::Null
+        );
+        assert_eq!(
+            sessions.with_api_retry(snapshot("running", None))["runtime"]["apiRetry"],
+            Value::Null
+        );
+    }
+
+    #[tokio::test]
     async fn filesystem_mcp_gets_the_local_workspace() {
         let workspace = tempfile::tempdir().unwrap();
         let path = workspace.path().display().to_string();

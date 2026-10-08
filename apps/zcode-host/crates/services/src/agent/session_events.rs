@@ -622,6 +622,83 @@ mod tests {
         assert!(coalesce_key(&event("streamRecovery.updated", json!({}))).is_some());
     }
 
+    fn runtime() -> AgentRuntime {
+        AgentRuntime::new(
+            crate::agent::AgentRuntimeConfig {
+                base_env: Default::default(),
+                command_vars: Default::default(),
+                search_roots: Vec::new(),
+                fallback_cwd: None,
+            },
+            crate::settings::SettingStore::new(std::path::Path::new("/nonexistent")),
+            crate::providers::ProviderRuntime::new(None, "/nonexistent/p.json".into()),
+        )
+    }
+
+    fn notification(method: &str, params: Value, request: bool) -> AgentNotification {
+        AgentNotification {
+            target: WorkspaceTarget::local("/w"),
+            workspace_key: "/w".into(),
+            generation: 1,
+            lane: Lane::Chat,
+            method: method.into(),
+            params,
+            request,
+        }
+    }
+
+    #[tokio::test]
+    async fn live_events_are_renumbered_deduplicated_and_requests_emitted_once() {
+        let events = SessionEvents::start(runtime());
+        let mut hub = Box::pin(events.hub.subscribe());
+        let event = |id: &str, seq: u64| json!({"eventId": id, "sessionId": "s", "type": "x", "seq": seq, "timestamp": 1});
+        events.accept(&notification("session/event", event("e5", 5), false));
+        events.accept(&notification("session/event", event("e0", 0), false));
+        events.accept(&notification("session/event", event("e0", 0), false));
+        events.accept(&notification(
+            "session/event",
+            json!({"eventId": "bad"}),
+            false,
+        ));
+        events.accept(&notification(
+            "state.updated",
+            json!({"revision": 2}),
+            false,
+        ));
+        let permission = json!({"sessionId": "s", "requestId": "r1"});
+        events.accept(&notification(
+            "interaction/requestPermission",
+            permission.clone(),
+            true,
+        ));
+        events.accept(&notification(
+            "interaction/requestPermission",
+            permission.clone(),
+            true,
+        ));
+        let first = hub.next().await.unwrap();
+        assert_eq!(first.event["event"]["seq"], 5);
+        let second = hub.next().await.unwrap();
+        assert_eq!(
+            second.event["event"]["seq"], 6,
+            "seq<=0 continues after the last seen seq"
+        );
+        let state = hub.next().await.unwrap();
+        assert_eq!(state.event["type"], "state.updated");
+        assert!(state.session_id.is_none(), "workspace-wide state update");
+        let request = hub.next().await.unwrap();
+        assert_eq!(
+            request.event,
+            json!({"type": "permission.request", "request": permission})
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), hub.next())
+                .await
+                .is_err(),
+            "duplicates are dropped"
+        );
+    }
+
     #[test]
     fn bounded_ids_forget_the_oldest() {
         let mut ids = BoundedIds::default();

@@ -205,6 +205,81 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct Sink(std::sync::Mutex<Vec<Value>>);
+
+    impl zcode_host_control::ControlSink for Sink {
+        fn send(&self, message: zcode_host_control::HostToMain) {
+            if let zcode_host_control::HostToMain::Raw(value) = message {
+                self.0.lock().unwrap().push(value);
+            }
+        }
+    }
+
+    #[test]
+    fn resource_facts_go_to_main_with_lane_labels() {
+        let sink = Arc::new(Sink::default());
+        let main = MainBridge::new(sink.clone());
+        let events = AgentEvents::default();
+        let target = WorkspaceTarget::local("/w");
+        let sample = json!({"cpuPercent": 1});
+        events.dispatch(
+            &notification(
+                target.clone(),
+                Lane::McpStatus,
+                "process/resourceSample",
+                sample,
+            ),
+            Some(&main),
+        );
+        events.dispatch(
+            &notification(
+                target.clone(),
+                Lane::Chat,
+                "process/resourceSample",
+                json!({"lane": "x"}),
+            ),
+            Some(&main),
+        );
+        events.dispatch(
+            &notification(
+                target.clone(),
+                Lane::Chat,
+                "process/mcpTelemetry",
+                json!({"kind": "spawn"}),
+            ),
+            Some(&main),
+        );
+        events.dispatch(
+            &notification(
+                target.clone(),
+                Lane::Chat,
+                "process/mcpResourceSamples",
+                json!([]),
+            ),
+            Some(&main),
+        );
+        events.dispatch(
+            &notification(
+                target,
+                Lane::PluginManagement,
+                "process/toolExecResource",
+                json!({"ms": 1}),
+            ),
+            Some(&main),
+        );
+        let sent = sink.0.lock().unwrap().clone();
+        assert_eq!(
+            sent,
+            vec![
+                json!({"type": "agent-resource-sample", "runtimeSurface": "local", "sample": {"cpuPercent": 1, "lane": "mcp-status"}}),
+                json!({"type": "mcp-telemetry", "runtimeSurface": "local", "event": {"kind": "spawn"}}),
+                json!({"type": "mcp-resource-samples", "runtimeSurface": "local", "samples": []}),
+                json!({"type": "tool-exec-resource", "runtimeSurface": "local", "sample": {"ms": 1}}),
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn routes_progress_ttft_and_cua_with_scope_rules() {
         let events = AgentEvents::default();

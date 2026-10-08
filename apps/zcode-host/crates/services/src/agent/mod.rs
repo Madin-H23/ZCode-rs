@@ -22,3 +22,6 @@ pub use runtime::{
     AgentProcess, AgentRuntime, AgentRuntimeConfig, Frame, FrameKind, Lane, RuntimePolicy,
     WorkspaceTarget,
 };
+
+#[cfg(test)]
+mod lane_tests;

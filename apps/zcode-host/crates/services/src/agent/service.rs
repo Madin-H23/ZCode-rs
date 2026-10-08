@@ -1212,6 +1212,21 @@ mod tests {
     }
 
     #[test]
+    fn denylists_merge_without_duplicates() {
+        assert_eq!(
+            merge_denylist(
+                &json!(["Bash", "CronDelete", "Bash"]),
+                &["CronCreate", "CronUpdate", "CronDelete"]
+            ),
+            json!(["Bash", "CronDelete", "CronCreate", "CronUpdate"])
+        );
+        assert_eq!(
+            merge_denylist(&Value::Null, &["OffPeakCreate"]),
+            json!(["OffPeakCreate"])
+        );
+    }
+
+    #[test]
     fn uuid_is_v4_shaped() {
         let id = uuid_v4();
         assert_eq!(id.len(), 36);
