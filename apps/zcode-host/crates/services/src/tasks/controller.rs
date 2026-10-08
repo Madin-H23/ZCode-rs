@@ -54,6 +54,44 @@ struct State {
     workspaces: Topic,
     /// subscriptionId → (连接, topic)
     subscribers: HashMap<String, (u64, &'static str)>,
+    /// 远端 source 的行与 workspace 事实（由 [`ExternalSources`] 推送，rust-host-remote.md §2.7）。
+    external: ExternalProjection,
+}
+
+/// 远端 source 的投影快照；与本地行共用同一个 `{logEpoch, seq}`。
+#[derive(Default)]
+struct ExternalProjection {
+    rows: BTreeMap<String, Value>,
+    workspaces: Vec<Value>,
+}
+
+/// 窗口内非本地的 source（远端 workspace，rust-host-remote.md §2.7）。实现方自己读取远端
+/// tasks-index 与实时摘要，经 [`Controller::publish_external`] 推送变化；controller 只合并。
+pub trait ExternalSources: Send + Sync {
+    /// 查询 scope 不属于本地：远端 session 存在，或 identity 是远端 identity（此时跳过，绝不读本地）。
+    fn claims(&self, scope: &Value) -> bool;
+    /// 列表查询前刷新被认领的 scope；单个 source 失败不影响其他 source。
+    fn refresh<'a>(&'a self, scopes: &'a [Value]) -> futures_util::future::BoxFuture<'a, ()>;
+    /// 被认领 scope 的列表项（已按 kind 过滤、未排序）；带 `search` 时逐 source 调用远端全文检索。
+    fn list_items<'a>(
+        &'a self,
+        query: &'a Value,
+        scopes: &'a [Value],
+    ) -> futures_util::future::BoxFuture<'a, Vec<Value>>;
+    /// address 带 `remoteSessionId` 的列表写操作；返回投影里的最新 meta。
+    fn mutate<'a>(
+        &'a self,
+        address: &'a Value,
+        mutation: &'a Value,
+    ) -> futures_util::future::BoxFuture<'a, Result<Value, RpcError>>;
+}
+
+/// 一次远端 source 变化：最新的行与 workspace 事实，以及要发出的增量。
+pub struct ExternalUpdate {
+    pub rows: BTreeMap<String, Value>,
+    pub workspaces: Vec<Value>,
+    pub task_deltas: Vec<Value>,
+    pub workspace_deltas: Vec<Value>,
 }
 
 pub struct Controller {
@@ -63,10 +101,11 @@ pub struct Controller {
     frames: EventHub<Arc<(u64, Value)>>,
     /// 串行化分区读取与应用，避免较早的读取结果覆盖较新的。
     refresh_lock: tokio::sync::Mutex<()>,
+    external: Mutex<Option<Arc<dyn ExternalSources>>>,
 }
 
 /// readSourceTaskIndex：active → pinned → archived，同一 taskId 后者覆盖前者。
-fn merge_partitions(partitions: Partitions) -> Vec<(Value, Value)> {
+pub(crate) fn merge_partitions(partitions: Partitions) -> Vec<(Value, Value)> {
     let mut order: Vec<String> = Vec::new();
     let mut merged: HashMap<String, (Value, Value)> = HashMap::new();
     let groups = [
@@ -120,7 +159,7 @@ fn task_key(target: &WorkspaceTarget, task_id: &str) -> String {
 }
 
 /// sessionOverlay 的 liveStatus。
-fn live_status(summary: &Value) -> &'static str {
+pub(crate) fn live_status(summary: &Value) -> &'static str {
     let summary_count = &summary["pendingInteractionSummary"];
     let pending = summary["pendingInteraction"].is_object()
         || summary_count["permissionCount"].as_u64().unwrap_or(0)
@@ -137,7 +176,7 @@ fn live_status(summary: &Value) -> &'static str {
     }
 }
 
-fn activity(summary: &Value) -> Value {
+pub(crate) fn activity(summary: &Value) -> Value {
     let mut activity = Map::new();
     activity.insert("phase".into(), summary["phase"].clone());
     activity.insert("lastActivityAt".into(), summary["lastActivityAt"].clone());
@@ -160,7 +199,7 @@ fn activity(summary: &Value) -> Value {
     Value::Object(activity)
 }
 
-fn status_from_phase(phase: &Value) -> Option<&'static str> {
+pub(crate) fn status_from_phase(phase: &Value) -> Option<&'static str> {
     match phase.as_str() {
         Some("prewarming" | "running") => Some("running"),
         Some("completedSuccess" | "completedInterrupted") => Some("completed"),
@@ -169,7 +208,7 @@ fn status_from_phase(phase: &Value) -> Option<&'static str> {
     }
 }
 
-fn pending_interaction(summary: &Value) -> Option<Value> {
+pub(crate) fn pending_interaction(summary: &Value) -> Option<Value> {
     let pending = summary["pendingInteraction"].as_object()?;
     let mut out = Map::new();
     for key in ["interactionId", "kind", "toolName", "autoResolution"] {
@@ -271,6 +310,12 @@ impl State {
                     .iter()
                     .map(|(key, row)| (key.clone(), row.clone()))
             })
+            .chain(
+                self.external
+                    .rows
+                    .iter()
+                    .map(|(key, row)| (key.clone(), row.clone())),
+            )
             .collect();
         rows.sort_by(|(left_key, left), (right_key, right)| {
             updated_at(right)
@@ -291,6 +336,7 @@ impl State {
                 .sources
                 .values()
                 .map(|source| workspace_fact(&source.target))
+                .chain(self.external.workspaces.iter().cloned())
                 .collect();
             (
                 &self.workspaces,
@@ -367,7 +413,7 @@ fn target_of(scope: &Value) -> Option<WorkspaceTarget> {
     })
 }
 
-fn matches_kind(membership: &Value, kind: &str) -> bool {
+pub(crate) fn matches_kind(membership: &Value, kind: &str) -> bool {
     let pinned = membership["pinned"] == true;
     let archived = membership["archived"] == true;
     match kind {
@@ -399,9 +445,11 @@ impl Controller {
                     seq: 0,
                 },
                 subscribers: HashMap::new(),
+                external: ExternalProjection::default(),
             }),
             frames: EventHub::new(),
             refresh_lock: tokio::sync::Mutex::new(()),
+            external: Mutex::new(None),
         });
         let mut index_events = Box::pin(observer.events().subscribe());
         let weak = Arc::downgrade(&controller);
@@ -446,6 +494,36 @@ impl Controller {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// 挂上远端 source（rust-host-remote.md §2.7）。
+    pub fn set_external(&self, external: Arc<dyn ExternalSources>) {
+        *self
+            .external
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(external);
+    }
+
+    fn external(&self) -> Option<Arc<dyn ExternalSources>> {
+        self.external
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// 远端 source 变化：更新缓存的行与事实，并按同一个 seq 发出增量（task 先于 workspace）。
+    pub fn publish_external(&self, update: ExternalUpdate) {
+        let frames = {
+            let mut state = self.lock();
+            state.external = ExternalProjection {
+                rows: update.rows,
+                workspaces: update.workspaces,
+            };
+            let mut frames = state.delta_frames(TASKS_TOPIC, update.task_deltas);
+            frames.extend(state.delta_frames(WORKSPACES_TOPIC, update.workspace_deltas));
+            frames
+        };
+        self.emit(frames);
     }
 
     fn emit(&self, frames: Vec<(u64, Value)>) {
@@ -521,12 +599,22 @@ impl Controller {
 
     pub async fn list_task_list(&self, query: &Value) -> Result<Value, RpcError> {
         let kind = query["kind"].as_str().unwrap_or("timeline");
-        let targets: Vec<WorkspaceTarget> = query["workspaceScopes"]
+        // 远端 scope 由 ExternalSources 认领：远端 history scope 未连接时也绝不落回本地 tasks-index。
+        let external = self.external();
+        let (claimed, local_scopes): (Vec<Value>, Vec<Value>) = query["workspaceScopes"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(target_of)
-            .collect();
+            .cloned()
+            .partition(|scope| {
+                external
+                    .as_ref()
+                    .is_some_and(|external| external.claims(scope))
+            });
+        if let Some(external) = &external {
+            external.refresh(&claimed).await;
+        }
+        let targets: Vec<WorkspaceTarget> = local_scopes.iter().filter_map(target_of).collect();
         for target in &targets {
             // 一个 source 读取失败不能清空其他 source 的投影。
             if let Err(error) = self.refresh(target, false).await {
@@ -570,6 +658,9 @@ impl Controller {
                 })
                 .collect()
         };
+        if let Some(external) = &external {
+            items.extend(external.list_items(query, &claimed).await);
+        }
         let sort_key = if query["sortBy"] == "created" {
             "createdAt"
         } else {
@@ -593,6 +684,12 @@ impl Controller {
     }
 
     pub async fn mutate_task(&self, address: &Value, mutation: &Value) -> Result<Value, RpcError> {
+        if address["remoteSessionId"].is_string() {
+            let external = self
+                .external()
+                .ok_or_else(|| fault("没有与任务地址匹配的 source"))?;
+            return external.mutate(address, mutation).await;
+        }
         let target =
             target_of(address).ok_or_else(|| fault("列表 mutation 无法解析唯一 source"))?;
         let task_id = address["taskId"]

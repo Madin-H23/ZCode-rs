@@ -235,7 +235,7 @@ pub fn install(
     registry.implement(tasks::controller::service(controller.clone()));
 
     // ── remote ──
-    let remote = remote::install(&context, settings.clone(), router);
+    let remote = remote::install(&context, settings.clone(), &controller, router);
 
     agent::session::warm_up(
         agent.clone(),

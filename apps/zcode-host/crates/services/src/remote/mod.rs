@@ -9,7 +9,9 @@ pub mod agent_scope;
 pub mod provisioning;
 pub mod registry;
 pub mod scope;
+pub mod sources;
 pub mod target;
+pub mod tasks;
 pub mod transport;
 
 use std::collections::HashMap;
@@ -43,6 +45,7 @@ pub struct RemoteHandle {
     pub target: RemoteTarget,
     /// 每条 attachment 连接一个 scope，按 `CallContext.connection` 区分。
     pub agent: Arc<RemoteAgentChannel>,
+    pub tracker: Arc<tasks::TaskTracker>,
     background: Vec<AbortHandle>,
 }
 
@@ -56,6 +59,7 @@ impl RegistryHandle for RemoteHandle {
         for task in &self.background {
             task.abort();
         }
+        self.tracker.dispose();
         let connection = self.connection.clone();
         Box::pin(async move { connection.dispose().await })
     }
@@ -86,6 +90,7 @@ struct Lease {
 
 pub struct RemoteWorkspaces {
     registry: RemoteRegistry<RemoteHandle>,
+    sources: Arc<sources::RemoteSources>,
     control: Arc<dyn ControlSink>,
     settings: SettingStore,
     provisioning: ProvisioningSource,
@@ -122,15 +127,17 @@ impl RemoteWorkspaces {
             let settings = config.settings.clone();
             let control = config.control.clone();
             let progress_for_connect = progress.clone();
+            let owner = weak.clone();
             let mut options = RegistryOptions::new(Arc::new(move |request: ConnectRequest| {
-                let (transport, settings, control, progress) = (
+                let (transport, settings, control, progress, owner) = (
                     transport.clone(),
                     settings.clone(),
                     control.clone(),
                     progress_for_connect.clone(),
+                    owner.clone(),
                 );
                 Box::pin(async move {
-                    connect_handle(transport, settings, control, progress, request).await
+                    connect_handle(transport, settings, control, progress, owner, request).await
                 }) as BoxFuture<'static, _>
             }));
             options.release_workspace = Some(Arc::new(|handle: Arc<RemoteHandle>, context| {
@@ -172,8 +179,10 @@ impl RemoteWorkspaces {
                 }
             });
             options.wsl_idle_ttl = config.wsl_idle_ttl;
+            let registry = RemoteRegistry::new(options);
             Self {
-                registry: RemoteRegistry::new(options),
+                sources: sources::RemoteSources::new(registry.clone()),
+                registry,
                 control: config.control,
                 settings: config.settings,
                 provisioning: config.provisioning,
@@ -186,6 +195,11 @@ impl RemoteWorkspaces {
 
     pub fn registry(&self) -> &RemoteRegistry<RemoteHandle> {
         &self.registry
+    }
+
+    /// window-controller 的远端 source（测试与 install 用）。
+    pub fn sources(&self) -> &Arc<sources::RemoteSources> {
+        &self.sources
     }
 
     fn send(&self, message: Value) {
@@ -223,6 +237,13 @@ impl RemoteWorkspaces {
         // logical session 离线时 attachment 仍持有旧 channel 与订阅：在失效源头统一关闭所有 clientMode。
         let id = event.remote_session_id.clone();
         self.close_leases(|lease| lease.remote_session_id == id);
+        if let Some(scope) = self
+            .registry
+            .get_session(&id)
+            .and_then(|session| session.scope())
+        {
+            self.sources.disconnect_source(&scope);
+        }
         let mut message = json!({
             "type": "remote-workspace-closed",
             "remoteSessionId": id,
@@ -342,6 +363,11 @@ impl RemoteWorkspaces {
             .collect();
         for session in replaced {
             let id = session.remote_session_id.clone();
+            if let (Some(previous), Some(next)) = (session.scope(), descriptor.scope()) {
+                self.sources
+                    .replace_disconnected_source(&previous, &next)
+                    .await;
+            }
             self.close_leases(|lease| lease.remote_session_id == id);
             self.registry.dispose_session(&id).await;
             // 旧 remoteSessionId 已不可 attachment：同步清理 Main 的端口关联，但不伪报一次 transport 失败。
@@ -350,6 +376,9 @@ impl RemoteWorkspaces {
     }
 
     fn on_bind(&self, message: Value) {
+        let previous = text(&message, "remoteSessionId")
+            .and_then(|id| self.registry.get_session(&id))
+            .and_then(|session| session.scope());
         let (Some(id), Some(path), Some(identity)) = (
             text(&message, "remoteSessionId"),
             text(&message, "workspacePath"),
@@ -388,6 +417,9 @@ impl RemoteWorkspaces {
                 ));
             }
         });
+        if let Some(previous) = previous {
+            self.sources.remove_source(&previous);
+        }
         log::info(format!(
             "bound remote workspace context, remoteSessionId={id}, workspacePath={path}"
         ));
@@ -397,8 +429,15 @@ impl RemoteWorkspaces {
         let Some(id) = text(&message, "remoteSessionId") else {
             return;
         };
+        let disposed = self
+            .registry
+            .get_session(&id)
+            .and_then(|session| session.scope());
         self.close_leases(|lease| lease.remote_session_id == id);
         self.registry.dispose_session(&id).await;
+        if let Some(scope) = disposed {
+            self.sources.remove_source(&scope);
+        }
         self.send(
             json!({"type": "remote-workspace-closed", "remoteSessionId": id, "reason": "disposed"}),
         );
@@ -503,13 +542,20 @@ impl RemoteWorkspaces {
         let client = handle.connection.client.clone();
         let mut registry = scope::base_registry(&client, local);
         registry.register("zcode-agent", handle.agent.clone());
+        let backend = handle.connection.backend.clone();
         registry.register(
             "zcode-task",
-            ForwardChannel::new(client.clone(), "zcode-task"),
+            tasks::RemoteTaskChannel::new(
+                client.clone(),
+                backend.clone(),
+                handle.tracker.clone(),
+                self.sources.clone(),
+                scope.clone(),
+            ),
         );
         registry.register(
             "zcode-session",
-            ForwardChannel::new(client.clone(), "zcode-session"),
+            tasks::RemoteSessionChannel::new(client.clone(), backend),
         );
         if let Some(backend) = &handle.connection.backend {
             registry.register(
@@ -559,6 +605,7 @@ async fn connect_handle(
     settings: SettingStore,
     control: Arc<dyn ControlSink>,
     progress: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    owner: std::sync::Weak<RemoteWorkspaces>,
     request: ConnectRequest,
 ) -> Result<Arc<RemoteHandle>, String> {
     let current = settings.get().await;
@@ -627,7 +674,20 @@ async fn connect_handle(
         connection.client.clone(),
         settings,
     )];
+    // 运行中任务数（WSL 释放屏障）回到窗口 registry。
+    let tracker = tasks::TaskTracker::new(
+        connection.client.clone(),
+        control,
+        Arc::new(move |path: &str, identity: Option<&str>, count: u64| {
+            if let Some(remote) = owner.upgrade() {
+                remote
+                    .registry
+                    .set_workspace_running_task_count(path, identity, count);
+            }
+        }),
+    );
     Ok(Arc::new(RemoteHandle {
+        tracker,
         agent: RemoteAgentChannel::new(connection.client.clone()),
         connection,
         target: request.target,
@@ -642,6 +702,7 @@ async fn connect_handle(
 pub fn install(
     context: &crate::ServiceContext,
     settings: SettingStore,
+    controller: &Arc<crate::tasks::controller::Controller>,
     router: &mut ControlRouter,
 ) -> Arc<RemoteWorkspaces> {
     let environment = &context.environment;
@@ -693,6 +754,7 @@ pub fn install(
         },
         router,
     );
+    remote.sources.attach_to(controller);
     remote
 }
 
