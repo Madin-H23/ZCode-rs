@@ -32,6 +32,13 @@ await run(process.execPath, [
   "scripts/rust-host/tasks-index-fixtures.ts",
   "--check",
 ]);
+// 扩展服务的对拍 fixture 由真实 TS 服务生成（docs/specs/rust-host-extensions.md §6）。
+await run(process.execPath, [
+  "--import",
+  "tsx",
+  "scripts/rust-host/extensions-fixtures.ts",
+  "--check",
+]);
 await run("cargo", ["fmt", "--all", "--manifest-path", manifest, "--check"]);
 await run("cargo", [
   "clippy",

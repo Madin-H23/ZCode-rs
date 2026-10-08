@@ -11,6 +11,8 @@ pub mod hooks;
 pub mod json;
 pub mod mcp_sync;
 pub mod memory;
+#[cfg(all(test, unix))]
+mod parity_tests;
 pub mod plugin_roots;
 pub mod plugin_sync;
 pub mod plugins;

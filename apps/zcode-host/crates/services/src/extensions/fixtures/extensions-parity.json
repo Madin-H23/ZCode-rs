@@ -1,0 +1,2748 @@
+{
+  "files": [
+    {
+      "path": "home/.zcode/skills/alpha/SKILL.md",
+      "content": "---\nname: alpha\ndescription: Alpha skill\n---\nBody\n"
+    },
+    {
+      "path": "home/.zcode/skills/group/beta/SKILL.md",
+      "content": "---\r\nname: beta\r\ndescription: 触发场景: 写代码\r\n---\r\nBeta body\r\n"
+    },
+    {
+      "path": "home/.zcode/skills/gamma/SKILL.md",
+      "content": "No frontmatter here\n"
+    },
+    {
+      "path": "home/.zcode/skills/gamma/_meta.json",
+      "content": "{\"slug\":\" g \",\"version\":\"1.2\",\"ownerId\":\"\",\"publishedAt\":5}"
+    },
+    {
+      "path": "home/.zcode/skills/node_modules/hidden/SKILL.md",
+      "content": "---\nname: hidden\ndescription: x\n---\nBody\n"
+    },
+    {
+      "path": "home/.agents/skills/alpha/SKILL.md",
+      "content": "---\nname: alpha\ndescription: Shadowed\n---\nBody\n"
+    },
+    {
+      "path": "home/.agents/skills/delta/SKILL.md",
+      "content": "---\nname: delta\ndescription: >\n  Folded\n  text\n---\n# Title\nDelta\n"
+    },
+    {
+      "path": "home/.agents/skills/linked",
+      "symlink": "${HOME}/linked-target"
+    },
+    {
+      "path": "home/linked-target/SKILL.md",
+      "content": "---\nname: linked\ndescription: Linked skill\n---\nBody\n"
+    },
+    {
+      "path": "home/plugins/inline-one/.zcode-plugin/plugin.json",
+      "content": "{\"name\":\"inline-one\",\"version\":\" 1.0.0 \",\"description\":\"Inline plugin\"}"
+    },
+    {
+      "path": "home/plugins/inline-one/skills/p-skill/SKILL.md",
+      "content": "---\nname: p-skill\ndescription: Plugin skill\n---\nBody\n"
+    },
+    {
+      "path": "home/plugins/inline-one/commands/plug.md",
+      "content": "---\ndescription: Plugin command\n---\nRun plug\n"
+    },
+    {
+      "path": "home/plugins/inline-one/agents/helper.md",
+      "content": "---\nname: helper\ndescription: helper agent\n---\nYou are helper.\n"
+    },
+    {
+      "path": "home/.zcode/cli/plugins/installed_plugins.json",
+      "content": "{\"plugins\":[{\"id\":\"mk@market\",\"marketplace\":\"market\",\"name\":\"mk\",\"installPath\":\"${HOME}/market-plugins/mk\",\"scope\":\"user\"}]}"
+    },
+    {
+      "path": "home/market-plugins/mk/.claude-plugin/plugin.json",
+      "content": "{\"name\":\"mk\",\"skills\":\"./custom-skills\",\"agents\":[\"./extra\"]}"
+    },
+    {
+      "path": "home/market-plugins/mk/custom-skills/m1/SKILL.md",
+      "content": "---\nname: m1\ndescription: Market\n---\nBody\n"
+    },
+    {
+      "path": "home/market-plugins/mk/extra/reviewer.md",
+      "content": "---\nname: reviewer\ndescription: reviewer agent\nmodel: openai/gpt-5$high\ntools: Read, Grep\n---\nYou are reviewer.\n"
+    },
+    {
+      "path": "home/market-plugins/mk/commands/mk-cmd.md",
+      "content": "Market command\n"
+    },
+    {
+      "path": "home/local-market/marketplace.json",
+      "content": "{\"name\":\"local-market\",\"description\":\"Local\",\"metadata\":{\"pluginRoot\":\"plugins\"},\"plugins\":[{\"name\":\"a\",\"source\":\"./a\",\"dependencies\":[\"b@local-market\"]},{\"name\":\"b\",\"version\":\"1\"}]}"
+    },
+    {
+      "path": "home/local-market/plugins/a/.zcode-plugin/plugin.json",
+      "content": "{\"name\":\"a\"}"
+    },
+    {
+      "path": "home/local-market/plugins/a/skills/a1/SKILL.md",
+      "content": "---\nname: a1\ndescription: A\n---\nBody\n"
+    },
+    {
+      "path": "home/local-market/plugins/b/.zcode-plugin/plugin.json",
+      "content": "{\"name\":\"b\"}"
+    },
+    {
+      "path": "home/.zcode/commands/deploy.md",
+      "content": "---\ndescription: Deploy it\n  carefully\nother: keep\n---\n\nDeploy now\n"
+    },
+    {
+      "path": "home/.zcode/commands/ns/sub.md",
+      "content": "Nested\n"
+    },
+    {
+      "path": "home/.agents/commands/agents-only.md",
+      "content": "Agents user command\n"
+    },
+    {
+      "path": "home/.zcode/agents/writer.md",
+      "content": "---\nname: writer\ndescription: writer agent\nmodel: builtin:zai/glm-4.6 # legacy\nthoughtLevel: high\ncolor: green\n---\nYou are writer.\n"
+    },
+    {
+      "path": "home/.zcode/v2/agents-state.json",
+      "content": "{\"builtInModelOverrides\":{\"Explore\":\"builtin:bigmodel/glm-5\"},\"disabledAgentIds\":[\"user:user:writer\",\"user:user:ghost\"]}"
+    },
+    {
+      "path": "home/.zcode/cli/memories/projects/repo-0123456789abcdef/memory/MEMORY.md",
+      "content": "# Index\n"
+    },
+    {
+      "path": "home/.zcode/cli/memories/projects/repo-0123456789abcdef/memory/note.md",
+      "content": "note"
+    },
+    {
+      "path": "home/.zcode/cli/memories/projects/repo-0123456789abcdef/memory/x.txt",
+      "content": "x"
+    },
+    {
+      "path": "home/.agents/settings.json",
+      "content": "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo legacy\",\"timeoutMs\":2500}]}]}}"
+    },
+    {
+      "path": "home/.zcode/cli/config.json",
+      "content": "{\n  \"model\": \"keep-me\",\n  \"plugins\": {\n    \"dirs\": [\n      \"${HOME}/plugins/inline-one\"\n    ],\n    \"enabledPlugins\": {\n      \"mk@market\": true\n    }\n  },\n  \"mcp\": {\n    \"servers\": {\n      \"fs\": {\n        \"command\": \"npx\",\n        \"args\": [\n          \"-y\",\n          \"@modelcontextprotocol/server-filesystem\",\n          \"/x\"\n        ]\n      },\n      \"legacy\": {\n        \"command\": \"legacy\",\n        \"enable\": false\n      }\n    }\n  },\n  \"hooks\": {\n    \"events\": {\n      \"UserPromptSubmit\": [\n        {\n          \"hooks\": [\n            {\n              \"type\": \"command\",\n              \"command\": \"echo user\"\n            }\n          ]\n        }\n      ]\n    }\n  }\n}"
+    },
+    {
+      "path": "ws/.git/HEAD",
+      "content": "ref: refs/heads/main\n"
+    },
+    {
+      "path": "ws/.zcode/skills/ws-skill/SKILL.md",
+      "content": "---\nname: ws-skill\ndescription: Workspace skill\n---\nBody\n"
+    },
+    {
+      "path": "ws/.agents/skills/ws-agents-skill/SKILL.md",
+      "content": "---\nname: ws-agents-skill\ndescription: Agents workspace skill\n---\nBody\n"
+    },
+    {
+      "path": "ws/.zcode/commands/local.md",
+      "content": "Local command\n"
+    },
+    {
+      "path": "ws/.agents/commands/ignored.md",
+      "content": "Ignored\n"
+    },
+    {
+      "path": "ws/.zcode/agents/ws-agent.md",
+      "content": "---\nname: ws-agent\ndescription: ws-agent agent\nmaxTurns: 3\n---\nYou are ws-agent.\n"
+    },
+    {
+      "path": "ws/.zcode/config.json",
+      "content": "{\"hooks\":{\"enabled\":true,\"events\":{\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo pre\",\"timeout\":5,\"note\":\"x\"}]}],\"Stop\":[{\"hooks\":[{\"type\":\"process\",\"command\":\"node\",\"args\":[\"a.js\"],\"timeoutMs\":1500}]}]}},\"mcp\":{\"servers\":{\"wsmcp\":{\"command\":\"y\"}}}}"
+    },
+    {
+      "path": "ws/zcode.json",
+      "content": "{\"hooks\":{\"events\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo start\",\"shell\":\"bash\"}]}]}}}"
+    }
+  ],
+  "calls": [
+    {
+      "channel": "skills",
+      "method": "list",
+      "params": {
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "skills",
+      "method": "setEnabled",
+      "params": {
+        "workspacePath": "${WS}",
+        "skillId": "$find:0:/skills:name=delta:/id",
+        "enabled": false
+      }
+    },
+    {
+      "channel": "skills",
+      "method": "list",
+      "params": {
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "skills",
+      "method": "buildPromptContext",
+      "params": {
+        "workspacePath": "${WS}",
+        "prompt": "use $alpha and $delta and $nope"
+      }
+    },
+    {
+      "channel": "skills",
+      "method": "copyToCommon",
+      "params": {
+        "workspacePath": "${WS}",
+        "skillId": "$find:0:/skills:name=ws-agents-skill:/id"
+      }
+    },
+    {
+      "channel": "skills",
+      "method": "removeFromCommon",
+      "params": {
+        "workspacePath": "${WS}",
+        "skillId": "$find:0:/skills:name=alpha:/id"
+      }
+    },
+    {
+      "channel": "skills",
+      "method": "deleteSkill",
+      "params": {
+        "workspacePath": "${WS}",
+        "skillId": "$find:0:/skills:name=p-skill:/id"
+      }
+    },
+    {
+      "channel": "skills",
+      "method": "deleteSkill",
+      "params": {
+        "workspacePath": "${WS}",
+        "skillId": "missing"
+      }
+    },
+    {
+      "channel": "skills",
+      "method": "list",
+      "params": {
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "commands",
+      "method": "list",
+      "params": {
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "commands",
+      "method": "writeCommandFile",
+      "params": {
+        "config": {
+          "name": "/new-cmd",
+          "prompt": "Do new",
+          "description": " New one ",
+          "argumentHint": "<x>"
+        }
+      }
+    },
+    {
+      "channel": "commands",
+      "method": "setCommandEnabled",
+      "params": {
+        "commandId": "c",
+        "filePath": "${HOME}/.zcode/commands/deploy.md",
+        "enabled": false
+      }
+    },
+    {
+      "channel": "commands",
+      "method": "updateCommandFile",
+      "params": {
+        "commandId": "c",
+        "oldFilePath": "${HOME}/.zcode/commands/deploy.md",
+        "config": {
+          "name": "/deploy2",
+          "prompt": "Deploy v2",
+          "description": "D2"
+        }
+      }
+    },
+    {
+      "channel": "commands",
+      "method": "deleteCommandFile",
+      "params": {
+        "commandId": "c",
+        "filePath": "${HOME}/.zcode/commands/new-cmd.md"
+      }
+    },
+    {
+      "channel": "commands",
+      "method": "writeCommandFile",
+      "params": {
+        "config": {
+          "name": "/local",
+          "prompt": "x"
+        },
+        "storageLevel": "project",
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "commands",
+      "method": "list",
+      "params": {
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "commands",
+      "method": "getPrimaryUserCommandsDirectory",
+      "params": {}
+    },
+    {
+      "channel": "memory",
+      "method": "listProjectMemories"
+    },
+    {
+      "channel": "memory",
+      "method": "readProjectMemoryFile",
+      "params": {
+        "workspaceId": "repo-0123456789abcdef",
+        "fileName": "MEMORY.md"
+      }
+    },
+    {
+      "channel": "memory",
+      "method": "readProjectMemoryFile",
+      "params": {
+        "workspaceId": "..",
+        "fileName": "MEMORY.md"
+      }
+    },
+    {
+      "channel": "plugins",
+      "method": "getOverview",
+      "params": {
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "plugins",
+      "method": "installPlugin",
+      "params": {
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "hooks",
+      "method": "loadHooks",
+      "params": {
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "hooks",
+      "method": "saveHooks",
+      "params": {
+        "workspacePath": "${WS}",
+        "hooks": "$ref:22:/hooks"
+      }
+    },
+    {
+      "channel": "hooks",
+      "method": "loadHooks",
+      "params": {
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "mcp-sync",
+      "method": "loadMcpFromUserDirectory",
+      "params": {
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "mcp-sync",
+      "method": "saveMcpToUserDirectory",
+      "params": {
+        "action": "set-enabled",
+        "name": "fs",
+        "enabled": false
+      }
+    },
+    {
+      "channel": "mcp-sync",
+      "method": "saveMcpToUserDirectory",
+      "params": {
+        "action": "upsert",
+        "name": "newsrv",
+        "config": {
+          "type": "http",
+          "url": "http://127.0.0.1:9/mcp"
+        }
+      }
+    },
+    {
+      "channel": "mcp-sync",
+      "method": "saveMcpToUserDirectory",
+      "params": {
+        "action": "delete",
+        "name": "wsmcp",
+        "projectPath": "${WS}"
+      }
+    },
+    {
+      "channel": "mcp-sync",
+      "method": "saveMcpToUserDirectory",
+      "params": {
+        "action": "upsert",
+        "name": "nocfg"
+      }
+    },
+    {
+      "channel": "mcp-sync",
+      "method": "listLocalUserMcpCandidates"
+    },
+    {
+      "channel": "mcp-sync",
+      "method": "listRemoteUserMcpStatuses",
+      "params": {
+        "names": ["FS", "nope"]
+      }
+    },
+    {
+      "channel": "mcp-sync",
+      "method": "exportMcpServers",
+      "params": {
+        "serverIds": ["$find:30:/candidates:name=fs:/id"]
+      }
+    },
+    {
+      "channel": "mcp-sync",
+      "method": "importMcpServers",
+      "params": {
+        "servers": [
+          {
+            "name": "imported",
+            "config": {
+              "command": "npx",
+              "args": ["@modelcontextprotocol/server-filesystem", "/local/me/docs"]
+            },
+            "enabled": true
+          },
+          {
+            "name": "fs",
+            "config": {
+              "command": "z"
+            },
+            "enabled": true
+          }
+        ],
+        "localHomeDir": "/local/me"
+      }
+    },
+    {
+      "channel": "mcp-sync",
+      "method": "checkRemoteUserMcpWriteAccess"
+    },
+    {
+      "channel": "subagents",
+      "method": "list",
+      "params": {
+        "workspacePath": "${WS}"
+      }
+    },
+    {
+      "channel": "subagents",
+      "method": "setEnabled",
+      "params": {
+        "agentId": "user:user:writer",
+        "enabled": true
+      }
+    },
+    {
+      "channel": "subagents",
+      "method": "setBuiltInModelOverride",
+      "params": {
+        "agentName": "general-purpose",
+        "modelSelection": {
+          "providerId": " openai ",
+          "modelId": "gpt",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        }
+      }
+    },
+    {
+      "channel": "subagents",
+      "method": "setPluginAgentModelOverride",
+      "params": {
+        "agentId": "$find:35:/pluginAgents:name=mk:reviewer:/id",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m"
+        }
+      }
+    },
+    {
+      "channel": "subagents",
+      "method": "createAgent",
+      "params": {
+        "config": {
+          "name": "new-agent",
+          "description": " D ",
+          "systemPrompt": " P ",
+          "tools": ["Read", "*"],
+          "color": "green",
+          "maxTurns": 4,
+          "mcpServers": [
+            {
+              "name": "srv",
+              "command": "x",
+              "args": ["-y"]
+            }
+          ]
+        },
+        "provider": "glm"
+      }
+    },
+    {
+      "channel": "subagents",
+      "method": "updateAgent",
+      "params": {
+        "agentId": "user:user:new-agent",
+        "oldFilePath": "${HOME}/.zcode/agents/new-agent.md",
+        "config": {
+          "name": "renamed-agent",
+          "description": "D2",
+          "systemPrompt": "P2"
+        },
+        "provider": "glm"
+      }
+    },
+    {
+      "channel": "subagents",
+      "method": "deleteAgent",
+      "params": {
+        "agentId": "user:user:renamed-agent",
+        "filePath": "${HOME}/.zcode/agents/renamed-agent.md"
+      }
+    },
+    {
+      "channel": "subagents",
+      "method": "createAgent",
+      "params": {
+        "config": {
+          "name": "x",
+          "description": "d",
+          "systemPrompt": "p"
+        },
+        "provider": "glm"
+      }
+    },
+    {
+      "channel": "subagents",
+      "method": "list",
+      "params": {
+        "workspacePath": "${WS}",
+        "mode": "settingsUserOnly"
+      }
+    },
+    {
+      "channel": "skill-sync",
+      "method": "listLocalUserSkillCandidates"
+    },
+    {
+      "channel": "skill-sync",
+      "method": "listRemoteUserSkillStatuses",
+      "params": {
+        "directoryNames": ["group/beta", "missing"],
+        "skills": [
+          {
+            "directoryName": "missing",
+            "name": "DELTA"
+          }
+        ]
+      }
+    },
+    {
+      "channel": "skill-sync",
+      "method": "listRemoteUserSkillStatuses",
+      "params": {
+        "directoryNames": ["../escape"]
+      }
+    },
+    {
+      "channel": "skill-sync",
+      "method": "exportSkillsArchive",
+      "params": {
+        "skillIds": ["$find:44:/candidates:name=beta:/id"]
+      }
+    },
+    {
+      "channel": "skill-sync",
+      "method": "importSkillsArchive",
+      "params": {
+        "archive": "$ref:47:/archive"
+      }
+    },
+    {
+      "channel": "skill-sync",
+      "method": "checkRemoteUserSkillWriteAccess"
+    },
+    {
+      "channel": "plugin-sync",
+      "method": "listLocalUserPluginCandidates"
+    },
+    {
+      "channel": "plugin-sync",
+      "method": "exportPluginsArchive",
+      "params": {
+        "pluginIds": ["$ref:50:/candidates/0/id"]
+      }
+    },
+    {
+      "channel": "plugin-sync",
+      "method": "importPluginsArchive",
+      "params": {
+        "archive": "$ref:51:/archive"
+      }
+    },
+    {
+      "channel": "plugin-sync",
+      "method": "listRemoteUserPluginStatuses",
+      "params": {
+        "plugins": [
+          {
+            "pluginId": "inline-one@inline",
+            "directoryName": "inline-one"
+          },
+          {
+            "pluginId": "other@inline",
+            "directoryName": "other"
+          }
+        ]
+      }
+    },
+    {
+      "channel": "plugin-sync",
+      "method": "checkRemoteUserPluginWriteAccess"
+    },
+    {
+      "channel": "plugin-sync",
+      "method": "exportMarketplaceSourceArchive",
+      "params": {
+        "marketplaceId": "local-market",
+        "pluginNames": ["a"],
+        "source": {
+          "source": "directory",
+          "path": "${HOME}/local-market"
+        }
+      }
+    },
+    {
+      "channel": "plugin-sync",
+      "method": "importMarketplaceSourceArchive",
+      "params": {
+        "archive": "$ref:55:/archive"
+      }
+    }
+  ],
+  "dumps": [
+    "home/.zcode/cli/config.json",
+    "ws/.zcode/config.json",
+    "home/.zcode/v2/agents-state.json",
+    "home/.zcode/agents/writer.md",
+    "home/.zcode/commands/deploy.md",
+    "home/.zcode/commands/deploy2.md",
+    "home/.zcode/commands/new-cmd.md",
+    "ws/.zcode/commands/local.md",
+    "home/.zcode/v2/skills-audit.log",
+    "ws/.zcode/skills/ws-agents-skill/SKILL.md",
+    "home/.zcode/skills/alpha/SKILL.md"
+  ],
+  "expected": {
+    "results": [
+      {
+        "result": {
+          "skills": [
+            {
+              "id": "glm:user:alpha:<H>",
+              "name": "alpha",
+              "description": "Alpha skill",
+              "body": "Body",
+              "path": "<ROOT>/home/.zcode/skills/alpha/SKILL.md",
+              "sourcePath": "<ROOT>/home/.zcode/skills/alpha/SKILL.md",
+              "scope": "user",
+              "enabled": true
+            },
+            {
+              "id": "glm:user:beta:<H>",
+              "name": "beta",
+              "description": "触发场景: 写代码",
+              "body": "Beta body",
+              "path": "<ROOT>/home/.zcode/skills/group/beta/SKILL.md",
+              "sourcePath": "<ROOT>/home/.zcode/skills/group/beta/SKILL.md",
+              "scope": "user",
+              "enabled": true
+            },
+            {
+              "id": "glm:user:delta:<H>",
+              "name": "delta",
+              "description": "Folded text",
+              "body": "# Title\nDelta",
+              "path": "<ROOT>/home/.agents/skills/delta/SKILL.md",
+              "sourcePath": "<ROOT>/home/.agents/skills/delta/SKILL.md",
+              "scope": "user",
+              "enabled": true
+            },
+            {
+              "id": "glm:user:gamma:<H>",
+              "name": "gamma",
+              "description": "",
+              "body": "No frontmatter here",
+              "path": "<ROOT>/home/.zcode/skills/gamma/SKILL.md",
+              "sourcePath": "<ROOT>/home/.zcode/skills/gamma/SKILL.md",
+              "scope": "user",
+              "enabled": true,
+              "metadata": {
+                "slug": "g",
+                "version": "1.2",
+                "publishedAt": 5
+              }
+            },
+            {
+              "id": "glm:user:linked:<H>",
+              "name": "linked",
+              "description": "Linked skill",
+              "body": "Body",
+              "path": "<ROOT>/home/linked-target/SKILL.md",
+              "sourcePath": "<ROOT>/home/.agents/skills/linked/SKILL.md",
+              "scope": "user",
+              "enabled": true
+            },
+            {
+              "id": "glm:plugin:m1:<H>",
+              "name": "m1",
+              "description": "Market",
+              "body": "Body",
+              "path": "<ROOT>/home/market-plugins/mk/custom-skills/m1/SKILL.md",
+              "sourcePath": "<ROOT>/home/market-plugins/mk/custom-skills/m1/SKILL.md",
+              "scope": "plugin",
+              "enabled": true,
+              "pluginName": "mk",
+              "pluginId": "mk@market"
+            },
+            {
+              "id": "glm:plugin:p-skill:<H>",
+              "name": "p-skill",
+              "description": "Plugin skill",
+              "body": "Body",
+              "path": "<ROOT>/home/plugins/inline-one/skills/p-skill/SKILL.md",
+              "sourcePath": "<ROOT>/home/plugins/inline-one/skills/p-skill/SKILL.md",
+              "scope": "plugin",
+              "enabled": true,
+              "pluginName": "inline-one",
+              "pluginId": "inline-one@inline"
+            },
+            {
+              "id": "glm:workspace:ws-agents-skill:<H>",
+              "name": "ws-agents-skill",
+              "description": "Agents workspace skill",
+              "body": "Body",
+              "path": "<ROOT>/ws/.agents/skills/ws-agents-skill/SKILL.md",
+              "sourcePath": "<ROOT>/ws/.agents/skills/ws-agents-skill/SKILL.md",
+              "scope": "workspace",
+              "enabled": true
+            },
+            {
+              "id": "glm:workspace:ws-skill:<H>",
+              "name": "ws-skill",
+              "description": "Workspace skill",
+              "body": "Body",
+              "path": "<ROOT>/ws/.zcode/skills/ws-skill/SKILL.md",
+              "sourcePath": "<ROOT>/ws/.zcode/skills/ws-skill/SKILL.md",
+              "scope": "workspace",
+              "enabled": true
+            }
+          ],
+          "capability": {
+            "userScopeAvailable": true
+          },
+          "diagnostics": []
+        }
+      },
+      {
+        "result": null
+      },
+      {
+        "result": {
+          "skills": [
+            {
+              "id": "glm:user:alpha:<H>",
+              "name": "alpha",
+              "description": "Alpha skill",
+              "body": "Body",
+              "path": "<ROOT>/home/.zcode/skills/alpha/SKILL.md",
+              "sourcePath": "<ROOT>/home/.zcode/skills/alpha/SKILL.md",
+              "scope": "user",
+              "enabled": true
+            },
+            {
+              "id": "glm:user:beta:<H>",
+              "name": "beta",
+              "description": "触发场景: 写代码",
+              "body": "Beta body",
+              "path": "<ROOT>/home/.zcode/skills/group/beta/SKILL.md",
+              "sourcePath": "<ROOT>/home/.zcode/skills/group/beta/SKILL.md",
+              "scope": "user",
+              "enabled": true
+            },
+            {
+              "id": "glm:user:delta:<H>",
+              "name": "delta",
+              "description": "Folded text",
+              "body": "# Title\nDelta",
+              "path": "<ROOT>/home/.agents/skills/delta/SKILL.md",
+              "sourcePath": "<ROOT>/home/.agents/skills/delta/SKILL.md",
+              "scope": "user",
+              "enabled": false
+            },
+            {
+              "id": "glm:user:gamma:<H>",
+              "name": "gamma",
+              "description": "",
+              "body": "No frontmatter here",
+              "path": "<ROOT>/home/.zcode/skills/gamma/SKILL.md",
+              "sourcePath": "<ROOT>/home/.zcode/skills/gamma/SKILL.md",
+              "scope": "user",
+              "enabled": true,
+              "metadata": {
+                "slug": "g",
+                "version": "1.2",
+                "publishedAt": 5
+              }
+            },
+            {
+              "id": "glm:user:linked:<H>",
+              "name": "linked",
+              "description": "Linked skill",
+              "body": "Body",
+              "path": "<ROOT>/home/linked-target/SKILL.md",
+              "sourcePath": "<ROOT>/home/.agents/skills/linked/SKILL.md",
+              "scope": "user",
+              "enabled": true
+            },
+            {
+              "id": "glm:plugin:m1:<H>",
+              "name": "m1",
+              "description": "Market",
+              "body": "Body",
+              "path": "<ROOT>/home/market-plugins/mk/custom-skills/m1/SKILL.md",
+              "sourcePath": "<ROOT>/home/market-plugins/mk/custom-skills/m1/SKILL.md",
+              "scope": "plugin",
+              "enabled": true,
+              "pluginName": "mk",
+              "pluginId": "mk@market"
+            },
+            {
+              "id": "glm:plugin:p-skill:<H>",
+              "name": "p-skill",
+              "description": "Plugin skill",
+              "body": "Body",
+              "path": "<ROOT>/home/plugins/inline-one/skills/p-skill/SKILL.md",
+              "sourcePath": "<ROOT>/home/plugins/inline-one/skills/p-skill/SKILL.md",
+              "scope": "plugin",
+              "enabled": true,
+              "pluginName": "inline-one",
+              "pluginId": "inline-one@inline"
+            },
+            {
+              "id": "glm:workspace:ws-agents-skill:<H>",
+              "name": "ws-agents-skill",
+              "description": "Agents workspace skill",
+              "body": "Body",
+              "path": "<ROOT>/ws/.agents/skills/ws-agents-skill/SKILL.md",
+              "sourcePath": "<ROOT>/ws/.agents/skills/ws-agents-skill/SKILL.md",
+              "scope": "workspace",
+              "enabled": true
+            },
+            {
+              "id": "glm:workspace:ws-skill:<H>",
+              "name": "ws-skill",
+              "description": "Workspace skill",
+              "body": "Body",
+              "path": "<ROOT>/ws/.zcode/skills/ws-skill/SKILL.md",
+              "sourcePath": "<ROOT>/ws/.zcode/skills/ws-skill/SKILL.md",
+              "scope": "workspace",
+              "enabled": true
+            }
+          ],
+          "capability": {
+            "userScopeAvailable": true
+          },
+          "diagnostics": []
+        }
+      },
+      {
+        "result": {
+          "prompt": "use $alpha and $delta and $nope\n\n<available_skills>\n<activated_skill name=\"alpha\" path=\"<ROOT>/home/.zcode/skills/alpha/SKILL.md\">\nBody\n</activated_skill>\n</available_skills>",
+          "activatedSkillNames": ["alpha"]
+        }
+      },
+      {
+        "result": {
+          "newPath": "<ROOT>/ws/.zcode/skills/ws-agents-skill/SKILL.md"
+        }
+      },
+      {
+        "result": null
+      },
+      {
+        "error": {
+          "name": "Error",
+          "message": "插件提供的技能不可单独删除，请卸载对应插件"
+        }
+      },
+      {
+        "error": {
+          "name": "Error",
+          "message": "Skill not found: missing"
+        }
+      },
+      {
+        "result": {
+          "skills": [
+            {
+              "id": "glm:user:alpha:<H>",
+              "name": "alpha",
+              "description": "Shadowed",
+              "body": "Body",
+              "path": "<ROOT>/home/.agents/skills/alpha/SKILL.md",
+              "sourcePath": "<ROOT>/home/.agents/skills/alpha/SKILL.md",
+              "scope": "user",
+              "enabled": true
+            },
+            {
+              "id": "glm:user:beta:<H>",
+              "name": "beta",
+              "description": "触发场景: 写代码",
+              "body": "Beta body",
+              "path": "<ROOT>/home/.zcode/skills/group/beta/SKILL.md",
+              "sourcePath": "<ROOT>/home/.zcode/skills/group/beta/SKILL.md",
+              "scope": "user",
+              "enabled": true
+            },
+            {
+              "id": "glm:user:delta:<H>",
+              "name": "delta",
+              "description": "Folded text",
+              "body": "# Title\nDelta",
+              "path": "<ROOT>/home/.agents/skills/delta/SKILL.md",
+              "sourcePath": "<ROOT>/home/.agents/skills/delta/SKILL.md",
+              "scope": "user",
+              "enabled": false
+            },
+            {
+              "id": "glm:user:gamma:<H>",
+              "name": "gamma",
+              "description": "",
+              "body": "No frontmatter here",
+              "path": "<ROOT>/home/.zcode/skills/gamma/SKILL.md",
+              "sourcePath": "<ROOT>/home/.zcode/skills/gamma/SKILL.md",
+              "scope": "user",
+              "enabled": true,
+              "metadata": {
+                "slug": "g",
+                "version": "1.2",
+                "publishedAt": 5
+              }
+            },
+            {
+              "id": "glm:user:linked:<H>",
+              "name": "linked",
+              "description": "Linked skill",
+              "body": "Body",
+              "path": "<ROOT>/home/linked-target/SKILL.md",
+              "sourcePath": "<ROOT>/home/.agents/skills/linked/SKILL.md",
+              "scope": "user",
+              "enabled": true
+            },
+            {
+              "id": "glm:plugin:m1:<H>",
+              "name": "m1",
+              "description": "Market",
+              "body": "Body",
+              "path": "<ROOT>/home/market-plugins/mk/custom-skills/m1/SKILL.md",
+              "sourcePath": "<ROOT>/home/market-plugins/mk/custom-skills/m1/SKILL.md",
+              "scope": "plugin",
+              "enabled": true,
+              "pluginName": "mk",
+              "pluginId": "mk@market"
+            },
+            {
+              "id": "glm:plugin:p-skill:<H>",
+              "name": "p-skill",
+              "description": "Plugin skill",
+              "body": "Body",
+              "path": "<ROOT>/home/plugins/inline-one/skills/p-skill/SKILL.md",
+              "sourcePath": "<ROOT>/home/plugins/inline-one/skills/p-skill/SKILL.md",
+              "scope": "plugin",
+              "enabled": true,
+              "pluginName": "inline-one",
+              "pluginId": "inline-one@inline"
+            },
+            {
+              "id": "glm:workspace:ws-agents-skill:<H>",
+              "name": "ws-agents-skill",
+              "description": "Agents workspace skill",
+              "body": "Body",
+              "path": "<ROOT>/ws/.agents/skills/ws-agents-skill/SKILL.md",
+              "sourcePath": "<ROOT>/ws/.agents/skills/ws-agents-skill/SKILL.md",
+              "scope": "workspace",
+              "enabled": true
+            },
+            {
+              "id": "glm:workspace:ws-agents-skill:<H>",
+              "name": "ws-agents-skill",
+              "description": "Agents workspace skill",
+              "body": "Body",
+              "path": "<ROOT>/ws/.zcode/skills/ws-agents-skill/SKILL.md",
+              "sourcePath": "<ROOT>/ws/.zcode/skills/ws-agents-skill/SKILL.md",
+              "scope": "workspace",
+              "enabled": true
+            },
+            {
+              "id": "glm:workspace:ws-skill:<H>",
+              "name": "ws-skill",
+              "description": "Workspace skill",
+              "body": "Body",
+              "path": "<ROOT>/ws/.zcode/skills/ws-skill/SKILL.md",
+              "sourcePath": "<ROOT>/ws/.zcode/skills/ws-skill/SKILL.md",
+              "scope": "workspace",
+              "enabled": true
+            }
+          ],
+          "capability": {
+            "userScopeAvailable": true
+          },
+          "diagnostics": []
+        }
+      },
+      {
+        "result": {
+          "commands": [
+            {
+              "name": "/local",
+              "prompt": "Local command",
+              "content": "Local command\n",
+              "filePath": "<ROOT>/ws/.zcode/commands/local.md",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "project",
+                "directoryPath": "<ROOT>/ws/.zcode/commands",
+                "projectPath": "<ROOT>/ws"
+              },
+              "id": "zcodeAgent:zcode:project:/local",
+              "source": "user",
+              "enabled": true,
+              "scope": "project",
+              "projectPath": "<ROOT>/ws"
+            },
+            {
+              "name": "/deploy",
+              "prompt": "Deploy now",
+              "content": "\nDeploy now\n",
+              "filePath": "<ROOT>/home/.zcode/commands/deploy.md",
+              "description": "Deploy it carefully",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/commands"
+              },
+              "id": "zcodeAgent:zcode:global:/deploy",
+              "source": "user",
+              "enabled": true,
+              "scope": "global"
+            },
+            {
+              "name": "/ns/sub",
+              "prompt": "Nested",
+              "content": "Nested\n",
+              "filePath": "<ROOT>/home/.zcode/commands/ns/sub.md",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/commands"
+              },
+              "id": "zcodeAgent:zcode:global:/ns/sub",
+              "source": "user",
+              "enabled": true,
+              "scope": "global"
+            },
+            {
+              "name": "/mk-cmd",
+              "prompt": "Market command",
+              "content": "Market command\n",
+              "filePath": "<ROOT>/home/market-plugins/mk/commands/mk-cmd.md",
+              "enabled": true,
+              "id": "plugin:market:mk:/mk-cmd:<ROOT>/home/market-plugins/mk/commands/mk-cmd.md",
+              "pluginEnabled": true,
+              "pluginMarketplace": "market",
+              "pluginName": "mk",
+              "scope": "global",
+              "source": "plugin"
+            },
+            {
+              "name": "/plug",
+              "prompt": "Run plug",
+              "content": "Run plug\n",
+              "filePath": "<ROOT>/home/plugins/inline-one/commands/plug.md",
+              "description": "Plugin command",
+              "enabled": true,
+              "id": "plugin:inline:inline-one:/plug:<ROOT>/home/plugins/inline-one/commands/plug.md",
+              "pluginEnabled": true,
+              "pluginMarketplace": "inline",
+              "pluginName": "inline-one",
+              "scope": "global",
+              "source": "plugin"
+            }
+          ],
+          "userCommands": [
+            {
+              "name": "/local",
+              "prompt": "Local command",
+              "content": "Local command\n",
+              "filePath": "<ROOT>/ws/.zcode/commands/local.md",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "project",
+                "directoryPath": "<ROOT>/ws/.zcode/commands",
+                "projectPath": "<ROOT>/ws"
+              },
+              "id": "zcodeAgent:zcode:project:/local",
+              "source": "user",
+              "enabled": true,
+              "scope": "project",
+              "projectPath": "<ROOT>/ws"
+            },
+            {
+              "name": "/deploy",
+              "prompt": "Deploy now",
+              "content": "\nDeploy now\n",
+              "filePath": "<ROOT>/home/.zcode/commands/deploy.md",
+              "description": "Deploy it carefully",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/commands"
+              },
+              "id": "zcodeAgent:zcode:global:/deploy",
+              "source": "user",
+              "enabled": true,
+              "scope": "global"
+            },
+            {
+              "name": "/ns/sub",
+              "prompt": "Nested",
+              "content": "Nested\n",
+              "filePath": "<ROOT>/home/.zcode/commands/ns/sub.md",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/commands"
+              },
+              "id": "zcodeAgent:zcode:global:/ns/sub",
+              "source": "user",
+              "enabled": true,
+              "scope": "global"
+            }
+          ],
+          "pluginCommands": [
+            {
+              "name": "/mk-cmd",
+              "prompt": "Market command",
+              "content": "Market command\n",
+              "filePath": "<ROOT>/home/market-plugins/mk/commands/mk-cmd.md",
+              "enabled": true,
+              "id": "plugin:market:mk:/mk-cmd:<ROOT>/home/market-plugins/mk/commands/mk-cmd.md",
+              "pluginEnabled": true,
+              "pluginMarketplace": "market",
+              "pluginName": "mk",
+              "scope": "global",
+              "source": "plugin"
+            },
+            {
+              "name": "/plug",
+              "prompt": "Run plug",
+              "content": "Run plug\n",
+              "filePath": "<ROOT>/home/plugins/inline-one/commands/plug.md",
+              "description": "Plugin command",
+              "enabled": true,
+              "id": "plugin:inline:inline-one:/plug:<ROOT>/home/plugins/inline-one/commands/plug.md",
+              "pluginEnabled": true,
+              "pluginMarketplace": "inline",
+              "pluginName": "inline-one",
+              "scope": "global",
+              "source": "plugin"
+            }
+          ],
+          "capability": {
+            "userScopeAvailable": true
+          }
+        }
+      },
+      {
+        "result": {
+          "command": {
+            "name": "/new-cmd",
+            "prompt": "Do new",
+            "content": "\nDo new",
+            "filePath": "<ROOT>/home/.zcode/commands/new-cmd.md",
+            "description": "New one",
+            "argumentHint": "<x>",
+            "agentSource": "zcodeAgent",
+            "location": {
+              "source": "zcode",
+              "scope": "user",
+              "directoryPath": "<ROOT>/home/.zcode/commands"
+            },
+            "id": "zcodeAgent:zcode:global:/new-cmd",
+            "source": "user",
+            "enabled": true,
+            "scope": "global"
+          }
+        }
+      },
+      {
+        "result": null
+      },
+      {
+        "result": {
+          "command": {
+            "name": "/deploy2",
+            "prompt": "Deploy v2",
+            "content": "\nDeploy v2",
+            "filePath": "<ROOT>/home/.zcode/commands/deploy2.md",
+            "description": "D2",
+            "agentSource": "zcodeAgent",
+            "location": {
+              "source": "zcode",
+              "scope": "user",
+              "directoryPath": "<ROOT>/home/.zcode/commands"
+            },
+            "id": "zcodeAgent:zcode:global:/deploy2",
+            "source": "user",
+            "enabled": false,
+            "scope": "global"
+          }
+        }
+      },
+      {
+        "result": null
+      },
+      {
+        "error": {
+          "name": "Error",
+          "message": "Command file already exists: local.md"
+        }
+      },
+      {
+        "result": {
+          "commands": [
+            {
+              "name": "/local",
+              "prompt": "Local command",
+              "content": "Local command\n",
+              "filePath": "<ROOT>/ws/.zcode/commands/local.md",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "project",
+                "directoryPath": "<ROOT>/ws/.zcode/commands",
+                "projectPath": "<ROOT>/ws"
+              },
+              "id": "zcodeAgent:zcode:project:/local",
+              "source": "user",
+              "enabled": true,
+              "scope": "project",
+              "projectPath": "<ROOT>/ws"
+            },
+            {
+              "name": "/deploy2",
+              "prompt": "Deploy v2",
+              "content": "\nDeploy v2",
+              "filePath": "<ROOT>/home/.zcode/commands/deploy2.md",
+              "description": "D2",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/commands"
+              },
+              "id": "zcodeAgent:zcode:global:/deploy2",
+              "source": "user",
+              "enabled": false,
+              "scope": "global"
+            },
+            {
+              "name": "/ns/sub",
+              "prompt": "Nested",
+              "content": "Nested\n",
+              "filePath": "<ROOT>/home/.zcode/commands/ns/sub.md",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/commands"
+              },
+              "id": "zcodeAgent:zcode:global:/ns/sub",
+              "source": "user",
+              "enabled": true,
+              "scope": "global"
+            },
+            {
+              "name": "/mk-cmd",
+              "prompt": "Market command",
+              "content": "Market command\n",
+              "filePath": "<ROOT>/home/market-plugins/mk/commands/mk-cmd.md",
+              "enabled": true,
+              "id": "plugin:market:mk:/mk-cmd:<ROOT>/home/market-plugins/mk/commands/mk-cmd.md",
+              "pluginEnabled": true,
+              "pluginMarketplace": "market",
+              "pluginName": "mk",
+              "scope": "global",
+              "source": "plugin"
+            },
+            {
+              "name": "/plug",
+              "prompt": "Run plug",
+              "content": "Run plug\n",
+              "filePath": "<ROOT>/home/plugins/inline-one/commands/plug.md",
+              "description": "Plugin command",
+              "enabled": true,
+              "id": "plugin:inline:inline-one:/plug:<ROOT>/home/plugins/inline-one/commands/plug.md",
+              "pluginEnabled": true,
+              "pluginMarketplace": "inline",
+              "pluginName": "inline-one",
+              "scope": "global",
+              "source": "plugin"
+            }
+          ],
+          "userCommands": [
+            {
+              "name": "/local",
+              "prompt": "Local command",
+              "content": "Local command\n",
+              "filePath": "<ROOT>/ws/.zcode/commands/local.md",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "project",
+                "directoryPath": "<ROOT>/ws/.zcode/commands",
+                "projectPath": "<ROOT>/ws"
+              },
+              "id": "zcodeAgent:zcode:project:/local",
+              "source": "user",
+              "enabled": true,
+              "scope": "project",
+              "projectPath": "<ROOT>/ws"
+            },
+            {
+              "name": "/deploy2",
+              "prompt": "Deploy v2",
+              "content": "\nDeploy v2",
+              "filePath": "<ROOT>/home/.zcode/commands/deploy2.md",
+              "description": "D2",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/commands"
+              },
+              "id": "zcodeAgent:zcode:global:/deploy2",
+              "source": "user",
+              "enabled": false,
+              "scope": "global"
+            },
+            {
+              "name": "/ns/sub",
+              "prompt": "Nested",
+              "content": "Nested\n",
+              "filePath": "<ROOT>/home/.zcode/commands/ns/sub.md",
+              "agentSource": "zcodeAgent",
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/commands"
+              },
+              "id": "zcodeAgent:zcode:global:/ns/sub",
+              "source": "user",
+              "enabled": true,
+              "scope": "global"
+            }
+          ],
+          "pluginCommands": [
+            {
+              "name": "/mk-cmd",
+              "prompt": "Market command",
+              "content": "Market command\n",
+              "filePath": "<ROOT>/home/market-plugins/mk/commands/mk-cmd.md",
+              "enabled": true,
+              "id": "plugin:market:mk:/mk-cmd:<ROOT>/home/market-plugins/mk/commands/mk-cmd.md",
+              "pluginEnabled": true,
+              "pluginMarketplace": "market",
+              "pluginName": "mk",
+              "scope": "global",
+              "source": "plugin"
+            },
+            {
+              "name": "/plug",
+              "prompt": "Run plug",
+              "content": "Run plug\n",
+              "filePath": "<ROOT>/home/plugins/inline-one/commands/plug.md",
+              "description": "Plugin command",
+              "enabled": true,
+              "id": "plugin:inline:inline-one:/plug:<ROOT>/home/plugins/inline-one/commands/plug.md",
+              "pluginEnabled": true,
+              "pluginMarketplace": "inline",
+              "pluginName": "inline-one",
+              "scope": "global",
+              "source": "plugin"
+            }
+          ],
+          "capability": {
+            "userScopeAvailable": true
+          }
+        }
+      },
+      {
+        "result": {
+          "path": "<ROOT>/home/.zcode/commands"
+        }
+      },
+      {
+        "result": [
+          {
+            "id": "repo-0123456789abcdef",
+            "label": "repo",
+            "updatedAt": "<N>",
+            "files": [
+              {
+                "name": "MEMORY.md",
+                "path": "<ROOT>/home/.zcode/cli/memories/projects/repo-0123456789abcdef/memory/MEMORY.md",
+                "kind": "index",
+                "size": 8,
+                "updatedAt": "<N>"
+              },
+              {
+                "name": "note.md",
+                "path": "<ROOT>/home/.zcode/cli/memories/projects/repo-0123456789abcdef/memory/note.md",
+                "kind": "item",
+                "size": 4,
+                "updatedAt": "<N>"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "result": {
+          "content": "# Index\n",
+          "updatedAt": "<N>"
+        }
+      },
+      {
+        "error": {
+          "name": "Error",
+          "message": "Invalid Project Memory path"
+        }
+      },
+      {
+        "result": {
+          "marketplaces": [],
+          "availablePlugins": [],
+          "installedPlugins": [],
+          "capability": {
+            "supported": false
+          }
+        }
+      },
+      {
+        "error": {
+          "name": "Error",
+          "message": "Legacy plugin management has been retired in ZCode Agent mode"
+        }
+      },
+      {
+        "result": {
+          "hooks": [
+            {
+              "id": "workspace-hook-0-SessionStart-0-0",
+              "event": "SessionStart",
+              "type": "command",
+              "command": "echo start",
+              "shell": "bash",
+              "enabled": true,
+              "editable": false,
+              "configuredState": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/zcode.json"
+              },
+              "workspaceHook": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/zcode.json",
+                "reviewItemId": "workspace-hook-0-SessionStart-0-0",
+                "sourceFileIndex": 0,
+                "workspaceIdentity": "<ROOT>/ws",
+                "bundleDigest": "796574e522854ccf1b963b7eae8d4874e05dab00158789fdd386884499cc57db",
+                "hookDeclarationDigest": "76d992ae7db33b0d71a35fe8b08008f7790ae73bf808aa41e7ce89513fb7204d",
+                "trustState": "pending_trust"
+              },
+              "location": {
+                "source": "zcode",
+                "scope": "project",
+                "directoryPath": "<ROOT>/ws",
+                "projectPath": "<ROOT>/ws"
+              }
+            },
+            {
+              "id": "workspace-hook-1-PreToolUse-0-0",
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "type": "command",
+              "command": "echo pre",
+              "timeout": 5,
+              "enabled": true,
+              "editable": true,
+              "configuredState": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/.zcode/config.json"
+              },
+              "workspaceHook": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/.zcode/config.json",
+                "reviewItemId": "workspace-hook-1-PreToolUse-0-0",
+                "sourceFileIndex": 1,
+                "workspaceIdentity": "<ROOT>/ws",
+                "bundleDigest": "796574e522854ccf1b963b7eae8d4874e05dab00158789fdd386884499cc57db",
+                "hookDeclarationDigest": "723aaafbc311ac5cf979856c5fcb36d83d8b8b140fa26b82afcbe40fb7849fd1",
+                "trustState": "pending_trust"
+              },
+              "custom": {
+                "note": "x"
+              },
+              "location": {
+                "source": "zcode",
+                "scope": "project",
+                "directoryPath": "<ROOT>/ws/.zcode",
+                "projectPath": "<ROOT>/ws"
+              }
+            },
+            {
+              "id": "workspace-hook-1-Stop-0-0",
+              "event": "Stop",
+              "type": "process",
+              "command": "node",
+              "args": ["a.js"],
+              "timeout": 1.5,
+              "enabled": true,
+              "editable": true,
+              "configuredState": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/.zcode/config.json"
+              },
+              "workspaceHook": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/.zcode/config.json",
+                "reviewItemId": "workspace-hook-1-Stop-0-0",
+                "sourceFileIndex": 1,
+                "workspaceIdentity": "<ROOT>/ws",
+                "bundleDigest": "796574e522854ccf1b963b7eae8d4874e05dab00158789fdd386884499cc57db",
+                "hookDeclarationDigest": "03452642187ec926d16a7fbd6cf358c99defd626b16a44f9d12ff2d5be4ba0c7",
+                "trustState": "pending_trust"
+              },
+              "location": {
+                "source": "zcode",
+                "scope": "project",
+                "directoryPath": "<ROOT>/ws/.zcode",
+                "projectPath": "<ROOT>/ws"
+              }
+            },
+            {
+              "id": "hook-zcode-user-0",
+              "event": "UserPromptSubmit",
+              "type": "command",
+              "command": "echo user",
+              "enabled": true,
+              "editable": true,
+              "configuredState": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/home/.zcode/cli/config.json"
+              },
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/cli"
+              }
+            },
+            {
+              "id": "hook-agents-user-0",
+              "event": "Stop",
+              "type": "command",
+              "command": "echo legacy",
+              "timeout": 3,
+              "enabled": false,
+              "editable": false,
+              "location": {
+                "source": "agents",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.agents"
+              }
+            }
+          ],
+          "hooksEnabled": true,
+          "workspaceHookSnapshot": {
+            "schemaVersion": 1,
+            "workspaceIdentity": "<ROOT>/ws",
+            "discoveredAt": "<TIME>",
+            "sourceFiles": [
+              {
+                "canonicalPath": "<ROOT>/ws/zcode.json",
+                "baseDir": "<ROOT>/ws",
+                "discoveryOrder": 0,
+                "configFileKind": "zcode.json",
+                "explicitProjectConfig": false,
+                "editable": false,
+                "hooksRoot": {}
+              },
+              {
+                "canonicalPath": "<ROOT>/ws/.zcode/config.json",
+                "baseDir": "<ROOT>/ws",
+                "discoveryOrder": 1,
+                "configFileKind": ".zcode/config.json",
+                "explicitProjectConfig": false,
+                "editable": true,
+                "hooksRoot": {
+                  "enabled": true
+                }
+              }
+            ],
+            "hooks": [
+              {
+                "reviewItemId": "workspace-hook-0-SessionStart-0-0",
+                "event": "SessionStart",
+                "matcherIndex": 0,
+                "hookIndex": 0,
+                "sourceFileIndex": 0,
+                "sourceRelativePath": "zcode.json",
+                "matcher": null,
+                "command": "echo start",
+                "resolvedTimeoutMs": 60000,
+                "resolvedMaxOutputBytes": 32768,
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "editable": false,
+                "declarationDigestAlgorithm": "sha256",
+                "hookDeclarationDigest": "76d992ae7db33b0d71a35fe8b08008f7790ae73bf808aa41e7ce89513fb7204d",
+                "type": "command",
+                "shell": "bash"
+              },
+              {
+                "reviewItemId": "workspace-hook-1-PreToolUse-0-0",
+                "event": "PreToolUse",
+                "matcherIndex": 0,
+                "hookIndex": 0,
+                "sourceFileIndex": 1,
+                "sourceRelativePath": ".zcode/config.json",
+                "matcher": "Bash",
+                "command": "echo pre",
+                "resolvedTimeoutMs": 5000,
+                "resolvedMaxOutputBytes": 32768,
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "editable": true,
+                "declarationDigestAlgorithm": "sha256",
+                "hookDeclarationDigest": "723aaafbc311ac5cf979856c5fcb36d83d8b8b140fa26b82afcbe40fb7849fd1",
+                "type": "command"
+              },
+              {
+                "reviewItemId": "workspace-hook-1-Stop-0-0",
+                "event": "Stop",
+                "matcherIndex": 0,
+                "hookIndex": 0,
+                "sourceFileIndex": 1,
+                "sourceRelativePath": ".zcode/config.json",
+                "matcher": null,
+                "command": "node",
+                "resolvedTimeoutMs": 1500,
+                "resolvedMaxOutputBytes": 32768,
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "editable": true,
+                "declarationDigestAlgorithm": "sha256",
+                "hookDeclarationDigest": "03452642187ec926d16a7fbd6cf358c99defd626b16a44f9d12ff2d5be4ba0c7",
+                "type": "process",
+                "args": ["a.js"]
+              }
+            ],
+            "digestAlgorithm": "sha256",
+            "bundleDigest": "796574e522854ccf1b963b7eae8d4874e05dab00158789fdd386884499cc57db"
+          }
+        }
+      },
+      {
+        "result": null
+      },
+      {
+        "result": {
+          "hooks": [
+            {
+              "id": "workspace-hook-0-SessionStart-0-0",
+              "event": "SessionStart",
+              "type": "command",
+              "command": "echo start",
+              "shell": "bash",
+              "enabled": true,
+              "editable": false,
+              "configuredState": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/zcode.json"
+              },
+              "workspaceHook": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/zcode.json",
+                "reviewItemId": "workspace-hook-0-SessionStart-0-0",
+                "sourceFileIndex": 0,
+                "workspaceIdentity": "<ROOT>/ws",
+                "bundleDigest": "796574e522854ccf1b963b7eae8d4874e05dab00158789fdd386884499cc57db",
+                "hookDeclarationDigest": "76d992ae7db33b0d71a35fe8b08008f7790ae73bf808aa41e7ce89513fb7204d",
+                "trustState": "pending_trust"
+              },
+              "location": {
+                "source": "zcode",
+                "scope": "project",
+                "directoryPath": "<ROOT>/ws",
+                "projectPath": "<ROOT>/ws"
+              }
+            },
+            {
+              "id": "workspace-hook-1-PreToolUse-0-0",
+              "event": "PreToolUse",
+              "matcher": "Bash",
+              "type": "command",
+              "command": "echo pre",
+              "timeout": 5,
+              "enabled": true,
+              "editable": true,
+              "configuredState": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/.zcode/config.json"
+              },
+              "workspaceHook": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/.zcode/config.json",
+                "reviewItemId": "workspace-hook-1-PreToolUse-0-0",
+                "sourceFileIndex": 1,
+                "workspaceIdentity": "<ROOT>/ws",
+                "bundleDigest": "796574e522854ccf1b963b7eae8d4874e05dab00158789fdd386884499cc57db",
+                "hookDeclarationDigest": "723aaafbc311ac5cf979856c5fcb36d83d8b8b140fa26b82afcbe40fb7849fd1",
+                "trustState": "pending_trust"
+              },
+              "custom": {
+                "note": "x"
+              },
+              "location": {
+                "source": "zcode",
+                "scope": "project",
+                "directoryPath": "<ROOT>/ws/.zcode",
+                "projectPath": "<ROOT>/ws"
+              }
+            },
+            {
+              "id": "workspace-hook-1-Stop-0-0",
+              "event": "Stop",
+              "type": "process",
+              "command": "node",
+              "args": ["a.js"],
+              "timeout": 1.5,
+              "enabled": true,
+              "editable": true,
+              "configuredState": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/.zcode/config.json"
+              },
+              "workspaceHook": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/ws/.zcode/config.json",
+                "reviewItemId": "workspace-hook-1-Stop-0-0",
+                "sourceFileIndex": 1,
+                "workspaceIdentity": "<ROOT>/ws",
+                "bundleDigest": "796574e522854ccf1b963b7eae8d4874e05dab00158789fdd386884499cc57db",
+                "hookDeclarationDigest": "03452642187ec926d16a7fbd6cf358c99defd626b16a44f9d12ff2d5be4ba0c7",
+                "trustState": "pending_trust"
+              },
+              "location": {
+                "source": "zcode",
+                "scope": "project",
+                "directoryPath": "<ROOT>/ws/.zcode",
+                "projectPath": "<ROOT>/ws"
+              }
+            },
+            {
+              "id": "hook-zcode-user-0",
+              "event": "UserPromptSubmit",
+              "type": "command",
+              "command": "echo user",
+              "enabled": true,
+              "editable": true,
+              "configuredState": {
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "sourcePath": "<ROOT>/home/.zcode/cli/config.json"
+              },
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/cli"
+              }
+            },
+            {
+              "id": "hook-agents-user-0",
+              "event": "Stop",
+              "type": "command",
+              "command": "echo legacy",
+              "timeout": 3,
+              "enabled": false,
+              "editable": false,
+              "location": {
+                "source": "agents",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.agents"
+              }
+            }
+          ],
+          "hooksEnabled": true,
+          "workspaceHookSnapshot": {
+            "schemaVersion": 1,
+            "workspaceIdentity": "<ROOT>/ws",
+            "discoveredAt": "<TIME>",
+            "sourceFiles": [
+              {
+                "canonicalPath": "<ROOT>/ws/zcode.json",
+                "baseDir": "<ROOT>/ws",
+                "discoveryOrder": 0,
+                "configFileKind": "zcode.json",
+                "explicitProjectConfig": false,
+                "editable": false,
+                "hooksRoot": {}
+              },
+              {
+                "canonicalPath": "<ROOT>/ws/.zcode/config.json",
+                "baseDir": "<ROOT>/ws",
+                "discoveryOrder": 1,
+                "configFileKind": ".zcode/config.json",
+                "explicitProjectConfig": false,
+                "editable": true,
+                "hooksRoot": {
+                  "enabled": true
+                }
+              }
+            ],
+            "hooks": [
+              {
+                "reviewItemId": "workspace-hook-0-SessionStart-0-0",
+                "event": "SessionStart",
+                "matcherIndex": 0,
+                "hookIndex": 0,
+                "sourceFileIndex": 0,
+                "sourceRelativePath": "zcode.json",
+                "matcher": null,
+                "command": "echo start",
+                "resolvedTimeoutMs": 60000,
+                "resolvedMaxOutputBytes": 32768,
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "editable": false,
+                "declarationDigestAlgorithm": "sha256",
+                "hookDeclarationDigest": "76d992ae7db33b0d71a35fe8b08008f7790ae73bf808aa41e7ce89513fb7204d",
+                "type": "command",
+                "shell": "bash"
+              },
+              {
+                "reviewItemId": "workspace-hook-1-PreToolUse-0-0",
+                "event": "PreToolUse",
+                "matcherIndex": 0,
+                "hookIndex": 0,
+                "sourceFileIndex": 1,
+                "sourceRelativePath": ".zcode/config.json",
+                "matcher": "Bash",
+                "command": "echo pre",
+                "resolvedTimeoutMs": 5000,
+                "resolvedMaxOutputBytes": 32768,
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "editable": true,
+                "declarationDigestAlgorithm": "sha256",
+                "hookDeclarationDigest": "723aaafbc311ac5cf979856c5fcb36d83d8b8b140fa26b82afcbe40fb7849fd1",
+                "type": "command"
+              },
+              {
+                "reviewItemId": "workspace-hook-1-Stop-0-0",
+                "event": "Stop",
+                "matcherIndex": 0,
+                "hookIndex": 0,
+                "sourceFileIndex": 1,
+                "sourceRelativePath": ".zcode/config.json",
+                "matcher": null,
+                "command": "node",
+                "resolvedTimeoutMs": 1500,
+                "resolvedMaxOutputBytes": 32768,
+                "sourceRootEnabled": true,
+                "declarationEnabled": true,
+                "runtimeHooksEnabled": true,
+                "configuredEnabled": true,
+                "editable": true,
+                "declarationDigestAlgorithm": "sha256",
+                "hookDeclarationDigest": "03452642187ec926d16a7fbd6cf358c99defd626b16a44f9d12ff2d5be4ba0c7",
+                "type": "process",
+                "args": ["a.js"]
+              }
+            ],
+            "digestAlgorithm": "sha256",
+            "bundleDigest": "796574e522854ccf1b963b7eae8d4874e05dab00158789fdd386884499cc57db"
+          }
+        }
+      },
+      {
+        "result": {
+          "servers": [
+            {
+              "source": "zcodeagentmcp",
+              "scope": "workspace",
+              "name": "wsmcp",
+              "config": {
+                "command": "y"
+              },
+              "enabled": true,
+              "projectPath": "<ROOT>/ws",
+              "location": {
+                "source": "zcode",
+                "scope": "project",
+                "directoryPath": "<ROOT>/ws/.zcode",
+                "projectPath": "<ROOT>/ws"
+              },
+              "file": {
+                "format": "json",
+                "filePath": "<ROOT>/ws/.zcode/config.json"
+              }
+            },
+            {
+              "source": "zcodeagentmcp",
+              "scope": "user",
+              "name": "fs",
+              "config": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/x"]
+              },
+              "enabled": true,
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/cli",
+                "projectPath": "<ROOT>/ws"
+              },
+              "file": {
+                "format": "json",
+                "filePath": "<ROOT>/home/.zcode/cli/config.json"
+              }
+            },
+            {
+              "source": "zcodeagentmcp",
+              "scope": "user",
+              "name": "legacy",
+              "config": {
+                "command": "legacy",
+                "enabled": false
+              },
+              "enabled": false,
+              "location": {
+                "source": "zcode",
+                "scope": "user",
+                "directoryPath": "<ROOT>/home/.zcode/cli",
+                "projectPath": "<ROOT>/ws"
+              },
+              "file": {
+                "format": "json",
+                "filePath": "<ROOT>/home/.zcode/cli/config.json"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "result": null
+      },
+      {
+        "result": null
+      },
+      {
+        "result": null
+      },
+      {
+        "error": {
+          "name": "Error",
+          "message": "Missing MCP config for upsert action"
+        }
+      },
+      {
+        "result": {
+          "candidates": [
+            {
+              "id": "<SHA>",
+              "name": "fs",
+              "config": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/x"],
+                "enabled": false
+              },
+              "enabled": false,
+              "source": "zcode",
+              "path": "<ROOT>/home/.zcode/cli/config.json"
+            },
+            {
+              "id": "<SHA>",
+              "name": "legacy",
+              "config": {
+                "command": "legacy",
+                "enabled": false
+              },
+              "enabled": false,
+              "source": "zcode",
+              "path": "<ROOT>/home/.zcode/cli/config.json"
+            },
+            {
+              "id": "<SHA>",
+              "name": "newsrv",
+              "config": {
+                "type": "http",
+                "url": "http://127.0.0.1:9/mcp"
+              },
+              "enabled": true,
+              "source": "zcode",
+              "path": "<ROOT>/home/.zcode/cli/config.json"
+            }
+          ],
+          "localHomeDir": "<ROOT>/home"
+        }
+      },
+      {
+        "result": {
+          "remoteHomeDir": "<ROOT>/home",
+          "statuses": [
+            {
+              "name": "FS",
+              "exists": true,
+              "path": "<ROOT>/home/.zcode/cli/config.json"
+            },
+            {
+              "name": "nope",
+              "exists": false
+            }
+          ]
+        }
+      },
+      {
+        "result": {
+          "localHomeDir": "<ROOT>/home",
+          "servers": [
+            {
+              "id": "<SHA>",
+              "name": "fs",
+              "config": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/x"],
+                "enabled": false
+              },
+              "enabled": false,
+              "source": "zcode",
+              "path": "<ROOT>/home/.zcode/cli/config.json"
+            }
+          ]
+        }
+      },
+      {
+        "result": {
+          "results": [
+            {
+              "name": "imported",
+              "status": "synced",
+              "path": "<ROOT>/home/.zcode/cli/config.json"
+            },
+            {
+              "name": "fs",
+              "status": "skipped",
+              "path": "<ROOT>/home/.zcode/cli/config.json"
+            }
+          ]
+        }
+      },
+      {
+        "result": {
+          "ok": true,
+          "path": "<ROOT>/home/.zcode/cli"
+        }
+      },
+      {
+        "result": {
+          "agents": [
+            {
+              "id": "built-in:built-in:general-purpose",
+              "name": "general-purpose",
+              "description": "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks.",
+              "color": "blue",
+              "injectAgentsMd": true,
+              "systemPrompt": "",
+              "tools": ["*"],
+              "path": "built-in:general-purpose",
+              "scope": "built-in",
+              "source": "built-in",
+              "enabled": true,
+              "readOnly": true
+            },
+            {
+              "id": "built-in:built-in:explore",
+              "name": "Explore",
+              "description": "Read-only search agent for broad fan-out searches.",
+              "color": "cyan",
+              "injectAgentsMd": false,
+              "modelSelection": {
+                "providerId": "bigmodel-api",
+                "modelId": "GLM-5"
+              },
+              "modelSelectionOverride": {
+                "providerId": "bigmodel-api",
+                "modelId": "GLM-5"
+              },
+              "systemPrompt": "",
+              "tools": ["Bash", "Glob", "Grep", "Read", "WebFetch", "WebSearch", "TodoWrite"],
+              "path": "built-in:Explore",
+              "scope": "built-in",
+              "source": "built-in",
+              "enabled": true,
+              "readOnly": true
+            },
+            {
+              "id": "user:user:writer",
+              "name": "writer",
+              "description": "writer agent",
+              "systemPrompt": "You are writer.",
+              "color": "green",
+              "modelSelection": {
+                "providerId": "zai-api",
+                "modelId": "GLM-4.6",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "path": "<ROOT>/home/.zcode/agents/writer.md",
+              "scope": "user",
+              "source": "user",
+              "enabled": false,
+              "readOnly": false
+            },
+            {
+              "id": "user:workspace:ws-agent",
+              "name": "ws-agent",
+              "description": "ws-agent agent",
+              "systemPrompt": "You are ws-agent.",
+              "maxTurns": 3,
+              "path": "<ROOT>/ws/.zcode/agents/ws-agent.md",
+              "scope": "workspace",
+              "source": "user",
+              "enabled": true,
+              "readOnly": false,
+              "projectPath": "<ROOT>/ws"
+            },
+            {
+              "id": "plugin:mk@market:reviewer",
+              "name": "mk:reviewer",
+              "description": "reviewer agent",
+              "systemPrompt": "You are reviewer.",
+              "modelSelection": {
+                "providerId": "openai",
+                "modelId": "gpt-5",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "tools": ["Read", "Grep"],
+              "path": "<ROOT>/home/market-plugins/mk/extra/reviewer.md",
+              "scope": "user",
+              "source": "plugin",
+              "enabled": true,
+              "readOnly": true,
+              "pluginId": "mk@market",
+              "pluginName": "mk",
+              "defaultModelSelection": {
+                "providerId": "openai",
+                "modelId": "gpt-5",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              }
+            },
+            {
+              "id": "plugin:plugin:mk@market:reviewer:alias:reviewer",
+              "name": "reviewer",
+              "description": "reviewer agent",
+              "systemPrompt": "You are reviewer.",
+              "modelSelection": {
+                "providerId": "openai",
+                "modelId": "gpt-5",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "tools": ["Read", "Grep"],
+              "path": "<ROOT>/home/market-plugins/mk/extra/reviewer.md",
+              "scope": "user",
+              "source": "plugin",
+              "enabled": true,
+              "readOnly": true,
+              "pluginId": "mk@market",
+              "pluginName": "mk",
+              "defaultModelSelection": {
+                "providerId": "openai",
+                "modelId": "gpt-5",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              }
+            }
+          ],
+          "userAgents": [
+            {
+              "id": "user:user:writer",
+              "name": "writer",
+              "description": "writer agent",
+              "systemPrompt": "You are writer.",
+              "color": "green",
+              "modelSelection": {
+                "providerId": "zai-api",
+                "modelId": "GLM-4.6",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "path": "<ROOT>/home/.zcode/agents/writer.md",
+              "scope": "user",
+              "source": "user",
+              "enabled": false,
+              "readOnly": false
+            },
+            {
+              "id": "user:workspace:ws-agent",
+              "name": "ws-agent",
+              "description": "ws-agent agent",
+              "systemPrompt": "You are ws-agent.",
+              "maxTurns": 3,
+              "path": "<ROOT>/ws/.zcode/agents/ws-agent.md",
+              "scope": "workspace",
+              "source": "user",
+              "enabled": true,
+              "readOnly": false,
+              "projectPath": "<ROOT>/ws"
+            }
+          ],
+          "pluginAgents": [
+            {
+              "id": "plugin:mk@market:reviewer",
+              "name": "mk:reviewer",
+              "description": "reviewer agent",
+              "systemPrompt": "You are reviewer.",
+              "modelSelection": {
+                "providerId": "openai",
+                "modelId": "gpt-5",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "tools": ["Read", "Grep"],
+              "path": "<ROOT>/home/market-plugins/mk/extra/reviewer.md",
+              "scope": "user",
+              "source": "plugin",
+              "enabled": true,
+              "readOnly": true,
+              "pluginId": "mk@market",
+              "pluginName": "mk",
+              "defaultModelSelection": {
+                "providerId": "openai",
+                "modelId": "gpt-5",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              }
+            }
+          ],
+          "capability": {
+            "userScopeAvailable": true
+          },
+          "diagnostics": []
+        }
+      },
+      {
+        "result": null
+      },
+      {
+        "result": null
+      },
+      {
+        "result": null
+      },
+      {
+        "result": {
+          "agent": {
+            "id": "user:user:new-agent",
+            "name": "new-agent",
+            "description": "D",
+            "systemPrompt": "P",
+            "color": "green",
+            "tools": ["Read", "*"],
+            "maxTurns": 4,
+            "mcpServers": [
+              {
+                "name": "srv",
+                "command": "x",
+                "args": ["-y"]
+              }
+            ],
+            "path": "<ROOT>/home/.zcode/agents/new-agent.md",
+            "scope": "user",
+            "source": "user",
+            "enabled": true,
+            "readOnly": false
+          }
+        }
+      },
+      {
+        "result": {
+          "agent": {
+            "id": "user:user:renamed-agent",
+            "name": "renamed-agent",
+            "description": "D2",
+            "systemPrompt": "P2",
+            "path": "<ROOT>/home/.zcode/agents/renamed-agent.md",
+            "scope": "user",
+            "source": "user",
+            "enabled": true,
+            "readOnly": false
+          }
+        }
+      },
+      {
+        "result": null
+      },
+      {
+        "error": {
+          "name": "Error",
+          "message": "Name must be between 3 and 50 characters"
+        }
+      },
+      {
+        "result": {
+          "agents": [
+            {
+              "id": "built-in:built-in:general-purpose",
+              "name": "general-purpose",
+              "description": "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks.",
+              "color": "blue",
+              "injectAgentsMd": true,
+              "modelSelection": {
+                "providerId": "openai",
+                "modelId": "gpt",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "modelSelectionOverride": {
+                "providerId": "openai",
+                "modelId": "gpt",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "systemPrompt": "",
+              "tools": ["*"],
+              "path": "built-in:general-purpose",
+              "scope": "built-in",
+              "source": "built-in",
+              "enabled": true,
+              "readOnly": true
+            },
+            {
+              "id": "built-in:built-in:explore",
+              "name": "Explore",
+              "description": "Read-only search agent for broad fan-out searches.",
+              "color": "cyan",
+              "injectAgentsMd": false,
+              "modelSelection": {
+                "providerId": "bigmodel-api",
+                "modelId": "GLM-5"
+              },
+              "modelSelectionOverride": {
+                "providerId": "bigmodel-api",
+                "modelId": "GLM-5"
+              },
+              "systemPrompt": "",
+              "tools": ["Bash", "Glob", "Grep", "Read", "WebFetch", "WebSearch", "TodoWrite"],
+              "path": "built-in:Explore",
+              "scope": "built-in",
+              "source": "built-in",
+              "enabled": true,
+              "readOnly": true
+            },
+            {
+              "id": "user:user:writer",
+              "name": "writer",
+              "description": "writer agent",
+              "systemPrompt": "You are writer.",
+              "color": "green",
+              "modelSelection": {
+                "providerId": "zai-api",
+                "modelId": "GLM-4.6",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "path": "<ROOT>/home/.zcode/agents/writer.md",
+              "scope": "user",
+              "source": "user",
+              "enabled": true,
+              "readOnly": false
+            }
+          ],
+          "userAgents": [
+            {
+              "id": "user:user:writer",
+              "name": "writer",
+              "description": "writer agent",
+              "systemPrompt": "You are writer.",
+              "color": "green",
+              "modelSelection": {
+                "providerId": "zai-api",
+                "modelId": "GLM-4.6",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "path": "<ROOT>/home/.zcode/agents/writer.md",
+              "scope": "user",
+              "source": "user",
+              "enabled": true,
+              "readOnly": false
+            }
+          ],
+          "pluginAgents": [
+            {
+              "id": "plugin:mk@market:reviewer",
+              "name": "mk:reviewer",
+              "description": "reviewer agent",
+              "systemPrompt": "You are reviewer.",
+              "modelSelection": {
+                "providerId": "p",
+                "modelId": "m"
+              },
+              "tools": ["Read", "Grep"],
+              "path": "<ROOT>/home/market-plugins/mk/extra/reviewer.md",
+              "scope": "user",
+              "source": "plugin",
+              "enabled": true,
+              "readOnly": true,
+              "pluginId": "mk@market",
+              "pluginName": "mk",
+              "defaultModelSelection": {
+                "providerId": "openai",
+                "modelId": "gpt-5",
+                "options": {
+                  "reasoningLevel": "high"
+                }
+              },
+              "modelSelectionOverride": {
+                "providerId": "p",
+                "modelId": "m"
+              }
+            }
+          ],
+          "capability": {
+            "userScopeAvailable": true
+          },
+          "diagnostics": []
+        }
+      },
+      {
+        "result": {
+          "candidates": [
+            {
+              "id": "<SHA>",
+              "name": "alpha",
+              "directoryName": "alpha",
+              "description": "Shadowed",
+              "path": "<ROOT>/home/.agents/skills/alpha/SKILL.md",
+              "sizeBytes": 47
+            },
+            {
+              "id": "<SHA>",
+              "name": "delta",
+              "directoryName": "delta",
+              "description": "Folded text",
+              "path": "<ROOT>/home/.agents/skills/delta/SKILL.md",
+              "sizeBytes": 65
+            },
+            {
+              "id": "<SHA>",
+              "name": "gamma",
+              "directoryName": "gamma",
+              "description": "",
+              "path": "<ROOT>/home/.zcode/skills/gamma/SKILL.md",
+              "sizeBytes": 79
+            },
+            {
+              "id": "<SHA>",
+              "name": "beta",
+              "directoryName": "group/beta",
+              "description": "",
+              "path": "<ROOT>/home/.zcode/skills/group/beta/SKILL.md",
+              "sizeBytes": 71
+            },
+            {
+              "id": "<SHA>",
+              "name": "linked",
+              "directoryName": "linked",
+              "description": "Linked skill",
+              "path": "<ROOT>/home/.agents/skills/linked/SKILL.md",
+              "sizeBytes": 52
+            }
+          ],
+          "maxArchiveBytes": 20971520
+        }
+      },
+      {
+        "result": {
+          "statuses": [
+            {
+              "directoryName": "group/beta",
+              "exists": true,
+              "path": "<ROOT>/home/.zcode/skills/group/beta"
+            },
+            {
+              "directoryName": "missing",
+              "exists": true,
+              "path": "<ROOT>/home/.agents/skills/delta"
+            }
+          ]
+        }
+      },
+      {
+        "error": {
+          "name": "Error",
+          "message": "unsafe skill sync path: ../escape"
+        }
+      },
+      {
+        "result": {
+          "archive": "<BYTES>",
+          "archiveBytes": "<N>",
+          "skills": [
+            {
+              "id": "<SHA>",
+              "name": "beta",
+              "directoryName": "group/beta"
+            }
+          ]
+        }
+      },
+      {
+        "result": {
+          "results": [
+            {
+              "name": "group/beta",
+              "directoryName": "group/beta",
+              "status": "skipped",
+              "path": "<ROOT>/home/.zcode/skills/group/beta"
+            }
+          ]
+        }
+      },
+      {
+        "result": {
+          "ok": true,
+          "path": "<ROOT>/home/.zcode/skills"
+        }
+      },
+      {
+        "result": {
+          "candidates": [
+            {
+              "id": "<SHA>",
+              "name": "inline-one",
+              "pluginId": "inline-one@inline",
+              "directoryName": "inline-one",
+              "description": "Inline plugin",
+              "version": "1.0.0",
+              "path": "<ROOT>/home/plugins/inline-one",
+              "sizeBytes": 232,
+              "enabled": true,
+              "componentTypes": ["skills", "commands"]
+            }
+          ],
+          "maxArchiveBytes": 52428800
+        }
+      },
+      {
+        "result": {
+          "archive": "<BYTES>",
+          "archiveBytes": "<N>",
+          "plugins": [
+            {
+              "id": "<SHA>",
+              "name": "inline-one",
+              "pluginId": "inline-one@inline",
+              "directoryName": "inline-one"
+            }
+          ]
+        }
+      },
+      {
+        "result": {
+          "results": [
+            {
+              "name": "inline-one",
+              "pluginId": "inline-one@inline",
+              "directoryName": "inline-one",
+              "status": "skipped",
+              "path": "<ROOT>/home/plugins/inline-one"
+            }
+          ]
+        }
+      },
+      {
+        "result": {
+          "statuses": [
+            {
+              "pluginId": "inline-one@inline",
+              "directoryName": "inline-one",
+              "exists": true,
+              "path": "<ROOT>/home/plugins/inline-one",
+              "reason": "samePluginId"
+            },
+            {
+              "pluginId": "other@inline",
+              "directoryName": "other",
+              "exists": false
+            }
+          ]
+        }
+      },
+      {
+        "result": {
+          "ok": true,
+          "path": "<ROOT>/home/.zcode/plugins, <ROOT>/home/.zcode/cli"
+        }
+      },
+      {
+        "result": {
+          "archive": "<BYTES>",
+          "archiveBytes": "<N>",
+          "marketplaceId": "local-market",
+          "pluginNames": ["a", "b"]
+        }
+      },
+      {
+        "result": {
+          "marketplaceId": "local-market",
+          "path": "<ROOT>/home/.zcode/plugins/marketplace-sources/local-market-b583f4738dfc",
+          "status": "synced"
+        }
+      }
+    ],
+    "files": {
+      "home/.zcode/cli/config.json": "{\n  \"model\": \"keep-me\",\n  \"plugins\": {\n    \"dirs\": [\n      \"<ROOT>/home/plugins/inline-one\"\n    ],\n    \"enabledPlugins\": {\n      \"mk@market\": true\n    }\n  },\n  \"mcp\": {\n    \"servers\": {\n      \"fs\": {\n        \"command\": \"npx\",\n        \"args\": [\n          \"-y\",\n          \"@modelcontextprotocol/server-filesystem\",\n          \"/x\"\n        ],\n        \"enabled\": false\n      },\n      \"legacy\": {\n        \"command\": \"legacy\",\n        \"enabled\": false\n      },\n      \"newsrv\": {\n        \"type\": \"http\",\n        \"url\": \"http://127.0.0.1:9/mcp\"\n      },\n      \"imported\": {\n        \"command\": \"npx\",\n        \"args\": [\n          \"@modelcontextprotocol/server-filesystem\",\n          \"<ROOT>/home/docs\"\n        ]\n      }\n    }\n  },\n  \"hooks\": {\n    \"events\": {\n      \"UserPromptSubmit\": [\n        {\n          \"hooks\": [\n            {\n              \"type\": \"command\",\n              \"command\": \"echo user\",\n              \"enabled\": true\n            }\n          ]\n        }\n      ]\n    }\n  },\n  \"skills\": {\n    \"<ROOT>/home/.agents/skills/delta/SKILL.md\": {\n      \"enable\": false\n    }\n  },\n  \"command\": {\n    \"<ROOT>/home/.zcode/commands/deploy2.md\": {\n      \"enable\": false\n    }\n  }\n}\n",
+      "ws/.zcode/config.json": "{\n  \"hooks\": {\n    \"enabled\": true,\n    \"events\": {\n      \"PreToolUse\": [\n        {\n          \"matcher\": \"Bash\",\n          \"hooks\": [\n            {\n              \"note\": \"x\",\n              \"type\": \"command\",\n              \"command\": \"echo pre\",\n              \"enabled\": true,\n              \"timeout\": 5\n            }\n          ]\n        }\n      ],\n      \"Stop\": [\n        {\n          \"hooks\": [\n            {\n              \"type\": \"process\",\n              \"command\": \"node\",\n              \"enabled\": true,\n              \"args\": [\n                \"a.js\"\n              ],\n              \"timeoutMs\": 1500\n            }\n          ]\n        }\n      ]\n    }\n  },\n  \"mcp\": {\n    \"servers\": {}\n  }\n}\n",
+      "home/.zcode/v2/agents-state.json": "{\n  \"builtInModelOverrides\": {\n    \"Explore\": \"builtin:bigmodel/glm-5\"\n  },\n  \"disabledAgentIds\": [\n    \"user:user:ghost\"\n  ],\n  \"builtInModelSelectionOverrides\": {\n    \"Explore\": {\n      \"providerId\": \"bigmodel-api\",\n      \"modelId\": \"GLM-5\"\n    },\n    \"general-purpose\": {\n      \"providerId\": \"openai\",\n      \"modelId\": \"gpt\",\n      \"options\": {\n        \"reasoningLevel\": \"high\"\n      }\n    }\n  },\n  \"pluginAgentModelSelectionOverrides\": {\n    \"plugin:mk@market:reviewer\": {\n      \"providerId\": \"p\",\n      \"modelId\": \"m\"\n    }\n  }\n}",
+      "home/.zcode/agents/writer.md": "---\nname: writer\ndescription: writer agent\nmodel: zai-api/GLM-4.6 # legacy\nthoughtLevel: high\ncolor: green\n---\nYou are writer.\n",
+      "home/.zcode/commands/deploy.md": null,
+      "home/.zcode/commands/deploy2.md": "---\nother: keep\ndescription: D2\n---\n\nDeploy v2",
+      "home/.zcode/commands/new-cmd.md": null,
+      "ws/.zcode/commands/local.md": "Local command\n",
+      "home/.zcode/v2/skills-audit.log": "{\"createdAt\":\"<T>\",\"workspacePath\":\"<ROOT>/ws\",\"workspaceIdentity\":null,\"activatedSkillNames\":[\"alpha\"]}\n",
+      "ws/.zcode/skills/ws-agents-skill/SKILL.md": "---\nname: ws-agents-skill\ndescription: Agents workspace skill\n---\nBody\n",
+      "home/.zcode/skills/alpha/SKILL.md": null
+    }
+  }
+}

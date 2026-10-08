@@ -144,6 +144,9 @@ pub struct Entry {
     pub is_symlink: bool,
 }
 
+/// `readdir(path, { withFileTypes: true })`。libuv 在 Unix 上用 `scandir(3)` 并按 `strcmp` 排序，
+/// 遍历顺序会进入结果（命令列表、去重的先到先得），所以这里同样按字节序排序；Windows 上两者
+/// 都直接用文件系统给出的顺序。
 pub async fn read_dir(path: &str) -> std::io::Result<Vec<Entry>> {
     let mut reader = fs::read_dir(path).await?;
     let mut entries = Vec::new();
@@ -156,6 +159,8 @@ pub async fn read_dir(path: &str) -> std::io::Result<Vec<Entry>> {
             is_symlink: file_type.is_symlink(),
         });
     }
+    #[cfg(unix)]
+    entries.sort_by(|left, right| left.name.as_bytes().cmp(right.name.as_bytes()));
     Ok(entries)
 }
 

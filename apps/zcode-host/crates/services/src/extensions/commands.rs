@@ -323,13 +323,10 @@ fn discover_user<'a>(
     out: &'a mut Vec<Value>,
 ) -> BoxFuture<'a, ()> {
     Box::pin(async move {
-        let Ok(mut reader) = fs::read_dir(current).await else {
+        let Ok(entries) = fsx::read_dir(current).await else {
             return;
         };
-        let mut names = Vec::new();
-        while let Ok(Some(entry)) = reader.next_entry().await {
-            names.push(entry.file_name().to_string_lossy().into_owned());
-        }
+        let names: Vec<String> = entries.into_iter().map(|entry| entry.name).collect();
         for name in names {
             if name.starts_with('.') {
                 continue;
@@ -370,13 +367,10 @@ fn discover_plugin<'a>(
     out: &'a mut Vec<Value>,
 ) -> BoxFuture<'a, ()> {
     Box::pin(async move {
-        let Ok(mut reader) = fs::read_dir(current).await else {
+        let Ok(entries) = fsx::read_dir(current).await else {
             return;
         };
-        let mut names = Vec::new();
-        while let Ok(Some(entry)) = reader.next_entry().await {
-            names.push(entry.file_name().to_string_lossy().into_owned());
-        }
+        let names: Vec<String> = entries.into_iter().map(|entry| entry.name).collect();
         for name in names {
             if name.starts_with('.') {
                 continue;
