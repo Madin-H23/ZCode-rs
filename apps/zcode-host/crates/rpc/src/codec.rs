@@ -368,7 +368,20 @@ pub struct RpcError {
     /// 透传键 `code`：Host 自身的错误是字符串，CLI 业务错误是 JSON-RPC 数字码。
     pub code: Option<Box<Value>>,
     pub data: Option<Box<Value>>,
+    /// 其余透传键（`kind`、`status`、`retryAfterMs`、`detail`、`details`、`taskId`、`traceId`）。
+    pub fields: Option<Box<Map<String, Value>>>,
 }
+
+/// `ChannelServer` / `ChannelClient` 的 9 个透传键中，除 `code`、`data` 之外的部分。
+const PASSTHROUGH_FIELDS: [&str; 7] = [
+    "kind",
+    "status",
+    "retryAfterMs",
+    "detail",
+    "details",
+    "taskId",
+    "traceId",
+];
 
 impl RpcError {
     pub fn new(name: impl Into<String>, message: impl Into<String>) -> Self {
@@ -377,7 +390,22 @@ impl RpcError {
             message: message.into(),
             code: None,
             data: None,
+            fields: None,
         }
+    }
+
+    /// 设置一个透传键；不是透传键的名字会被忽略（ChannelClient 不会还原它）。
+    pub fn with_field(mut self, key: &str, value: impl Into<Value>) -> Self {
+        if PASSTHROUGH_FIELDS.contains(&key) {
+            self.fields
+                .get_or_insert_with(Default::default)
+                .insert(key.to_owned(), value.into());
+        }
+        self
+    }
+
+    pub fn field(&self, key: &str) -> Option<&Value> {
+        self.fields.as_deref().and_then(|fields| fields.get(key))
     }
 
     pub fn with_code(mut self, code: impl Into<Value>) -> Self {
@@ -407,6 +435,11 @@ impl RpcError {
         }
         if let Some(data) = &self.data {
             object.insert("data".into(), Value::clone(data));
+        }
+        if let Some(fields) = &self.fields {
+            for (key, value) in fields.iter() {
+                object.insert(key.clone(), value.clone());
+            }
         }
         Value::Object(object)
     }
