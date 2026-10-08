@@ -8,7 +8,7 @@ use tokio::fs;
 use tokio::io::AsyncReadExt;
 use zcode_host_kit::{Reply, RpcError, ServiceBuilder};
 
-use super::fsx;
+use super::{bind, fsx};
 use crate::support::collate::locale_compare;
 
 pub const CHANNEL: &str = "memory";
@@ -391,22 +391,16 @@ struct ReadParams {
 }
 
 pub fn service(memory: MemoryService) -> ServiceBuilder {
-    let list = memory.clone();
-    ServiceBuilder::new(CHANNEL)
-        .method("listProjectMemories", move |_, _| {
-            let memory = list.clone();
-            async move { memory.list_project_memories().await.map(Reply::Value) }
-        })
-        .method("readProjectMemoryFile", move |_, args| {
-            let memory = memory.clone();
-            async move {
-                let params: ReadParams = args.get(0, "params")?;
-                memory
-                    .read_project_memory_file(&params.workspace_id, &params.file_name)
-                    .await
-                    .map(Reply::Value)
-            }
-        })
+    let builder = ServiceBuilder::new(CHANNEL);
+    let builder = bind(builder, "listProjectMemories", &memory, |s, _| async move {
+        s.list_project_memories().await.map(Reply::Value)
+    });
+    bind(builder, "readProjectMemoryFile", &memory, |s, p| async move {
+        let params: ReadParams = super::parse_params(p)?;
+        s.read_project_memory_file(&params.workspace_id, &params.file_name)
+            .await
+            .map(Reply::Value)
+    })
 }
 
 #[cfg(all(test, unix))]
