@@ -550,6 +550,49 @@ pub fn resolve(
     }
 }
 
+/// 单个模型的有效配置：内置规则 + 个人精确规则按层覆盖
+/// （`ModelConfigRules.composeEffective(builtin, personal).resolve(...)`）。
+pub fn effective_model_config(
+    builtin_rules: &Value,
+    personal_rules: Option<&Value>,
+    provider_id: &str,
+    template_id: Option<&str>,
+    model_id: &str,
+    api_type: &str,
+    base_url: &str,
+) -> Value {
+    let mut model_rules = rules(builtin_rules, false);
+    if let Some(personal) = personal_rules {
+        model_rules.extend(rules(personal, true));
+    }
+    let base_url = base_url.trim_end_matches('/');
+    let mut effective = json!({});
+    for rule_entry in &model_rules {
+        let value = &rule_entry.value;
+        if value.get("providerId").is_some()
+            && (value["providerId"] != provider_id || value["modelId"] != model_id)
+        {
+            continue;
+        }
+        if value.get("templateId").is_some()
+            && (value["templateId"].as_str() != template_id || value["modelId"] != model_id)
+        {
+            continue;
+        }
+        if rule_entry.model.as_ref().is_some_and(|re| !re.is_match(model_id))
+            || rule_entry.api.as_ref().is_some_and(|re| !re.is_match(api_type))
+            || rule_entry.url.as_ref().is_some_and(|re| !re.is_match(base_url))
+        {
+            continue;
+        }
+        if rule_entry.manual {
+            clear_manual(&mut effective);
+        }
+        overlay(&mut effective, &value["config"]);
+    }
+    effective
+}
+
 fn reasoning_levels(model: &ModelEntry) -> Vec<String> {
     ids(&model.effective_config["optionSpecs"]["reasoningLevel"]["values"])
 }

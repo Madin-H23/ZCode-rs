@@ -3,6 +3,8 @@
 //! 数据源：Main 在 InitLocal 给的内置配置文件，与 `<appConfigDir>/provider_config.json`。
 //! 两个文件内容变化（每秒轮询，与 TS 的 personal 文件轮询节奏相同）时重新解析，revision 加一，
 //! 并触发两个 channel 的 `onDidChange`。未登录：account provider 一律不可用。
+pub mod personal;
+pub mod personal_schema;
 pub mod resolve;
 
 use std::path::{Path, PathBuf};
@@ -42,6 +44,8 @@ struct State {
     personal: Arc<Value>,
     builtin_revision: String,
     builtin_signature: Vec<u8>,
+    /// 个人配置原始字节的 sha256；写入时在锁内核对（membership revision）。
+    personal_revision: String,
     account: Option<Arc<AccountLayer>>,
 }
 
@@ -149,6 +153,13 @@ impl ProviderRuntime {
             }
         };
         let builtin_revision = builtin_revision_of(&builtin, self.inner.builtin_file.as_deref());
+        let personal_revision = {
+            use sha2::Digest;
+            sha2::Sha256::digest(&personal_bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
         let (builtin, personal) = (Arc::new(config_of(&builtin)), Arc::new(config_of(&personal)));
         let builtin_changed = {
             let mut state = self.lock_write();
@@ -157,6 +168,7 @@ impl ProviderRuntime {
             state.builtin = builtin;
             state.personal = personal;
             state.builtin_revision = builtin_revision;
+            state.personal_revision = personal_revision;
             state.signature = signature;
             changed
         };
@@ -225,6 +237,16 @@ impl ProviderRuntime {
         }
         let state = self.lock_read();
         (state.builtin_revision.clone(), state.builtin.clone())
+    }
+
+    /// 原子地取快照与对应的个人配置 revision（写入的 membership 核对用）。
+    pub async fn snapshot_with_personal(&self) -> (u64, Arc<Resolved>, String) {
+        let (revision, resolved) = self.snapshot().await;
+        let state = self.lock_read();
+        if state.revision == revision {
+            return (revision, resolved, state.personal_revision.clone());
+        }
+        (state.revision, state.resolved.clone(), state.personal_revision.clone())
     }
 
     pub fn builtin_changes(&self) -> EventHub<()> {

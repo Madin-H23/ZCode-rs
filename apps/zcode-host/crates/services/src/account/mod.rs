@@ -53,6 +53,7 @@ pub struct AccountStack {
     pub availability: availability::AvailabilityResolver,
     pub providers: account_providers::AccountProviderSource,
     pub official_mcp: official_mcp::OfficialMcpCredentials,
+    pub config_sync: cli::AccountConfigSync,
 }
 
 impl AccountStack {
@@ -94,7 +95,9 @@ impl AccountStack {
             auth.clone(),
             credentials.clone(),
         );
+        let config_sync = cli::AccountConfigSync::new(providers.clone());
         Self {
+            config_sync,
             credentials,
             endpoints,
             api,
@@ -201,11 +204,59 @@ impl AccountStack {
         registry.implement(onboarding::service(records));
     }
 
+    /// provider-settings 的写成员（个人配置）与模型连通性测试；`refresh` 同时刷新账号层。
+    pub fn register_provider_writes(
+        &self,
+        registry: &mut ChannelRegistry,
+        runtime: &ProviderRuntime,
+        agent: &AgentRuntime,
+    ) {
+        let source = self.providers.clone();
+        let refresh: Arc<dyn Fn(String) -> futures_util::future::BoxFuture<'static, ()> + Send + Sync> =
+            Arc::new(move |reason| {
+                let source = source.clone();
+                Box::pin(async move {
+                    let _ = source.refresh(&reason).await;
+                })
+            });
+        let (agent, sync) = (agent.clone(), self.config_sync.clone());
+        let tester: crate::providers::personal::ConnectivityTester = Arc::new(move |input| {
+            let (agent, sync) = (agent.clone(), sync.clone());
+            Box::pin(async move {
+                let target = crate::agent::WorkspaceTarget::from_value(&input)
+                    .map_err(|error| error.message)?;
+                let process = agent
+                    .get_client(&target, crate::agent::RuntimePolicy::StartIfNeeded)
+                    .await
+                    .map_err(|error| error.message)?;
+                sync.sync(&process, "provider_test_model_connectivity")
+                    .await
+                    .map_err(|error| error.message)?;
+                process
+                    .request_value(
+                        "provider/testModelConnectivity",
+                        &json!({
+                            "workspace": target.workspace_ref(),
+                            "selection": {"providerId": input["providerId"], "modelId": input["modelId"]},
+                        }),
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.message)
+            })
+        });
+        registry.implement(crate::providers::personal::writer_service(
+            crate::providers::personal::PersonalWriter::new(runtime.clone()),
+            refresh,
+            Some(tester),
+        ));
+    }
+
     /// CLI 集成：Account Config 同步、反向请求、取消通知与 spawn 环境。
     pub fn attach_agent(&self, runtime: &AgentRuntime, context: &ServiceContext) {
         cli::register(
             runtime,
-            cli::AccountConfigSync::new(self.providers.clone()),
+            self.config_sync.clone(),
             self.auth.clone(),
             self.official_mcp.clone(),
             self.endpoints.clone(),

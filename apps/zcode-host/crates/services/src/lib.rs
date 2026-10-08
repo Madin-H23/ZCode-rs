@@ -233,6 +233,7 @@ pub fn install(
     );
     registry.implement(account::usage_stats_service());
     registry.implement(account::coding_plan_service(providers.clone()));
+    account.register_provider_writes(registry, &providers, &agent);
     account.attach_agent(&agent, &context);
     account.start(broadcaster);
 
