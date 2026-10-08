@@ -11,7 +11,7 @@ use tokio::task::AbortHandle;
 use zcode_host_rpc::codec::{self, RESPONSE_EVENT_FIRE, RESPONSE_PROMISE_SUCCESS};
 use zcode_host_rpc::{RequestKind, RpcError, RpcValue, read_request};
 
-use zcode_host_kit::{CallContext, ChannelRegistry, Reply, log};
+use zcode_host_kit::{CallContext, ChannelRegistry, FlowState, Reply, log};
 
 type Active = Arc<Mutex<HashMap<i32, AbortHandle>>>;
 
@@ -20,6 +20,7 @@ pub(crate) async fn serve(
     mut ready: watch::Receiver<Option<Arc<ChannelRegistry>>>,
     mut inbound: mpsc::UnboundedReceiver<Vec<u8>>,
     outbound: mpsc::UnboundedSender<Vec<u8>>,
+    mut flow: watch::Receiver<FlowState>,
 ) {
     let registry = match ready.wait_for(Option::is_some).await {
         Ok(registry) => registry.clone(),
@@ -32,7 +33,25 @@ pub(crate) async fn serve(
     log::debug(format!("attachment {} initialized", context.attachment_id));
 
     let active: Active = Arc::new(Mutex::new(HashMap::new()));
-    while let Some(message) = inbound.recv().await {
+    // 接入层的积压边沿与请求在同一循环里按到达顺序处理；接入方不观测背压时 flow 永不变化。
+    let mut flow_open = true;
+    loop {
+        let message = tokio::select! {
+            message = inbound.recv() => match message {
+                Some(message) => message,
+                None => break,
+            },
+            changed = flow.changed(), if flow_open => {
+                match changed {
+                    Ok(()) => {
+                        let state = *flow.borrow_and_update();
+                        registry.connection_flow(&context, state);
+                    }
+                    Err(_) => flow_open = false,
+                }
+                continue;
+            }
+        };
         let request = match read_request(&message) {
             Ok(request) => request,
             Err(error) => {
@@ -188,6 +207,7 @@ mod tests {
         ready: watch::Sender<Option<Arc<ChannelRegistry>>>,
         to_server: mpsc::UnboundedSender<Vec<u8>>,
         from_server: mpsc::UnboundedReceiver<Vec<u8>>,
+        flow: watch::Sender<FlowState>,
     }
 
     fn start() -> Harness {
@@ -199,11 +219,13 @@ mod tests {
             attachment_id: "a1".into(),
             client_mode: ClientMode::DesktopContinuous,
         };
-        tokio::spawn(serve(context, ready_rx, inbound, outbound));
+        let (flow, flow_rx) = watch::channel(FlowState::Drained);
+        tokio::spawn(serve(context, ready_rx, inbound, outbound, flow_rx));
         Harness {
             ready,
             to_server,
             from_server,
+            flow,
         }
     }
 
@@ -299,5 +321,53 @@ mod tests {
             .send(request(json!([100, 6, "setting", "get"]), Some(json!([]))))
             .unwrap();
         assert_eq!(next(&mut harness).await.0, json!([202, 6]));
+    }
+
+    /// 记录收到的流控边沿。
+    struct FlowRecorder(Mutex<Vec<(u64, FlowState)>>);
+
+    impl zcode_host_kit::ServiceChannel for FlowRecorder {
+        fn call(
+            &self,
+            _context: &CallContext,
+            _method: &str,
+            _args: Vec<RpcValue>,
+        ) -> zcode_host_kit::CallFuture {
+            Box::pin(async { Ok(Reply::Undefined) })
+        }
+
+        fn listen(
+            &self,
+            _context: &CallContext,
+            _event: &str,
+            _arg: RpcValue,
+        ) -> Result<zcode_host_kit::EventStream, RpcError> {
+            Err(RpcError::new("Error", "no events"))
+        }
+
+        fn connection_flow(&self, context: &CallContext, state: FlowState) {
+            self.0.lock().unwrap().push((context.connection, state));
+        }
+    }
+
+    #[tokio::test]
+    async fn flow_edges_reach_channels_with_the_connection_context() {
+        let mut harness = start();
+        let recorder = Arc::new(FlowRecorder(Mutex::new(Vec::new())));
+        let mut registry = ChannelRegistry::from_contract(contract());
+        registry.register("recorder", recorder.clone());
+        harness.ready.send_replace(Some(Arc::new(registry)));
+        next(&mut harness).await;
+        harness.flow.send_replace(FlowState::Saturated);
+        harness.flow.send_replace(FlowState::Drained);
+        // 之后的请求照常应答；应答到达时，之前的边沿已在同一循环里处理过。
+        harness
+            .to_server
+            .send(request(json!([100, 7, "recorder", "x"]), Some(json!([]))))
+            .unwrap();
+        assert_eq!(next(&mut harness).await.0, json!([201, 7]));
+        let seen = recorder.0.lock().unwrap().clone();
+        assert_eq!(seen.last(), Some(&(1, FlowState::Drained)));
+        assert!(seen.iter().all(|(connection, _)| *connection == 1));
     }
 }

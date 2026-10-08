@@ -3,6 +3,7 @@ import {
   databaseStartupStateSchema,
   databaseStartupPortPayloadSchema,
   serviceEndpointPayloadSchema,
+  hostConnectionStatePayloadSchema,
 } from "@zcode/shared";
 /* eslint-disable max-lines -- preload bridge 集中暴露桌面平台 IPC，拆散会让 contextBridge 权限边界更难审计。 */
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
@@ -843,6 +844,12 @@ ipcRenderer.on(InternalChannels.ServiceEndpoint, (_event, payload: unknown) => {
   const parsed = serviceEndpointPayloadSchema.safeParse(payload);
   if (parsed.success)
     window.postMessage({ type: InternalChannels.ServiceEndpoint, ...parsed.data }, "*");
+});
+// Rust Host 自动重启进度（docs/specs/rust-host-resilience.md §2.1），规则与 ServiceEndpoint 相同。
+ipcRenderer.on(InternalChannels.HostConnectionState, (_event, payload: unknown) => {
+  const parsed = hostConnectionStatePayloadSchema.safeParse(payload);
+  if (parsed.success)
+    window.postMessage({ type: InternalChannels.HostConnectionState, payload: parsed.data }, "*");
 });
 
 ipcRenderer.on(

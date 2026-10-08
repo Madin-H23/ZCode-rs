@@ -123,4 +123,11 @@ impl ServiceChannel for BuiltService {
             fallback.connection_closed(context);
         }
     }
+
+    /// builder 自身不持有下游订阅；流控交给被覆盖的原 channel（例如包在 zcode-agent 外的成员）。
+    fn connection_flow(&self, context: &CallContext, state: crate::FlowState) {
+        if let Some(fallback) = &self.fallback {
+            fallback.connection_flow(context, state);
+        }
+    }
 }

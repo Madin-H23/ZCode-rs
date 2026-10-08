@@ -15,19 +15,20 @@
 //!
 //! 订阅实际工作放在独立任务里：连接关闭会中止调用 future，但 ACK 迟到时仍要反向退订。
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
 use tokio::task::AbortHandle;
 use zcode_host_control::ClientMode;
 use zcode_host_kit::{
-    Args, CallContext, CallFuture, EventHub, EventStream, Reply, RpcError, RpcValue,
+    Args, CallContext, CallFuture, EventHub, EventStream, FlowState, Reply, RpcError, RpcValue,
     ServiceChannel, log, replies,
 };
 
 use super::api::AgentApi;
 use super::extensions::UseReason;
+use super::flow::ConnectionFlow;
 use super::runtime::{
     AgentProcess, AgentRuntime, Frame, FrameKind, RUNTIME_UNAVAILABLE_CODE, RuntimePolicy,
     WorkspaceTarget,
@@ -239,9 +240,57 @@ struct Scope {
     runtime: AgentRuntime,
     api: AgentApi,
     state: Mutex<ScopeState>,
+    /// 流控边沿与 closed 的串行转发（rust-host-resilience.md §2.3）。
+    flow: ConnectionFlow,
 }
 
 impl Scope {
+    fn new(
+        connection_id: String,
+        client_mode: ClientMode,
+        runtime: AgentRuntime,
+        api: AgentApi,
+    ) -> Arc<Self> {
+        Arc::new_cyclic(|weak: &Weak<Scope>| {
+            let weak = weak.clone();
+            let (send_runtime, send_connection) = (runtime.clone(), connection_id.clone());
+            let flow = ConnectionFlow::spawn(
+                move || {
+                    weak.upgrade()
+                        .map(|scope| scope.lock().touched.values().cloned().collect())
+                        .unwrap_or_default()
+                },
+                move |target: WorkspaceTarget, state: &'static str| {
+                    let (runtime, connection_id) = (send_runtime.clone(), send_connection.clone());
+                    async move {
+                        let Some(process) = runtime.existing(&target).await else {
+                            return false;
+                        };
+                        let params = json!({"connectionId": connection_id, "state": state});
+                        match process.request("v4/connection/flow", &params).await {
+                            Ok(_) => true,
+                            Err(error) => {
+                                log::debug(format!(
+                                    "connection flow {state} failed: {}",
+                                    error.message
+                                ));
+                                false
+                            }
+                        }
+                    }
+                },
+            );
+            Scope {
+                connection_id,
+                client_mode,
+                runtime,
+                api,
+                state: Mutex::new(ScopeState::default()),
+                flow,
+            }
+        })
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, ScopeState> {
         self.state
             .lock()
@@ -320,6 +369,8 @@ impl Scope {
             .touched
             .entry(target.key())
             .or_insert_with(|| target.clone());
+        // 连接正处于 saturated 时，新用到的 workspace 也要暂停投递。
+        self.flow.touch(target.clone());
     }
 
     fn begin_pending(&self, kind: FrameKind, workspace_key: &str, topic: &str) -> u64 {
@@ -885,14 +936,8 @@ impl Scope {
         for route in routes.values() {
             route.task.abort();
         }
-        for target in touched.values() {
-            if let Some(process) = self.runtime.existing(target).await {
-                let params = json!({"connectionId": self.connection_id, "state": "closed"});
-                if let Err(error) = process.request("v4/connection/flow", &params).await {
-                    log::debug(format!("connection flow closed failed: {}", error.message));
-                }
-            }
-        }
+        // closed 排在已入队的 saturated / drained 之后（rust-host-resilience.md §2.3）。
+        self.flow.close(touched.values().cloned().collect()).await;
         for entry in &owned {
             let Some(target) = touched.get(&entry.workspace_key) else {
                 continue;
@@ -927,13 +972,12 @@ impl AgentChannel {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .entry(context.connection)
             .or_insert_with(|| {
-                Arc::new(Scope {
-                    connection_id: format!("host-rpc-{}", uuid_v4()),
-                    client_mode: context.client_mode,
-                    runtime: self.runtime.clone(),
-                    api: self.api.clone(),
-                    state: Mutex::new(ScopeState::default()),
-                })
+                Scope::new(
+                    format!("host-rpc-{}", uuid_v4()),
+                    context.client_mode,
+                    self.runtime.clone(),
+                    self.api.clone(),
+                )
             })
             .clone()
     }
@@ -1167,6 +1211,19 @@ impl ServiceChannel for AgentChannel {
                 Some(fallback) => fallback.listen(context, event, arg),
                 None => Err(fault(&format!("Event not found: {event}"))),
             },
+        }
+    }
+
+    fn connection_flow(&self, context: &CallContext, state: FlowState) {
+        // 只转发给已存在的 scope：没调用过 zcode-agent 的连接没有 CLI 订阅可暂停。
+        let scope = self
+            .scopes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&context.connection)
+            .cloned();
+        if let Some(scope) = scope {
+            scope.flow.set_state(state.as_str());
         }
     }
 

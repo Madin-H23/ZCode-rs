@@ -63,6 +63,8 @@ const tests = [
   "packages/client/test/rustHostConnection.test.ts",
   // Main 发起的 MessagePort attachment（web-remote-replayable）经 WebSocket 桥接（rust-host-tasks.md）。
   "packages/desktop/test/rustHostPortBridge.test.ts",
+  // Main 的自动重启策略（纯逻辑，docs/specs/rust-host-resilience.md §2.1）。
+  "packages/desktop/test/rustHostRestartPolicy.test.ts",
 ];
 await run(process.execPath, ["--import", "tsx", "--test", ...tests], {
   ...process.env,

@@ -12,6 +12,7 @@ import {
 } from "electron";
 import type { MessagePortMain, UtilityProcess as ElectronUtilityProcess } from "electron";
 import {
+  type DatabaseStartupState,
   type HostAgentProcessErrorResponse,
   type HostAgentProcessExceptionResponse,
   type HostAgentProcessExitedResponse,
@@ -55,10 +56,11 @@ import { ingestHostSelfResourceSample } from "./processResourceSelfHeapSource.js
 import { createFeedbackLogArchiveFromExportLogs } from "./exportLogs.js";
 import { buildHostE2ECoverageEnv } from "./e2eCoverage.js";
 import {
+  createRustHostEndpointIssuer,
   isRustDesktopHostEnabled,
-  sendRustHostServiceEndpoint,
   spawnRustHostProcess,
 } from "./rustDesktopHost.js";
+import { handleUnexpectedRustHostExit } from "./rustHostRestart.js";
 
 export interface WindowBootstrapOptions {
   restoreSession?: boolean;
@@ -314,6 +316,8 @@ export function spawnHostProcess(
   });
 
   const databaseStartupRelay = bindDatabaseStartupRelay(win, child, hostId);
+  // Rust Host 的 Renderer endpoint 在每次启动尝试 ready 时签发（rust-host-resilience.md §2.2）。
+  let issueRustHostEndpoint: ((state: DatabaseStartupState) => void) | undefined;
   child.on("message", (message: unknown) => {
     const result = hostResponseMessageSchema.safeParse(message);
     if (!result.success) {
@@ -322,6 +326,7 @@ export function spawnHostProcess(
 
     if (result.data.type === HostResponseTypes.DatabaseStartupState) {
       databaseStartupRelay.receive(result.data.state);
+      issueRustHostEndpoint?.(result.data.state);
       return;
     }
 
@@ -733,7 +738,7 @@ export function spawnHostProcess(
         `[spawnHostProcess] Rust Host supports only the window's own renderer attachment (${label})`,
       );
     } else {
-      void sendRustHostServiceEndpoint(
+      issueRustHostEndpoint = createRustHostEndpointIssuer(
         win,
         rustHost,
         databaseStartupRelay.startupId,
@@ -789,11 +794,24 @@ export function spawnHostProcess(
       dependencies.broadcastHub.unregister(windowId);
     }
     unregisterHostProcess(label);
+    let wasWindowHost = false;
     for (const [wcId, process] of dependencies.windowHostProcessMap) {
       if (process === child) {
         dependencies.windowHostProcessMap.delete(wcId);
+        wasWindowHost = true;
         break;
       }
+    }
+    // D2：窗口自己的 Rust Host 未经 dispose 就退出时由 Main 有界自动重启（rust-host-resilience.md §2.1）。
+    // dispose（窗口关闭、App 退出、reload 回退）先登记 disposingHostProcesses，因此不会误触发。
+    if (rustHost && wasWindowHost && !disposingHostProcesses.has(child)) {
+      handleUnexpectedRustHostExit({
+        win,
+        label,
+        code,
+        hasHost: () => dependencies.windowHostProcessMap.has(windowId),
+        logger: dependencies.logger,
+      });
     }
   });
 

@@ -11,6 +11,7 @@ import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 import { app, type BrowserWindow, type MessagePortMain, type UtilityProcess } from "electron";
 import {
+  type DatabaseStartupState,
   type HostIssueAttachmentEndpointMessage,
   HostMessageTypes,
   HostResponseTypes,
@@ -266,4 +267,23 @@ export async function sendRustHostServiceEndpoint(
       error instanceof Error ? error.message : String(error),
     );
   }
+}
+
+/**
+ * 每个启动尝试第一次进入 ready 时签发一次 Renderer endpoint（rust-host-resilience.md §2.2）。
+ * capability 只有 30 s 有效期：在拉起时签发，长迁移或 30 s 后才点重试会拿到过期凭据。
+ */
+export function createRustHostEndpointIssuer(
+  win: BrowserWindow,
+  host: RustHostProcess,
+  databaseStartupId: string,
+  logger: RustHostLogger,
+): (state: DatabaseStartupState) => void {
+  const issuedAttempts = new Set<string>();
+  return (state) => {
+    if (state.startupId !== databaseStartupId || state.phase !== "ready") return;
+    if (issuedAttempts.has(state.attemptId)) return;
+    issuedAttempts.add(state.attemptId);
+    void sendRustHostServiceEndpoint(win, host, databaseStartupId, logger);
+  };
 }

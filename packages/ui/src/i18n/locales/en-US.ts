@@ -112,6 +112,14 @@ const enUS: Record<string, string> = {
   "startup.global.error.unsupported_runtime":
     "The configured Agent does not support storage preparation. Restore the bundled Agent, then reopen ZCode.",
 
+  "startup.hostConnection.reconnecting": "Reconnecting to ZCode services",
+  "startup.hostConnection.help":
+    "ZCode's local service stopped unexpectedly and is restarting. The window will reload when it is ready.",
+  "startup.hostConnection.attempt": "Restart attempt {attempt} of {max}",
+  "startup.hostConnection.failed": "ZCode services stopped",
+  "startup.hostConnection.failedHelp":
+    "The local service stopped repeatedly. Reload to start it again, or exit and reopen ZCode.",
+  "startup.hostConnection.reload": "Reload",
   "startup.database.checking": "Checking history",
   "startup.database.waiting_for_lock": "Waiting for another window to prepare data",
   "startup.database.migrating": "Upgrading history",

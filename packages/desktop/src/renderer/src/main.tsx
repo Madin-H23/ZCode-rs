@@ -37,6 +37,7 @@ import type { Locale } from "@zcode/shared";
 import type { IServiceAccessor } from "@zcode/services";
 import { syncAppTelemetryContext } from "../appTelemetryBridge.js";
 import { createDesktopPlatform } from "./desktopPlatform.js";
+import { createHostConnectionLostView } from "./hostConnectionLost.js";
 import { startPerformanceTimelineCleanup } from "./performanceTimelineCleanup.js";
 import { initializeDesktopUserActionTrace } from "./userActionTraceBootstrap.js";
 import { buildRemoteWorkspaceSessionServices } from "./remoteWorkspaceSessionServices.js";
@@ -168,7 +169,27 @@ const appRoot =
   windowKind === "update-status" ? null : createRoot(document.getElementById("root")!);
 const sendStartupControl = (control: DatabaseStartupControl) =>
   window.postMessage({ type: InternalChannels.DatabaseStartupControl, control }, "*");
+const hostConnectionLost = createHostConnectionLostView({
+  renderShell: (screen) =>
+    appRoot?.render(
+      <AppErrorBoundary isDesktop isMacDesktop={isMacDesktop} isWindowsDesktop={isWindowsDesktop}>
+        <ZCodeIntlProvider
+          initialLocale={initialLocaleFlag ? initialLocale : undefined}
+          resolveSystemLocale={desktopPlatform.getSystemLocale}
+        >
+          {/* 页面刚加载就进入断开状态时，也要通知 HTML 启动壳退场，否则状态页被遮住。 */}
+          <StartupReadyNotifier />
+          {screen}
+        </ZCodeIntlProvider>
+      </AppErrorBoundary>,
+    ),
+  onExit: () => sendStartupControl({ action: "exit" }),
+});
 function renderDatabaseStartup(): void {
+  if (hostConnectionLost.active) {
+    hostConnectionLost.render();
+    return;
+  }
   appRoot?.render(
     <AppErrorBoundary isDesktop isMacDesktop={isMacDesktop} isWindowsDesktop={isWindowsDesktop}>
       <ZCodeIntlProvider
@@ -193,7 +214,7 @@ function renderDatabaseStartup(): void {
   );
 }
 function enterAppIfPrepared(): void {
-  if (appInitialized) return;
+  if (appInitialized || hostConnectionLost.active) return;
   const connector = databaseStartupAdmission.takeReadyConnector();
   if (connector) initializeBusinessRoot(connector);
 }
@@ -276,6 +297,8 @@ function handleServicePortMessage(event: MessageEvent): void {
     return;
   }
 
+  if (hostConnectionLost.handleMessage(event)) return;
+
   if (event.data === InternalChannels.TaskNotificationSound) {
     void playTaskNotificationSound();
     return;
@@ -324,13 +347,21 @@ function initializeBusinessRoot(connector: ServiceConnector): void {
     renderBusinessRoot(connectViaMessagePort(connector.port));
     return;
   }
+  let connected = false;
   void createWebSocketServiceConnection(connector.url, {
     protocols: [
       RUST_HOST_RPC_SUBPROTOCOL,
       `${RUST_HOST_CAPABILITY_SUBPROTOCOL_PREFIX}${connector.capability}`,
     ],
+    // 连上之后的关闭说明 Rust Host 已退出：立即离开不可操作的业务界面，等待 Main 自动重启。
+    onClose: () => {
+      if (connected) hostConnectionLost.onConnectionClosed();
+    },
   }).then(
-    (connection) => renderBusinessRoot(connection.services),
+    (connection) => {
+      connected = true;
+      renderBusinessRoot(connection.services);
+    },
     () => {
       // 握手失败时显示启动失败页，而不是停在空白；reload 窗口会重新签发 endpoint。
       appInitialized = false;

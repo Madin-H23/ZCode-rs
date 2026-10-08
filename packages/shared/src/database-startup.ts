@@ -165,6 +165,22 @@ export const serviceEndpointPayloadSchema = z
   })
   .strict();
 export type ServiceEndpointPayload = z.infer<typeof serviceEndpointPayloadSchema>;
+/**
+ * Rust Host 意外退出后 Main 的自动重启进度（docs/specs/rust-host-resilience.md §2.1）。
+ * restarting：第 attempt 次重启将在 delayMs 后 reload 窗口；failed：已放弃自动重启。
+ */
+export const hostConnectionStatePayloadSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      state: z.literal("restarting"),
+      attempt: z.number().int().positive(),
+      maxAttempts: z.number().int().positive(),
+      delayMs: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z.object({ state: z.literal("failed"), attempts: z.number().int().nonnegative() }).strict(),
+]);
+export type HostConnectionStatePayload = z.infer<typeof hostConnectionStatePayloadSchema>;
 export const databaseStartupControlSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("snapshot") }).strict(),
   z.object({ action: z.literal("exit") }).strict(),
