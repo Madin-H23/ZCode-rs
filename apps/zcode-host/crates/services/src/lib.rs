@@ -19,6 +19,7 @@ pub mod runtime_env;
 pub mod settings;
 pub mod store;
 pub mod system;
+pub mod tasks_index;
 
 use main_bridge::MainBridge;
 

@@ -25,6 +25,13 @@ function run(command, args, env = process.env) {
 }
 
 await run(process.execPath, ["scripts/rust-host/contract-inventory.mjs", "--check"]);
+// tasks-index 的账本 checksum 与对拍 fixture 必须与当前 TS 实现一致（Rust 测试 include_str! 它们）。
+await run(process.execPath, [
+  "--import",
+  "tsx",
+  "scripts/rust-host/tasks-index-fixtures.ts",
+  "--check",
+]);
 await run("cargo", ["fmt", "--all", "--manifest-path", manifest, "--check"]);
 await run("cargo", [
   "clippy",
