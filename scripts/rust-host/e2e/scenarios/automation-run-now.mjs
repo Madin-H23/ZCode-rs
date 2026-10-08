@@ -64,7 +64,9 @@ export async function run({ page, shots, model, home }) {
   if (!created || created.title !== "E2E automation" || created.lifecycle_status !== "active")
     throw new Error(`unexpected automation row: ${JSON.stringify(created)}`);
   if (!created.next_run_at) throw new Error("automation has no next_run_at");
-  console.info(`[e2e] automation created; next run at ${new Date(created.next_run_at).toISOString()}`);
+  console.info(
+    `[e2e] automation created; next run at ${new Date(created.next_run_at).toISOString()}`,
+  );
 
   await card.first().click();
   const runNow = page.getByTestId("automation-run-now");

@@ -44,7 +44,11 @@ export const OPS: Op[] = [
   create("op-1", {}, { serverTicketId: "t-1", queuePosition: 3, registeredAt: BASE_NOW }),
   create("op-2", { workspaceIdentity: " id-b ", boundSessionId: "sess-1" }, { schedulable: true }),
   create("op-3", { boundSessionId: "sess-1", workspaceIdentity: " id-b " }),
-  create("op-4", { modelSelection: { providerId: "p", modelId: "m", options: {} } }, { now: BASE_NOW + 5 }),
+  create(
+    "op-4",
+    { modelSelection: { providerId: "p", modelId: "m", options: {} } },
+    { now: BASE_NOW + 5 },
+  ),
   {
     op: "sql",
     sql: "INSERT INTO tasks (task_id, workspace_key, workspace_path, provider, title, created_at, updated_at) VALUES ('sess-1', 'id-b', '/tmp/ws-b', 'glm', 'Bound session', 1, 1)",
@@ -68,7 +72,12 @@ export const OPS: Op[] = [
   {
     op: "updateSchedulingSnapshot",
     id: "op-1",
-    patch: { schedulable: true, queuePosition: null, nextPollAt: BASE_NOW + 5000, now: BASE_NOW + 14 },
+    patch: {
+      schedulable: true,
+      queuePosition: null,
+      nextPollAt: BASE_NOW + 5000,
+      now: BASE_NOW + 14,
+    },
   },
   {
     op: "updateSchedulingSnapshot",
@@ -77,7 +86,10 @@ export const OPS: Op[] = [
     now: BASE_NOW + 15,
   },
   { op: "listNonTerminal" },
-  { op: "sql", sql: "UPDATE off_peak_tasks SET status = 'running', started_at = 7, conversation_id = 'c-1', claim_running = 1 WHERE off_peak_task_id = 'op-1'" },
+  {
+    op: "sql",
+    sql: "UPDATE off_peak_tasks SET status = 'running', started_at = 7, conversation_id = 'c-1', claim_running = 1 WHERE off_peak_task_id = 'op-1'",
+  },
   { op: "setPaused", id: "op-1", paused: true },
   { op: "markHistoryDeleted", id: "op-2", now: BASE_NOW + 16 },
   { op: "markHistoryDeleted", id: "op-1", now: BASE_NOW + 17 },
@@ -105,7 +117,10 @@ export const OPS: Op[] = [
   { op: "markSettled", id: "op-1", at: BASE_NOW + 24 },
   { op: "markSettled", id: "op-3", at: BASE_NOW + 25 },
   { op: "listUnsettledTerminal" },
-  { op: "sql", sql: "UPDATE off_peak_tasks SET model_selection = 'not json' WHERE off_peak_task_id = 'op-2'" },
+  {
+    op: "sql",
+    sql: "UPDATE off_peak_tasks SET model_selection = 'not json' WHERE off_peak_task_id = 'op-2'",
+  },
   { op: "get", id: "op-2" },
   { op: "delete", id: "op-4" },
   { op: "list" },

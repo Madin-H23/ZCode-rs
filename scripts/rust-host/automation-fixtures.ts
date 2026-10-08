@@ -21,11 +21,11 @@ if (Intl.DateTimeFormat().resolvedOptions().locale !== "en-US") {
 
 const { Cron } = await import("croner");
 const cronModule = await import("../../packages/services/src/session/automationCron.js");
-const { AutomationService } = await import("../../packages/services/src/session/automationService.js");
+const { AutomationService } =
+  await import("../../packages/services/src/session/automationService.js");
 const { AutomationRepo } = await import("../../packages/services/src/session/automationRepo.js");
-const { prepareTasksIndexStorage } = await import(
-  "../../packages/services/src/session/tasksDatabase/startup.js"
-);
+const { prepareTasksIndexStorage } =
+  await import("../../packages/services/src/session/tasksDatabase/startup.js");
 const scenarios = await import("./automation-scenarios.js");
 
 const { DatabaseSync } = createRequire(import.meta.url)(
@@ -252,7 +252,9 @@ async function runServiceScenario(dir: string, scenario: { name: string; ops: Op
     }
     const dumps = {
       automations: db.prepare("SELECT * FROM automations ORDER BY created_at, title").all(),
-      automation_runs: db.prepare("SELECT * FROM automation_runs ORDER BY created_at, run_id").all(),
+      automation_runs: db
+        .prepare("SELECT * FROM automation_runs ORDER BY created_at, run_id")
+        .all(),
     };
     return { ...scenario, results, dumps: normalize(dumps, ids) };
   } finally {

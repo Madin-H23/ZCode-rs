@@ -16,6 +16,7 @@
 //   run(context)           必需；context = { page, shots, model, workspace, home, temp, relaunch }
 //   mockRules              可选；按顺序匹配的 mock 模型规则 { name, match(request), respond(request) }
 //   seed(context)          可选；在启动 App 之前补充隔离 profile（context = { home, workspace, temp }）
+//   env(context)           可选；返回追加给 App 进程树的环境变量（不能覆盖隔离用的 HOME 等键）
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
@@ -197,10 +198,11 @@ async function runScenario(name, cli) {
   const model = await startMockModel(workspace, scenario.mockRules ?? []);
   await seedProfile(home, workspace, model.baseUrl);
   await scenario.seed?.({ home, workspace, temp });
+  const env = (await scenario.env?.({ home, workspace, temp })) ?? {};
   let app;
   let failed = false;
   try {
-    app = await launchApp({ temp, home, cli });
+    app = await launchApp({ temp, home, cli, env });
     if (options.explore) {
       for (let index = 0; index < 8; index += 1) {
         await sleep(4000);
@@ -218,7 +220,7 @@ async function runScenario(name, cli) {
       temp,
       relaunch: async () => {
         await app.stop();
-        app = await launchApp({ temp, home, cli });
+        app = await launchApp({ temp, home, cli, env });
         return app.page;
       },
     });
@@ -263,13 +265,14 @@ async function main() {
 }
 
 /** 启动一个隔离的 Electron 实例并连上它的 renderer 页面。 */
-async function launchApp({ temp, home, cli }) {
+async function launchApp({ temp, home, cli, env = {} }) {
   const cdpPort = await freePort();
   const electronBinary = require("electron");
   const electron = spawn(electronBinary, [".", `--remote-debugging-port=${cdpPort}`], {
     cwd: desktop,
     env: {
       ...process.env,
+      ...env,
       ZCODE_ENV: "production",
       ZCODE_DESKTOP_HOST: "rust",
       ZCODE_AGENT_SERVER_COMMAND: cli,

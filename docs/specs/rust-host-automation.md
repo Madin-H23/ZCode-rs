@@ -39,12 +39,12 @@
 
 ### 2.3 `zcode-agent` 成员
 
-| 成员                                                                                                              | 行为                                                                                                                         |
-| ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `listAutomations(target)` / `listAllAutomations()`                                                                | 按 `created_at` 倒序；前者限定 workspace                                                                                     |
-| `createAutomation` / `updateAutomation`                                                                           | 经 service 校验与重算；update 限定调用方 workspace，找不到时返回 `null`                                                      |
+| 成员                                                                                                             | 行为                                                                                                                        |
+| ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `listAutomations(target)` / `listAllAutomations()`                                                               | 按 `created_at` 倒序；前者限定 workspace                                                                                    |
+| `createAutomation` / `updateAutomation`                                                                          | 经 service 校验与重算；update 限定调用方 workspace，找不到时返回 `null`                                                     |
 | `deleteAutomation` / `setAutomationEnabled` / `restartAutomation` / `deleteAutomationRun` / `listAutomationRuns` | 限定调用方 workspace；restart 只复活 `failed`                                                                               |
-| `runAutomationNow`                                                                                                | 抢到锁返回 `{status:"queued"}` 并在当前 Host 直接派发；锁被占用返回 `{status:"duplicate"}`；automation 不存在也是 duplicate |
+| `runAutomationNow`                                                                                               | 抢到锁返回 `{status:"queued"}` 并在当前 Host 直接派发；锁被占用返回 `{status:"duplicate"}`；automation 不存在也是 duplicate |
 
 这些成员不依赖连接 scope（Node 也不读 connectionId），由 `automation::members` 实现，`agent/service.rs` 的 dispatch 里只有一段委托。
 
@@ -70,12 +70,12 @@ scheduler 是 Main 起的 Node utilityProcess，只读写 tasks-index，经 Main
 
 ## 3. 状态所有者
 
-| 状态                                                          | 唯一所有者                                                                 |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| automation 定义、调度状态、single-flight 锁、run 台账         | tasks-index.sqlite（Rust 经 `TasksIndex` 线程，scheduler 与 Node Host 同库） |
-| 到期判定、认领、重试退避、错过窗口                            | Main 的 scheduler（Node）                                                  |
-| 本 Host 在途运行的终态订阅、manual 续租定时器                 | `automation::dispatch::Dispatcher`（内存，Host 退出即丢；靠锁超时回收）   |
-| 会话、轮次、模型配置                                          | CLI                                                                        |
+| 状态                                                  | 唯一所有者                                                                   |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------- |
+| automation 定义、调度状态、single-flight 锁、run 台账 | tasks-index.sqlite（Rust 经 `TasksIndex` 线程，scheduler 与 Node Host 同库） |
+| 到期判定、认领、重试退避、错过窗口                    | Main 的 scheduler（Node）                                                    |
+| 本 Host 在途运行的终态订阅、manual 续租定时器         | `automation::dispatch::Dispatcher`（内存，Host 退出即丢；靠锁超时回收）      |
+| 会话、轮次、模型配置                                  | CLI                                                                          |
 
 ## 4. 事件顺序
 
@@ -101,14 +101,14 @@ UI runAutomationNow ─► runNow（BEGIN IMMEDIATE 抢锁 + 插 manual run）
 
 ## 5. 有意与 Node 不同之处（automation）
 
-| Node 行为                                                                | Rust Host                                                    | 理由                                                                                 |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| 远端 workspace 的 automation 派发到远端 Host                             | 远端 identity 一律报 `Automation 目标 Remote Host 当前不可用` | 远端 workspace 不在本阶段；与 Node 在远端不可用时的行为相同                           |
-| 会话终态取 task adapter 的 `activePromptInputIds`                        | Dispatcher 自己记录本轮 inputId，只结算自己派发的轮次         | Rust Host 的 zcode-task 还没有 sendPrompt facade；结果相同                            |
-| 终态 `stopped` 从未产生（adapter 只映射 completed / failed）              | 同 Node                                                      | 保真                                                                                 |
-| 派发后上报 `session_create` 遥测                                         | 不上报                                                       | 遥测不在 Rust Host 范围                                                              |
-| `session/create` 旧协议字段兼容重试                                       | 不做                                                         | Rust Host 只配当前 CLI                                                               |
-| `sendConversationCommandV4` 为所有调用方合并 automation 工具 denylist     | 只在 Host 自己派发的 sendText 上合并                         | Renderer 的命令走 `zcode-agent`（agent 区域）；CLI 侧还有 `resolveTurnAutomationId` 兜底 |
+| Node 行为                                                             | Rust Host                                                     | 理由                                                                                     |
+| --------------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 远端 workspace 的 automation 派发到远端 Host                          | 远端 identity 一律报 `Automation 目标 Remote Host 当前不可用` | 远端 workspace 不在本阶段；与 Node 在远端不可用时的行为相同                              |
+| 会话终态取 task adapter 的 `activePromptInputIds`                     | Dispatcher 自己记录本轮 inputId，只结算自己派发的轮次         | Rust Host 的 zcode-task 还没有 sendPrompt facade；结果相同                               |
+| 终态 `stopped` 从未产生（adapter 只映射 completed / failed）          | 同 Node                                                       | 保真                                                                                     |
+| 派发后上报 `session_create` 遥测                                      | 不上报                                                        | 遥测不在 Rust Host 范围                                                                  |
+| `session/create` 旧协议字段兼容重试                                   | 不做                                                          | Rust Host 只配当前 CLI                                                                   |
+| `sendConversationCommandV4` 为所有调用方合并 automation 工具 denylist | 只在 Host 自己派发的 sendText 上合并                          | Renderer 的命令走 `zcode-agent`（agent 区域）；CLI 侧还有 `resolveTurnAutomationId` 兜底 |
 
 ## 6. 闲时任务
 

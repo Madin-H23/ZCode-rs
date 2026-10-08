@@ -275,7 +275,7 @@ async fn gateway_and_client_follow_the_ticket_state_machine() {
     assert_eq!(states, ["expired", "ready", "not_found"]);
     client.settle(&again.ticket_id).await.unwrap();
     let status = client
-        .batch_status(&[again.ticket_id.clone()])
+        .batch_status(std::slice::from_ref(&again.ticket_id))
         .await
         .unwrap();
     assert_eq!(status.tickets[0].state, "settled");
