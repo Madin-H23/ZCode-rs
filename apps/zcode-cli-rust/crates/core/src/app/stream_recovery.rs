@@ -10,7 +10,8 @@ use tokio::sync::oneshot;
 impl Engine {
     /// Node `modelAnomalyGuard` of the effective config (spec §5).
     pub fn with_anomaly_guard(mut self, guard: &Value) -> Self {
-        self.anomaly_guard = crate::domain::model_anomaly::Guard::from_config(guard);
+        self.default_scope_mut().anomaly_guard =
+            crate::domain::model_anomaly::Guard::from_config(guard);
         self
     }
 

@@ -35,9 +35,10 @@ impl Server {
         else {
             return Err(RuntimeError::InvalidParams("clientMode: invalid".into()));
         };
+        // 会话话题带上 attachment 的 workspace：冷加载只接受该 workspace 的会话。
         self.forward(
             Method::TopicOpen,
-            json!({"topic":topic,"base":p["base"]}),
+            json!({"topic":topic,"base":p["base"],"workspace":p["workspace"]}),
             Pending::Subscribe {
                 id,
                 topic,

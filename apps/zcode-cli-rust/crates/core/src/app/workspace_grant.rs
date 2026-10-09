@@ -15,9 +15,8 @@ impl Engine {
     /// `workspace/hooks/trustGrant`: Settings trusts one declaration of the
     /// freshly discovered bundle without a session.
     pub(super) async fn trust_grant(&mut self, p: &Value) -> Result<Value> {
-        let path = p["workspace"]["workspacePath"].as_str();
-        let (Some(path), Some(bundle), Some(digest)) = (
-            path,
+        let (Some(_), Some(bundle), Some(digest)) = (
+            p["workspace"]["workspacePath"].as_str(),
             p["bundleDigest"].as_str(),
             p["hookDeclarationDigest"].as_str(),
         ) else {
@@ -25,12 +24,8 @@ impl Engine {
                 "workspace, bundleDigest and hookDeclarationDigest are required",
             ));
         };
-        let identity = p["workspace"]["workspaceIdentity"]
-            .as_str()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or(path);
-        let outcome = self.grant_declaration(identity, path, bundle, digest).await;
+        let workspace = self.request_workspace(p)?;
+        let outcome = self.grant_declaration(&workspace, bundle, digest).await;
         Ok(match outcome {
             Ok(()) => json!({"accepted": true}),
             Err(code) => json!({"accepted": false, "reasonCode": code}),
@@ -39,19 +34,25 @@ impl Engine {
 
     async fn grant_declaration(
         &mut self,
-        identity: &str,
-        path: &str,
+        workspace: &crate::contract::Workspace,
         bundle: &str,
         digest: &str,
     ) -> Outcome {
         let ports = self.hooks.ports.clone().ok_or(UNREADABLE)?;
-        // 本进程只服务一个工作区：其他工作区的配置无法在此发现。
-        if identity != self.workspace && path != self.workspace_path {
-            return Err(UNREADABLE);
-        }
-        let config = ports.config.load().await.map_err(|_| UNREADABLE)?;
-        let snapshot =
-            workspace::discover(&config, identity, &self.workspace_path).ok_or(UNREADABLE)?;
+        // 请求的 workspace 的配置：作用域按需打开（不限于进程 cwd）。
+        self.open_scope(workspace).await.map_err(|_| UNREADABLE)?;
+        let source = self
+            .scope(&workspace.key)
+            .ok()
+            .and_then(|scope| scope.config.clone())
+            .ok_or(UNREADABLE)?;
+        let root = self
+            .scope(&workspace.key)
+            .map_err(|_| UNREADABLE)?
+            .workspace
+            .clone();
+        let config = source.load().await.map_err(|_| UNREADABLE)?;
+        let snapshot = workspace::discover(&config, &root.key, &root.path).ok_or(UNREADABLE)?;
         if snapshot.bundle_digest != bundle {
             return Err("workspace_hooks_bundle_changed");
         }

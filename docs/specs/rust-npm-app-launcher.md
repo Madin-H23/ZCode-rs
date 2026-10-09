@@ -44,7 +44,7 @@ Node bridge 不派生脱离 Host 进程组的进程；父进程退出、EOF、EP
 
 桥接使用独立管道转发原始字节，bridge 意外退出会关闭 Rust stdin，避免直接继承 Host 文件描述符后遗留运行时。macOS 按 executable 的加载记录判断已有 App，不能依赖被 `process.title` 改写的进程名。
 
-当前限制：工作区路径必须使用真实路径。3.14.3 Host 不显式传递原始 `--cwd`，符号链接别名可能与 Rust 从 cwd 得到的路径不同，导致 workspace identity mismatch。启动器不通过改写 identity 或合并旧会话掩盖此问题；首版验收和发布说明必须保留这一边界。
+0.1.0 的限制：工作区路径必须使用真实路径。3.14.3 Host 不显式传递原始 `--cwd`，符号链接别名可能与 Rust 从 cwd 得到的路径不同，导致 workspace identity mismatch。启动器不通过改写 identity 或合并旧会话掩盖此问题；首版验收和发布说明必须保留这一边界。Rust CLI 改为按请求解析 workspace 后（[rust-cli-architecture.md](rust-cli-architecture.md)「Workspace 作用域」），别名路径作为它自己的 workspace key 服务，不再失败；同一物理目录的别名与真实路径仍是两个 workspace，会话按各自的 key 隔离。
 
 ## 分发与验收
 

@@ -133,16 +133,24 @@ async fn listing_and_index_read_node_session_rows() {
         json!({"workspacePath": "/w", "workspaceKey": "/w"})
     );
     assert_eq!(projected["titleSource"], "first_input");
-    let loaded = store.load_session("/w", "sess_1").await.unwrap().unwrap();
+    let loaded = store
+        .load_session(Some("/w"), "sess_1")
+        .await
+        .unwrap()
+        .unwrap();
     assert!(loaded.node.created);
     assert_eq!(loaded.title, "Hello there");
     assert!(
         store
-            .load_session("/other", "sess_1")
+            .load_session(Some("/other"), "sess_1")
             .await
             .unwrap()
             .is_none()
     );
+    // 不限 workspace 的按 id 加载保留库中的 key 与路径（V4 会话话题冷加载）。
+    let any = store.load_session(None, "sess_1").await.unwrap().unwrap();
+    assert_eq!(any.workspace, "/w");
+    assert_eq!(any.workspace_path.as_deref(), Some("/w"));
     store.discard_draft("/w", "sess_2", None).await.unwrap();
     assert!(store.load("/w").await.is_err());
 }

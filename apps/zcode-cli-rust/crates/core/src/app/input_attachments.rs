@@ -8,9 +8,11 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 impl Engine {
+    /// `root` is the session's workspace path: relative local refs resolve
+    /// against it, not the process cwd.
     pub(super) async fn prepare_attachments(
         &self,
-        id: &str,
+        (id, root): (&str, &str),
         p: &mut Value,
         selection: &ModelIdentity,
     ) -> Result<BTreeMap<String, StoredAttachment>> {
@@ -73,7 +75,7 @@ impl Engine {
                 let path = if original.starts_with("file://") {
                     original.to_owned()
                 } else {
-                    std::path::Path::new(&self.workspace_path)
+                    std::path::Path::new(root)
                         .join(original)
                         .to_string_lossy()
                         .into_owned()

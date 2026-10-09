@@ -116,16 +116,19 @@ impl Engine {
         };
         match grant {
             Grant::Project(updates) => {
-                let rules = policy::apply_updates(&self.permissions.project_rules, &updates);
+                // 项目规则属于工具所在会话的 workspace。
+                let key = self.session_scope(&owner)?.workspace.key.clone();
+                let rules =
+                    policy::apply_updates(&self.scope(&key)?.permissions.project_rules, &updates);
                 let value = serde_json::to_value(&rules)?;
                 // 与 Node permission-flow 一致：规则写入失败时交互仍按允许解决，但工具不执行，
                 // 模型收到存储错误；内存规则保持旧值，避免重启后授权凭空消失。
                 match self
                     .store
-                    .save_project_setting(&self.workspace, "permission", "ruleset", &value)
+                    .save_project_setting(&key, "permission", "ruleset", &value)
                     .await
                 {
-                    Ok(()) => self.permissions.project_rules = Arc::new(rules),
+                    Ok(()) => self.scope_mut(&key)?.permissions.project_rules = Arc::new(rules),
                     Err(error) => {
                         tracing::warn!(
                             target: "zcode::permission",

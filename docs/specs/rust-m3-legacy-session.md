@@ -75,7 +75,7 @@ sequenceDiagram
 
 ### 3.2 字段语义
 
-- **`workspace`**：必须指向本 runtime 的工作区（身份 key 与路径一致），否则 `-32603 Workspace identity mismatch`；结果中原样回显（裁剪后），不重算 `workspaceKey`。
+- **`workspace`**：会话属于该 workspace（key = `workspaceIdentity?.trim() || workspacePath`，路径 = `workspacePath`），工具与配置按它解析；`session/resume` 只恢复该 workspace 的会话，key 不一致按不存在处理（[rust-cli-architecture.md](rust-cli-architecture.md)「Workspace 作用域」）。结果中原样回显（裁剪后），不重算 `workspaceKey`。
 - **`sessionId`**：新建为 `sess_<uuid v4>`。
 - **`mode`**：创建参数 → 项目偏好 → 配置 `permission.mode` → `build`，再经 `ExecutionState::resolve`（`plan` 即 `{build, planEnabled: true}`）。不写项目偏好。
 - **`model` 与 `thoughtLevel`**：

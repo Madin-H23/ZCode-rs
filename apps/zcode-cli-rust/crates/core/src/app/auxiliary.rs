@@ -13,10 +13,13 @@ pub(super) struct Auxiliary {
     pub plugin_operation: Option<String>,
     /// A generated title job: its result goes to the session, not a reply.
     pub title: Option<Box<super::session_title::TitleJob>>,
+    /// The workspace the job serves (provider headers requests name it).
+    pub workspace: crate::contract::Workspace,
 }
 impl Engine {
     pub(super) fn start_auxiliary(&mut self, request: &Call) -> Result<()> {
-        self.validate_workspace(&request.params)?;
+        // 生成文本按请求的 workspace 发起鉴权（TS 每个 workspace App 一个 headers port）。
+        let workspace = self.request_workspace(&request.params)?;
         ensure!(self.auxiliary.len() < 16, "Too many workspace requests");
         let p = &request.params;
         let selected = self.select(&json!({"modelSelection":p["selection"]}), None)?;
@@ -73,6 +76,7 @@ impl Engine {
                 operation,
                 plugin_operation: None,
                 title: None,
+                workspace,
             },
         );
         let sink = EventSink {
@@ -119,7 +123,7 @@ impl Engine {
                 reply,
             } if !self.auxiliary[&id].cancel.is_cancelled() && !reply.is_closed() => {
                 let request_id = format!("rust-auth-{}", self.clock.id());
-                let workspace = json!({"workspaceKey":self.workspace,"workspacePath":self.workspace_path,"workspaceIdentity":self.workspace});
+                let workspace = super::model_config::auth_workspace(&self.auxiliary[&id].workspace);
                 let params = json!({"requestId":request_id,"sessionId":id,"workspace":workspace,"providerId":provider,"modelSelection":selection,"accountAccess":access,"reason":"model-request"});
                 self.waiters.add_host(
                     request_id.clone(),

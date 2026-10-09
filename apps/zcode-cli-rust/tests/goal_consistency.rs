@@ -32,7 +32,7 @@ impl SessionStore for Store {
     async fn load(&self, _: &str) -> Result<(Vec<Session>, BTreeMap<String, Value>)> {
         Ok((vec![], BTreeMap::new()))
     }
-    async fn load_session(&self, _: &str, _: &str) -> Result<Option<Session>> {
+    async fn load_session(&self, _: Option<&str>, _: &str) -> Result<Option<Session>> {
         let mut session = Session::new(
             "session".into(),
             "workspace".into(),
@@ -129,7 +129,7 @@ async fn goal_start_and_verdict_are_durable_barriers_and_failure_stops_the_next_
             let (gate, mut gates) = mpsc::unbounded_channel();
             let (calls, mut requests) = mpsc::unbounded_channel();
             let engine = Engine::new(
-                "workspace".into(),
+                "workspace",
                 Some(ModelIdentity {
                     provider_id: "p".into(),
                     model_id: "m".into(),

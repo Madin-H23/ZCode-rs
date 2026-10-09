@@ -137,6 +137,27 @@ async fn core_chat_flow_against_rust_cli() {
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(serve_mock_model(listener));
 
+    // 真实 workspace 的项目配置：一个 inline 插件与一个停用的 MCP server。控制面 lane 的
+    // cwd 是 plugin-workspace，只能按请求里的 workspace 读到它们。
+    let plugin_dir = home.path().join("plugins-src/host-demo");
+    std::fs::create_dir_all(plugin_dir.join(".zcode-plugin")).unwrap();
+    std::fs::write(
+        plugin_dir.join(".zcode-plugin/plugin.json"),
+        json!({"name": "host-demo", "version": "1.0.0", "description": "Seeded plugin"})
+            .to_string(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(workspace.path().join(".zcode")).unwrap();
+    std::fs::write(
+        workspace.path().join(".zcode/config.json"),
+        json!({
+            "plugins": {"dirs": [plugin_dir.to_string_lossy()]},
+            "mcp": {"servers": {"seeded": {"type": "stdio", "command": "never-started", "enabled": false}}},
+        })
+        .to_string(),
+    )
+    .unwrap();
+
     let config_dir = home.path().join(".zcode/v2");
     std::fs::create_dir_all(&config_dir).unwrap();
     let personal = config_dir.join("provider_config.json");
@@ -435,51 +456,53 @@ async fn core_chat_flow_against_rust_cli() {
     )
     .await;
     assert!(usage.is_object(), "{usage}");
-    // 插件与 MCP 走两个控制面 lane（工作目录在临时 home 下）。Rust CLI 只接受自己 cwd 的
-    // workspace 参数，所以这里用控制面工作目录本身作为目标（TS CLI 接受任意 workspace）。
+    // 插件与 MCP 走两个控制面 lane（工作目录在临时 home 下），真实 workspace 只作为请求参数，
+    // 两个 lane 的 CLI 同时存活（同一 cwd，无工作区锁）。
+    let plugins = call(
+        &channel,
+        &context,
+        "listPlugins",
+        json!({"workspacePath": workspace_path}),
+    )
+    .await;
+    let seeded = plugins["plugins"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{plugins}"))
+        .iter()
+        .find(|plugin| plugin["id"] == "host-demo@inline")
+        .unwrap_or_else(|| panic!("seeded plugin missing: {plugins}"));
+    assert_eq!(seeded["rootSource"], "workspace", "{seeded}");
+    let mcp = call(
+        &channel,
+        &context,
+        "listMcpServerStatuses",
+        json!({"workspacePath": workspace_path}),
+    )
+    .await;
+    assert_eq!(mcp["statuses"]["seeded"]["status"], "disabled", "{mcp}");
+    // status 模式读同一 workspace 最近一次 connect 的结果。
+    let status = call(
+        &channel,
+        &context,
+        "listMcpServerStatuses",
+        json!({"workspacePath": workspace_path, "mode": "status"}),
+    )
+    .await;
+    assert_eq!(
+        status["statuses"]["seeded"]["status"], "disabled",
+        "{status}"
+    );
     let plugin_workspace = home
         .path()
         .join(".zcode/plugin-workspace")
         .to_string_lossy()
         .into_owned();
-    let plugins = call(
-        &channel,
-        &context,
-        "listPlugins",
-        json!({"workspacePath": plugin_workspace}),
-    )
-    .await;
-    assert!(plugins.is_object(), "{plugins}");
-    // Rust CLI 对同一 cwd 持有独占锁，两个控制面 lane 不能同时存活（TS CLI 没有这个限制）：
-    // 先回收 plugin lane，再在 mcp-status lane 上查询。
-    let plugin_target = WorkspaceTarget::local(plugin_workspace.clone());
-    let plugin_process = api.plugin.existing(&plugin_target).await.unwrap();
+    let lane_target = WorkspaceTarget::local(plugin_workspace);
+    let plugin_process = api.plugin.existing(&lane_target).await.unwrap();
     assert!(plugin_process.runtime_identity().get("lane").is_none());
-    api.plugin.dispose_workspace(&plugin_target).await;
-    let mut mcp = Value::Null;
-    for _ in 0..50 {
-        match channel
-            .call(
-                &context,
-                "listMcpServerStatuses",
-                args(json!({"workspacePath": plugin_workspace, "mode": "status"})),
-            )
-            .await
-        {
-            Ok(Reply::RawJson(raw)) => {
-                mcp = serde_json::from_str(&raw).unwrap();
-                break;
-            }
-            Ok(Reply::Value(value)) => {
-                mcp = value;
-                break;
-            }
-            _ => tokio::time::sleep(Duration::from_millis(200)).await,
-        }
-    }
-    assert!(mcp.is_object(), "{mcp}");
-    let mcp_process = api.mcp.existing(&plugin_target).await.unwrap();
+    let mcp_process = api.mcp.existing(&lane_target).await.unwrap();
     assert_eq!(mcp_process.runtime_identity()["lane"], "mcp-status");
+    assert!(!plugin_process.client.is_closed());
     let children = call(
         &channel,
         &context,
@@ -488,8 +511,20 @@ async fn core_chat_flow_against_rust_cli() {
     )
     .await;
     let children = children.as_array().unwrap();
-    assert_eq!(children.len(), 2, "{children:?}");
-    assert!(children.iter().any(|entry| entry["lane"] == "mcp-status"));
+    assert_eq!(children.len(), 3, "{children:?}");
+    // chat 在真实 workspace；plugin-management（不带 lane 字段，同 Node）与 mcp-status 都在
+    // plugin-workspace，两者同时存活。
+    let at = |path: &str, lane: Option<&str>| {
+        children.iter().any(|entry| {
+            entry["workspacePath"] == path && entry.get("lane").and_then(Value::as_str) == lane
+        })
+    };
+    assert!(at(&workspace_path, None), "{children:?}");
+    assert!(at(&lane_target.workspace_path, None), "{children:?}");
+    assert!(
+        at(&lane_target.workspace_path, Some("mcp-status")),
+        "{children:?}"
+    );
     // legacy 会话：草稿创建后条件关闭。
     let draft = call(
         &channel,

@@ -41,6 +41,7 @@ mod tool_definitions;
 mod tool_edit;
 mod tool_files;
 mod tool_process;
+mod tool_runtime;
 mod tool_search;
 mod tool_shell;
 mod tool_skills;

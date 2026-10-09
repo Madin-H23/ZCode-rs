@@ -285,14 +285,14 @@ get_client(target)：进程 applied < latest.v ─► lock(prefs) ─► 推 lat
 | `generateWorkspaceText` 只在调用方带 AbortSignal 时生成 operationId 并在 abort 时取消 | 总是带 operationId；调用 future 被丢弃时取消                                                | RPC 调用方无法传 AbortSignal；调用方已离开时继续生成只浪费模型调用                                                                                                                   |
 | `zcode-agent.initialize` 失败结果                                                     | 同 Node：带 `protocolName` / `protocolVersion`                                              | R2 曾省略，这里补齐                                                                                                                                                                  |
 
-### 5.1 Rust CLI 的已知限制（CLI 侧，Node Host 同样受影响）
+### 5.1 Rust CLI 与控制面 lane（已解决）
 
-E2E 与集成测试用的是 Rust CLI；它与两个控制面 lane 的组合有两处不兼容，均不在 Host 范围内（CLI 与协议不改）：
+E2E 与集成测试用的是 Rust CLI。它与两个控制面 lane 的组合原有两处不兼容，2026-10-09 起已在 CLI 侧解决（Host 与协议不改，见 [rust-cli-architecture.md](rust-cli-architecture.md)「Workspace 作用域」）：
 
-1. Rust CLI 只接受自己 cwd 对应的 workspace 参数（`validate_workspace`：`Workspace identity mismatch`）。控制面 lane 的 cwd 是 `plugin-workspace`，UI 传真实 workspace 时 `plugins/*`、`mcp/list` 失败。TS CLI 接受任意 workspace，按协议参数做 workspace-scope 判定。
-2. Rust CLI 对同一 cwd 持有独占锁（`Workspace runtime is already owned or cannot be locked`），plugin-management 与 mcp-status 两个 lane 不能同时存活。
+1. 原先 Rust CLI 只接受自己 cwd 对应的 workspace（`Workspace identity mismatch`）。现在与 TS CLI 一样按请求参数解析 workspace：控制面 lane 的 cwd 是 `plugin-workspace`，`plugins/*`、`mcp/list` 按 UI 传入的真实 workspace 读取配置与文件。
+2. 原先 Rust CLI 对同一 cwd 持有独占锁，plugin-management 与 mcp-status 两个 lane 不能同时存活。锁已删除，会话归属与 Node 一样只由 Host owner/lease 保证，两个 lane 可同时存活。
 
-集成测试因此以 `plugin-workspace` 本身为目标，并先回收 plugin lane 再查询 MCP；插件商店、MCP 设置页的桌面 E2E 要等 Rust CLI 支持后再加。
+集成测试以真实 workspace 为目标、两个 lane 同时存活；桌面 E2E `agent-plugins-mcp` 覆盖插件页与 MCP 设置页。
 
 ## 6. 验收
 
@@ -306,7 +306,8 @@ E2E 与集成测试用的是 Rust CLI；它与两个控制面 lane 的组合有�
   - legacy 会话事件：seq 补号、去重、replay 先于 live、合并规则；
   - 会话库准备：协议、reuse、失败分类、首帧超时；
   - zcode-session：草稿不写库、API 重试运行态、filesystem MCP 追加。
-- `cargo test -p zcode-host-services --test agent_cli`（真实 Rust CLI + 本地 mock 模型）：legacy createSession / readSession、workspace-config 订阅、插件列表（plugin lane）、MCP 状态（mcp-status lane）、技能目录、`--prepare-storage`。
+- `cargo test -p zcode-host-services --test agent_cli`（真实 Rust CLI + 本地 mock 模型）：legacy createSession / readSession、workspace-config 订阅、插件列表（plugin lane，真实 workspace 的项目插件）、MCP 状态（mcp-status lane，真实 workspace 的项目 MCP 配置，两个 lane 同时存活）、技能目录、`--prepare-storage`。
 - `cargo test -p zcode-host --test agent_startup`（真实 Rust CLI）：Host 启动依次经过 `preparing_host_storage`、`preparing_session_storage`（首帧 checking，最后一个目录 `finalDatabase:true`）、`starting_services`、`ready`。
 - `pnpm exec tsx scripts/rust-host/agent-schema-fixtures.ts --check`：Rust 的 TTFT / telemetry / CUA 校验与 TS zod 对拍样本一致（`scripts/rust-host/test.mjs` 先跑它）。
 - 桌面 E2E `agent-subsystem`：Main 的启动状态镜像在 `ready` 时带会话库的 `migrationBaselines`（经过了 `preparing_session_storage`）；Composer 输入 `/` 后菜单列出 workspace 技能（`getSkillReferenceCatalog` 经 chat lane），菜单项可点击。`core` 场景回归通过。
+- 桌面 E2E `agent-plugins-mcp`：隔离 profile 预置用户级 marketplace 插件、workspace 项目插件与项目 stdio MCP server；设置页「Plugins」列出两个插件（plugin-management lane 按真实 workspace 读取），「MCP」页的 server 行由 mcp-status lane 探测为 connected、工具数 1。

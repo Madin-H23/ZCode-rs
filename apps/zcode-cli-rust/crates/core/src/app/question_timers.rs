@@ -128,7 +128,8 @@ impl Engine {
         Ok(())
     }
     pub(super) async fn interaction_preferences(&mut self, p: &Value) -> Result<Value> {
-        self.validate_workspace(p)?;
+        // 交互偏好是进程级（Node 相同）；workspace 只校验引用形状。
+        self.named_workspace(p)?;
         let enabled = p["preferences"]["askUserQuestionAutoResolutionEnabled"]
             .as_bool()
             .context("Invalid interaction preferences")?;

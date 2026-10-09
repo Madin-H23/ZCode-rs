@@ -7,7 +7,5 @@ mod node_store;
 mod node_store_ports;
 mod usage;
 mod usage_query;
-mod workspace_lock;
 pub use node_store::NodeStore;
-pub use workspace_lock::lock_workspace;
 use zcode_cli_host::id;

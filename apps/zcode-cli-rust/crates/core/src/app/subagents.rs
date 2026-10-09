@@ -102,9 +102,10 @@ impl Engine {
         };
         let output_file = self.tools.agent_output(&child, "").await?;
         self.tools.inherit_session(parent, &child).await?;
+        // 子代理继承父会话的 workspace（工具、权限与配置都按它解析）。
         let mut session = Session::new(
             child.clone(),
-            self.workspace.clone(),
+            self.sessions[parent].workspace.clone(),
             selection.provider_id,
             selection.model_id,
             selection.reasoning_level,
@@ -123,7 +124,7 @@ impl Engine {
         session.listed = false;
         session.title = args["description"].as_str().unwrap().into();
         session.title_source = "custom".into();
-        session.workspace_path = Some(self.workspace_path.clone());
+        session.workspace_path = self.sessions[parent].workspace_path.clone();
         session.skills = self.sessions[parent].skills.clone();
         session.prompt_snapshot = self.sessions[parent].prompt_snapshot.clone();
         session.agent_profile = Some(profile.clone());
@@ -225,7 +226,10 @@ impl Engine {
             }
             self.tools.cancel_session(&task.child_id, None).await?;
         } else if name == "SendMessage" {
-            self.ensure_session(&task.child_id).await?;
+            // 子代理会话属于父会话的 workspace。
+            let workspace = Self::session_workspace(&self.sessions[parent]);
+            self.ensure_session_in(&task.child_id, Some(&workspace))
+                .await?;
             let id = self.clock.id();
             let content = format!(
                 "{}\n\n{}",

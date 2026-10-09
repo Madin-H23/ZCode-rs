@@ -110,8 +110,9 @@ impl Engine {
             super::goal_commands::validate_objective(replay.payload["text"].as_str().unwrap())?;
         }
         let selected = self.select(&replay.payload, Some(self.session_selection(id)?))?;
+        let root = self.session_scope(id)?.workspace.path.clone();
         let assets = self
-            .prepare_attachments(id, &mut replay.payload, &selected)
+            .prepare_attachments((id, &root), &mut replay.payload, &selected)
             .await?;
         if c.payload["workspaceMode"] == "rewind" {
             let preview = self
@@ -265,12 +266,10 @@ impl Engine {
         let mut ack = c.ack("accepted", self.sessions[parent].revision, None);
         ack["result"] = json!({"type":"forkAssistant","sessionId":id});
         // 新 session 与父命令的幂等 ACK 在同一事务中提交；故障不得留下可重复创建的分支。
+        // 分支是父会话的克隆，workspace key 与路径随之继承。
+        let workspace = child.workspace.clone();
         self.store
-            .commit_receipt(
-                &self.workspace,
-                Some(&mut child),
-                Some((c.key(), ack.clone())),
-            )
+            .commit_receipt(&workspace, Some(&mut child), Some((c.key(), ack.clone())))
             .await
             .context(StorageCommitFailure)?;
         self.durable_acks.insert(c.key());
@@ -278,7 +277,7 @@ impl Engine {
         self.tools.inherit_session(parent, &id).await?;
         let summary = child.summary();
         self.sessions.insert(id.clone(), child);
-        self.publish_index(&id, Some(summary))?;
+        self.publish_index(&workspace, &id, Some(summary))?;
         Ok(ack)
     }
     pub(super) fn history_snapshot(&mut self, id: &str) -> Result<()> {

@@ -4,9 +4,11 @@ use anyhow::{Result, ensure};
 use tokio_util::sync::CancellationToken;
 
 impl Engine {
-    pub(super) fn start_mcp_query(&mut self, request: &Call) -> Result<()> {
-        self.validate_workspace(&request.params)?;
+    pub(super) async fn start_mcp_query(&mut self, request: &Call) -> Result<()> {
+        // 状态探测按请求的 workspace：路径作工作目录、配置从该 workspace 读取。
+        let workspace = self.request_workspace(&request.params)?;
         ensure!(self.auxiliary.len() < 16, "Too many auxiliary requests");
+        self.open_scope(&workspace).await?;
         let id = format!("mcp-query:{}", self.clock.id());
         let cancel = CancellationToken::new();
         self.auxiliary.insert(
@@ -17,6 +19,7 @@ impl Engine {
                 operation: None,
                 plugin_operation: None,
                 title: None,
+                workspace: workspace.clone(),
             },
         );
         let sink = EventSink {
@@ -26,7 +29,7 @@ impl Engine {
             origin: crate::contract::RequestOrigin::detached(self.clock.id()),
             request_auth: None,
         };
-        let tools = self.tools.clone();
+        let tools = self.scope(&workspace.key)?.tools.clone();
         let params = request.params.clone();
         tokio::spawn(async move {
             let result = tools.mcp_list(&params, &cancel).await;

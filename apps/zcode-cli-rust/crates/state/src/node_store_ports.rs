@@ -52,8 +52,8 @@ impl crate::contract::SessionStore for NodeStore {
         self.request(|reply| Request::List(params.clone(), reply))
             .await
     }
-    async fn load_session(&self, workspace: &str, id: &str) -> Result<Option<Session>> {
-        self.request(|reply| Request::Load(workspace.into(), id.into(), reply))
+    async fn load_session(&self, workspace: Option<&str>, id: &str) -> Result<Option<Session>> {
+        self.request(|reply| Request::Load(workspace.map(str::to_owned), id.into(), reply))
             .await
     }
     async fn subagent_facts(

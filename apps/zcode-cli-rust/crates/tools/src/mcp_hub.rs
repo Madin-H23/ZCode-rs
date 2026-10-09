@@ -5,7 +5,7 @@ use futures_util::{StreamExt, stream};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
 use tokio_util::sync::CancellationToken;
@@ -32,13 +32,19 @@ struct State {
     overrides: BTreeMap<String, Value>,
     connections: BTreeMap<String, Arc<Connection>>,
     bindings: BTreeMap<String, Vec<Binding>>,
-    statuses: BTreeMap<String, Value>,
+    /// Server statuses of the latest prepare and the workspace root it served.
+    statuses: (PathBuf, BTreeMap<String, Value>),
 }
+/// The workspace view a hub call serves: its root, configuration and official
+/// MCP identity (spec rust-cli-architecture, Workspace 作用域).
+pub(super) struct Scope<'a> {
+    pub cwd: &'a Path,
+    pub config: &'a dyn crate::contract::ConfigSource,
+    pub official: &'a Arc<super::official_auth::OfficialAuth>,
+}
+/// MCP connections of the process, shared by every workspace view.
 pub(super) struct Hub {
-    cwd: PathBuf,
-    config: std::sync::Arc<dyn crate::contract::ConfigSource>,
     egress: Arc<zcode_cli_net::Egress>,
-    pub official: Arc<super::official_auth::OfficialAuth>,
     state: RwLock<State>,
     gate: tokio::sync::Mutex<()>,
     stop: CancellationToken,
@@ -53,24 +59,19 @@ impl Hub {
         state.borrowed.insert(child.into());
     }
     pub fn new(
-        cwd: PathBuf,
-        config: std::sync::Arc<dyn crate::contract::ConfigSource>,
         egress: Arc<zcode_cli_net::Egress>,
         sink: Option<super::mcp_telemetry::ProcessSink>,
     ) -> Self {
         Self {
             telemetry: Arc::new(super::mcp_telemetry::Tracker::new(sink)),
-            official: super::official_auth::OfficialAuth::for_workspace(&egress, &cwd),
-            cwd,
-            config,
             egress,
             state: Default::default(),
             gate: Default::default(),
             stop: CancellationToken::new(),
         }
     }
-    pub fn configure(&self, session: &str, servers: &Value) -> Result<()> {
-        mcp_config::explicit(servers, &self.cwd)?;
+    pub fn configure(&self, cwd: &Path, session: &str, servers: &Value) -> Result<()> {
+        mcp_config::explicit(servers, cwd)?;
         self.state
             .write()
             .unwrap()
@@ -102,13 +103,14 @@ impl Hub {
     }
     pub async fn definitions(
         &self,
+        scope: &Scope<'_>,
         session: &str,
         cancel: &CancellationToken,
     ) -> Result<Vec<Value>> {
         let overrides = self.state.read().unwrap().overrides.get(session).cloned();
         let borrowed = self.state.read().unwrap().borrowed.contains(session);
         if !borrowed {
-            self.prepare(session, overrides.as_ref(), false, cancel)
+            self.prepare(scope, session, overrides.as_ref(), false, cancel)
                 .await?;
         }
         Ok(self
@@ -122,20 +124,38 @@ impl Hub {
             .map(|b| b.definition.clone())
             .collect())
     }
-    pub async fn list(&self, p: &Value, cancel: &CancellationToken) -> Result<Value> {
+    /// `mcp/list` of one workspace. Connect mode converges the process-wide
+    /// `mcp-status` lease on that workspace (Node `protocol-settings` lease,
+    /// replace semantics); status mode only reports that workspace's latest
+    /// prepare and nothing for another workspace.
+    pub async fn list(
+        &self,
+        scope: &Scope<'_>,
+        p: &Value,
+        cancel: &CancellationToken,
+    ) -> Result<Value> {
         if p["mode"] == "status" {
-            return Ok(json!({"statuses":self.state.read().unwrap().statuses}));
+            return Ok(json!({"statuses":self.statuses(scope.cwd)}));
         }
         ensure!(
             p.get("mode").is_none_or(|v| v == "connect"),
             "Invalid MCP list mode"
         );
-        self.prepare("mcp-status", p.get("mcpServers"), true, cancel)
+        self.prepare(scope, "mcp-status", p.get("mcpServers"), true, cancel)
             .await?;
-        Ok(json!({"statuses":self.state.read().unwrap().statuses}))
+        Ok(json!({"statuses":self.statuses(scope.cwd)}))
+    }
+    fn statuses(&self, cwd: &Path) -> BTreeMap<String, Value> {
+        let state = self.state.read().unwrap();
+        if state.statuses.0 == cwd {
+            state.statuses.1.clone()
+        } else {
+            BTreeMap::new()
+        }
     }
     async fn prepare(
         &self,
+        scope: &Scope<'_>,
         session: &str,
         overrides: Option<&Value>,
         refresh: bool,
@@ -150,20 +170,21 @@ impl Hub {
             relay_cancel.cancel();
         });
         let result = self
-            .prepare_inner(session, overrides, refresh, &request_cancel)
+            .prepare_inner(scope, session, overrides, refresh, &request_cancel)
             .await;
         relay.abort();
         result
     }
     async fn prepare_inner(
         &self,
+        scope: &Scope<'_>,
         session: &str,
         overrides: Option<&Value>,
         refresh: bool,
         cancel: &CancellationToken,
     ) -> Result<()> {
-        let config = self.config.load().await?;
-        let configs = tokio::select! {biased;_=cancel.cancelled()=>anyhow::bail!("Cancelled"),result=mcp_config::configured(&self.cwd,&config.config,overrides,cancel)=>result?};
+        let config = scope.config.load().await?;
+        let configs = tokio::select! {biased;_=cancel.cancelled()=>anyhow::bail!("Cancelled"),result=mcp_config::configured(scope.cwd,&config.config,overrides,cancel)=>result?};
         let mut bindings = vec![];
         let mut statuses = BTreeMap::new();
         let mut names = BTreeSet::new();
@@ -196,7 +217,7 @@ impl Hub {
                     match transport {
                         Ok(transport) => {
                             let telemetry = (&self.telemetry, key.as_str());
-                            Connection::open(&server, transport, &self.official, cancel, telemetry)
+                            Connection::open(&server, transport, scope.official, cancel, telemetry)
                                 .await
                                 .map(|c| Some(Arc::new(c)))
                         }
@@ -294,7 +315,7 @@ impl Hub {
         {
             let mut state = self.state.write().unwrap();
             state.bindings.insert(session.into(), bindings);
-            state.statuses = statuses;
+            state.statuses = (scope.cwd.to_owned(), statuses);
         }
         self.prune().await?;
         if let Some(error) = cleanup_failure {

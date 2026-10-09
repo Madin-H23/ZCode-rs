@@ -101,20 +101,20 @@ impl Engine {
             return cached.clone();
         }
         let cancel = tokio_util::sync::CancellationToken::new();
-        let events = self
-            .tools
-            .plugin_hooks(&cancel)
-            .await
-            .unwrap_or_else(|error| {
-                // 插件发现失败时本会话只运行用户 hooks，不中断会话。
-                tracing::warn!(
-                    target: "zcode::hooks",
-                    event = "plugin_hook.discovery_failed",
-                    error = %format!("{error:#}"),
-                    "Plugin hooks could not be discovered"
-                );
-                vec![]
-            });
+        // 插件按会话所属 workspace 的配置发现。
+        let tools = self
+            .session_tools(id)
+            .unwrap_or_else(|_| self.tools.clone());
+        let events = tools.plugin_hooks(&cancel).await.unwrap_or_else(|error| {
+            // 插件发现失败时本会话只运行用户 hooks，不中断会话。
+            tracing::warn!(
+                target: "zcode::hooks",
+                event = "plugin_hook.discovery_failed",
+                error = %format!("{error:#}"),
+                "Plugin hooks could not be discovered"
+            );
+            vec![]
+        });
         let configured = (!events.is_empty()).then(|| {
             let merged = crate::domain::hooks::merge_plugin_hooks(&self.hooks.user_config, &events);
             crate::domain::hooks::registrations(&merged, Some(&self.hooks.user_path)).into()
@@ -202,14 +202,17 @@ impl Engine {
         if !updates.is_empty() {
             // 与 Node permission-flow 一致：hook 给出的 permissionUpdates 写入项目规则；
             // 写入失败时交互仍解决，工具以存储错误失败。
-            let rules = policy::apply_updates(&self.permissions.project_rules, &updates);
+            // 项目规则属于工具所在会话的 workspace。
+            let key = self.session_scope(&owner)?.workspace.key.clone();
+            let rules =
+                policy::apply_updates(&self.scope(&key)?.permissions.project_rules, &updates);
             let value = serde_json::to_value(&rules)?;
             match self
                 .store
-                .save_project_setting(&self.workspace, "permission", "ruleset", &value)
+                .save_project_setting(&key, "permission", "ruleset", &value)
                 .await
             {
-                Ok(()) => self.permissions.project_rules = Arc::new(rules),
+                Ok(()) => self.scope_mut(&key)?.permissions.project_rules = Arc::new(rules),
                 Err(error) => {
                     tracing::warn!(
                         target: "zcode::permission",

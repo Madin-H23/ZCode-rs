@@ -448,7 +448,7 @@ R1–R6 按领域拆成子规格，由并行的分支实现后合入 `feat/rust-
 
 契约覆盖（2026-10-09）：491 个成员中，有意保留 stub 的只有 legacy 快照成员（`getTaskSnapshot` 等）、依赖它的 `setAssistantMessageFeedback`，以及 Node 本地 Host 同样不注册的 `provider-provisioning-target`，原因见 [rust-host-tasks.md](rust-host-tasks.md)。
 
-已知限制（不在 Host 范围）：Rust CLI 只接受自身 cwd 对应的 workspace，且对同一 cwd 持独占锁，因此 plugin-management / mcp-status lane 配 Rust CLI 时不可用；Node Host 配 Rust CLI 同样如此，见 [rust-host-agent.md](rust-host-agent.md) §5.1。
+原先的 Rust CLI 限制（只接受自身 cwd 的 workspace、对同一 cwd 持独占锁，plugin-management / mcp-status lane 不可用）已在 CLI 侧解决，见 [rust-host-agent.md](rust-host-agent.md) §5.1。
 
 ## 6. 风险
 

@@ -21,6 +21,7 @@ mod tool_hooks;
 mod turn_hooks;
 mod workspace_grant;
 mod workspace_review;
+mod workspace_scope;
 mod workspace_trust;
 
 mod compaction;

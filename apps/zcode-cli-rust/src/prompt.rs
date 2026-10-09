@@ -189,9 +189,6 @@ async fn run(prompt: PromptArgs, cwd: PathBuf) -> anyhow::Result<i32> {
     watch_signals(interrupt_tx);
     let data_dir = prompt.data_dir.as_ref().map(PathBuf::from);
     let ctx = runtime::Context::prepare(Some(cwd.clone()), data_dir).await?;
-    // 与 app-server 相同的工作区所有权：同一工作区只能有一个 Rust runtime 写入。
-    let _owner =
-        zcode_cli_state::lock_workspace(ctx.data_dir.clone(), ctx.workspace.clone()).await?;
     let store: std::sync::Arc<dyn zcode_cli_core_api::SessionStore> =
         std::sync::Arc::new(ctx.node_store().await?);
     let config = prompt.config.as_ref().map(PathBuf::from);

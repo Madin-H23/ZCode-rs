@@ -15,9 +15,10 @@ const TASK_LIST_TYPES: [&str; 3] = ["interactive", "fork", "workflow_parent"];
 impl Engine {
     pub(super) async fn list_sessions(&self, p: &Value) -> Result<Value> {
         let params = ListParams::parse(p)?;
+        let default = &self.default_scope().workspace;
         let records = self
             .store
-            .list_sessions(&params, (&self.workspace, &self.workspace_path))
+            .list_sessions(&params, (&default.key, &default.path))
             .await?;
         let mut sessions = records
             .iter()

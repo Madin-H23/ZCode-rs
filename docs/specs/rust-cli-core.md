@@ -53,7 +53,7 @@ sequenceDiagram
 - session state 只有 Rust actor 可写。异步执行返回事件，不直接修改会话。
 - 同 session 接纳串行，不在等待模型/权限时阻塞 stdio reader；不同 session 可执行并行。
 - 队列仅属于 Rust 进程，重启丢弃并可查询 discarded 结果；不能把已排队内容误恢复为已执行对话。
-- 身份 key 为 `workspaceIdentity.trim() || workspacePath`；文件和 Shell 使用 cwd。拒绝跨 workspace 读取。
+- 身份 key 为 `workspaceIdentity.trim() || workspacePath`；文件和 Shell 使用会话所属 workspace 的路径。workspace 由请求给出，进程 cwd 只是缺省值；按 key 隔离会话、列表与订阅（[rust-cli-architecture.md](rust-cli-architecture.md)「Workspace 作用域」）。
 - ACK 仅表示接纳，不表示 turn 完成。去重以 `(workspace, sessionId, commandId)` 为边界，重试不能重复副作用。
 - stop 必须校验可选 execution id；取消传播到 HTTP/工具/权限等待。迟到事件按 runId 丢弃。
 - SIGTERM/SIGINT 即使发生在 output channel 背压时也能进入收口；退出时最多等待 stdout drain 两秒，Host 已停止读管道时报告失败退出，不无限 join writer。
@@ -103,7 +103,7 @@ sequenceDiagram
 
 ## 验证状态
 
-补充核心一致性约束：同一 data-dir、workspace identity 同时只允许一个会话 runtime 持有 OS 文件锁；存储准备入口不抢占 runtime。第二个 runtime 必须在恢复历史前失败，进程退出后锁由 OS 释放。首次输入落库时同时保存 draft 的 create ACK；重启后重复 create 不得产生第二个会话。队列编辑和 setAutoDrain 按共享协议强制要求 baseRevision。工具投影按当前 turn 和 toolCallId 联合定位，供应商跨 turn 复用 ID 不得覆盖旧行。
+补充核心一致性约束：Rust 进程不持有工作区文件锁，会话的 live 归属只由 Host owner/lease 保证（2026-10-09 起，原 data-dir 工作区锁已删除，见 [rust-cli-architecture.md](rust-cli-architecture.md)「Workspace 作用域」规则 11）。首次输入落库时同时保存 draft 的 create ACK；重启后重复 create 不得产生第二个会话。队列编辑和 setAutoDrain 按共享协议强制要求 baseRevision。工具投影按当前 turn 和 toolCallId 联合定位，供应商跨 turn 复用 ID 不得覆盖旧行。
 
 - 已确认当前 checkout 无既有 CLI 单测/E2E 目录，不能引用其他分支历史覆盖。
 - 实现前 `pnpm architecture:check --changed`：0 violations。

@@ -95,7 +95,7 @@ flowchart LR
 - **domain**（无 IO）：Node 记录构造器（消息、part、entry、输入账本、会话行），按 Node 键序生成 JSON；冷投影与历史还原的纯函数。
 - **core**：Session actor 在与 Node 相同的时机调用 `NodeJournal`，把待写记录排入会话；`persist` 把排队的写操作连同其他耐久事实交给存储。行与模型上下文仍是运行时内存状态。
 - **state**：存储 worker 持有唯一连接，按顺序执行写操作。一次 `persist` 在一个 `begin immediate` 事务中提交。冷加载读取 Node 表并调用 domain 的冷投影。
-- **进程间**：只依赖 SQLite 锁（WAL、`busy_timeout`、`begin immediate`），与 Node 相同。同一会话的 live 归属由 Host owner/lease 负责，不在库中加锁。
+- **进程间**：只依赖 SQLite 锁（WAL、`busy_timeout`、`begin immediate`），与 Node 相同。同一会话的 live 归属由 Host owner/lease 负责，不在库中加锁，Rust 进程也不再持有工作区文件锁；同一 cwd 可同时运行多个 Rust 进程。
 
 ## 4. Rust 状态到 Node 记录的映射
 
@@ -168,11 +168,11 @@ flowchart LR
 
 - **NodeJournal**（domain，纯函数、无 IO）挂在 `Session.node`：记住当前轮与当前模型步骤的 Node id（用户消息、assistant 消息、各 part、工具 part 的声明序号与开始时间），在与 Node 相同的时机按 Node 写入模板生成记录，排入待写队列。
 - **NodeStore**（state）实现 core 的 `SessionStore`：一次 `commit` 把会话的待写队列在一个 `begin immediate` 事务里交给 M11.1 的仓储函数；`load_index`、`list_sessions`、`load_session`、`lookup_ack` 走 §6、§7 的冷读取；用量写入 Node 的 `model_usage`/`turn_usage`/`tool_usage`；项目设置写 `local_setting`。
-- 唯一实现：M11.5 起 `app-server` 与 `-p` 都只使用 NodeStore，数据库与产物根按 §2.1 解析（`zcode_cli_host::storage_paths`）；旧存储、导入与 `--node-storage` 开关已删除。data dir 只放工作区 owner 锁（`workspace-<sha256>.lock`）与 Rust 工具缓存。
+- 唯一实现：M11.5 起 `app-server` 与 `-p` 都只使用 NodeStore，数据库与产物根按 §2.1 解析（`zcode_cli_host::storage_paths`）；旧存储、导入与 `--node-storage` 开关已删除。data dir 只放 Rust 工具缓存，不放锁：原工作区 owner 锁（`workspace-<sha256>.lock`）已删除，会话 live 归属只由 Host owner/lease 保证（§3、§9）。
 - 开关：`SessionStore::node_journal()` 只有 NodeStore 为 true。测试替身为 false 时引擎不调用任何 NodeJournal 钩子。记录范围是根会话与已存在于库中的子会话（fork、子代理）。
 - id：新会话 `sess_<uuid>`（NodeStore 时）；消息与 part 用 Node 格式（毫秒 36 进制 + uuid）；`anchor.turnId` 为 `turn_<轮 uuid>`。
 - 提交：`commit` 取出会话的待写队列，在 worker 上以一个 `begin immediate` 事务执行；失败时整批写操作放回 `Session.node`，下一次提交重试，不丢失也不重复。`ack` 参数不落库（Node 不持久化回执，§7）。
-- 读取：`load_index` 为 §6.2 的冷种子；`list_sessions` 按 §6.2 过滤后以 `path ?? directory` 构造工作区引用；`load_session` 只返回本工作区（`workspaceID.trim() || path || directory` 等于引擎的 workspace identity）的会话，按 §6.1 恢复，并把 `admitted` 输入结算为 `discarded/session_resumed`；`zcode-artifact://` 按 Node `NodeToolArtifactStore` 的目录规则读取（文本产物按 UTF-8，其余 base64）。冷读取另算活动分支的上下文用量（Node `contextUsageFromPersistedMessages`：最近压缩摘要的压缩后计数，否则最后一个 assistant 的 `tokens.total` 或 `input + output`），引擎载入后按会话模型的窗口写入 `usage.contextWindow{usedTokens, maxTokens, autoCompactThresholdTokens: null}`（Node 冷用量种子）；冷行投影本身不带窗口（store 不持有模型 registry）。
+- 读取：`load_index` 为 §6.2 的冷种子；`list_sessions` 按 §6.2 过滤后以 `path ?? directory` 构造工作区引用；`load_session(workspace, id)` 只返回该工作区（`workspaceID.trim() || path || directory` 等于给出的 key）的会话；引擎用请求指明的 workspace，未指明时用默认 workspace（[rust-cli-architecture.md](rust-cli-architecture.md)「Workspace 作用域」规则 5），会话带库中的 key 与路径（`path ?? directory`）；按 §6.1 恢复，并把 `admitted` 输入结算为 `discarded/session_resumed`；`zcode-artifact://` 按 Node `NodeToolArtifactStore` 的目录规则读取（文本产物按 UTF-8，其余 base64）。冷读取另算活动分支的上下文用量（Node `contextUsageFromPersistedMessages`：最近压缩摘要的压缩后计数，否则最后一个 assistant 的 `tokens.total` 或 `input + output`），引擎载入后按会话模型的窗口写入 `usage.contextWindow{usedTokens, maxTokens, autoCompactThresholdTokens: null}`（Node 冷用量种子）；冷行投影本身不带窗口（store 不持有模型 registry）。
 - 项目设置：`permission/ruleset` 以 core 的 `projectIdFromDirectory`（空 slug 为 `session`）为 scope id，`permission/mode` 以 bootstrap 的同名函数（空 slug 为 `default`）为 scope id，两者都带 `proj_` 前缀，与 Node 两处写入方一致。
 - 用量写入 Node 的 `model_usage`、`turn_usage`、`tool_usage`。
 - 附件（M11.4h）：提示附件只存 Node 产物，不再有 Rust 自己的内容寻址目录，见 §5.3。
@@ -487,6 +487,7 @@ createSession 的全局查找按 `queue_<commandId>` 读取输入行（Node `loo
 - 每个进程一个连接，由存储 worker 串行使用；事务内不跨越异步等待。
 - 多语句写入使用 `begin immediate`；`sequence` 与账本序号在写语句内分配。
 - 跨进程的读后写（`updateSession`、输入历史去重）与 Node 保持相同的竞争窗口。
+- 没有进程锁：一个会话同一时间只由一个 live runtime 持有，由 Host owner/lease 保证，Rust 与 Node 相同。会话级恢复（`admitted` 输入结算、中断收口、未完成的文件回退事务）只在会话被加载进本进程时做，启动时不扫描其他会话。已接受的风险：终端 `zcode -p --resume <id>` 对桌面正在运行的会话没有保护（冷加载会把对方 `admitted` 的输入结算为 discarded、把未收口的运行标为中断），与 TS CLI 相同。
 
 ## 10. 分期
 

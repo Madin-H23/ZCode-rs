@@ -261,6 +261,7 @@ impl Engine {
                 operation: None,
                 plugin_operation: None,
                 title: Some(Box::new(job)),
+                workspace: Self::session_workspace(&self.sessions[id]),
             },
         );
         // Node 的标题请求沿用触发轮次的 queryId（网络状态与遥测据此归属）。

@@ -28,7 +28,7 @@ impl SessionStore for Store {
     async fn load(&self, _: &str) -> Result<(Vec<Session>, BTreeMap<String, Value>)> {
         Ok((vec![], BTreeMap::new()))
     }
-    async fn load_session(&self, _: &str, _: &str) -> Result<Option<Session>> {
+    async fn load_session(&self, _: Option<&str>, _: &str) -> Result<Option<Session>> {
         let mut session = Session::new(
             "parent".into(),
             "workspace".into(),
@@ -129,7 +129,7 @@ async fn child_start_and_result_require_both_owners_to_commit_and_failure_releas
             let (gate, mut gates) = mpsc::unbounded_channel();
             let (calls, mut requests) = mpsc::unbounded_channel();
             let engine = Engine::new(
-                "workspace".into(),
+                "workspace",
                 Some(ModelIdentity {
                     provider_id: "p".into(),
                     model_id: "m".into(),

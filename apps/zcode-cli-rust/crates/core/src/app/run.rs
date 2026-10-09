@@ -113,7 +113,11 @@ impl Engine {
         history.agent_profile = session.agent_profile.clone();
         history.tool_disallowlist = submission.tool_disallowlist;
         history.tool_filter = session.runtime.tools.clone();
-        history.anomaly_guard = self.anomaly_guard;
+        history.anomaly_guard = self
+            .scopes
+            .get(&session.workspace)
+            .context("Workspace scope unavailable")?
+            .anomaly_guard;
         history.compact_failures = session.runtime.compact_failures;
         // Node turnNumber：本轮输入之前已有用户消息（或已压缩）即非首轮。
         let users = session
@@ -148,8 +152,9 @@ impl Engine {
             history.plugin_references = crate::domain::plugin_reference::extract(text);
         }
         let turn_hooks = self.turn_hooks(id, &turn_id, submission.prompt, &identity);
-        let context = self.context.clone();
-        let tools = self.tools.clone();
+        // 运行使用会话所属 workspace 的端口：工具根目录、提示上下文与配置都来自它。
+        let scope = self.session_scope(id)?;
+        let (context, tools) = (scope.context.clone(), scope.tools.clone());
         let sink = Sink {
             session_id: id.into(),
             run_id,
@@ -223,12 +228,14 @@ impl Engine {
         } else {
             "startup"
         };
+        // hook 进程的 cwd 与工具端口取会话所属的 workspace。
+        let scope = self.scopes.get(&session.workspace)?;
         let hooks = super::hook_runner::Hooks {
             registrations: self.hooks.user.clone(),
             admission: None,
-            tools: self.tools.clone(),
+            tools: scope.tools.clone(),
             clock: self.clock.clone(),
-            cwd: self.workspace_path.clone(),
+            cwd: scope.workspace.path.clone(),
             turn_id: turn.into(),
         };
         Some(super::turn_hooks::TurnHooks {

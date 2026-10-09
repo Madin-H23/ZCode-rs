@@ -32,10 +32,10 @@ pub(super) struct HookState {
     pub without: BTreeSet<String>,
 }
 
+/// The shared trust store; each workspace scope supplies its own config source.
 #[derive(Clone)]
 pub(super) struct TrustPorts {
     pub store: Arc<dyn TrustStorePort>,
-    pub config: Arc<dyn ConfigSource>,
     pub app_version: Option<String>,
 }
 
@@ -67,19 +67,31 @@ impl WorkspaceTrust {
 }
 
 impl Engine {
-    /// App-server: project hooks are admitted through the shared trust store.
+    /// App-server: project hooks are admitted through the shared trust store;
+    /// `config` is the startup workspace's layered configuration (other
+    /// workspaces bring theirs with their scope).
     pub fn with_workspace_trust(
         mut self,
         store: Arc<dyn TrustStorePort>,
         config: Arc<dyn ConfigSource>,
         app_version: Option<String>,
     ) -> Self {
-        self.hooks.ports = Some(TrustPorts {
-            store,
-            config,
-            app_version,
-        });
+        self.default_scope_mut().config = Some(config);
+        self.hooks.ports = Some(TrustPorts { store, app_version });
         self
+    }
+
+    /// The config source and workspace of session `id`'s scope; `None` when
+    /// the scope has no layered configuration.
+    pub(super) fn session_config(
+        &self,
+        id: &str,
+    ) -> Result<Option<(Arc<dyn ConfigSource>, crate::contract::Workspace)>> {
+        let scope = self.session_scope(id)?;
+        Ok(scope
+            .config
+            .clone()
+            .map(|config| (config, scope.workspace.clone())))
     }
 
     /// Node `activate`: the first run of a session in this process discovers
@@ -93,10 +105,13 @@ impl Engine {
             if self.hooks.without.contains(id) {
                 return Ok(None);
             }
-            let config = ports.config.load().await?;
-            let Some(snapshot) =
-                workspace::discover(&config, &self.workspace, &self.workspace_path)
-            else {
+            // 项目 hooks 从会话所属 workspace 的配置发现，不用进程 cwd。
+            let Some((source, root)) = self.session_config(id)? else {
+                self.hooks.without.insert(id.into());
+                return Ok(None);
+            };
+            let config = source.load().await?;
+            let Some(snapshot) = workspace::discover(&config, &root.key, &root.path) else {
                 self.hooks.without.insert(id.into());
                 return Ok(None);
             };

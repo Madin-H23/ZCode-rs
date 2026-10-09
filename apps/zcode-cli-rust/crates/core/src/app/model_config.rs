@@ -259,7 +259,6 @@ impl Engine {
         )
     }
     pub(super) fn refresh_catalog(&mut self) -> Result<()> {
-        self.config_seq += 1;
         self.config = self.registry.as_ref().and_then(|r| r.default_selection());
         self.publish_config();
         Ok(())
@@ -310,7 +309,12 @@ impl Engine {
             return;
         }
         let request_id = format!("rust-auth-{}", self.clock.id());
-        let workspace = json!({"workspaceKey":self.workspace,"workspacePath":self.workspace_path,"workspaceIdentity":self.workspace});
+        // 鉴权请求带会话所属的 workspace（TS 每个 workspace App 的 provider headers port）。
+        let workspace = self.sessions.get(id).map_or_else(
+            || self.default_scope().workspace.clone(),
+            Self::session_workspace,
+        );
+        let workspace = auth_workspace(&workspace);
         let params = json!({"requestId":request_id,"sessionId":id,"turnId":turn,"workspace":workspace,"providerId":provider,"modelSelection":selection,"accountAccess":access,"reason":"model-request"});
         self.waiters.add_host(
             request_id.clone(),
@@ -326,4 +330,10 @@ impl Engine {
             params,
         });
     }
+}
+
+/// The workspace of a provider headers request: the key is also sent as
+/// `workspaceIdentity`, as the Host has always received it.
+pub(super) fn auth_workspace(workspace: &crate::contract::Workspace) -> Value {
+    json!({"workspaceKey":workspace.key,"workspacePath":workspace.path,"workspaceIdentity":workspace.key})
 }

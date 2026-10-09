@@ -34,10 +34,19 @@ impl Official {
     }
 }
 
-pub(super) struct OfficialAuth {
+/// The Host channel every workspace view shares.
+struct HostChannel {
     events: OnceLock<mpsc::Sender<RunEvent>>,
     sequence: AtomicU64,
     env: zcode_cli_net::RuntimeEnv,
+}
+
+/// Identity headers for the official servers of one workspace view.
+pub(super) struct OfficialAuth {
+    host: std::sync::Arc<HostChannel>,
+    /// A request workspace's ref; `None` for the startup view, which names the
+    /// env identity and the Host's path.
+    workspace: Option<Value>,
     /// The Host's workspace path (the engine's), else the tools working directory.
     workspace_path: OnceLock<String>,
     cwd: String,
@@ -94,12 +103,25 @@ pub(super) fn trusted(
 impl OfficialAuth {
     pub fn new(env: zcode_cli_net::RuntimeEnv, workspace_path: String) -> Self {
         Self {
-            events: OnceLock::new(),
-            sequence: AtomicU64::new(0),
-            env,
+            host: std::sync::Arc::new(HostChannel {
+                events: OnceLock::new(),
+                sequence: AtomicU64::new(0),
+                env,
+            }),
+            workspace: None,
             workspace_path: OnceLock::new(),
             cwd: workspace_path,
         }
+    }
+
+    /// The same Host channel for another workspace (`workspace` is its ref).
+    pub fn view(&self, workspace: Value, cwd: String) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            host: self.host.clone(),
+            workspace: Some(workspace),
+            workspace_path: OnceLock::new(),
+            cwd,
+        })
     }
 
     pub fn for_workspace(
@@ -111,17 +133,17 @@ impl OfficialAuth {
     }
 
     pub fn attach(&self, events: mpsc::Sender<RunEvent>, workspace_path: &str) {
-        let _ = self.events.set(events);
+        let _ = self.host.events.set(events);
         let _ = self.workspace_path.set(workspace_path.to_owned());
     }
 
     /// Whether a Host channel exists (standalone runs have none).
     pub fn attached(&self) -> bool {
-        self.events.get().is_some()
+        self.host.events.get().is_some()
     }
 
     fn env(&self, key: &str) -> Option<&str> {
-        self.env.get(key)
+        self.host.env.get(key)
     }
 
     /// The current ZCode API origin (Node `resolveRuntimeZCodeEndpointOrigin`).
@@ -139,6 +161,9 @@ impl OfficialAuth {
     }
 
     fn workspace(&self) -> Value {
+        if let Some(workspace) = &self.workspace {
+            return workspace.clone();
+        }
         let identity = self
             .env(IDENTITY_ENV)
             .map(str::trim)
@@ -154,10 +179,10 @@ impl OfficialAuth {
     /// Node `resolveHeaders`: any transport failure or malformed reply is
     /// `official_auth_unavailable`; the caller dropping the future abandons the wait.
     pub async fn headers(&self, official: &Official, target_origin: &str) -> Headers {
-        let Some(events) = self.events.get() else {
+        let Some(events) = self.host.events.get() else {
             return Err(UNAVAILABLE);
         };
-        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed) + 1;
+        let sequence = self.host.sequence.fetch_add(1, Ordering::Relaxed) + 1;
         let params = json!({"mcpKey":official.mcp_key,"pluginId":official.plugin_id,
             "requestId":format!("official-mcp-auth:{sequence}"),"targetOrigin":target_origin,
             "workspace":self.workspace()});

@@ -116,21 +116,6 @@ fn journal_path(root: &Path, session: &str) -> PathBuf {
     root.join("checkpoints/journals")
         .join(format!("{}.json", blobs::hash(session.as_bytes())))
 }
-pub(super) async fn pending(root: &Path) -> Result<Vec<String>> {
-    let mut dir = match tokio::fs::read_dir(root.join("checkpoints/journals")).await {
-        Ok(d) => d,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
-        Err(e) => return Err(e.into()),
-    };
-    let mut ids = vec![];
-    while let Some(entry) = dir.next_entry().await? {
-        if entry.path().extension().is_some_and(|x| x == "json") {
-            let j = read_journal(&entry.path()).await?;
-            ids.push(j.session);
-        }
-    }
-    Ok(ids)
-}
 async fn read_journal(path: &Path) -> Result<Journal> {
     ensure!(
         tokio::fs::metadata(path).await?.len() <= 8 * 1024 * 1024,

@@ -93,7 +93,10 @@ impl Engine {
         let now = self.clock.now();
         let interaction = format!("workspace-hook-interaction:{}", self.clock.id());
         let new_flow = format!("workspace-hook-review:{}", self.clock.id());
-        let label = workspace_label(&self.workspace_path);
+        let path = self
+            .session_scope(id)
+            .map_or_else(|_| String::new(), |scope| scope.workspace.path.clone());
+        let label = workspace_label(&path);
         let trust = self.hooks.sessions.get_mut(id).unwrap();
         if let Some((request, true)) = &trust.review.current
             && request["bundleDigest"] == trust.snapshot.bundle_digest.as_str()
@@ -274,7 +277,7 @@ impl Engine {
     async fn toggle_review_item(&mut self, id: &str, p: &Value) -> Outcome {
         let item = p["reviewItemId"].as_str().unwrap_or("").to_owned();
         self.validate_target(id, p, std::slice::from_ref(&item))?;
-        let ports = self.hooks.ports.clone().ok_or(UNREADABLE)?;
+        let (config, root) = self.session_config(id).ok().flatten().ok_or(UNREADABLE)?;
         let trust = &self.hooks.sessions[id];
         let entry = trust
             .snapshot
@@ -285,7 +288,7 @@ impl Engine {
         if !entry.editable {
             return Err(MISMATCH);
         }
-        let current = self.rediscover(&ports).await?;
+        let current = rediscover(config.as_ref(), &root).await?;
         let trust = &self.hooks.sessions[id];
         if current.workspace_identity != trust.snapshot.workspace_identity {
             return Err(MISMATCH);
@@ -306,11 +309,11 @@ impl Engine {
             resolved_max_output_bytes: entry.resolved_max_output_bytes,
             enabled: p["enabled"] == true,
         };
-        ports.config.set_workspace_hook_enabled(toggle).await?;
+        config.set_workspace_hook_enabled(toggle).await?;
         // 写盘已提交：重建完成前项目 hooks 一律阻止，重建失败时审查以配置错误收口。
         self.hooks.sessions.get_mut(id).unwrap().invalidated = Some(REBUILD_FAILED);
         let _ = self.refresh_trust(id);
-        let Ok(next) = self.rediscover(&ports).await else {
+        let Ok(next) = rediscover(config.as_ref(), &root).await else {
             self.settle_review(id);
             return Err(REBUILD_FAILED);
         };
@@ -320,14 +323,6 @@ impl Engine {
         self.refresh_trust(id).map_err(|_| REBUILD_FAILED)?;
         self.refresh_review(id);
         Ok(())
-    }
-
-    async fn rediscover(
-        &self,
-        ports: &super::workspace_trust::TrustPorts,
-    ) -> std::result::Result<workspace::Snapshot, &'static str> {
-        let config = ports.config.load().await.map_err(|_| UNREADABLE)?;
-        workspace::discover(&config, &self.workspace, &self.workspace_path).ok_or(MISMATCH)
     }
 
     /// Node `revoke` (review items) and `revokeCurrent` (declaration digests).
@@ -374,6 +369,15 @@ impl Engine {
         self.refresh_review(id);
         Ok(())
     }
+}
+
+/// The project hook bundle of `root` as its config describes it now.
+async fn rediscover(
+    source: &dyn crate::contract::ConfigSource,
+    root: &crate::contract::Workspace,
+) -> std::result::Result<workspace::Snapshot, &'static str> {
+    let config = source.load().await.map_err(|_| UNREADABLE)?;
+    workspace::discover(&config, &root.key, &root.path).ok_or(MISMATCH)
 }
 
 /// Node `workspaceLabel`: the last path segment.
