@@ -79,6 +79,41 @@ async fn executes_through_main_and_correlates_results() {
 }
 
 #[tokio::test]
+async fn ambient_requests_carry_the_window_of_the_sending_connection() {
+    let (bridge, sink) = bridge(Duration::from_secs(5));
+    let target = WorkspaceTarget::local("/w".to_owned());
+    let collecting = {
+        let bridge = bridge.clone();
+        tokio::spawn(async move {
+            bridge
+                .ambient_context("s1", &target, "desktop-continuous", WindowId::new(2))
+                .await
+        })
+    };
+    let mut requests = Vec::new();
+    while requests.len() < 2 {
+        requests.extend(sink.take());
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    for request in &requests {
+        assert_eq!(request["type"], EXECUTE_REQUEST);
+        assert_eq!(request["windowId"], 2, "{request}");
+        bridge.handle_result(&json!({"requestId": request["requestId"], "result": {"ok": false}}));
+    }
+    assert_eq!(collecting.await.unwrap(), None);
+
+    // 没有窗口身份（CLI 回合中的 browserExecute、legacy 入口）：省略 windowId。
+    let running = {
+        let bridge = bridge.clone();
+        tokio::spawn(async move { bridge.execute(input("r1", json!({"method": "list"}))).await })
+    };
+    let request = wait_for_post(&sink).await;
+    assert!(request.get("windowId").is_none(), "{request}");
+    bridge.handle_result(&json!({"requestId": "r1", "result": {"ok": true}}));
+    running.await.unwrap();
+}
+
+#[tokio::test]
 async fn rejects_foreign_or_stale_backends_without_posting() {
     let (bridge, sink) = bridge(Duration::from_secs(5));
     let mut foreign = input("r", json!({"method": "list"}));

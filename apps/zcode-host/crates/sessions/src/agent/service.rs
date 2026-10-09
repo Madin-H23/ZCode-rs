@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex, Weak};
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
 use tokio::task::AbortHandle;
-use zcode_host_control::ClientMode;
+use zcode_host_control::{ClientMode, WindowId};
 use zcode_host_kit::{
     Args, CallContext, CallFuture, EventHub, EventStream, FlowState, Reply, RpcError, RpcValue,
     ServiceChannel, log, replies,
@@ -237,6 +237,8 @@ enum RememberError {
 struct Scope {
     connection_id: String,
     client_mode: ClientMode,
+    /// 连接所属主窗口：这条连接发起的浏览器请求带上它，Main 按它路由（rust-u4-app-host.md §2.2）。
+    window_id: Option<WindowId>,
     runtime: AgentRuntime,
     api: AgentApi,
     state: Mutex<ScopeState>,
@@ -248,6 +250,7 @@ impl Scope {
     fn new(
         connection_id: String,
         client_mode: ClientMode,
+        window_id: Option<WindowId>,
         runtime: AgentRuntime,
         api: AgentApi,
     ) -> Arc<Self> {
@@ -283,6 +286,7 @@ impl Scope {
             Scope {
                 connection_id,
                 client_mode,
+                window_id,
                 runtime,
                 api,
                 state: Mutex::new(ScopeState::default()),
@@ -801,7 +805,12 @@ impl Scope {
             && let Some(session_id) = envelope["sessionId"].as_str().filter(|id| !id.is_empty())
             && let Some(browser) = &self.api.browser
             && let Some(ambient) = browser
-                .ambient_context(session_id, target, client_mode_str(self.client_mode))
+                .ambient_context(
+                    session_id,
+                    target,
+                    client_mode_str(self.client_mode),
+                    self.window_id,
+                )
                 .await
             && envelope["payload"].is_object()
         {
@@ -975,6 +984,7 @@ impl AgentChannel {
                 Scope::new(
                     format!("host-rpc-{}", uuid_v4()),
                     context.client_mode,
+                    context.window_id,
                     self.runtime.clone(),
                     self.api.clone(),
                 )

@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
-use zcode_host_control::ControlRouter;
+use zcode_host_control::{ControlRouter, WindowId};
 use zcode_host_kit::log;
 
 use super::extensions::{Extensions, ReverseContext, ReverseReply};
@@ -45,6 +45,10 @@ pub struct ExecuteInput {
     pub remote_session_id: Option<String>,
     pub client_mode: Option<String>,
     pub session_context: Option<String>,
+    /// 发起调用的连接所属主窗口（rust-u4-app-host.md §4.1 `browser-execute-request.windowId`）。只有能直接
+    /// 归属到连接的请求才有：发送时收集浏览器环境（ambient context）。CLI 回合中的 `browserExecute`
+    /// 没有“回合 → 连接”的既有关联，省略，Main 用任意一个主窗口。
+    pub window_id: Option<WindowId>,
     pub command: Value,
 }
 
@@ -276,6 +280,9 @@ impl BrowserBridge {
             "sessionContext".into(),
             json!(input.session_context.as_deref().unwrap_or("live")),
         );
+        if let Some(window_id) = input.window_id {
+            message.insert("windowId".into(), json!(window_id.get()));
+        }
         message.insert("command".into(), command.clone());
         Value::Object(message)
     }
@@ -473,6 +480,7 @@ impl BrowserBridge {
         session_id: &str,
         target: &super::WorkspaceTarget,
         client_mode: &str,
+        window_id: Option<WindowId>,
     ) -> Option<Value> {
         let browser = self
             .list()
@@ -488,6 +496,7 @@ impl BrowserBridge {
             remote_session_id: target.remote_session_id.clone(),
             client_mode: Some(client_mode.to_owned()),
             session_context: Some("live".into()),
+            window_id,
             ..ExecuteInput::default()
         };
         let controlled = ExecuteInput {
@@ -698,6 +707,8 @@ fn parse_execute(context: &ReverseContext) -> Option<ExecuteInput> {
         remote_session_id: text(&object, "remoteSessionId"),
         client_mode: text(&object, "clientMode").or_else(|| Some("desktop-continuous".into())),
         session_context: text(&object, "sessionContext").or_else(|| Some("live".into())),
+        // CLI 的反向请求只知道会话与回合，不知道是哪条连接发起的回合：不猜窗口。
+        window_id: None,
         command,
     })
 }
