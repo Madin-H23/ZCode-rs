@@ -87,6 +87,25 @@ impl Job {
         }
         Ok(())
     }
+
+    /// `child` 属于这个 Job（测试用）。
+    #[cfg(test)]
+    #[expect(unsafe_code, reason = "Win32 Job Object API 没有安全封装")]
+    pub(crate) fn holds(&self, child: &Child) -> bool {
+        let Some(process) = child.raw_handle() else {
+            return false;
+        };
+        let mut result = 0;
+        // SAFETY: 两个句柄在调用期间都有效；result 是本函数的局部变量。
+        let queried = unsafe {
+            windows_sys::Win32::System::JobObjects::IsProcessInJob(
+                process,
+                self.handle.as_raw_handle(),
+                &raw mut result,
+            )
+        };
+        queried != 0 && result != 0
+    }
 }
 
 #[cfg(test)]
