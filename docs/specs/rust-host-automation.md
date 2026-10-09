@@ -27,7 +27,7 @@
    - `runNow`：`BEGIN IMMEDIATE` 内回收超时 10 分钟的僵尸认领，再以 `running 0→1` 抢 single-flight 锁；成功则插入 `<automationId>:manual:<uuid>` 的 manual run（`dispatch_status=claimed`、`attempts=1`、`model_selection` 为 NULL）。
    - `markManualRunDispatched`、`fixRunModelSelection`、`markRunOutcome`、`ensureRunClaimed`、`markRunDispatch`、`releaseManualClaim`、`touchManualClaim`、`deleteRun`、`setEnabled`、`restart`、`delete`：SQL 原样移植。
    - 模型选择序列化：trim 后按 `providerId, modelId, options?` 写 JSON，`options` 为空对象时省略；非法时报错。
-3. 只移植 Host 用到的方法。`claimDue`、`claimManualRuns`、`markDispatched`、`markDispatchFailed`、`skipAndReschedule`、`upsertRunClaimed`、`recordSkippedRun`、`pruneRuns` 只由 scheduler 调用，scheduler 仍是 Node（第 2.6 节）。
+3. 只移植 Host 用到的方法。U4 起调度状态机迁入 Host（[rust-u4-app-host.md](rust-u4-app-host.md) §2.4），`claimDue`、`claimManualRuns`、`markDispatched`、`markDispatchFailed`、`skipAndReschedule`、`upsertRunClaimed`、`releaseClaim` 随之移植，SQL 原样，与 TS 对拍（`scripts/rust-host/scheduler-fixtures.ts`）；`recordSkippedRun`、`pruneRuns` 没有生产调用方，不移植。
 4. **workspace 归属**：带 scope 的写和单查都加 `workspace_key` 过滤，key = `workspaceIdentity?.trim() || workspacePath`。
 
 ### 2.2 下次触发时间（`automationCron.ts`）
@@ -67,14 +67,14 @@
 
 ### 2.6 Main 的 scheduler
 
-scheduler 是 Main 起的 Node utilityProcess，只读写 tasks-index，经 Main 把 `cron-dispatch-request` 转成 `cron-run` 发给某个本地 Host，再把 `cron-run-result` 转回去结算。它与 Rust Host 无关，保持不变；Rust Host 只需消费 `cron-run`、回 `cron-run-result`。控制消息类型与 Node 相同，不新增。
+scheduler 是 Main 起的 Node utilityProcess，只读写 tasks-index，经 Main 把 `cron-dispatch-request` 转成 `cron-run` 发给某个本地 Host，再把 `cron-run-result` 转回去结算。Rust Host 消费 `cron-run`、回 `cron-run-result`，控制消息类型与 Node 相同，不新增。U4 起 Rust 开关下由 Host 内的 `Scheduler` 取代它（[rust-u4-app-host.md](rust-u4-app-host.md) §2.4）；`cron-run` 的处理在 Main 改完之前保留。
 
 ## 3. 状态所有者
 
 | 状态                                                  | 唯一所有者                                                                   |
 | ----------------------------------------------------- | ---------------------------------------------------------------------------- |
 | automation 定义、调度状态、single-flight 锁、run 台账 | tasks-index.sqlite（Rust 经 `TasksIndex` 线程，scheduler 与 Node Host 同库） |
-| 到期判定、认领、重试退避、错过窗口                    | Main 的 scheduler（Node）                                                    |
+| 到期判定、认领、重试退避、错过窗口                    | Main 的 scheduler（Node）；U4 起为 Host 内的 `Scheduler`                     |
 | 本 Host 在途运行的终态订阅、manual 续租定时器         | `automation::dispatch::Dispatcher`（内存，Host 退出即丢；靠锁超时回收）      |
 | 会话、轮次、模型配置                                  | CLI                                                                          |
 
@@ -116,9 +116,9 @@ UI runAutomationNow ─► runNow（BEGIN IMMEDIATE 抢锁 + 插 manual run）
 
 ### 6.1 规则
 
-1. **仓库**（`offPeakTaskRepo.ts`）：与 Node Host、Main 的 scheduler 共用 `off_peak_tasks`，SQL 原样移植。行映射同 `rowToTask`（新列 `model_selection` 损坏或缺失时给 `modelSelectionIssue:{code:"repair-required"}`；`list` 联查 tasks 表的绑定会话标题）。终态（completed / failed / cancelled）不可逆出；绑定会话的唯一索引冲突识别为 `session_bound`。只移植 Host 用到的方法，`claimDue`、`markRunning`、`releaseClaim`、`recoverInterrupted` 由 scheduler 调用。
+1. **仓库**（`offPeakTaskRepo.ts`）：与 Node Host、Main 的 scheduler 共用 `off_peak_tasks`，SQL 原样移植。行映射同 `rowToTask`（新列 `model_selection` 损坏或缺失时给 `modelSelectionIssue:{code:"repair-required"}`；`list` 联查 tasks 表的绑定会话标题）。终态（completed / failed / cancelled）不可逆出；绑定会话的唯一索引冲突识别为 `session_bound`。只移植 Host 用到的方法；U4 起 Host 内的 `Scheduler` 还用到 `claimDue`、`markRunning`、`releaseClaim`、`recoverInterrupted`、`countActive`，一并移植并与 TS 对拍。
 2. **`off-peak-task` channel 的 11 个成员**：语义同 `OffPeakTaskService`。`createTask` 先校验（标题、prompt、workspace 非空，权限是六档之一）→ 用当前 Registry 解析固定的 Off-Peak Provider 与模型 → 绑定会话预检 → `POST /ticket` → 成功才落库；失败只回稳定分类 `{ok:false, failureStage, errorCategory, errorCode, providerName}`（3101 / 3103 / network / invalid_response / local_persist / client_validation）。`cancelTask` 先落终态再停 loop（V4 `stop`），再后台核销；`continueTask` 票活着只恢复，票已废才重取号；`updateTask` 只允许 queued / paused；`list` / `get` 只派生模型诊断，不写库。
-3. **轮询同步**：tokio 定时器驱动。每个周期先补报未核销终态（4xx 当作幂等 ack），无票的 queued 补取号，再 `POST /ticket/status` 写回快照（ready → schedulable、位次、废票重取号）；翻为可派发时发 `off-peak-scheduler-wake-request`。间隔取服务端 `next_poll_after`，钳制在 5 s – 5 min，失败按 10 s 起指数退避。没有任务时也按 5 min 重排（TS 的 `finally` 如此，注释所说“不重排”与代码不符，以代码为准）。
+3. **轮询同步**：tokio 定时器驱动。每个周期先补报未核销终态（4xx 当作幂等 ack），无票的 queued 补取号，再 `POST /ticket/status` 写回快照（ready → schedulable、位次、废票重取号）；翻为可派发时唤醒 Host 内的 `Scheduler`（U4 之前是发 `off-peak-scheduler-wake-request` 给 Main）。间隔取服务端 `next_poll_after`，钳制在 5 s – 5 min，失败按 10 s 起指数退避。没有任务时也按 5 min 重排（TS 的 `finally` 如此，注释所说“不重排”与代码不符，以代码为准）。
 4. **凭据与灰度**：`ZCODE_OFFPEAK_MOCK=1` 时与 Node 相同，用确定性的 mock 凭据（bigmodel-personal），服务端 origin 是进程内 mock 网关；非 mock 时走账号栈的真实凭据链（zcode JWT + 选中 Coding Plan 的 key，`off_peak::credentials`，见 [rust-host-integration.md](rust-host-integration.md) §2.1），服务端请求带 ZCode 来源头；`coding-plan-subscription.getOffPeakClientConfig` 由本区域包一层，在 mock 模式下按 `resolveOffPeakClientConfig` 的 mock 分支返回（有隐藏的 Off-Peak Provider 模型即 enabled），其余情况原样交给 coding-plan 的实现。非 mock 时 origin 是 `ZCODE_BASE_URL` / `ZCODE_ENDPOINT_ORIGIN`（缺省 `https://zcode.z.ai`）。
 5. **mock 网关**：`127.0.0.1`，端口 `ZCODE_OFFPEAK_MOCK_PORT` 或固定 45197，被占用时复用已有实例；`ZCODE_OFFPEAK_MOCK_*` 的延迟、额度、429 注入、`capture` / `invalid-ticket` 场景与 Node 相同；状态机为 take → queued → ready → active → expired / settled，在轮询与 messages 请求时懒惰推进。
 6. **`off-peak-run` 派发**：无票 → transient；模型不可解析或凭据不可用 → `failureKind:"permanent"`。三个分支：resume（续跑同一会话，发固定续跑提示词）、bound-first-run（恢复绑定会话，先检查已删除（permanent）/ 正忙（transient），再设权限模式）、init（新建会话，`persistence:"deferred"`，盖 `offPeakTaskId`）。V4 sendText 携带闲时 Selection、`modelExecution`（`memoryExtraction:"skip"`、`selectionScope:"execution"`、逐请求鉴权头、`subagents`）、`offPeakTaskId`、`offPeakRunType`，denylist 含 `CronCreate`、`OffPeakCreate`。init 分支首发后上报 `session-create-telemetry`（`create_source:"automation_idle"`）。终态：succeeded → completed，其余 → failed；回写失败（已终态）只记日志；会话置未读。
