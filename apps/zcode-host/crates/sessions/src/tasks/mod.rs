@@ -20,6 +20,7 @@ pub mod service;
 pub mod session_messages;
 mod sqlite;
 pub mod syncer;
+mod task_commands;
 pub mod trajectory;
 
 use std::sync::Arc;
@@ -40,12 +41,14 @@ pub struct WorkspaceEvent {
 pub type WorkspaceEvents = EventHub<Arc<WorkspaceEvent>>;
 
 /// sessions-index 观察到的会话终态迁移（zcodeTaskIndexSyncer `emitTerminalAndReady`）。
-/// 不是 UI 流，只给 host 内部的 runtime command 队列与 terminal / ready 事件使用。
+/// 不是 UI 流，只给 host 内部的 terminal / ready 事件使用。
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionSignal {
     pub target: WorkspaceTarget,
     pub session_id: String,
     pub failed: bool,
+    /// 结束的这一轮的输入：迁移前那份摘要的 `activeInputId`（runtime 给出，Host 不另存）。
+    pub input_id: Option<String>,
 }
 
 pub type SessionSignals = EventHub<Arc<SessionSignal>>;

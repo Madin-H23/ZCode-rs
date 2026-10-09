@@ -235,7 +235,7 @@ sequenceDiagram
 | B4a  | 投递逻辑抽成独立 crate（3.2）                                                                       | 完成               |
 | 边界 | 结构隔离、三种构建形态、单二进制多入口（[rust-host-cli-boundary.md](rust-host-cli-boundary.md)）    | 进行中             |
 | B8   | 一个 Engine 管所有本地 workspace（3.3，[rust-u3-one-engine.md](rust-u3-one-engine.md)）             | 用户已决定，未开始 |
-| B9   | 输入队列归一（3.4）：三个接口映射到 `CommandInbox`，删除 Host 的命令队列                            | 进行中             |
+| B9   | 输入队列归一（3.4）：三个接口映射到 `CommandInbox`，删除 Host 的命令队列                            | 完成；3.4.4 待确认 |
 | B10  | 已接受输入在实例重建后的结算：补测试（实例 panic 后查询命令状态得到 `inputDiscardedOnRestart`）     | 未开始             |
 | 缺陷 | 投递 crate：连接关闭与在途的订阅请求竞争时，连接已关仍登记订阅（今天由 Host 在 ACK 后补发退订清理） | 未开始             |
 

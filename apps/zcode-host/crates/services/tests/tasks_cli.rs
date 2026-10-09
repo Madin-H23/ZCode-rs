@@ -1,6 +1,7 @@
 //! zcode-task 生命周期成员对真实 Rust CLI 的集成测试（rust-host-tasks.md 第 6 节）：
 //! createTask（legacy session/create）→ sendPrompt（V4 sendText）→ sessions-index 终态 →
-//! onDynamicTaskTerminalOutcome / Ready → 配置读写 → host command 队列 drain → resume → close。
+//! onDynamicTaskTerminalOutcome / Ready → 配置读写 → 空闲时 enqueueTaskCommand → resume → close。
+//! task 命令映射到 runtime 队列的其余情形见 `task_queue_cli.rs`。
 //! 模型是本地 mock 的 OpenAI 兼容端点；HOME 与数据目录都是临时目录，不读写开发者的 `~/.zcode`。
 //!
 //! 缺省用进程内的嵌入式 runtime（docs/specs/rust-u3-single-process.md），不需要预先构建 CLI；设置
@@ -286,7 +287,7 @@ async fn task_lifecycle_against_rust_cli() {
         .unwrap();
     assert!(usage.is_object(), "usage: {usage}");
 
-    // host command 队列：入队后在 ready 边界 drain，终态按 traceId 收口。
+    // 空闲会话入队：runtime 立即开跑，终态的 inputId 是 traceId；跑完后取消回 not_found。
     let enqueued = lifecycle
         .enqueue_command(
             &json!({"workspacePath": workspace_path, "taskId": task_id, "commandId": "c1",

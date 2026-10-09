@@ -595,7 +595,7 @@ flowchart LR
 | U3   | A 期已完成：Host 进程内运行 runtime（每个 workspace 一个实例），进程内是缺省；合并 U4 之前 25 个桌面 E2E 场景通过；对比测量见 [报告](../reports/rust-u3-embedded-runtime.md)。B 期按 D-U13 修订：投递逻辑的抽取已完成；进行中：结构隔离、三种构建形态、单二进制多入口；原计划中让 Host 依赖 runtime 内部的步骤取消 | [rust-u3-single-process.md](rust-u3-single-process.md)、[rust-u3-stage-b.md](rust-u3-stage-b.md)、[rust-host-cli-boundary.md](rust-host-cli-boundary.md) |
 | U4   | 已完成并在 Electron 里验证（在合并 Gateway 之前的提交上）：一个 App 一个 Rust Host；28 个桌面 E2E 场景在进程内 runtime 下通过，包括多窗口、没有窗口时的调度、设置读写、崩溃重启；Node Host 路径 5 个场景通过。进行中：合并 Gateway 之后重跑全部 E2E                                                                | [rust-u4-app-host.md](rust-u4-app-host.md)                                                                                                               |
 
-用户已决定、尚未实现：工具进程的回收（D-U15）、一个 Engine（D-U12）、输入队列的映射（D-U6）。
+用户已决定、尚未实现：工具进程的回收（D-U15）、一个 Engine（D-U12）。输入队列的映射（D-U6）已实现，外部客户端能看到的差别（[rust-u3-stage-b.md](rust-u3-stage-b.md) 3.4.4）待用户确认。
 
 **不做中间发布（D-U8）。** U0–U7 都是开发里程碑，不是发布版本：
 
