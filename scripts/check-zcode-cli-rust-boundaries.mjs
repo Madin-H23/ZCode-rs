@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { resolve, relative } from "node:path";
+import { findSpawns } from "./rust/task-spawns.mjs";
 
 const app = resolve(import.meta.dirname, "../apps/zcode-cli-rust");
 const root = resolve(app, "crates");
@@ -11,49 +12,10 @@ const SPAWN_EXCEPTIONS = new Set([
   // 实例任务本身（Host 需要 JoinHandle）与嵌入方进程级的日志清理；Host 传入自己的作用域后去掉。
   "src/embed.rs",
 ]);
-const SPAWN =
-  /\btokio\s*::\s*(?:task\s*::\s*)?(?:spawn|spawn_blocking|spawn_local|JoinSet)\b|\btask\s*::\s*(?:spawn|spawn_blocking|spawn_local)\s*\(|(?<![.\w])(?:spawn_blocking|spawn_local)\s*\(|\bHandle\s*::\s*current\s*\(\s*\)\s*\.\s*spawn/;
-
-/** 测试文件：`tests.rs`、`*_tests.rs`，以及 tests/、examples/、benches/ 目录下的文件。 */
-function isTestFile(file) {
-  return /(?:^|\/)(?:tests|examples|benches)\//.test(file) || /(?:^|\/|_)tests\.rs$/.test(file);
-}
-
-/** 去掉 `#[cfg(test)]` 标注的条目（rustfmt 格式：条目以同一缩进的 `}` 结束）。 */
-function withoutTestItems(code) {
-  const lines = code.split("\n");
-  const kept = [];
-  for (let index = 0; index < lines.length; index++) {
-    const attribute = /^(\s*)#\[cfg\(test\)\]\s*$/.exec(lines[index]);
-    if (!attribute) {
-      kept.push(lines[index]);
-      continue;
-    }
-    let item = index + 1;
-    while (item < lines.length && /^\s*#\[/.test(lines[item])) item++;
-    let end = item;
-    if (/\{\s*$/.test(lines[item] ?? "")) {
-      while (end < lines.length && lines[end] !== `${attribute[1]}}`) end++;
-    }
-    index = end;
-  }
-  return kept.join("\n");
-}
 
 async function checkSpawns(directory) {
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const path = resolve(directory, entry.name);
-    if (entry.isDirectory()) {
-      await checkSpawns(path);
-      continue;
-    }
-    const file = relative(app, path).replaceAll("\\", "/");
-    if (!path.endsWith(".rs") || isTestFile(file) || SPAWN_EXCEPTIONS.has(file)) continue;
-    const code = withoutTestItems((await readFile(path, "utf8")).replace(/\/\/[^\n]*/g, ""));
-    if (SPAWN.test(code))
-      failures.push(
-        `${file}: starts a task outside zcode-async (use a Spawner, owned or blocking)`,
-      );
+  for (const file of await findSpawns(directory, { base: app, exceptions: SPAWN_EXCEPTIONS })) {
+    failures.push(`${file}: starts a task outside zcode-async (use a Spawner, owned or blocking)`);
   }
 }
 
