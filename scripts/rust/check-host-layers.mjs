@@ -7,10 +7,12 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "../../apps/zcode-host/crates");
 // 目录名 → 层号。0–2 是与业务无关的基础（协议、控制消息、RPC 工具）；3 起是规格第 2 节的表。
+// gateway（连接层，docs/specs/rust-u2-gateway.md）与 base 同层：两者互不依赖。
 const LAYERS = {
   rpc: 0,
   control: 1,
   kit: 2,
+  gateway: 3,
   base: 3,
   settings: 4,
   providers: 5,
@@ -23,6 +25,11 @@ const LAYERS = {
   services: 10,
   "host-core": 11,
   "zcode-host": 12,
+};
+
+// 只允许列出的 crate 依赖它：业务 service 不认识连接层（docs/specs/rust-u2-gateway.md §2.1）。
+const DEPENDENTS = {
+  gateway: ["host-core", "zcode-host"],
 };
 
 /** `[dependencies]`、`[dev-dependencies]`、`[target.….dependencies]` 等段里出现的包名。 */
@@ -66,6 +73,12 @@ for (const [name, { directory, manifest }] of packages) {
   for (const dependency of dependencyNames(manifest)) {
     const target = packages.get(dependency);
     if (!target || dependency === name) continue;
+    const allowed = DEPENDENTS[target.directory];
+    if (allowed && !allowed.includes(directory)) {
+      failures.push(
+        `${directory} depends on ${target.directory}: only ${allowed.join(", ")} may depend on it`,
+      );
+    }
     const targetLayer = LAYERS[target.directory];
     if (targetLayer === undefined || targetLayer < layer) continue;
     failures.push(

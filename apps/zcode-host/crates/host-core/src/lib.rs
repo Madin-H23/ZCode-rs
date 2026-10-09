@@ -1,26 +1,29 @@
 //! Rust Host 的组装层（docs/specs/rust-host.md §3.1、rust-host-r0.md）。
 //!
 //! 接入层只向这里交付两样东西：Main 的控制消息（[`HostCore::on_control`]），以及每个 attachment
-//! 一条已鉴权的 `@zcode/rpc` 连接（[`HostCore::attach`]）。services 在收到 `InitLocal` 时按
-//! Main 给的路径与环境构建；构建完成前建立的 attachment 先挂起，之后才发 `[200]`。
+//! 一条已鉴权的 `@zcode/rpc` 连接（[`HostCore::connect`]，连接本身由 Gateway 承载，见
+//! docs/specs/rust-u2-gateway.md）。services 在收到 `InitLocal` 时按 Main 给的路径与环境构建；
+//! 构建完成前建立的 attachment 先挂起，之后才发 `[200]`。
+//!
+//! `HostCore` 持有根作用域 `host`（docs/specs/rust-u2-task-scope.md §4）：启动、遥测、连接循环与
+//! transport 的任务都在它下面；Host 退出时关闭它。
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 pub mod attachments;
 pub mod rpc_telemetry;
-mod server;
 mod startup;
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tokio::sync::{mpsc, watch};
-use tokio::task::JoinHandle;
+use tokio::sync::watch;
+use zcode_async::{Spawner, TaskScope};
 use zcode_host_control::{
     AttachmentEndpointResult, AttachmentScope, ControlRouter, DatabaseStartupControl, False,
     HostToMain, InitLocal, MainToHost, True,
 };
-use zcode_host_kit::{CallContext, ChannelRegistry, FlowState, contract, log};
+use zcode_host_gateway::{ChannelSource, Channels, Connection, Gateway, OutboundLimits};
+use zcode_host_kit::{ChannelRegistry, contract, log};
 use zcode_host_services::{HostEnvironment, Installed, ServiceContext};
 
 pub use attachments::{AttachmentMeta, AttachmentRegistry};
@@ -61,16 +64,31 @@ struct Inner {
     initializing: AtomicBool,
     /// `init-local` 与启动状态的所有者；失败后的 retry 用同一份 `init-local` 重新执行。
     startup: Mutex<Option<(InitLocal, Arc<StartupCoordinator>)>>,
-    /// attachmentId → 该 attachment 上各条连接的关闭信号（`detach-service-port`、远端断线）。
-    connections: Mutex<HashMap<String, Vec<watch::Sender<bool>>>>,
+    /// 连接注册表、连接循环、出站队列与串行键通道（docs/specs/rust-u2-gateway.md）。
+    gateway: Gateway,
     /// RPC 网络遥测的观测缓冲（rust-host-integration.md §2.3）。
     telemetry: Arc<rpc_telemetry::RpcTelemetry>,
+    /// 根作用域 `host`。它的任务（连接循环、transport、启动）持有 `HostCore` 的克隆，所以作用域不会
+    /// 随最后一个外部克隆释放；[`HostCore::shutdown`] 显式关闭它。
+    scope: TaskScope,
 }
 
 impl HostCore {
     pub fn new(config: HostConfig, control: Arc<dyn ControlSink>) -> Self {
         let (registry, _) = watch::channel(None);
-        let telemetry = rpc_telemetry::RpcTelemetry::new(control.clone());
+        // 任务 panic 只结束它自己；上报进 Host 日志，带作用域路径与任务名。
+        let scope = TaskScope::root("host", |panic| {
+            log::error(format!(
+                "task panicked: scope={} task={}: {}",
+                panic.scope, panic.task, panic.message
+            ));
+        });
+        let telemetry = rpc_telemetry::RpcTelemetry::new(control.clone(), scope.spawner());
+        let gateway = Gateway::new(
+            scope.spawner(),
+            telemetry.clone(),
+            OutboundLimits::default(),
+        );
         Self {
             inner: Arc::new(Inner {
                 config,
@@ -82,9 +100,15 @@ impl HostCore {
                 installed: Mutex::new(None),
                 initializing: AtomicBool::new(false),
                 startup: Mutex::new(None),
-                connections: Mutex::new(HashMap::new()),
+                gateway,
+                scope,
             }),
         }
+    }
+
+    /// 根作用域的启动权限：transport 等 Host 级任务在这里启动，随 Host 退出被中止。
+    pub fn spawner(&self) -> Spawner {
+        self.inner.scope.spawner()
     }
 
     pub fn on_control(&self, message: MainToHost) -> ControlOutcome {
@@ -95,7 +119,10 @@ impl HostCore {
                     return ControlOutcome::Continue;
                 }
                 let core = self.clone();
-                tokio::spawn(async move { core.initialize(init).await });
+                drop(
+                    self.spawner()
+                        .spawn("startup", async move { core.initialize(init).await }),
+                );
             }
             MainToHost::IssueAttachmentEndpoint(request) => {
                 let result = self.issue_endpoint(AttachmentMeta {
@@ -162,7 +189,8 @@ impl HostCore {
         ));
     }
 
-    /// Host 退出前冲刷 RPC 遥测并回收子进程（CLI 进程树）；未初始化时只冲刷遥测。
+    /// Host 退出前冲刷 RPC 遥测并回收子进程（CLI 进程树）；未初始化时只冲刷遥测。最后关闭根作用域：
+    /// 连接、transport 与启动任务被中止，列进日志（rust-u2-task-scope.md §5）。
     pub async fn shutdown(&self) {
         self.inner.telemetry.shutdown();
         let installed = self
@@ -174,6 +202,9 @@ impl HostCore {
         if let Some(installed) = installed {
             installed.shutdown().await;
         }
+        // 这些任务都不观察取消信号，宽限期没有意义：立即中止。
+        let aborted = self.inner.scope.close(Duration::ZERO).await;
+        log::info(format!("host tasks aborted at shutdown: {aborted:?}"));
     }
 
     /// InitLocal 之后的启动顺序（docs/specs/rust-host-r2.md §5.1）：
@@ -205,7 +236,10 @@ impl HostCore {
                 if coordinator.try_retry(&attempt_id) {
                     log::info("database startup retry accepted");
                     let core = self.clone();
-                    tokio::spawn(async move { core.run_startup().await });
+                    drop(
+                        self.spawner()
+                            .spawn("startup", async move { core.run_startup().await }),
+                    );
                 } else {
                     log::debug("database startup retry ignored");
                 }
@@ -320,23 +354,11 @@ impl HostCore {
             .clone()
     }
 
-    fn lock_connections(
-        &self,
-    ) -> std::sync::MutexGuard<'_, HashMap<String, Vec<watch::Sender<bool>>>> {
-        self.inner
-            .connections
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
     /// `detach-service-port`：关闭该 attachmentId 的全部连接（本地与远端 scope 同样适用）。
     pub fn detach(&self, attachment_id: &str) {
-        let closers = self.lock_connections().remove(attachment_id);
-        for closer in closers.into_iter().flatten() {
-            closer.send_replace(true);
-        }
+        let closed = self.inner.gateway.close_attachment(attachment_id);
         log::info(format!(
-            "detached service port, attachmentId={attachment_id}"
+            "detached service port, attachmentId={attachment_id}, connections={closed}"
         ));
     }
 
@@ -345,84 +367,48 @@ impl HostCore {
         self.inner.attachments.redeem(capability)
     }
 
-    /// 为一条已鉴权的连接运行 `@zcode/rpc` 服务端。`inbound` / `outbound` 都是完整的 rpc 消息。
+    /// 接入一条已鉴权的连接（docs/specs/rust-u2-gateway.md §2.1）。
     ///
-    /// 远端 scope 先等对应 logical session 的 workspace 就绪，再用它的 scoped channel 表；解析失败时
-    /// 关闭连接、不发 `[200]`，绝不回落到本地服务。
-    pub fn attach(
-        &self,
-        meta: AttachmentMeta,
-        inbound: mpsc::UnboundedReceiver<Vec<u8>>,
-        outbound: mpsc::UnboundedSender<Vec<u8>>,
-    ) -> JoinHandle<()> {
-        // 不观测背压的接入方：流控状态恒为 drained。
-        let (_flow, flow_rx) = watch::channel(FlowState::Drained);
-        self.attach_with_flow(meta, inbound, outbound, flow_rx)
+    /// 本地 scope 等 InitLocal 之后的 channel 表；远端 scope 先等对应 logical session 的 workspace
+    /// 就绪，再用它的 scoped channel 表。解析失败时关闭连接、不发 `[200]`，绝不回落到本地服务。
+    pub fn connect(&self, meta: AttachmentMeta) -> Connection {
+        let source = self.channel_source(&meta);
+        self.inner.gateway.connect(meta, source)
     }
 
-    /// 同 [`Self::attach`]，并把接入层观测到的发送积压边沿（`saturated` / `drained`）交给
-    /// 按连接持有状态的 channel（rust-host-resilience.md §2.3）。
-    pub fn attach_with_flow(
-        &self,
-        meta: AttachmentMeta,
-        inbound: mpsc::UnboundedReceiver<Vec<u8>>,
-        outbound: mpsc::UnboundedSender<Vec<u8>>,
-        flow: watch::Receiver<FlowState>,
-    ) -> JoinHandle<()> {
-        static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
-        let context = CallContext {
-            connection: NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed),
-            attachment_id: meta.attachment_id.clone(),
-            client_mode: meta.client_mode,
-            window_id: meta.window_id,
-        };
-        let (close_tx, close_rx) = watch::channel(false);
-        {
-            let mut connections = self.lock_connections();
-            let closers = connections.entry(meta.attachment_id.clone()).or_default();
-            closers.retain(|closer| !closer.is_closed());
-            closers.push(close_tx);
-        }
+    fn channel_source(&self, meta: &AttachmentMeta) -> ChannelSource {
+        let mut ready = self.inner.registry.subscribe();
         let Some(scope) = remote_scope(&meta.scope) else {
-            let inbound = closable(inbound, vec![close_rx]);
-            return tokio::spawn(server::serve(
-                context,
-                self.inner.registry.subscribe(),
-                inbound,
-                outbound,
-                flow,
-                self.inner.telemetry.clone(),
-            ));
+            return Box::pin(async move {
+                let registry = ready.wait_for(Option::is_some).await.ok()?.clone()?;
+                Some(Channels {
+                    registry,
+                    closed: None,
+                })
+            });
         };
-        let telemetry = self.inner.telemetry.clone();
-        let core = self.clone();
-        tokio::spawn(async move {
-            let mut ready = core.inner.registry.subscribe();
-            let local = match ready.wait_for(Option::is_some).await {
-                Ok(registry) => registry.clone(),
-                Err(_) => return,
-            };
-            let (Some(local), Some(installed)) = (local, core.installed()) else {
-                return;
-            };
-            let attachment = match installed
+        let (core, attachment_id, client_mode) =
+            (self.clone(), meta.attachment_id.clone(), meta.client_mode);
+        Box::pin(async move {
+            let local = ready.wait_for(Option::is_some).await.ok()?.clone()?;
+            let installed = core.installed()?;
+            match installed
                 .remote()
-                .attach(&meta.attachment_id, meta.client_mode, &scope, &local)
+                .attach(&attachment_id, client_mode, &scope, &local)
                 .await
             {
-                Ok(attachment) => attachment,
+                Ok(attachment) => Some(Channels {
+                    registry: attachment.registry,
+                    closed: Some(attachment.closed),
+                }),
                 Err(error) => {
                     // 跨 logical session 或旧 identity 的连接若继续暴露，会把远端请求路由到错误 source。
                     log::warn(format!(
-                        "failed to attach scoped service port, attachmentId={}: {error}",
-                        meta.attachment_id
+                        "failed to attach scoped service port, attachmentId={attachment_id}: {error}"
                     ));
-                    return;
+                    None
                 }
-            };
-            let (_, registry) = watch::channel(Some(attachment.registry));
-            let inbound = closable(inbound, vec![close_rx, attachment.closed]);
-            server::serve(context, registry, inbound, outbound, flow, telemetry).await;
+            }
         })
     }
 }
@@ -441,41 +427,6 @@ fn remote_scope(scope: &AttachmentScope) -> Option<zcode_host_services::remote::
             workspace_identity: workspace_identity.clone(),
         }),
     }
-}
-
-/// 转发入站消息，直到任一关闭信号置 true：此时丢弃转发端，服务端循环随之走正常的连接关闭清理。
-fn closable(
-    mut inbound: mpsc::UnboundedReceiver<Vec<u8>>,
-    mut signals: Vec<watch::Receiver<bool>>,
-) -> mpsc::UnboundedReceiver<Vec<u8>> {
-    let (sender, receiver) = mpsc::unbounded_channel();
-    tokio::spawn(async move {
-        let closed = async {
-            let waits = signals.iter_mut().map(|signal| {
-                Box::pin(async move {
-                    if signal.wait_for(|closed| *closed).await.is_err() {
-                        std::future::pending::<()>().await;
-                    }
-                })
-            });
-            futures_util::future::select_all(waits).await;
-        };
-        tokio::pin!(closed);
-        loop {
-            tokio::select! {
-                message = inbound.recv() => match message {
-                    Some(message) => {
-                        if sender.send(message).is_err() {
-                            return;
-                        }
-                    }
-                    None => return,
-                },
-                _ = &mut closed => return,
-            }
-        }
-    });
-    receiver
 }
 
 pub fn now_ms() -> u64 {
@@ -591,31 +542,30 @@ mod remote_scope_tests {
         );
     }
 
+    /// 本地 scope 的连接在 Host 就绪前挂起；detach 照样能关闭它们，同一 attachment 的连接全部关闭，
+    /// 其他 attachment 不受影响。
     #[tokio::test]
-    async fn closing_signals_end_the_forwarded_inbound_stream() {
-        let (to_core, inbound) = mpsc::unbounded_channel();
-        let (close, closed) = watch::channel(false);
-        let (_other, other) = watch::channel(false);
-        let mut forwarded = closable(inbound, vec![other, closed]);
-        to_core.send(vec![1]).unwrap();
-        assert_eq!(forwarded.recv().await, Some(vec![1]));
-        close.send_replace(true);
-        let ended = tokio::time::timeout(Duration::from_secs(1), forwarded.recv())
-            .await
-            .expect("forwarder stops");
-        assert_eq!(ended, None);
-    }
-
-    #[test]
-    fn detach_closes_every_connection_of_the_attachment() {
+    async fn detach_closes_every_connection_of_the_attachment() {
         let (core, _) = core();
-        let (first, mut first_rx) = watch::channel(false);
-        let (second, mut second_rx) = watch::channel(false);
-        core.lock_connections()
-            .insert("a1".into(), vec![first, second]);
+        let local = |attachment_id: &str| AttachmentMeta {
+            attachment_id: attachment_id.into(),
+            ..meta(AttachmentScope::Local, ClientMode::DesktopContinuous)
+        };
+        let first = core.connect(local("a1"));
+        let second = core.connect(local("a1"));
+        let other = core.connect(local("a2"));
         core.detach("a1");
-        assert!(*first_rx.borrow_and_update());
-        assert!(*second_rx.borrow_and_update());
-        assert!(core.lock_connections().is_empty());
+        for connection in [&first, &second] {
+            let ended = tokio::time::timeout(Duration::from_secs(5), connection.outbound.next())
+                .await
+                .expect("detached connection closes");
+            assert_eq!(ended, None);
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), other.outbound.next())
+                .await
+                .is_err(),
+            "the other attachment still waits for the Host to be ready"
+        );
     }
 }

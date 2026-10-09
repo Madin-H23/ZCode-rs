@@ -25,6 +25,7 @@
 | 7   | `zcode-host-remote`     | `remote`                                                                                                        | 10k    |
 | 8   | `zcode-host-services`   | 组装（`install`）与对外门面                                                                                     | 0.4k   |
 
+- 表外的 crate：`zcode-host-rpc`、`zcode-host-control`、`zcode-host-kit` 是与业务无关的基础，在第 1 层之下；`zcode-host-gateway`（连接层，[rust-u2-gateway.md](rust-u2-gateway.md)）只依赖这三者与 `zcode-async`，与第 1 层同级、与 `zcode-host-base` 互不依赖，并且只允许 `zcode-host-core` 与 `zcode-host` 依赖它（业务 service 不认识连接层）；`zcode-host-core`（组装）与 `zcode-host`（二进制）在第 8 层之上。
 - 第 5 层的三个 crate 互不依赖。
 - 有环的两簇各自留在一个 crate 内（`sessions`、`automation`）。把它们再拆细需要先把环改成事件或端口，属于后续步骤。
 - `zcode-host-services` 重新导出所有模块（`pub use zcode_host_sessions::agent;` 等），外部的 `zcode_host_services::<module>` 路径不变。
@@ -32,7 +33,7 @@
 
 ## 3. 规则
 
-1. **依赖方向**：crate 只能依赖表中层号更小的 crate；同层的 crate 互不依赖。Cargo 保证无环，`scripts/rust/check-host-layers.mjs`（`pnpm check:rust` 的一步）按本表检查越层与同层依赖，包括 dev-dependencies。新增 crate 或跨层依赖必须先改本表和脚本里的层号。
+1. **依赖方向**：crate 只能依赖表中层号更小的 crate；同层的 crate 互不依赖。Cargo 保证无环，`scripts/rust/check-host-layers.mjs`（`pnpm check:rust` 的一步）按本表检查越层与同层依赖，包括 dev-dependencies，以及只允许特定 crate 依赖的 crate（`zcode-host-gateway`）。新增 crate 或跨层依赖必须先改本表和脚本里的层号。
 2. **模块内的路径不改**：每个 crate 的 `lib.rs` 用 `use zcode_host_<lower>::<module>;` 把下层模块引入 crate 根，原有的 `crate::<module>::…` 路径保持有效。
 3. **可见性最小放开**：只把编译器报告的、确实被上层 crate 用到的 `pub(crate)` / `pub(super)` 条目改为 `pub`；其余保持原样。
 4. **测试替身跨 crate 复用**：用 crate 的 `test-support` feature（`#[cfg(any(test, feature = "test-support"))]`），由使用方在 `[dev-dependencies]` 中开启；测试辅助代码不进入正式构建。目前只有 `zcode-host-automation`（`bots::test_support`，被 `remote` 的测试使用）。
@@ -52,9 +53,9 @@
 
 ## 6. U2 的后续步骤（不在本文范围）
 
-| 步骤     | 内容                                                                                                                   |
-| -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 拆环     | `agent ↔ tasks` 改为事件订阅；`automation ↔ bots` 改为构造时传入的端口；之后把 `tasks_index`、`bots` 拆成独立 crate    |
-| 显式组装 | 去掉 `OnceLock` / `bind_*` / `attach_*` 这类事后注入，`install` 按依赖顺序构造                                         |
-| Gateway  | 连接注册表、方法表与串行范围、出站队列策略；40 个 channel 的注册移到 `zcode-gateway-legacy`                            |
-| 并发     | 所有 spawn 归入任务作用域；无界通道改为有界并写明溢出策略；存量的 `#[expect(clippy::await_holding_invalid_type)]` 清零 |
+| 步骤     | 内容                                                                                                                          |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 拆环     | `agent ↔ tasks` 改为事件订阅；`automation ↔ bots` 改为构造时传入的端口；之后把 `tasks_index`、`bots` 拆成独立 crate           |
+| 显式组装 | 去掉 `OnceLock` / `bind_*` / `attach_*` 这类事后注入，`install` 按依赖顺序构造                                                |
+| Gateway  | 已完成连接层（连接注册表、串行键、出站队列，[rust-u2-gateway.md](rust-u2-gateway.md)）；方法表与 `zcode-gateway-legacy` 在 U9 |
+| 并发     | 所有 spawn 归入任务作用域；无界通道改为有界并写明溢出策略；存量的 `#[expect(clippy::await_holding_invalid_type)]` 清零        |

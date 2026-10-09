@@ -98,6 +98,19 @@ impl FlowState {
 }
 
 pub trait ServiceChannel: Send + Sync {
+    /// 这次调用的串行键（docs/specs/rust-u2-gateway.md §2.2）：键相同的调用在整个 Host 内按到达 Gateway
+    /// 的顺序逐个执行，前一个结束（完成、失败或被取消）后下一个才开始；`None`（缺省）的调用立即开始。
+    ///
+    /// 在连接循环里同步调用，只能读参数，不能阻塞或产生副作用。有键的调用直到轮到它时才调用
+    /// [`Self::call`]，排队中被取消的调用不会走到 `call`。
+    fn serial_key(
+        &self,
+        _context: &CallContext,
+        _method: &str,
+        _args: &[RpcValue],
+    ) -> Option<String> {
+        None
+    }
     fn call(&self, context: &CallContext, method: &str, args: Vec<RpcValue>) -> CallFuture;
     fn listen(
         &self,

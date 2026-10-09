@@ -5,7 +5,6 @@
 //! - `127.0.0.1:<系统分配端口>`：Renderer 的 WebSocket 接入，凭一次性 capability 连接。
 //!
 //! 本文件是唯一读取 argv 与环境变量的地方。
-mod flow;
 mod ws;
 
 use std::net::Ipv4Addr;
@@ -96,7 +95,9 @@ async fn run(args: Args) -> Result<()> {
     let port = listener.local_addr()?.port();
 
     let (control_tx, control_rx) = mpsc::unbounded_channel();
-    tokio::spawn(write_control(control_rx));
+    // 控制写任务由 run 拥有、在 run 返回时结束：它要比 Host 的根作用域活得久，关闭作用域之后
+    // （shutdown 的最后一步）仍能写出此前入队的控制消息。
+    let _control_writer = zcode_async::owned(write_control(control_rx));
     let core = HostCore::new(
         HostConfig {
             ws_port: port,
@@ -105,7 +106,10 @@ async fn run(args: Args) -> Result<()> {
         Arc::new(StdoutControl(control_tx.clone())),
     );
     let policy = Arc::new(ws::Policy::new(port, args.allowed_origins));
-    tokio::spawn(ws::serve(listener, core.clone(), policy));
+    drop(core.spawner().spawn(
+        "websocket-listener",
+        ws::serve(listener, core.clone(), policy),
+    ));
     let _ = control_tx.send(HostToMain::HostEndpointReady { ws_port: port });
     // 结构化日志经控制通道交给 Main 实时落盘；Main 收到首条结构化日志后不再缓存 stderr。
     log::set_sink(Box::new(StdoutControl(control_tx.clone())));

@@ -30,7 +30,7 @@ fn decode(encoded: &[u8]) -> Value {
         .map(RpcValue::into_json)
         .unwrap_or(Value::Null)
 }
-use crate::agent::service::{CHANNEL, parse_client_hello, uuid_v4};
+use crate::agent::service::{CHANNEL, parse_client_hello, serial_key, uuid_v4};
 
 const TRUSTED_CONNECTION_FIELD: &str = "__zcodeTrustedV4Connection";
 const TRUSTED_UNSUBSCRIBE_ROUTE_FIELD: &str = "__zcodeTrustedV4UnsubscribeRoute";
@@ -737,6 +737,16 @@ const READY_FORWARDED: &[&str] = &[
 ];
 
 impl ServiceChannel for RemoteAgentChannel {
+    /// 与本地 `zcode-agent` 同一张串行键表：同一会话的写操作按到达顺序逐个转发到远端。
+    fn serial_key(
+        &self,
+        _context: &CallContext,
+        method: &str,
+        args: &[RpcValue],
+    ) -> Option<String> {
+        serial_key(method, args)
+    }
+
     fn call(&self, context: &CallContext, method: &str, args: Vec<RpcValue>) -> CallFuture {
         let scope = self.scope(context);
         let params = first_arg(&args);
