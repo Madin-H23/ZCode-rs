@@ -1,6 +1,6 @@
 # Rust 单进程 Host：顶层架构规划
 
-日期：2026-10-09（第一版）。基线：`feat/rust-host` / `f8b5087`。状态：规划。D-U1、D-U2、D-U3、D-U8 已定（2026-10-09），其余待定，见第 14 节。
+日期：2026-10-09（第一版）。基线：`feat/rust-host` / `f8b5087`。状态：规划。D-U1、D-U2、D-U3、D-U8、D-U12 已定（2026-10-09），其余待定，见第 14 节。
 
 本文接续 [rust-host.md](rust-host.md) 第 9 节“本计划之后”，并扩大范围：
 
@@ -162,7 +162,7 @@ flowchart TB
 | L1  | `zcode-link`                          | Host ↔ Host 握手与版本协商；链路上承载 `zcode-api`                                                                                                                  | 新增；取代 `zcode-hello`                                                                                                   |
 | L2  | `zcode-domain`                        | 纯逻辑：配置合并、历史、投递缓冲、权限规则、上下文管理、provider 规则（唯一一份）                                                                                   | CLI `domain`，加上 Host `providers/resolve.rs` 的规则                                                                      |
 | L2  | `zcode-runtime-api`                   | runtime 端口：`SessionStore`、`ModelPort`、`ToolPort`、`ContextPort`、`ConfigSource`、`AuthPort`、`Clock`、`EventSink`，新增 `Environment`                          | CLI `core-api`                                                                                                             |
-| L3  | `zcode-runtime`                       | Engine、Scope、SessionActor、agent loop、`CommandInbox`                                                                                                             | CLI `core`                                                                                                                 |
+| L3  | `zcode-runtime`                       | WorkspaceRuntime、SessionActor、SessionDirectory、ResidencyManager、agent loop、`CommandInbox`（14.1）                                                              | CLI `core`                                                                                                                 |
 | L3  | `zcode-ext-*`                         | goal / todo / plan / question / subagent / title 等扩展（U9）                                                                                                       | CLI `core/src/app/*`                                                                                                       |
 | L3  | 适配器                                | `zcode-session-store`、`zcode-model`、`zcode-tools`、`zcode-bash`、`zcode-mcp`、`zcode-plugins`、`zcode-env-local`                                                  | CLI 同名 crate                                                                                                             |
 | L4  | `zcode-svc-profile`                   | setting、credential、onboarding、settings-sync、data 目录迁移                                                                                                       | Host `settings`、`settings_sync`、`account/credential.rs`                                                                  |
@@ -254,7 +254,7 @@ pub struct ConnectionMeta {
 
 - **Profile** 是显式的值，不是进程全局。今天每个进程只有一个 Profile；Web 将来要支持多用户时，只需同时持有多个 Profile。
 - **扩展的私有状态** 挂在对应作用域上，采用类型化的 map。这样 goal、todo 等扩展不需要往 `Session` 上加字段（今天约 77 个公开字段）。（Codex：`ExtensionData`。）
-- **`SessionActor` 指会话状态的唯一所有者**，下文的状态表和时序图都用这个名字。它是不是独立的 tokio 任务，由 D-U12 决定（14.1）。按推荐的 ②，它是所属 workspace 的 Engine 内的一份会话状态，由该 Engine 的循环串行处理。
+- **每个已加载的会话是一个独立的 `SessionActor`**（D-U12），`WorkspaceRuntime` 是每个 workspace 的协调者 actor。actor 拓扑、通信规则与跨会话操作见 14.1。
 
 ### 6.3 Gateway：方法表、串行范围与投递
 
@@ -314,24 +314,26 @@ pub trait Environment: Send + Sync {
 
 ## 7. 状态所有者
 
-| 状态                                                       | 唯一所有者                                                          | 作用域              | 持久化                    | 相对今天                                                 |
-| ---------------------------------------------------------- | ------------------------------------------------------------------- | ------------------- | ------------------------- | -------------------------------------------------------- |
-| 进程环境（登录 shell PATH、代理、CA）                      | `RuntimeEnv`（不可变，变更时整体换一份）                            | 进程                | —                         | 取代 InitLocal 补丁、改写全局 env、按 CLI 注入 env       |
-| `setting.json`                                             | `zcode-svc-profile` 的 SettingsStore actor                          | Profile             | 文件；兼容期保留跨进程锁  | Main 改为经控制通道读写（D-U7）                          |
-| 凭据                                                       | `zcode-svc-profile` 的 CredentialStore                              | Profile             | `credentials.json`        | runtime 通过 `AuthPort` 直接调用，反向请求取消           |
-| provider 注册表                                            | `zcode-svc-providers`（ArcSwap 快照）                               | Profile             | `provider_config.json` 等 | 取代 Host 与每个 CLI 各自每秒轮询                        |
-| 扩展目录（skills / commands / hooks / MCP / plugins 配置） | `zcode-svc-extensions`                                              | Profile + Workspace | `cli/config.json` 等      | 两套解析合并成一套，写入统一走锁协议                     |
-| workspace 打开状态与路由                                   | `WorkspaceRegistry`                                                 | 进程                | —                         | 取代 3 个 lane 的进程表和窗口级远端注册表                |
-| workspace Scope（项目配置、权限、sessions-index、epoch）   | `WorkspaceRuntime`                                                  | Workspace           | session DB                | 来自 CLI Engine 的 scopes（进行中的工作）                |
-| 会话事实、`CommandInbox`、runId、seq / epoch               | `SessionActor`                                                      | Session             | session DB                | 来自 CLI；replayable 模式下的 Host 命令队列并入（D-U6）  |
-| 会话事件日志（保留 2000 条）与订阅                         | `SessionLog` + `DeliveryHub`                                        | Session             | 内存                      | CLI delivery 与 Host connection scope 合并               |
-| tasks-index                                                | `zcode-svc-tasks`（事件投影，唯一写入方）                           | Profile             | `tasks-index.sqlite`      | 取代 syncer 复制和 scheduler 写入                        |
-| 连接、capability、principal、clientMode                    | `zcode-gateway` 的 ConnectionRegistry                               | 进程                | —                         | attachment registry 与 connection scope 合并             |
-| 远端链路                                                   | `zcode-svc-remote`，每个远端主机 key 一条                           | 进程                | —                         | 从窗口级提升为 App 级，多个窗口共用                      |
-| 手机配对与 relay 会话                                      | `zcode-svc-relay`                                                   | Profile             | 配对记录                  | 新增                                                     |
-| cron / 闲时任务调度                                        | `zcode-svc-automation`                                              | Profile             | tasks-index               | scheduler 进程和 Main 转发取消                           |
-| 会话的 live owner                                          | `WorkspaceRoute`（本地或远端节点）加上 `SessionActor` 的 runId 校验 | —                   | —                         | Main `taskRealtimeBus` 退役，错误码与 stale-run 防护保留 |
-| 窗口、CDP、原生 UI、自动更新                               | Main                                                                | App                 | —                         | 不变                                                     |
+| 状态                                                       | 唯一所有者                                                          | 作用域              | 持久化                    | 相对今天                                                         |
+| ---------------------------------------------------------- | ------------------------------------------------------------------- | ------------------- | ------------------------- | ---------------------------------------------------------------- |
+| 进程环境（登录 shell PATH、代理、CA）                      | `RuntimeEnv`（不可变，变更时整体换一份）                            | 进程                | —                         | 取代 InitLocal 补丁、改写全局 env、按 CLI 注入 env               |
+| `setting.json`                                             | `zcode-svc-profile` 的 SettingsStore actor                          | Profile             | 文件；兼容期保留跨进程锁  | Main 改为经控制通道读写（D-U7）                                  |
+| 凭据                                                       | `zcode-svc-profile` 的 CredentialStore                              | Profile             | `credentials.json`        | runtime 通过 `AuthPort` 直接调用，反向请求取消                   |
+| provider 注册表                                            | `zcode-svc-providers`（ArcSwap 快照）                               | Profile             | `provider_config.json` 等 | 取代 Host 与每个 CLI 各自每秒轮询                                |
+| 扩展目录（skills / commands / hooks / MCP / plugins 配置） | `zcode-svc-extensions`                                              | Profile + Workspace | `cli/config.json` 等      | 两套解析合并成一套，写入统一走锁协议                             |
+| workspace 打开状态与路由                                   | `WorkspaceRegistry`                                                 | 进程                | —                         | 取代 3 个 lane 的进程表和窗口级远端注册表                        |
+| workspace Scope（项目配置、权限、sessions-index、epoch）   | `WorkspaceRuntime`                                                  | Workspace           | session DB                | 来自 CLI Engine 的 scopes（进行中的工作）                        |
+| 会话 id → workspace 路由，冷加载 single-flight             | `SessionDirectory`                                                  | 进程                | —                         | 新增；取代按进程 cwd 区分 workspace                              |
+| 会话常驻与卸载                                             | `ResidencyManager`                                                  | 进程                | —                         | 来自 Engine `trim_resident`；预算从单个 workspace 扩大到整个进程 |
+| 会话事实、`CommandInbox`、runId、seq / epoch               | `SessionActor`                                                      | Session             | session DB                | 来自 CLI；replayable 模式下的 Host 命令队列并入（D-U6）          |
+| 会话事件日志（保留 2000 条）与订阅                         | `SessionLog` + `DeliveryHub`                                        | Session             | 内存                      | CLI delivery 与 Host connection scope 合并                       |
+| tasks-index                                                | `zcode-svc-tasks`（事件投影，唯一写入方）                           | Profile             | `tasks-index.sqlite`      | 取代 syncer 复制和 scheduler 写入                                |
+| 连接、capability、principal、clientMode                    | `zcode-gateway` 的 ConnectionRegistry                               | 进程                | —                         | attachment registry 与 connection scope 合并                     |
+| 远端链路                                                   | `zcode-svc-remote`，每个远端主机 key 一条                           | 进程                | —                         | 从窗口级提升为 App 级，多个窗口共用                              |
+| 手机配对与 relay 会话                                      | `zcode-svc-relay`                                                   | Profile             | 配对记录                  | 新增                                                             |
+| cron / 闲时任务调度                                        | `zcode-svc-automation`                                              | Profile             | tasks-index               | scheduler 进程和 Main 转发取消                                   |
+| 会话的 live owner                                          | `WorkspaceRoute`（本地或远端节点）加上 `SessionActor` 的 runId 校验 | —                   | —                         | Main `taskRealtimeBus` 退役，错误码与 stale-run 防护保留         |
+| 窗口、CDP、原生 UI、自动更新                               | Main                                                                | App                 | —                         | 不变                                                             |
 
 **owner/lease 怎么延续。** 今天 lease 的作用有两个：防止两个 Host 同时驱动同一个会话，以及用 `runId` 拒绝过期命令。单进程以后：
 
@@ -576,18 +578,18 @@ flowchart LR
     U7 --> U8
 ```
 
-| 阶段 | 规模 | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 验收                                                                                                                                                                                |
-| ---- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| U0   | M    | • 两个 Cargo workspace 合并为 `rust/`，统一依赖版本、lints、工具链和 CI（第 11 节）<br>• 拆出 L0 crate（kit / async / proc / net / observe / sqlite / git），Host 与 CLI 都改用它们，删除 P1 中的重复实现<br>• 顺带修复已确认的缺陷：run panic 兜底；cmd.exe 引号；`/bin/ps` 失败时不发信号；空 HOME 回落到 cwd；host reply 的 `error` 被当作 null 结果（Desktop 是否会回 error 待确认）；原子写不一致<br>• 架构检查加入 5.3 的规则                                                                                                                   | • Host 与 CLI 行为不变：Node 驱动的集成测试、`pnpm test:rust-host`、桌面 E2E 场景全部通过<br>• 每个缺陷都有一个修复前失败的测试<br>• 5.3 的 disallowed-methods 规则在 L0 范围内生效 |
-| U1   | L    | • 基于进行中的 `feat/rust-cli-workspace-scope`（Engine 按 key 持有 Scope）<br>• 组装根迁入库：`WorkspaceRuntime::open(WorkspaceSpec{path, identity, env, store, providers…})`<br>• 清除 P4 中 CLI 一侧的进程全局：env、cwd、全局 tracing、锁 owner 改为 token、rustls 只安装一次<br>• `Environment` 端口与本地实现，工具、hooks、git、MCP stdio 都改经它访问文件和进程<br>• 用类型化 sink 取代“先拼字符串再解析”；delivery 抽成独立 crate 供 Gateway 复用<br>• `app-server --stdio` 只作为 Node 驱动集成测试的入口保留，测试迁到进程内 harness 后删除 | • 同一进程内两个 workspace 并发流式运行的测试<br>• 现有 CLI 测试全部通过<br>• `std::env` 与 `current_dir` 只出现在组装根                                                            |
-| U2   | XL   | • `services` 按 5.2 拆成 `zcode-svc-*`；HostCore 显式组装；`EventBus` 拆环；去掉 `OnceLock` / `bind_*` 这类事后注入<br>• `zcode-gateway`：连接注册表、方法表与串行范围、出站队列策略、`ConnectionRpcGate`；`zcode-gateway-legacy` 承接 40 个 channel<br>• 有不变量的状态改为 actor 持有；所有 spawn 归入 `TaskScope`；所有 channel 都有界                                                                                                                                                                                                             | • 契约覆盖率不下降（491 个成员）<br>• 桌面 E2E 全部通过<br>• crate 依赖图无环<br>• `tokio::spawn` 只出现在 `zcode-async`                                                            |
-| U3   | L    | • Rust Host 的 agent 子系统直接改为进程内调用 runtime；stdio 链路只作为差分测试的对照，U3 结束时删除<br>• 取消 plugin-management / mcp-status lane，改为直接调用服务<br>• 反向请求改为端口实现：`AuthPort` 由 account 实现，浏览器调用经控制通道<br>• 合并 P2 中的双写：provider 注册表、扩展目录、sessions-index 改为事件投影、V4 delivery 只留一份<br>• 已接受输入的持久化（10.2）                                                                                                                                                                  | • stdio 与进程内两种链路做差分 E2E，两种 V4 语义都覆盖<br>• 会话 panic 只影响该会话<br>• N 个 workspace 同时流式时，控制 RPC p95 ≤ 20 ms<br>• RSS 与 CPU 和多进程方案对比，写入报告 |
-| U4   | M    | • Main 改为每个 App 一个 Host，窗口通过 `IssueAttachment` 接入<br>• setting 写入、scheduler、BroadcastHub、`taskRealtimeBus`、Bot 绕回连接迁入 Host（9.1）                                                                                                                                                                                                                                                                                                                                                                                            | • 多窗口 E2E；reload；Host 崩溃重启<br>• 没有窗口时 cron 照常运行<br>• owner 相关错误码不变                                                                                         |
-| U5   | L    | • `zcode serve --stdio`；`RemoteLauncher` 的三种实现；单二进制部署（6 个目标平台）；`zcode-link`；路由<br>• 取代远端 Node server                                                                                                                                                                                                                                                                                                                                                                                                                      | • SSH 覆盖密钥、agent、密码、二次验证、ProxyJump；WSL 与 Docker 的 E2E<br>• 版本不一致时重新部署；并发部署时的锁<br>• 断线与重连语义与今天一致；远端 Bot 正常                       |
-| U6   | M    | • `zcode serve --http`、`zcode daemon`；取代 `packages/server` 的 HTTP 入口与 `zcode-server-cli`                                                                                                                                                                                                                                                                                                                                                                                                                                                      | • Web E2E（replayable）、token 鉴权、Bot webhook                                                                                                                                    |
-| U7   | M    | • `zcode-svc-relay`：配对、端到端加密、虚拟连接、能力限制（需与 relay 一方约定协议）                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | • 配对、relay 重连后重发、能力限制生效<br>• relay 无法解密内容                                                                                                                      |
-| U8   | M    | • 默认启用；6 个平台的打包与签名<br>• 删除 Node Host、Node server bundle 和桌面包内的 TS CLI（D-U9）<br>• 更新 AGENTS.md（第 15 节）                                                                                                                                                                                                                                                                                                                                                                                                                  | • 全平台 E2E 矩阵<br>• 冷启动、常驻 RSS、流式 CPU 都不比 Node Host（当时的发布版）差，实测写入 `docs/reports/`                                                                      |
-| U9   | 持续 | • `zcode-api` 生成 TS 客户端，UI 按领域逐步离开 legacy 映射（D-U5）<br>• runtime 扩展化：goal、todo、title 等移出核心                                                                                                                                                                                                                                                                                                                                                                                                                                 | 按领域验收                                                                                                                                                                          |
+| 阶段 | 规模 | 内容                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 验收                                                                                                                                                                                |
+| ---- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| U0   | M    | • 两个 Cargo workspace 合并为 `rust/`，统一依赖版本、lints、工具链和 CI（第 11 节）<br>• 拆出 L0 crate（kit / async / proc / net / observe / sqlite / git），Host 与 CLI 都改用它们，删除 P1 中的重复实现<br>• 顺带修复已确认的缺陷：run panic 兜底；cmd.exe 引号；`/bin/ps` 失败时不发信号；空 HOME 回落到 cwd；host reply 的 `error` 被当作 null 结果（Desktop 是否会回 error 待确认）；原子写不一致<br>• 架构检查加入 5.3 的规则                                                                                                                                                                                                                          | • Host 与 CLI 行为不变：Node 驱动的集成测试、`pnpm test:rust-host`、桌面 E2E 场景全部通过<br>• 每个缺陷都有一个修复前失败的测试<br>• 5.3 的 disallowed-methods 规则在 L0 范围内生效 |
+| U1   | XL   | • 基于进行中的 `feat/rust-cli-workspace-scope`（Engine 按 key 持有 Scope）<br>• Engine 拆成 `WorkspaceRuntime`（每 workspace 的协调者）与 `SessionActor`（每个会话一个），见 14.1<br>• 组装根迁入库：`WorkspaceRuntime::open(WorkspaceSpec{path, identity, env, store, providers…})`<br>• 清除 P4 中 CLI 一侧的进程全局：env、cwd、全局 tracing、锁 owner 改为 token、rustls 只安装一次<br>• `Environment` 端口与本地实现，工具、hooks、git、MCP stdio 都改经它访问文件和进程<br>• 用类型化 sink 取代“先拼字符串再解析”；delivery 抽成独立 crate 供 Gateway 复用<br>• `app-server --stdio` 只作为 Node 驱动集成测试的入口保留，测试迁到进程内 harness 后删除 | • 14.1 的验收项<br>• 同一进程内两个 workspace 并发流式运行的测试<br>• 现有 CLI 测试全部通过<br>• `std::env` 与 `current_dir` 只出现在组装根                                         |
+| U2   | XL   | • `services` 按 5.2 拆成 `zcode-svc-*`；HostCore 显式组装；`EventBus` 拆环；去掉 `OnceLock` / `bind_*` 这类事后注入<br>• `zcode-gateway`：连接注册表、方法表与串行范围、出站队列策略、`ConnectionRpcGate`；`zcode-gateway-legacy` 承接 40 个 channel<br>• 有不变量的状态改为 actor 持有；所有 spawn 归入 `TaskScope`；所有 channel 都有界                                                                                                                                                                                                                                                                                                                    | • 契约覆盖率不下降（491 个成员）<br>• 桌面 E2E 全部通过<br>• crate 依赖图无环<br>• `tokio::spawn` 只出现在 `zcode-async`                                                            |
+| U3   | L    | • Rust Host 的 agent 子系统直接改为进程内调用 runtime；stdio 链路只作为差分测试的对照，U3 结束时删除<br>• 取消 plugin-management / mcp-status lane，改为直接调用服务<br>• 反向请求改为端口实现：`AuthPort` 由 account 实现，浏览器调用经控制通道<br>• 合并 P2 中的双写：provider 注册表、扩展目录、sessions-index 改为事件投影、V4 delivery 只留一份<br>• 已接受输入的持久化（10.2）                                                                                                                                                                                                                                                                         | • stdio 与进程内两种链路做差分 E2E，两种 V4 语义都覆盖<br>• 会话 panic 只影响该会话<br>• N 个 workspace 同时流式时，控制 RPC p95 ≤ 20 ms<br>• RSS 与 CPU 和多进程方案对比，写入报告 |
+| U4   | M    | • Main 改为每个 App 一个 Host，窗口通过 `IssueAttachment` 接入<br>• setting 写入、scheduler、BroadcastHub、`taskRealtimeBus`、Bot 绕回连接迁入 Host（9.1）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | • 多窗口 E2E；reload；Host 崩溃重启<br>• 没有窗口时 cron 照常运行<br>• owner 相关错误码不变                                                                                         |
+| U5   | L    | • `zcode serve --stdio`；`RemoteLauncher` 的三种实现；单二进制部署（6 个目标平台）；`zcode-link`；路由<br>• 取代远端 Node server                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | • SSH 覆盖密钥、agent、密码、二次验证、ProxyJump；WSL 与 Docker 的 E2E<br>• 版本不一致时重新部署；并发部署时的锁<br>• 断线与重连语义与今天一致；远端 Bot 正常                       |
+| U6   | M    | • `zcode serve --http`、`zcode daemon`；取代 `packages/server` 的 HTTP 入口与 `zcode-server-cli`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | • Web E2E（replayable）、token 鉴权、Bot webhook                                                                                                                                    |
+| U7   | M    | • `zcode-svc-relay`：配对、端到端加密、虚拟连接、能力限制（需与 relay 一方约定协议）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | • 配对、relay 重连后重发、能力限制生效<br>• relay 无法解密内容                                                                                                                      |
+| U8   | M    | • 默认启用；6 个平台的打包与签名<br>• 删除 Node Host、Node server bundle 和桌面包内的 TS CLI（D-U9）<br>• 更新 AGENTS.md（第 15 节）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | • 全平台 E2E 矩阵<br>• 冷启动、常驻 RSS、流式 CPU 都不比 Node Host（当时的发布版）差，实测写入 `docs/reports/`                                                                      |
+| U9   | 持续 | • `zcode-api` 生成 TS 客户端，UI 按领域逐步离开 legacy 映射（D-U5）<br>• runtime 扩展化：goal、todo、title 等移出核心                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 按领域验收                                                                                                                                                                          |
 
 **不做中间发布（D-U8）。** U0–U7 都是开发里程碑，不是发布版本：
 
@@ -599,78 +601,129 @@ flowchart LR
 
 ## 13. 风险
 
-| #   | 风险                                                                                                          | 应对                                                                              |
-| --- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| K1  | 爆炸半径扩大                                                                                                  | 第 10 节；U3 的验收包含 panic 隔离                                                |
-| K2  | 开发期两条线并存：发布版 Node Host，开发开关后的 Rust Host                                                    | 不发布中间形态（D-U8）；每个开发开关写明下线阶段；差分测试始终以 Node Host 为基准 |
-| K3  | U2 的拆分与并行分支冲突                                                                                       | 集中窗口加功能冻结；用 `git mv` 保留历史；先移动，再改接口                        |
-| K4  | 单二进制远端的平台矩阵：glibc 与 musl、arm64、老内核，以及杀毒软件误报                                        | Linux 用 musl 静态链接；部署前先 probe；Windows 与 macOS 签名                     |
-| K5  | SSH 认证方式多，本机难以覆盖                                                                                  | D-U3；E2E 环境准备多种 sshd 配置                                                  |
-| K6  | 过渡期 `packages/server` 仍有用户                                                                             | U6 之前保留 TS server，两条路径共用 wire 夹具                                     |
-| K7  | 单个 Engine actor 承载所有 workspace，循环里慢的 await 会阻塞所有 workspace，一处致命错误会停掉所有 workspace | D-U12                                                                             |
-| K8  | relay 协议依赖外部团队                                                                                        | U7 只依赖 U2，可以最后排期；在此之前保留现有挂接点                                |
-| K9  | 内部 API 来源翻转（D-U5）会牵动 UI                                                                            | 放到 U9，按领域推进；legacy 映射可以长期保留                                      |
+| #   | 风险                                                                                             | 应对                                                                                                                             |
+| --- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| K1  | 爆炸半径扩大                                                                                     | 第 10 节；U3 的验收包含 panic 隔离                                                                                               |
+| K2  | 开发期两条线并存：发布版 Node Host，开发开关后的 Rust Host                                       | 不发布中间形态（D-U8）；每个开发开关写明下线阶段；差分测试始终以 Node Host 为基准                                                |
+| K3  | U2 的拆分与并行分支冲突                                                                          | 集中窗口加功能冻结；用 `git mv` 保留历史；先移动，再改接口                                                                       |
+| K4  | 单二进制远端的平台矩阵：glibc 与 musl、arm64、老内核，以及杀毒软件误报                           | Linux 用 musl 静态链接；部署前先 probe；Windows 与 macOS 签名                                                                    |
+| K5  | SSH 认证方式多，本机难以覆盖                                                                     | D-U3；E2E 环境准备多种 sshd 配置                                                                                                 |
+| K6  | 过渡期 `packages/server` 仍有用户                                                                | U6 之前保留 TS server，两条路径共用 wire 夹具                                                                                    |
+| K7  | Engine 拆成 WorkspaceRuntime 与 SessionActor 的改造量大，并且与进行中的 workspace-scope 工作重叠 | U1 子规格先定 actor 协议与跨会话操作（14.1）；与 workspace-scope 工作的负责人对齐，让它的 Scope 直接成为 WorkspaceRuntime 的职责 |
+| K8  | relay 协议依赖外部团队                                                                           | U7 只依赖 U2，可以最后排期；在此之前保留现有挂接点                                                                               |
+| K9  | 内部 API 来源翻转（D-U5）会牵动 UI                                                               | 放到 U9，按领域推进；legacy 映射可以长期保留                                                                                     |
 
 ## 14. 决策
 
 **已定**（2026-10-09，用户确认）
 
-| 编号 | 问题               | 决定                                                                                                                                         |
-| ---- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| D-U1 | Host 进程归谁      | App 的子进程，每个 App 一个。HostCore 不区分启动方式，用户级 daemon 以后作为另一种启动方式补上                                               |
-| D-U2 | 远端运行什么       | 完整 Host（同一个二进制 `zcode serve --stdio`），远端拥有会话。`Environment` 抽象保留，将来可以支持“只做远程执行”                            |
-| D-U3 | SSH 怎么实现       | 系统 OpenSSH 加 askpass。复用用户的 `~/.ssh/config`、agent、ProxyJump、known_hosts；现有 ssh2 的配置项要迁移。替换 rust-host D8 的 TS 连接器 |
-| D-U8 | 是否先发布中间形态 | 不先发布 R7，也不发布任何中间形态。按最终设计做，U8 一次切换；第 12 节的阶段只是开发里程碑                                                   |
+| 编号  | 问题                  | 决定                                                                                                                                         |
+| ----- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-U1  | Host 进程归谁         | App 的子进程，每个 App 一个。HostCore 不区分启动方式，用户级 daemon 以后作为另一种启动方式补上                                               |
+| D-U2  | 远端运行什么          | 完整 Host（同一个二进制 `zcode serve --stdio`），远端拥有会话。`Environment` 抽象保留，将来可以支持“只做远程执行”                            |
+| D-U3  | SSH 怎么实现          | 系统 OpenSSH 加 askpass。复用用户的 `~/.ssh/config`、agent、ProxyJump、known_hosts；现有 ssh2 的配置项要迁移。替换 rust-host D8 的 TS 连接器 |
+| D-U8  | 是否先发布中间形态    | 不先发布 R7，也不发布任何中间形态。按最终设计做，U8 一次切换；第 12 节的阶段只是开发里程碑                                                   |
+| D-U12 | runtime 的 actor 粒度 | 每个会话一个 actor（Codex 的做法），每个 workspace 一个协调者 actor。设计见 14.1                                                             |
 
 **待定**
 
-| 编号  | 问题                              | 选项                                                                                                                    | 推荐与理由                                                                                                          |
-| ----- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| D-U4  | 远端会话在断线后是否继续存活      | ① 保持现状；② 远端 daemon 加 stdio ↔ UDS 转发                                                                           | **先 ①**，U5 之后再评估 ②                                                                                           |
-| D-U5  | 内部 API 以哪边为来源             | ① Rust 方法表为来源，生成 TS 类型；② 继续以 zod 为来源，生成 Rust                                                       | **①，从 U9 开始**。行为全部在 Rust 里，类型应该和行为放在一起（Codex 的做法）。V4 命令的 zod 来源在 U9 之前保持不变 |
-| D-U6  | replayable 模式的输入队列         | ① 并入 runtime `CommandInbox`；② 保留 Host 命令队列                                                                     | **①**。只有一个队列所有者，符合 AGENTS.md；需要在 U3 子规格中写清 `promote` / `cancel` 的映射                       |
-| D-U7  | Main 的业务职责是否收回           | 收回 setting 写入、scheduler、BroadcastHub、`taskRealtimeBus`                                                           | **收回**（U4）                                                                                                      |
-| D-U9  | Rust runtime 何时成为唯一 runtime | U3 合并的前提是桌面默认改用 Rust runtime                                                                                | 以 [rust-parity-remaining.md](rust-parity-remaining.md) 的剩余项清零为门槛，在 U3 之前确认                          |
-| D-U10 | 是否接受单进程的爆炸半径          | ① 接受，并用第 10 节的措施兜底；② 保留可选的 runtime 子进程模式                                                         | **①**。② 等于长期维护两条链路，与 G1 冲突                                                                           |
-| D-U11 | 代码放在哪里、怎么命名            | 单一 Cargo workspace `rust/`，crate 前缀 `zcode-`                                                                       | 推荐                                                                                                                |
-| D-U12 | runtime 的 actor 粒度（14.1）     | ① 一个 Engine 管所有 workspace 的所有会话；② 每个 workspace 一个 Engine，workspace 内的会话共用它；③ 每个会话一个 actor | **②，并加一条规则：actor 循环里不 await 慢操作**。理由见 14.1                                                       |
+| 编号  | 问题                              | 选项                                                              | 推荐与理由                                                                                                          |
+| ----- | --------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| D-U4  | 远端会话在断线后是否继续存活      | ① 保持现状；② 远端 daemon 加 stdio ↔ UDS 转发                     | **先 ①**，U5 之后再评估 ②                                                                                           |
+| D-U5  | 内部 API 以哪边为来源             | ① Rust 方法表为来源，生成 TS 类型；② 继续以 zod 为来源，生成 Rust | **①，从 U9 开始**。行为全部在 Rust 里，类型应该和行为放在一起（Codex 的做法）。V4 命令的 zod 来源在 U9 之前保持不变 |
+| D-U6  | replayable 模式的输入队列         | ① 并入 runtime `CommandInbox`；② 保留 Host 命令队列               | **①**。只有一个队列所有者，符合 AGENTS.md；需要在 U3 子规格中写清 `promote` / `cancel` 的映射                       |
+| D-U7  | Main 的业务职责是否收回           | 收回 setting 写入、scheduler、BroadcastHub、`taskRealtimeBus`     | **收回**（U4）                                                                                                      |
+| D-U9  | Rust runtime 何时成为唯一 runtime | U3 合并的前提是桌面默认改用 Rust runtime                          | 以 [rust-parity-remaining.md](rust-parity-remaining.md) 的剩余项清零为门槛，在 U3 之前确认                          |
+| D-U10 | 是否接受单进程的爆炸半径          | ① 接受，并用第 10 节的措施兜底；② 保留可选的 runtime 子进程模式   | **①**。② 等于长期维护两条链路，与 G1 冲突                                                                           |
+| D-U11 | 代码放在哪里、怎么命名            | 单一 Cargo workspace `rust/`，crate 前缀 `zcode-`                 | 推荐                                                                                                                |
 
-### 14.1 D-U12：runtime 的 actor 粒度
+### 14.1 D-U12：每个会话一个 actor
 
-**今天的样子。** Rust CLI 的 `Engine` 是一个 actor，也就是一个 tokio 任务加一个循环（`crates/core/src/app/engine.rs:181-205`）。它按到达顺序逐条处理：
+**为什么是会话级。** 今天一个 workspace 一个进程，是 Node 下的取舍：Node 只有一个事件循环，要隔离和并行只能开进程，而每个会话一个进程太重。Rust 里一个 actor 只是一个 tokio 任务加一个收件箱，开销在 KB 级；会话占用的内存主要是会话数据本身，与 actor 粒度无关。所以资源上已经没有理由让多个会话共用一个循环。会话级 actor 带来三样东西：
 
-- 所有请求：`self.request(..).await`；
-- 所有 run 回报的事件，包括落库、投影和投递：`self.apply_event(event).await`；
-- 每秒一次的 provider 注册表刷新。
+- 会话之间互不排队；
+- 一个会话的 panic 只影响它自己；
+- 同一 workspace 的多个会话可以同时使用多个核。
 
-模型流式输出和工具执行跑在另外的任务里，不占这个循环；但它们产生的每个事件，都要回到这个循环里排队提交。进行中的 workspace-scope 工作把多个 workspace 的 Scope 也放进了同一个 Engine。合并进 Host 以后，等于整个 App 所有 workspace 的所有会话共用这一条队列。
+（Codex：每个 thread 一个 submission loop；`ThreadManager` 只持有共享服务和 thread 表。）
 
-**三种粒度**
+**actor 拓扑**
 
-| 选项                         | 互不阻塞的范围 | 一处致命错误影响的范围 | 跨会话操作（fork、子代理、sessions-index、常驻 LRU）                | 改动 |
-| ---------------------------- | -------------- | ---------------------- | ------------------------------------------------------------------- | ---- |
-| ① 一个 Engine 管所有         | 无，全部串行   | 所有 workspace         | 直接读写字段，最简单                                                | 无   |
-| ② 每个 workspace 一个 Engine | workspace 之间 | 一个 workspace         | workspace 内仍直接读写；跨 workspace 的操作本来就几乎没有           | 小   |
-| ③ 每个会话一个 actor         | 会话之间       | 一个会话               | 都要改成 actor 之间的消息协议，需要设计顺序并避免互相等待造成的死锁 | 大   |
+```mermaid
+flowchart TB
+    DIR["SessionDirectory（进程级）<br/>sessionId → workspace 与 handle；冷加载 single-flight"]
+    RES["ResidencyManager（进程级）<br/>常驻预算与卸载"]
+    WR["WorkspaceRuntime（每 workspace 一个协调者 actor）<br/>Scope 快照、sessions-index（摘要 / seq / epoch）、创建 / fork / 导入"]
+    SA["SessionActor（每个已加载会话一个）<br/>会话事实、CommandInbox、runId、SessionLog、订阅与投递"]
+    RUN["Run 任务（每个运行中的 turn 一个）<br/>模型流式、工具调用、等待子会话"]
+    SH["共享服务<br/>ProviderRegistry（ArcSwap）、MCP hub、工具运行时、SessionStore 写线程"]
+    DIR --> WR
+    WR -- "请求 / 应答（只向下）" --> SA
+    SA -. "事件（向上，不等待）" .-> WR
+    SA --> RUN
+    RUN -. "事件 + 提交回执" .-> SA
+    RES -. "Unload 请求" .-> SA
+    SA --> SH
+    RUN --> SH
+```
 
-**推荐 ②，理由如下：**
+**通信规则**（防死锁，定顺序）
 
-- workspace 是天然的隔离单位：配置、权限、sessions-index、项目 hooks 都按 workspace 划分，跨 workspace 的会话交互几乎不存在。
-- ② 拿到了合并后最需要的两样东西：一个 workspace 的慢操作或致命错误不会拖垮其他 workspace；`WorkspaceRegistry` 正好持有每个 workspace 一个 `WorkspaceRuntime`（6.2）。
-- workspace 内部会话之间的排队问题，用规则解决，不靠拆 actor：创建会话时准备附件、冷加载大会话、读配置文件这类可能变慢的工作，一律移到循环外的任务里执行，完成后把结果作为消息送回循环。这样循环里只剩内存操作和落库，排队延迟很短。
-- ③ 是 Codex 的做法（每个 thread 一个 submission loop）。但我们同一 workspace 内的会话共享状态很多：子代理的父子关系、fork、sessions-index、常驻 LRU、共享的工具运行时。拆成独立 actor 需要重新设计一整套消息协议，而在执行“不 await 慢操作”规则以后，它相对 ② 的收益很小。
+1. 请求 / 应答只能向下：Gateway → WorkspaceRuntime → SessionActor。向上只发事件，发送方不等待。
+2. actor 循环里不 await 慢操作。准备附件、冷加载、读配置、调用模型，都放到循环外的任务里做，完成后把结果作为消息送回。循环里只有内存操作，以及向存储写线程提交。
+3. 两个 SessionActor 的循环之间不互相等待。需要等待另一个会话时（例如子代理），由 Run 任务去等；Run 任务不是 actor 循环。
+4. 同一会话内的全序就是该 SessionActor 收件箱的顺序。会话之间不承诺全序；需要顺序的跨会话操作，各自在下表中规定。
+5. Scope 的配置以 ArcSwap 快照下发给会话，会话读配置不需要往返。
 
-**② 的额外成本：**
+**跨会话操作**
 
-- 按会话 id 定位、但不带 workspace 的请求，需要一张进程级的“会话 → workspace”路由表，由 `WorkspaceRegistry` 维护。
-- Provider 注册表、MCP 连接池、工具运行时这些进程级资源，改为注入到各个 Engine，而不是由 Engine 自己创建。
+| 操作                                                       | 今天（单个 Engine）                 | 会话级 actor 的做法                                                                                                        |
+| ---------------------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| sessions-index                                             | Engine 直接修改 index               | 会话向 WorkspaceRuntime 发 `SummaryChanged` 事件；WorkspaceRuntime 独占 seq / epoch 并推送给订阅者                         |
+| 新建会话                                                   | Engine 插入 map                     | WorkspaceRuntime 创建 SessionActor，登记到 SessionDirectory，返回 handle                                                   |
+| fork                                                       | Engine 读父会话、写子会话、原子提交 | WorkspaceRuntime 向父会话请求边界快照（向下请求）→ 创建子会话 actor → 子会话与 ACK 在同一个存储事务中提交                  |
+| 子代理（Agent / Task、SendMessage、TaskOutput / TaskStop） | Engine 内部调用                     | 父会话的 Run 任务经 WorkspaceRuntime 创建子会话，拿到 handle 后直接发命令、订阅结果；取消沿 CancellationToken 的父子链传递 |
+| 按 id 冷加载                                               | Engine 内部加载                     | SessionDirectory single-flight：同一会话的并发请求只加载一次；加载在循环外的任务里进行                                     |
+| 常驻淘汰（8 个 / 16 MiB）                                  | Engine `trim_resident`              | ResidencyManager 根据会话上报的估算内存和最近活动挑选，向会话发 `Unload`；会话在没有运行、没有订阅时持久化并退出，否则拒绝 |
+| 关机                                                       | Engine 内按顺序收口                 | TaskScope 树：HostCore → WorkspaceRuntime → SessionActor → Run，逐层取消，并等待已提交的 `Finished`                        |
 
-**验收**：U3 时测量两项指标：一个 workspace 内某个会话在做慢操作时，同 workspace 其他会话的命令延迟；一个 workspace 出现致命错误时，其他 workspace 不受影响。
+**子代理时序**
+
+```mermaid
+sequenceDiagram
+    participant PR as 父会话 Run 任务
+    participant WR as WorkspaceRuntime
+    participant CS as 子会话 SessionActor
+    participant CR as 子会话 Run 任务
+    PR->>WR: CreateChild{parent, profile, prompt}
+    WR->>CS: 创建并登记（继承 Skill / MCP 绑定）
+    WR-->>PR: 子会话 handle
+    PR->>CS: Admit(prompt)（进入子会话自己的 CommandInbox）
+    CS->>CR: 启动 run
+    CR-->>CS: 事件
+    CS-->>PR: 订阅到的结果与 Finished
+    Note over PR,CS: 父会话的 SessionActor 循环全程不阻塞；取消父会话时，子会话的 token 随之取消
+```
+
+**故障处理**
+
+- **SessionActor panic**：TaskScope 捕获 → 该会话标记为失败，向订阅者发 `Finished{error}` → 从 SessionDirectory 注销。下次访问时从库冷加载出新的 actor。已提交的事实不受影响；尚未提交的流式内容，按现有的中断恢复规则处理。
+- **WorkspaceRuntime panic**：它只做内存操作，由 TaskScope 重建。重建时从库恢复 sessions-index，存活的会话 actor 重新登记，epoch 换新，客户端走快照恢复。
+- **Run 任务 panic**：会话收到 `Finished{error}`。这同时修复了今天 `run.rs:163` 的问题。
+
+**代价**：CLI `core/src/app` 中的 Engine（约 1.7 万行，方法以 `&mut self` 同时访问多个会话）要拆成 WorkspaceRuntime 和 SessionActor，这是 U1 中最大的一块工作。进行中的 workspace-scope 工作中“Engine 按 key 持有 Scope”的部分，拆分后成为 WorkspaceRuntime 的职责。
+
+**验收**（U1）
+
+- 同一 workspace 的两个会话：一个正在做慢操作（大附件、冷加载）时，另一个会话 Stop 的延迟不受影响；
+- 一个会话 panic 时，同一 workspace 的其他会话和其他 workspace 都照常运行；
+- 子代理、fork、sessions-index、常驻淘汰、关机的现有测试全部通过；
+- 实测 100 个已加载会话时 actor 本身的内存开销，写入报告。
 
 ## 15. 与现有规格和规则的关系
 
 - [rust-host.md](rust-host.md)：第 9 节“本计划之后”由本文接替；R0–R6 的产出与决策继续有效。R7 不单独执行，默认切换、打包与签名并入 U8（D-U8）；D1（每窗口一个 Host）在 U4 改为每 App 一个；D8（TS 连接器）在 U5 由系统 OpenSSH 取代（D-U3）。
-- [rust-cli-architecture.md](rust-cli-architecture.md) 的“Workspace 作用域”一节（进行中）是 U1 的起点；本文不改变其中规则。
+- [rust-cli-architecture.md](rust-cli-architecture.md) 的“Workspace 作用域”一节（进行中）是 U1 的起点。其中的规则语义不变；“Engine 按 key 持有作用域”的结构在 U1 拆成 WorkspaceRuntime 与 SessionActor（D-U12）。
 - AGENTS.md 需要在对应阶段更新：
   - “Desktop app 通过 stdio 与 Agent 通信”：U3；
   - “每个窗口使用一个 window-scoped Local Host”“远程 workspace 由窗口内的连接注册表管理”：U4、U5；
