@@ -15,6 +15,18 @@ import {
 /** 等待 Host 就绪与等待写入结果的上限。 */
 export const HOST_SETTING_WRITE_TIMEOUT_MS = 10_000;
 
+/**
+ * 退出时等在途设置写入结果的上限（§2.6）：退出预算（waitTimeoutMs）先留出 dispose 的强杀等待
+ * （forceKillDelayMs），剩下的才给写入，且不超过写入本身的 10 s 上限。
+ */
+export function settingSettleBudgetMs(policy: {
+  forceKillDelayMs?: number;
+  waitTimeoutMs?: number;
+}): number {
+  const budget = (policy.waitTimeoutMs ?? 0) - (policy.forceKillDelayMs ?? 0);
+  return Math.max(0, Math.min(HOST_SETTING_WRITE_TIMEOUT_MS, budget));
+}
+
 /** Main 读写设置的统一入口：Node 路径是今天的 settingService，Rust 路径读文件、写经 Host。 */
 export interface MainSettingStore {
   get(): Promise<AppSettings>;
@@ -114,10 +126,24 @@ export class HostSettingWriter {
     }
   }
 
-  /** App 退出与安装更新：拒绝新写入，等在途写入的结果后再 dispose Host（§2.6）。 */
-  async closeAndSettle(): Promise<void> {
+  /**
+   * App 退出与安装更新：拒绝新写入，等在途写入的结果后再 dispose Host（§2.6）。
+   * 最多等 `timeoutMs`（由退出预算决定）；返回在途写入是否都已有结果。超时的写入仍按原有
+   * 10 s 上限或 Host 退出得到结果，这里只是不再等它。
+   */
+  async closeAndSettle(timeoutMs: number): Promise<boolean> {
     this.closed = true;
-    await Promise.all(Array.from(this.pending.values(), (entry) => entry.settled));
+    if (this.pending.size === 0) return true;
+    const settled = Promise.all(Array.from(this.pending.values(), (entry) => entry.settled));
+    let cancelTimer = () => {};
+    const timedOut = new Promise<false>((resolve) => {
+      cancelTimer = this.ports.setTimer(Math.max(0, timeoutMs), () => resolve(false));
+    });
+    try {
+      return await Promise.race([settled.then(() => true as const), timedOut]);
+    } finally {
+      cancelTimer();
+    }
   }
 
   private settle(requestId: string, error?: Error): void {

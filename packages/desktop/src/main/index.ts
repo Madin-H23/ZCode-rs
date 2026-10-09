@@ -204,6 +204,7 @@ import {
 } from "./desktopRemoteUsageArmsTelemetry.js";
 import { resolveCanonicalWslTarget } from "./desktopWslTargetResolver.js";
 import {
+  isMainApplicationWindowWebContents,
   listRegisteredHostAgentProcessIds,
   setBrowserUseGuestWebContentsIdsProvider,
 } from "./resourceManagerWindow.js";
@@ -628,6 +629,35 @@ const windowWorkspaceMap = new Map<number, Set<string>>();
 const windowTaskRealtimeHostIdMap = new Map<number, string>();
 const windowUnreadCountMap = new Map<number, number>();
 const windowHostProcessMap = new Map<number, ElectronUtilityProcess>();
+const disposingHostProcessTimers = new WeakMap<
+  ElectronUtilityProcess,
+  ReturnType<typeof setTimeout>
+>();
+const fileSettingService = createSettingService();
+// 修复原因：rustAppHost 原来声明在 resolveWindowHost / cuaPipFocusRouter 之后，源码顺序上存在 TDZ
+// 风险（任何提前的调用都会抛 ReferenceError）；移到使用它的函数之前。
+// Rust 开关下整个 App 只有一个 Host，并且是 setting.json 的唯一写入方（docs/specs/rust-u4-app-host.md）。
+const rustAppHost = isRustDesktopHostEnabled()
+  ? createRustAppHost({
+      logger,
+      getDependencies: () => buildHostProcessDependencies(),
+      prepareInit: prepareRustAppHostInit,
+      findWindowIdForRemoteWorkspace: (workspace) =>
+        remoteSessionManager.findWindowIdForRemoteWorkspace(workspace),
+      onSettingChanged: (settings) => mainSettingsSync.acceptHostSnapshot(settings),
+      onOffPeakActiveCountChanged: handleOffPeakActiveCountChanged,
+      disposingHostProcessTimers,
+    })
+  : null;
+/** Main 读写设置的入口：Node 路径直接读写文件；Rust 开关下读文件、写经 Host（§2.6）。 */
+const mainSettingService: MainSettingStore = rustAppHost
+  ? rustAppHost.createSettingStore(fileSettingService)
+  : fileSettingService;
+/** Main 内存里的设置派生状态只认一个来源：Node 路径是 Renderer 的通知，Rust 开关下是 Host 的推送。 */
+const mainSettingsSync = createMainSettingsSync({
+  source: rustAppHost ? "host" : "renderer",
+  apply: (patch) => syncImmediateAppSettings(patch),
+});
 /**
  * 窗口当前使用的 Host（按 webContents.id）。Node 路径是窗口自己的 Host；Rust 开关下是 App 级
  * Host，所有已接入的主窗口返回同一个进程（docs/specs/rust-u4-app-host.md §3）。
@@ -683,39 +713,12 @@ function resolveCronDispatchHost(): ElectronUtilityProcess | null {
   const first = windowHostProcessMap.values().next();
   return first.done ? null : first.value;
 }
-const disposingHostProcessTimers = new WeakMap<
-  ElectronUtilityProcess,
-  ReturnType<typeof setTimeout>
->();
 let updateStatusWindow: BrowserWindow | null = null;
 const UPDATE_STATUS_WINDOW_WIDTH = 512;
 const UPDATE_STATUS_WINDOW_COMPACT_HEIGHT = 205;
 const UPDATE_STATUS_WINDOW_PROGRESS_HEIGHT = 224;
 const UPDATE_STATUS_WINDOW_READY_HEIGHT = UPDATE_STATUS_WINDOW_PROGRESS_HEIGHT - 54;
 const UPDATE_STATUS_WINDOW_TRAFFIC_LIGHT_POSITION = { x: 10, y: 10 } as const;
-const fileSettingService = createSettingService();
-// Rust 开关下整个 App 只有一个 Host，并且是 setting.json 的唯一写入方（docs/specs/rust-u4-app-host.md）。
-const rustAppHost = isRustDesktopHostEnabled()
-  ? createRustAppHost({
-      logger,
-      getDependencies: () => buildHostProcessDependencies(),
-      prepareInit: prepareRustAppHostInit,
-      findWindowIdForRemoteWorkspace: (workspace) =>
-        remoteSessionManager.findWindowIdForRemoteWorkspace(workspace),
-      onSettingChanged: (settings) => mainSettingsSync.acceptHostSnapshot(settings),
-      onOffPeakActiveCountChanged: handleOffPeakActiveCountChanged,
-      disposingHostProcessTimers,
-    })
-  : null;
-/** Main 读写设置的入口：Node 路径直接读写文件；Rust 开关下读文件、写经 Host（§2.6）。 */
-const mainSettingService: MainSettingStore = rustAppHost
-  ? rustAppHost.createSettingStore(fileSettingService)
-  : fileSettingService;
-/** Main 内存里的设置派生状态只认一个来源：Node 路径是 Renderer 的通知，Rust 开关下是 Host 的推送。 */
-const mainSettingsSync = createMainSettingsSync({
-  source: rustAppHost ? "host" : "renderer",
-  apply: (patch) => syncImmediateAppSettings(patch),
-});
 const appLaunchGate = createAppLaunchGate();
 const appLaunchCoordinator = createAppLaunchCoordinator(appLaunchGate);
 const appTelemetryCredentialService = createCredentialService();
@@ -1972,9 +1975,14 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
  * 多窗口的开发入口（docs/specs/rust-u4-app-host.md §2.9）：`ZCODE_DEV_EXTRA_MAIN_WINDOW=1` 且非打包
  * 构建时，在第一个主窗口就绪后再建一个主窗口，绕过 primaryWindowCoordinator 的复用。只用于 E2E。
  */
-function maybeCreateDevExtraMainWindow(primaryWindow: BrowserWindow | undefined): void {
-  if (app.isPackaged || process.env.ZCODE_DEV_EXTRA_MAIN_WINDOW?.trim() !== "1" || !primaryWindow)
-    return;
+function maybeCreateDevExtraMainWindow(): void {
+  if (app.isPackaged || process.env.ZCODE_DEV_EXTRA_MAIN_WINDOW?.trim() !== "1") return;
+  // 修复原因：原来取 getApplicationWindowsExcludingCuaIndicator()[0]，可能拿到不是主窗口的窗口
+  // （更新状态窗、强制升级窗等）；只认登记过的主窗口。
+  const primaryWindow = getMainApplicationWindows().find((win) =>
+    isMainApplicationWindowWebContents(win.webContents.id),
+  );
+  if (!primaryWindow) return;
   const createExtra = () => {
     if (primaryWindow.isDestroyed() || forceQuitRef.current) return;
     logger.info("[startup] creating the extra main window (ZCODE_DEV_EXTRA_MAIN_WINDOW)");
@@ -2413,7 +2421,7 @@ app.whenReady().then(async () => {
   if (primaryWindow) {
     scheduleReportPerfAppStartAfterMainViewReady(primaryWindow.webContents, logger);
   }
-  maybeCreateDevExtraMainWindow(primaryWindow);
+  maybeCreateDevExtraMainWindow();
 
   // 启动后检测 CPU 架构是否匹配（如 Apple 芯片误装 x64 版本经 Rosetta 转译运行），
   // 命中后异步弹框提示安装原生架构版本，不阻塞主界面。

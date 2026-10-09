@@ -272,7 +272,7 @@ export function spawnRustHostProcess(
 
 /**
  * 为主窗口当前页面签发一个 Renderer endpoint 并下发（docs/specs/rust-u4-app-host.md §2.1）。
- * `isCurrentPage` 为 false 说明签发期间窗口已 reload 或关闭，结果丢弃。
+ * `isCurrentPage` 为 false 说明签发期间窗口已 reload 或关闭，结果丢弃。返回是否交给了当前页面。
  */
 export async function sendRustHostServiceEndpoint(
   win: BrowserWindow,
@@ -280,16 +280,18 @@ export async function sendRustHostServiceEndpoint(
   databaseStartupId: string,
   logger: RustHostLogger,
   isCurrentPage: () => boolean,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const endpoint = await host.requestServiceEndpoint({ windowId: win.webContents.id });
-    if (win.isDestroyed() || win.webContents.isDestroyed() || !isCurrentPage()) return;
+    if (win.isDestroyed() || win.webContents.isDestroyed() || !isCurrentPage()) return false;
     const payload: ServiceEndpointPayload = { databaseStartupId, ...endpoint };
     win.webContents.send(InternalChannels.ServiceEndpoint, payload);
+    return true;
   } catch (error) {
     logger.warn(
       "[rustHost] failed to issue a renderer endpoint:",
       error instanceof Error ? error.message : String(error),
     );
+    return false;
   }
 }

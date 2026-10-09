@@ -13,7 +13,7 @@ type RustAppHostPhase =
   | "running"
   /** 意外退出后等待退避结束再拉起下一代。 */
   | "restart-scheduled"
-  /** 60 s 内意外退出过多，已放弃自动重启；任意窗口 dom-ready（Retry）触发一次重启。 */
+  /** 60 s 内意外退出过多，已放弃自动重启；失败页所在窗口的 reload（Retry）触发一次重启。 */
   | "gave-up"
   | "disposing"
   | "disposed";
@@ -24,8 +24,8 @@ interface RustAppHostCoreEffects {
   /** 为窗口当前页面签发 endpoint；pageToken 用来丢弃发给已被 reload 的旧页面的结果。 */
   issueEndpoint(windowId: number, generation: number, pageToken: number): void;
   reloadWindow(windowId: number): void;
-  /** 发给所有主窗口（不只是已接入的窗口）。 */
-  notifyConnectionState(payload: HostConnectionStatePayload): void;
+  /** 发给 `windowId` 这个主窗口；省略时发给所有主窗口（不只是已接入的窗口）。 */
+  notifyConnectionState(payload: HostConnectionStatePayload, windowId?: number): void;
   setTimer(delayMs: number, fire: () => void): () => void;
   now(): number;
   logger: {
@@ -41,6 +41,8 @@ interface WindowEntry {
   needsEndpoint: boolean;
   /** 页面属于已退出的那一代 Host（显示断开 / 失败页），下一代 ready 后要 reload。 */
   stale: boolean;
+  /** Main 已让这个页面 reload、还没等到它的 dom-ready：下一次 dom-ready 来自 Main，不是用户操作。 */
+  reloadRequested: boolean;
 }
 
 interface RustAppHostCoreSnapshot {
@@ -62,6 +64,8 @@ export class RustAppHostCore {
   private readonly readyWaiters = new Set<(ready: boolean) => void>();
   private cancelRestart: (() => void) | null = null;
   private nextPageToken = 0;
+  /** 放弃前自动重启过的次数，给放弃期间新打开的窗口显示同一失败页。 */
+  private gaveUpAttempts = 0;
 
   constructor(
     private readonly effects: RustAppHostCoreEffects,
@@ -96,10 +100,12 @@ export class RustAppHostCore {
   /** 主窗口 dom-ready（含 reload）：为这个页面签发一个 endpoint；Host 未就绪时等就绪后签发。 */
   windowDomReady(windowId: number): void {
     if (this.phase === "disposing" || this.phase === "disposed") return;
+    const previous = this.windows.get(windowId);
     const entry: WindowEntry = {
       pageToken: ++this.nextPageToken,
       needsEndpoint: true,
       stale: false,
+      reloadRequested: false,
     };
     this.windows.set(windowId, entry);
     if (this.phase === "idle") {
@@ -107,8 +113,28 @@ export class RustAppHostCore {
       return;
     }
     if (this.phase === "gave-up") {
-      // 失败页的 Retry（页面自身 location.reload）：触发一次 App 级重启，不经过重启策略。
-      this.spawnNext(`retry-from-window-${windowId}`);
+      if (previous?.stale && !previous.reloadRequested) {
+        // 失败页的 Retry（页面自身 location.reload）：触发一次 App 级重启，不经过重启策略。
+        // 修复原因：原来放弃后的任何 dom-ready（包括新打开的窗口）都会重启，且不清空计数，
+        // Retry 之后一次崩溃就直接再次放弃。Retry 是用户明确要求重来，从第 1 次自动重启重新计起。
+        this.policy.reset();
+        this.spawnNext(`retry-from-window-${windowId}`);
+        return;
+      }
+      // 不是 Retry 的 dom-ready 不触发重启，页面显示同一失败页，它的 Retry 才触发（§2.8）：
+      // - 放弃期间新打开的主窗口；
+      // - 修复原因：新一代就绪后 Main 让旧页面 reload，reload 完成前这一代又崩溃并放弃时，这次
+      //   reload 的 dom-ready 曾被当成用户的 Retry，自动拉起下一代——启动后很快崩溃的 Host 会因此
+      //   无限重启（E2E resilience-host-crash 两个窗口时复现：第 4 次崩溃后窗口 2 的 reload 拉起了第 5 代）。
+      entry.stale = true;
+      entry.needsEndpoint = false;
+      this.effects.logger.info(
+        `[rustAppHost] window ${windowId} loaded after giving up (${previous?.reloadRequested ? "reload requested by Main" : "new page"}); showing the failure page`,
+      );
+      this.effects.notifyConnectionState(
+        { state: "failed", attempts: this.gaveUpAttempts },
+        windowId,
+      );
       return;
     }
     if (this.phase === "running" && this.ready) this.issue(windowId, entry);
@@ -142,6 +168,7 @@ export class RustAppHostCore {
         if (!entry.stale) continue;
         entry.stale = false;
         entry.needsEndpoint = false;
+        entry.reloadRequested = true;
         this.effects.reloadWindow(windowId);
       }
       for (const resolve of Array.from(this.readyWaiters)) resolve(true);
@@ -168,6 +195,7 @@ export class RustAppHostCore {
     const decision = this.policy.onUnexpectedExit(this.effects.now());
     if (decision.kind === "give-up") {
       this.phase = "gave-up";
+      this.gaveUpAttempts = decision.attempts;
       this.effects.logger.warn(
         `[rustAppHost] host generation ${generation} exited unexpectedly with code ${code}; giving up after ${decision.attempts} automatic restarts`,
       );

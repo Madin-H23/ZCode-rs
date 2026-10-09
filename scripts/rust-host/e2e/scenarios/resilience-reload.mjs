@@ -4,7 +4,12 @@
 import { join } from "node:path";
 
 import { sendMessage, sseChunk, sseText } from "../helpers.mjs";
-import { findRunProcesses, runtimeGenerations, waitUsable } from "../resilience-helpers.mjs";
+import {
+  findRunProcesses,
+  hostLogLines,
+  runtimeGenerations,
+  waitUsable,
+} from "../resilience-helpers.mjs";
 
 const TICKS = 80;
 
@@ -40,6 +45,10 @@ export async function run(context) {
   await bodyHas(page, "tick-3 ", 60_000);
   const before = await findRunProcesses(context);
   const generationsBefore = await runtimeGenerations(home, workspace);
+  // reload 后的页面重新 attach（App 级 Host 为这个窗口签发新的 endpoint，rust-u4-app-host.md §2.1）。
+  const attachments = async () =>
+    (await hostLogLines(home)).filter((line) => /attachment \S+ connected/.test(line)).length;
+  const attachmentsBefore = await attachments();
   await page.reload();
   await waitUsable(page);
   // reload 后由恢复的标签页重新打开会话；没有自动打开时从侧栏点开。
@@ -55,6 +64,8 @@ export async function run(context) {
   const generationsAfter = await runtimeGenerations(home, workspace);
   if (after.host !== before.host || after.cli !== before.cli)
     throw new Error("reload must reattach to the same Host and CLI");
+  if (context.host !== "node" && (await attachments()) <= attachmentsBefore)
+    throw new Error("the reloaded window did not attach to the Host again");
   if (generationsBefore.length === 0 || generationsAfter.join() !== generationsBefore.join())
     throw new Error(
       `reload must keep the runtime instance: generations ${generationsBefore} -> ${generationsAfter}`,

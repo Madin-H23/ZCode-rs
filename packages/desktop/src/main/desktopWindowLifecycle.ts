@@ -60,7 +60,8 @@ export interface WindowOwnedHostOptions {
 interface AppHostWindowOptions {
   kind: "app";
   appHost: {
-    attachWindow(win: BrowserWindow): void;
+    /** `onAttached` 在 Host 就绪、endpoint 交给这个页面之后执行。 */
+    attachWindow(win: BrowserWindow, onAttached: () => void): void;
     detachWindow(webContentsId: number): void;
   };
 }
@@ -158,13 +159,18 @@ export function createWindow(options: {
 
     if (host.kind === "app") {
       // App 级 Host：首次加载与 reload 都只为当前页面申请接入（Host 未就绪时由 owner 等就绪后签发）。
-      host.appHost.attachWindow(win);
-      options.onHostProcessReady?.(wcId);
+      // 修复原因：原来在 dom-ready 立即通知“Host 可用”并补挂远端 attachment，不管 Host 是否就绪
+      // （退避期间同样执行），reload 也记成 renderer-ready。改为 endpoint 交给这个页面之后再做，
+      // 与 Node 路径“Host 就位后再做”的顺序一致。
+      const reason = currentDomReadyGeneration === 1 ? "renderer-ready" : "renderer-reload";
+      host.appHost.attachWindow(win, () => {
+        options.onHostProcessReady?.(wcId);
+        // 修复原因：原 Rust 分支在 reload 时直接返回，没有为窗口重新挂远端 workspace 的 attachment。
+        options.reattachRemoteWorkspaceSessionsForWindow(win, `${label}:${reason}`);
+      });
       options.syncAutoUpdaterStateToWindow(win);
       options.syncReadyUpdateToWindow(win);
       options.syncPostUpdateReleaseNotesToWindow(win);
-      // 修复原因：原 Rust 分支在 reload 时直接返回，没有为窗口重新挂远端 workspace 的 attachment。
-      options.reattachRemoteWorkspaceSessionsForWindow(win, `${label}:renderer-ready`);
       return;
     }
 

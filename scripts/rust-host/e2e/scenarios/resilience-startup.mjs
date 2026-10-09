@@ -1,10 +1,13 @@
-// 启动失败页（docs/specs/rust-host-resilience.md §2.2）：tasks-index 打不开时显示失败页；
-// Exit 退出 App；再次启动后等 30 s 以上（capability 若在拉起时签发就已过期），排除故障并 Retry，进入主界面。
+// 启动失败页（docs/specs/rust-host-resilience.md §2.2、docs/specs/rust-u4-app-host.md §2.8）：tasks-index
+// 打不开时所有主窗口（ZCODE_DEV_EXTRA_MAIN_WINDOW=1，两个）都显示失败页；任一窗口的 Exit 退出 App；
+// 再次启动后等 30 s 以上（capability 若在拉起时签发就已过期），排除故障，在第二个窗口点 Retry：
+// 两个窗口都进入主界面（App 级 Host 的启动状态向所有主窗口扇出，任意窗口的 retry 都被接受）。
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
-import { sendMessage, sseText } from "../helpers.mjs";
+import { sseText } from "../helpers.mjs";
 import { waitUsable } from "../resilience-helpers.mjs";
+import { EXTRA_MAIN_WINDOW_ENV, mainWindowPages, roundTrip } from "../window-helpers.mjs";
 
 export const mockRules = [
   {
@@ -13,6 +16,10 @@ export const mockRules = [
     respond: ({ response, text }) => response.end(sseText(`Reply to: ${text}`)),
   },
 ];
+
+export function env() {
+  return EXTRA_MAIN_WINDOW_ENV;
+}
 
 const blocker = (home) => join(home, ".zcode", "v2", "tasks-index.sqlite");
 
@@ -29,25 +36,39 @@ async function failurePage(page) {
   return { status, retry };
 }
 
-export async function run({ page, shots, home, relaunch }) {
+/** 两个主窗口都停在失败页；返回 [harness 找到的第一个页面, 另一个]。 */
+async function bothOnFailurePage(context, page) {
+  const pages = await mainWindowPages(context, 2);
+  const other = pages.find((candidate) => candidate !== page);
   const first = await failurePage(page);
-  console.info(`[e2e] startup failed with ${await first.status.getAttribute("data-error-code")}`);
+  const second = await failurePage(other);
+  return { pages: [page, other], first, second };
+}
+
+export async function run(context) {
+  const { page, shots, home, relaunch } = context;
+  const initial = await bothOnFailurePage(context, page);
+  console.info(
+    `[e2e] startup failed with ${await initial.first.status.getAttribute("data-error-code")} in both windows`,
+  );
   await page.screenshot({ path: join(shots, "01-failed.png") });
 
   const closed = page.waitForEvent("close", { timeout: 30_000 });
-  await page.getByRole("button", { name: "Exit" }).click();
+  await initial.pages[1].getByRole("button", { name: "Exit" }).click();
   await closed;
-  console.info("[e2e] Exit quit the app");
+  console.info("[e2e] Exit from the second window quit the app");
 
   const next = await relaunch();
-  const { retry } = await failurePage(next);
+  const again = await bothOnFailurePage(context, next);
   // capability 只有 30 s 有效期：等过这个时间，确认 endpoint 是在 ready 时才签发的。
   await new Promise((resolve) => setTimeout(resolve, 31_000));
   await rm(blocker(home), { recursive: true });
-  await retry.click();
-  await waitUsable(next);
+  await again.second.retry.click();
+  for (const window of again.pages) await waitUsable(window);
   await next.screenshot({ path: join(shots, "02-after-retry.png") });
-  await sendMessage(next, "after the retry");
-  await next.getByText("Reply to: after the retry").first().waitFor({ timeout: 60_000 });
-  console.info("[e2e] Retry prepared storage again and the app is usable");
+  await roundTrip(next, "after the retry");
+  await roundTrip(again.pages[1], "after the retry in the second window");
+  console.info(
+    "[e2e] Retry from the second window prepared storage again; both windows are usable",
+  );
 }

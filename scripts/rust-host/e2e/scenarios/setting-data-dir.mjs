@@ -1,11 +1,9 @@
 // setting.updateDataBaseDir（docs/specs/rust-host-setting.md §6）：设置页 → General → 数据存储路径。
 // “Choose folder” 走 IPlatformService.selectDirectory，即 Main 的 dialog.showOpenDialog。原生对话框
-// 无法驱动，所以经 `--inspect` 连上 Main，把 showOpenDialog 换成直接返回隔离 HOME 内的目标目录，
+// 无法驱动，所以经 harness 的 Main inspector（context.main()，e2e/main-process.mjs）把 showOpenDialog 换成直接返回隔离 HOME 内的目标目录，
 // 其余（草稿、Save、Rust Host 的守卫 → 复制 → 写设置、“需要重启”提示）都走真实界面与真实链路。
 // 重启后 Main 按 setting.json 的 dataBaseDir 给 Rust Host 下发新目录，新任务写进新目录的 tasks-index。
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { once } from "node:events";
-import { createServer } from "node:net";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -21,73 +19,15 @@ export const mockRules = [
   { name: "default", match: () => true, respond: ({ response }) => response.end(sseText(REPLY)) },
 ];
 
-let inspectorPort = 0;
-
-async function freePort() {
-  const server = createServer();
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const { port } = server.address();
-  server.close();
-  return port;
-}
-
-/** Main 进程开 Node inspector（只监听 127.0.0.1 的随机端口），用来替换原生目录对话框。 */
-export async function args() {
-  inspectorPort = await freePort();
-  return [`--inspect=127.0.0.1:${inspectorPort}`];
-}
-
 export async function seed({ home }) {
   const marker = join(home, ".zcode/v2", MARKER);
   await mkdir(join(marker, ".."), { recursive: true });
   await writeFile(marker, MARKER_CONTENT);
 }
 
-/** 在 Main 里执行一段表达式（Runtime.evaluate）。 */
-async function evaluateInMain(expression) {
-  let target;
-  for (let attempt = 0; attempt < 60 && !target; attempt += 1) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${inspectorPort}/json/list`);
-      target = (await response.json()).find((entry) => entry.webSocketDebuggerUrl);
-    } catch {
-      // inspector 还没就绪
-    }
-    if (!target) await sleep(500);
-  }
-  if (!target) throw new Error("Main inspector did not come up");
-  const socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.onopen = resolve;
-    socket.onerror = () => reject(new Error("cannot connect to the Main inspector"));
-  });
-  try {
-    const reply = await new Promise((resolve) => {
-      socket.onmessage = (event) => {
-        const message = JSON.parse(String(event.data));
-        if (message.id === 1) resolve(message);
-      };
-      socket.send(
-        JSON.stringify({
-          id: 1,
-          method: "Runtime.evaluate",
-          params: { expression, returnByValue: true, awaitPromise: true },
-        }),
-      );
-    });
-    if (reply.result?.exceptionDetails) {
-      throw new Error(`Main evaluate failed: ${JSON.stringify(reply.result.exceptionDetails)}`);
-    }
-    return reply.result?.result?.value;
-  } finally {
-    socket.close();
-  }
-}
-
 /** 把 Main 的 dialog.showOpenDialog 换成直接选中 `directory`（selectDirectory 的唯一后端）。 */
-async function stubDirectoryDialog(directory) {
-  const value = await evaluateInMain(`(() => {
+async function stubDirectoryDialog(main, directory) {
+  const value = await main.evaluate(`(() => {
     const { createRequire } = process.getBuiltinModule("node:module");
     const { dialog } = createRequire(process.cwd() + "/")("electron");
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [${JSON.stringify(directory)}] });
@@ -110,10 +50,10 @@ async function exists(path) {
   );
 }
 
-export async function run({ page, shots, home, relaunch }) {
+export async function run({ page, shots, home, relaunch, main }) {
   const target = join(home, "zcode-data-target");
   await mkdir(target, { recursive: true });
-  await stubDirectoryDialog(target);
+  await stubDirectoryDialog(main(), target);
   console.info("[e2e:setting-data-dir] Main directory dialog stubbed");
 
   await openSettingsSection(page, "General", shots, "data-dir");

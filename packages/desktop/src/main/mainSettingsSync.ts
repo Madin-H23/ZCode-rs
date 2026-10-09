@@ -11,6 +11,16 @@ type MainSettingsSyncSource = "renderer" | "host";
 
 type SettingsPatch = Partial<AppSettings>;
 
+/**
+ * 比较用的字段值：没有快捷键覆盖与空覆盖表等价。基线由 Main 的 TS 读取得到，快照由 Host 的
+ * SettingStore 得到，两边只要有一边把“没有覆盖”写成 `{}`，就不能当成一次快捷键修改
+ * （否则重建菜单并向所有窗口广播 SettingsChanged）。
+ */
+function comparableValue(key: string, value: unknown): string | undefined {
+  if (key === "shortcutBindings" && (value === undefined || value === null)) return "{}";
+  return JSON.stringify(value);
+}
+
 /** 逐字段比较两个快照；被移除的字段记为 undefined。 */
 export function diffAppSettings(
   previous: AppSettings | undefined,
@@ -20,7 +30,7 @@ export function diffAppSettings(
   const before = new Map<string, unknown>(Object.entries(previous ?? {}));
   const after = new Map<string, unknown>(Object.entries(next));
   for (const key of new Set([...before.keys(), ...after.keys()])) {
-    if (JSON.stringify(before.get(key)) !== JSON.stringify(after.get(key))) {
+    if (comparableValue(key, before.get(key)) !== comparableValue(key, after.get(key))) {
       patch[key] = after.get(key);
     }
   }

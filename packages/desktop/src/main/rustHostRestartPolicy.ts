@@ -41,4 +41,9 @@ export class RustHostRestartPolicy {
     const delayMs = this.backoffMs[Math.min(attempt, this.backoffMs.length) - 1] ?? 0;
     return { kind: "restart", attempt, maxAttempts: this.maxRestarts, delayMs };
   }
+
+  /** 用户在失败页点 Retry：之后的意外退出重新从第 1 次自动重启计起（rust-u4-app-host.md §2.8）。 */
+  reset(): void {
+    this.exits = [];
+  }
 }

@@ -23,7 +23,11 @@ import {
   spawnRustAppHostProcess,
 } from "./desktopHostProcess.js";
 import { resolveHostRequestWindow } from "./hostRequestWindowRouting.js";
-import { HostSettingWriter, type MainSettingStore } from "./hostSettingWriter.js";
+import {
+  HostSettingWriter,
+  type MainSettingStore,
+  settingSettleBudgetMs,
+} from "./hostSettingWriter.js";
 import { isMainApplicationWindowWebContents } from "./resourceManagerWindow.js";
 import { RustAppHostCore } from "./rustAppHostCore.js";
 import { type RustHostProcess, sendRustHostServiceEndpoint } from "./rustDesktopHost.js";
@@ -117,15 +121,31 @@ export function createRustAppHost(options: RustAppHostOptions) {
   /** 当前代的进程；退出后置空，下一代拉起时替换。 */
   let current: { host: RustHostProcess; generation: number; startupId: string } | null = null;
   let initPromise: Promise<RustAppHostInit> | null = null;
+  /** 每个窗口当前页面拿到 endpoint 之后要做的事（attachWindow 传入，随每次 dom-ready 替换）。 */
+  const onPageAttached = new Map<number, () => void>();
 
   const core = new RustAppHostCore({
-    spawn: (generation) => void spawnGeneration(generation),
+    spawn: (generation) => {
+      // 修复原因：这里原来是 `void spawnGeneration(generation)`，拉起时同步抛出的异常变成无人处理的
+      // rejection，状态机停在 running 却没有进程，窗口永远等不到 endpoint。拉起失败按这一代意外退出处理，
+      // 交给重启策略。
+      spawnGeneration(generation).catch((error: unknown) =>
+        spawnFailed(generation, "spawning the host failed", error),
+      );
+    },
     issueEndpoint: (windowId, generation, pageToken) => {
       const win = findMainWindow(windowId);
       if (!win || !current || current.generation !== generation) return;
-      void sendRustHostServiceEndpoint(win, current.host, current.startupId, logger, () =>
-        core.isCurrentPage(windowId, pageToken),
-      );
+      const isCurrentPage = () => core.isCurrentPage(windowId, pageToken);
+      void sendRustHostServiceEndpoint(
+        win,
+        current.host,
+        current.startupId,
+        logger,
+        isCurrentPage,
+      ).then((delivered) => {
+        if (delivered && isCurrentPage()) onPageAttached.get(windowId)?.();
+      });
     },
     reloadWindow: (windowId) => {
       const win = findMainWindow(windowId);
@@ -133,9 +153,11 @@ export function createRustAppHost(options: RustAppHostOptions) {
       logger.info(`[rustAppHost] reloading window ${windowId} to attach to the new host`);
       win.webContents.reload();
     },
-    notifyConnectionState: (payload) => {
-      for (const win of listMainWindows()) {
-        win.webContents.send(InternalChannels.HostConnectionState, payload);
+    notifyConnectionState: (payload, windowId) => {
+      const targets =
+        windowId === undefined ? listMainWindows() : [findMainWindow(windowId)].filter(Boolean);
+      for (const win of targets) {
+        win?.webContents.send(InternalChannels.HostConnectionState, payload);
       }
     },
     setTimer: startTimer,
@@ -178,14 +200,30 @@ export function createRustAppHost(options: RustAppHostOptions) {
     }
   }
 
+  /** 这一代没能拉起（或拉起中途失败）：结束可能已启动的进程，按意外退出交给状态机。 */
+  function spawnFailed(generation: number, reason: string, error: unknown): void {
+    logger.warn(`[rustAppHost] ${reason} for generation ${generation}:`, error);
+    if (current?.generation === generation) {
+      const host = current.host;
+      current = null;
+      settingWriter.hostExited();
+      try {
+        host.kill();
+      } catch {
+        // 进程可能已经不存在。
+      }
+    }
+    core.hostExited(generation, -1);
+  }
+
   async function spawnGeneration(generation: number): Promise<void> {
     let init: RustAppHostInit;
     try {
       init = await (initPromise ??= options.prepareInit());
     } catch (error) {
       initPromise = null;
-      logger.warn("[rustAppHost] failed to prepare init-local:", error);
-      if (core.shouldSpawn(generation)) core.hostExited(generation, -1);
+      if (core.shouldSpawn(generation))
+        spawnFailed(generation, "failed to prepare init-local", error);
       return;
     }
     if (!core.shouldSpawn(generation)) return;
@@ -235,12 +273,20 @@ export function createRustAppHost(options: RustAppHostOptions) {
     start(): void {
       core.start();
     },
-    /** 主窗口 dom-ready（含 reload）：为当前页面签发 endpoint，Host 未就绪时等就绪后签发。 */
-    attachWindow(win: BrowserWindow): void {
-      core.windowDomReady(win.webContents.id);
+    /**
+     * 主窗口 dom-ready（含 reload）：为当前页面签发 endpoint，Host 未就绪时等就绪后签发。
+     * `onAttached` 在 endpoint 交给这个页面之后执行（窗口级的“Host 已可用”动作，如补挂远端
+     * attachment）；页面在此之前 reload 或关闭时不执行。
+     */
+    attachWindow(win: BrowserWindow, onAttached?: () => void): void {
+      const windowId = win.webContents.id;
+      if (onAttached) onPageAttached.set(windowId, onAttached);
+      else onPageAttached.delete(windowId);
+      core.windowDomReady(windowId);
     },
     /** 主窗口关闭或销毁：只断开这个窗口；Renderer 的 WebSocket 随页面一起关闭，Host 继续运行。 */
     detachWindow(webContentsId: number): void {
+      onPageAttached.delete(webContentsId);
       core.windowClosed(webContentsId);
     },
     /** 窗口当前使用的 Host：窗口已接入且当前代进程存活时返回。 */
@@ -255,14 +301,22 @@ export function createRustAppHost(options: RustAppHostOptions) {
         update: (patch) => settingWriter.write(patch),
       };
     },
-    /** App 退出 / 安装更新：先等在途的设置写入结果，再发 dispose，最多等 3.5 s 后结束进程（不变）。 */
+    /**
+     * App 退出 / 安装更新：先等在途的设置写入结果，再发 dispose，最多等 3.5 s 后结束进程（不变）。
+     * 修复原因：原来无上限地等写入结果（单个写入最长 10 s），超过普通退出的 4.5 s 预算；现在写入的
+     * 等待与 dispose 共用同一个退出预算（settingSettleBudgetMs）。
+     */
     async disposeAndWait(
       reason: string,
       policy: { forceKillDelayMs?: number; waitTimeoutMs?: number },
     ): Promise<void> {
-      const settled = settingWriter.closeAndSettle();
+      const startedAt = Date.now();
+      const settled = settingWriter.closeAndSettle(settingSettleBudgetMs(policy));
       const live = core.beginDispose();
-      await settled;
+      if (!(await settled))
+        logger.warn(
+          `[rustAppHost] disposing with setting writes still in flight (${reason}); their results are unknown`,
+        );
       const host = current?.host;
       if (!live || !host) return;
       logger.info(`[rustAppHost] disposing the app host (${reason}), pid=${host.pid ?? "unknown"}`);
@@ -271,7 +325,12 @@ export function createRustAppHost(options: RustAppHostOptions) {
         `${RUST_APP_HOST_LABEL}:${reason}`,
         options.disposingHostProcessTimers,
         logger,
-        policy,
+        {
+          ...policy,
+          ...(policy.waitTimeoutMs === undefined
+            ? {}
+            : { waitTimeoutMs: Math.max(0, policy.waitTimeoutMs - (Date.now() - startedAt)) }),
+        },
       );
     },
   };
