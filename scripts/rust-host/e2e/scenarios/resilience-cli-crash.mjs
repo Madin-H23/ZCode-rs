@@ -18,6 +18,12 @@ import {
 
 const FAULT = "zcode-e2e-fault-5d2c91";
 
+/** embedded 模式的故障注入让 Engine panic：Host 日志（panic hook、runtime 退出）与 runtime 日志都会记下，这是本场景要的。 */
+export const expectedHostLog = [
+  /engine_fault\.rs/,
+  /fault injection: the request contains the marker/,
+];
+
 export const mockRules = [
   {
     name: "echo",

@@ -156,3 +156,22 @@ export async function waitUsable(page, timeout = 90_000) {
   await input.click({ trial: true, timeout });
   return input;
 }
+
+/**
+ * Rust Host 上当前打开的 Renderer 连接数：Host 进程里本端口是它 WebSocket 监听端口（Host 日志
+ * `listening on 127.0.0.1:<port>`，取最后一次启动的）的 ESTABLISHED TCP 连接。用于确认 reload、
+ * 销毁窗口之后旧连接确实被 Gateway 收口，而不是挂着。
+ */
+export async function hostRpcConnections(home, hostPid) {
+  const ports = (await hostLogLines(home))
+    .map((line) => line.match(/\[zcode-host\] listening on 127\.0\.0\.1:(\d+)/))
+    .filter(Boolean);
+  const port = ports.at(-1)?.[1];
+  if (!port) throw new Error("the Host log has no listening port");
+  const { stdout } = await run(
+    "lsof",
+    ["-a", "-p", String(hostPid), "-iTCP", "-sTCP:ESTABLISHED", "-n", "-P"],
+    { maxBuffer: 4 * 1024 * 1024 },
+  ).catch((error) => (error.code === 1 ? { stdout: "" } : Promise.reject(error)));
+  return stdout.split("\n").filter((line) => line.includes(`127.0.0.1:${port}->`)).length;
+}

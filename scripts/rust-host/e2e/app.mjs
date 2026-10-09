@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createWriteStream } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer as createNetServer } from "node:net";
 import { join, resolve } from "node:path";
@@ -138,6 +139,45 @@ export async function assertCleanQuit(host, home, quit) {
   }
   console.info(
     `[e2e] clean quit: Main quit sequence ${mainQuitMs}ms, process gone after ${quit.waitedMs}ms, no leftover processes`,
+  );
+}
+
+/**
+ * Host 日志里的异常报告（docs/specs/rust-u2-gateway.md §2.3、§2.4，rust-u2-task-scope.md）：任务 panic
+ * （作用域上报 `task panicked: scope=…`，以及 panic hook 的 `panic: panicked at …`）、出站积压越过上限而
+ * 关闭连接、退出时 runtime 任务没有收口而被中止（`aborting, still running`）；runtime 的 JSONL 日志里的
+ * `task.panicked` 与关闭时仍在运行而被中止的任务。这些都不该在正常场景里出现；
+ * 场景故意制造的（例如故障注入的 panic）用模块导出 `expectedHostLog`（正则数组）声明。
+ */
+const HOST_LOG_ALARM = /panicked|outbound backlog exceeded|hard limit|still running|aborting/;
+export async function assertHostLogClean(home, expected = []) {
+  // 一条日志可能跨多行（panic 的消息在下一行）：按行首时间戳切成条目再判断。
+  const entries = [];
+  for (const line of await hostLogLines(home)) {
+    if (/^\[\d{4}-\d{2}-\d{2} /.test(line) || entries.length === 0) entries.push(line);
+    else entries[entries.length - 1] += `\n${line}`;
+  }
+  // runtime 自己的 JSONL 日志（嵌入式与子进程两种链路都写在隔离 HOME 里）：任务 panic、关闭时被中止的任务。
+  const runtimeDir = join(home, ".zcode", "cli", "log");
+  const runtimeNames = (await readdir(runtimeDir).catch(() => [])).filter((name) =>
+    name.endsWith(".jsonl"),
+  );
+  const runtimeLines = (
+    await Promise.all(runtimeNames.map((name) => readFile(join(runtimeDir, name), "utf8")))
+  )
+    .join("\n")
+    .split("\n")
+    .filter((line) => /"task\.panicked"|still running/.test(line));
+  const alarms = [
+    ...entries.filter((entry) => entry.includes("[host-log]") && HOST_LOG_ALARM.test(entry)),
+    ...runtimeLines,
+  ].filter((entry) => !expected.some((pattern) => pattern.test(entry)));
+  if (alarms.length > 0)
+    throw new Error(
+      `Host log reports problems:\n${alarms.map((entry) => entry.slice(0, 600)).join("\n")}`,
+    );
+  console.info(
+    "[e2e] Host and runtime logs: no panics, no outbound hard-limit closes, no aborted runtime tasks",
   );
 }
 
