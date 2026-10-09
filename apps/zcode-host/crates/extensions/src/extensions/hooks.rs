@@ -6,8 +6,8 @@
 use std::collections::HashSet;
 
 use serde_json::{Map, Value, json};
-use zcode_cli_domain::hooks::trust as trust_record;
 use zcode_host_kit::{Reply, RpcError, ServiceBuilder, log};
+use zcode_shared::hook_trust as trust_record;
 
 use super::cli_config::{self, Update};
 use super::skill_sync::truthy;
@@ -477,7 +477,7 @@ fn iso_now() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default();
-    zcode_cli_domain::hooks::input::iso_timestamp(ms)
+    zcode_kit::js::iso_timestamp(ms)
 }
 
 // ── Hook 投影（workspaceHookSettingsModel.ts） ──
@@ -950,7 +950,7 @@ impl HooksService {
         let configured = storage
             .get("dir")
             .and_then(Value::as_str)
-            .map(|dir| zcode_cli_domain::js_string::trim(dir).to_owned())
+            .map(|dir| zcode_kit::js::string::trim(dir).to_owned())
             .unwrap_or_default();
         let home = &self.roots.home;
         let root = if configured.is_empty() {
@@ -1003,7 +1003,7 @@ impl HooksService {
         let identity = params
             .get("workspaceIdentity")
             .and_then(Value::as_str)
-            .map(|identity| zcode_cli_domain::js_string::trim(identity).to_owned())
+            .map(|identity| zcode_kit::js::string::trim(identity).to_owned())
             .filter(|identity| !identity.is_empty())
             .unwrap_or_else(|| workspace.clone());
         let project = Self::project_sources(&workspace).await;

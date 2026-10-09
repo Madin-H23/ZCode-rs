@@ -5,7 +5,7 @@
 use rusqlite::Connection;
 use rusqlite::types::Value as SqlValue;
 use serde_json::{Map, Value, json};
-use zcode_cli_domain::js_string;
+use zcode_kit::js::string as js_string;
 
 use super::meta::{TaskRow, resolve_workspace_key, row_to_meta};
 use super::repo::read_task_row;

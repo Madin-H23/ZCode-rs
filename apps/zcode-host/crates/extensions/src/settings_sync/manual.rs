@@ -8,8 +8,8 @@ use std::collections::{HashMap, HashSet};
 
 use regex::Regex;
 use serde_json::{Map, Value, json};
-use zcode_cli_domain::js_string::trim as js_trim;
 use zcode_host_kit::{RpcError, log};
+use zcode_kit::js::string::trim as js_trim;
 
 use crate::extensions::{cli_config, commands, fsx, json as js, walk, yaml};
 use crate::support::collate::locale_compare;

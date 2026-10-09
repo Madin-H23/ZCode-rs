@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::bail;
 use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior};
 use serde_json::{Map, Value, json};
-use zcode_cli_domain::js_string;
+use zcode_kit::js::string as js_string;
 
 use super::meta::resolve_row_workspace_identity;
 use super::repo::sql_to_json;

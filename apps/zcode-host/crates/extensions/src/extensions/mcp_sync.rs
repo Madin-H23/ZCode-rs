@@ -685,7 +685,7 @@ impl McpSyncService {
 }
 
 fn name_key(name: &str) -> String {
-    zcode_cli_domain::js_string::trim(name).to_lowercase()
+    zcode_kit::js::string::trim(name).to_lowercase()
 }
 
 /// `getUnrecognizedTopLevelKeys`：-32602 且 data.message 是 zod issues JSON。
@@ -765,13 +765,13 @@ fn is_stdio(config: &Value) -> bool {
     let kind = config
         .get("type")
         .and_then(Value::as_str)
-        .map(|kind| zcode_cli_domain::js_string::trim(kind).to_lowercase())
+        .map(|kind| zcode_kit::js::string::trim(kind).to_lowercase())
         .unwrap_or_default();
     if kind.is_empty()
         && config
             .get("command")
             .and_then(Value::as_str)
-            .is_some_and(|command| !zcode_cli_domain::js_string::trim(command).is_empty())
+            .is_some_and(|command| !zcode_kit::js::string::trim(command).is_empty())
     {
         return true;
     }
@@ -807,7 +807,7 @@ fn rewrite_path_arg(arg: &str, paths: &RewritePaths) -> String {
         && let Some(remote) = paths
             .remote_workspace
             .as_deref()
-            .filter(|path| !zcode_cli_domain::js_string::trim(path).is_empty())
+            .filter(|path| !zcode_kit::js::string::trim(path).is_empty())
     {
         return join_remote(remote, &relative);
     }
@@ -818,7 +818,7 @@ fn rewrite_path_arg(arg: &str, paths: &RewritePaths) -> String {
 }
 
 fn comparable(raw: &str) -> Option<(String, bool)> {
-    let trimmed = zcode_cli_domain::js_string::trim(raw);
+    let trimmed = zcode_kit::js::string::trim(raw);
     if trimmed.is_empty() {
         return None;
     }
@@ -839,7 +839,7 @@ fn comparable(raw: &str) -> Option<(String, bool)> {
 }
 
 fn relative_within(base: Option<&str>, candidate: &str) -> Option<String> {
-    let base = base.filter(|base| !zcode_cli_domain::js_string::trim(base).is_empty())?;
+    let base = base.filter(|base| !zcode_kit::js::string::trim(base).is_empty())?;
     let (base_value, insensitive) = comparable(base)?;
     let (candidate_value, _) = comparable(candidate)?;
     let fold = |value: &str| {
@@ -920,7 +920,7 @@ fn join_remote(base: &str, relative: &str) -> String {
         .split(['/', '\\'])
         .filter(|segment| !segment.is_empty())
         .collect();
-    let normalized = zcode_cli_domain::js_string::trim(base);
+    let normalized = zcode_kit::js::string::trim(base);
     let bytes = normalized.as_bytes();
     let windows = (bytes.len() >= 3
         && bytes[0].is_ascii_alphabetic()

@@ -1,4 +1,8 @@
 pub use zcode_cli_protocol as protocol;
+// 与 Host 共用的代码在 rust/（docs/specs/rust-host-cli-boundary.md §3.1）；保留原路径供 runtime 内部引用。
+pub use zcode_kit::js::json as js_json;
+pub use zcode_kit::js::string as js_string;
+pub use zcode_shared::{option_map, workspace_identity};
 
 pub mod agent_profile;
 pub mod attachment_upload;
@@ -17,8 +21,6 @@ pub mod goal_verdict;
 pub mod history;
 pub mod history_cold;
 pub mod hooks;
-pub mod js_json;
-pub mod js_string;
 pub mod json_order;
 mod json_size;
 pub mod legacy_attachments;
@@ -34,7 +36,6 @@ pub mod node_history;
 pub mod node_ids;
 pub mod node_journal;
 pub mod node_rows;
-pub mod option_map;
 pub mod permission;
 pub mod persisted_output;
 pub mod plan_mode;
@@ -69,7 +70,6 @@ pub mod tool_input;
 pub mod topic_log;
 pub mod usage;
 pub mod web;
-pub mod workspace_identity;
 pub mod zod;
 
 pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;

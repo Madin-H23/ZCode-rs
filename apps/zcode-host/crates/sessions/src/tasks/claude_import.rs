@@ -359,7 +359,7 @@ fn searchable_text(messages: &[Value]) -> String {
         };
         let units = next.encode_utf16().count();
         if total + units > SEARCH_TEXT_MAX {
-            out.push_str(zcode_cli_domain::js_string::utf16_prefix(
+            out.push_str(zcode_kit::js::string::utf16_prefix(
                 &next,
                 SEARCH_TEXT_MAX - total,
             ));

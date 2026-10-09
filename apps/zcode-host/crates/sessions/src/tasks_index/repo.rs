@@ -7,7 +7,7 @@ use anyhow::Context as _;
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OptionalExtension as _, Row, TransactionBehavior, named_params};
 use serde_json::Value;
-use zcode_cli_domain::{js_json, js_string};
+use zcode_kit::js::{json as js_json, string as js_string};
 
 use super::meta::{
     JsObject, TaskRow, is_remote_identity, meta_workspace_key, resolve_row_workspace_identity,

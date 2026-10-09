@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
-use zcode_cli_domain::js_string::trim as js_trim;
 use zcode_host_kit::{Reply, RpcError, ServiceBuilder};
+use zcode_kit::js::string::trim as js_trim;
 
 use super::archive::{self, Entry, Flavor};
 use super::cli_config::{self, Update};

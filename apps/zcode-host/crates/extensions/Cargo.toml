@@ -23,7 +23,8 @@ tokio.workspace = true
 # settings-sync 导入 Codex `config.toml` 的 MCP 条目要按文档顺序（同 smol-toml）。
 toml = { workspace = true, features = ["preserve_order"] }
 yaml-rust2.workspace = true
-zcode-cli-domain.workspace = true
+zcode-kit.workspace = true
+zcode-shared.workspace = true
 zcode-host-control.workspace = true
 zcode-host-kit.workspace = true
 

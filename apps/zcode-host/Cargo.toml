@@ -103,7 +103,6 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
 ] }
-zcode-cli-domain = { path = "../zcode-cli-rust/crates/domain" }
 # 进程内 runtime（docs/specs/rust-u3-single-process.md）：Host 把 CLI 的 runtime 当库链接，不再只是独立进程。
 zcode-cli-rust = { path = "../zcode-cli-rust" }
 zcode-host-control = { path = "crates/control" }
@@ -125,6 +124,7 @@ zcode-host-rpc = { path = "crates/rpc" }
 zcode-async = { path = "../../rust/crates/async" }
 zcode-kit = { path = "../../rust/crates/kit" }
 zcode-proc = { path = "../../rust/crates/proc" }
+zcode-shared = { path = "../../rust/crates/shared" }
 
 [profile.release]
 lto = "thin"

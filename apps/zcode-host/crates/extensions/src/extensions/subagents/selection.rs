@@ -2,7 +2,7 @@
 //! 写法的一次性迁移（packages/shared/src/model-selection.ts、custom-model-value.ts、
 //! subagent-markdown-selection.ts、subagent-state-migration.ts、legacy-model-provider-identity.ts）。
 use serde_json::{Map, Value, json};
-use zcode_cli_domain::js_string::trim as js_trim;
+use zcode_kit::js::string::trim as js_trim;
 
 const INHERIT_NAMES: [&str; 5] = ["inherit", "main", "sonnet", "opus", "haiku"];
 

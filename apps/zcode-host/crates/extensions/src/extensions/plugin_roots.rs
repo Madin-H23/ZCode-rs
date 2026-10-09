@@ -128,7 +128,7 @@ pub async fn read_installed_roots(plugin_storage_root: &str) -> Vec<InstalledRoo
     let field = |item: &Map<String, Value>, key: &str| {
         item.get(key)
             .and_then(Value::as_str)
-            .map(|value| zcode_cli_domain::js_string::trim(value).to_owned())
+            .map(|value| zcode_kit::js::string::trim(value).to_owned())
             .unwrap_or_default()
     };
     items
@@ -176,7 +176,7 @@ pub async fn read_manifest(root: &str) -> Option<(String, Map<String, Value>)> {
     let name = manifest
         .get("name")
         .and_then(Value::as_str)
-        .map(|name| zcode_cli_domain::js_string::trim(name).to_owned())
+        .map(|name| zcode_kit::js::string::trim(name).to_owned())
         .unwrap_or_default();
     valid_plugin_name(&name).then_some((name, manifest))
 }

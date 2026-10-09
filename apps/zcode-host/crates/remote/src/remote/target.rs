@@ -1,6 +1,6 @@
 //! 远端目标与身份工具（`packages/shared/src/remoteTarget.ts`、`remote-workspace-identity.ts`、
 //! `remoteEnvironmentKey.ts`、`remoteSshHostKey.ts`）。与 TS 逐字节相同；业务代码只经这里构造身份，
-//! 不手写拼接规则。解析仍用 `zcode_cli_domain::workspace_identity::parse_remote`。
+//! 不手写拼接规则。解析仍用 `zcode_shared::workspace_identity::parse_remote`。
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -370,7 +370,7 @@ mod tests {
             for (path, expected) in paths.iter().zip(identities.iter()) {
                 assert_eq!(target.workspace_identity(path), *expected, "{raw} {path}");
                 assert!(
-                    zcode_cli_domain::workspace_identity::parse_remote(expected).is_some(),
+                    zcode_shared::workspace_identity::parse_remote(expected).is_some(),
                     "parser accepts {expected}"
                 );
             }

@@ -1,4 +1,5 @@
-//! Restricted CEL option maps. No functions, member access or external IO.
+//! Restricted CEL option maps (provider option mapping, shared by the CLI and
+//! the Host). No functions, member access or external IO.
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Map, Value};
 
@@ -305,9 +306,13 @@ fn eval(e: &Expr, input: &Value) -> Result<Value> {
                     match op.as_str() {
                         "==" => (a == b).into(),
                         "!=" => (a != b).into(),
-                        "+" if a.is_string() && b.is_string() => {
-                            format!("{}{}", a.as_str().unwrap(), b.as_str().unwrap()).into()
-                        }
+                        // 守卫已确认两边都是字符串（rust/ 不允许 unwrap）。
+                        "+" if a.is_string() && b.is_string() => format!(
+                            "{}{}",
+                            a.as_str().unwrap_or_default(),
+                            b.as_str().unwrap_or_default()
+                        )
+                        .into(),
                         "<" | "<=" | ">" | ">=" => {
                             let cmp = if let (Some(a), Some(b)) = (a.as_str(), b.as_str()) {
                                 a.encode_utf16().cmp(b.encode_utf16())
@@ -349,7 +354,10 @@ pub fn merge_patch(target: &mut Value, patch: &Value) {
         }
         for (key, v) in patch {
             if v.is_null() {
-                target.as_object_mut().unwrap().remove(key);
+                // 上面已把 target 换成对象。
+                if let Some(target) = target.as_object_mut() {
+                    target.remove(key);
+                }
             } else {
                 merge_patch(&mut target[key], v);
             }
@@ -374,7 +382,7 @@ pub fn validate_patches(patches: &[Value]) -> Result<()> {
     for patch in patches {
         let mut current = vec![];
         ensure!(patch.is_object(), "Option map must return object");
-        if patch.as_object().unwrap().is_empty() {
+        if patch.as_object().is_some_and(Map::is_empty) {
             continue;
         }
         paths(patch, vec![], &mut current);

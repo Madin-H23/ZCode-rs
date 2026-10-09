@@ -131,6 +131,7 @@ zcode-cli-tui = { path = "crates/tui" }
 # 基础 crate（rust/，docs/specs/rust-u0-foundation.md §3）。
 zcode-kit = { path = "../../rust/crates/kit" }
 zcode-proc = { path = "../../rust/crates/proc" }
+zcode-shared = { path = "../../rust/crates/shared" }
 
 [package]
 name = "zcode-cli-rust"

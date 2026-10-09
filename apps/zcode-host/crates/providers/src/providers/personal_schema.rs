@@ -93,7 +93,7 @@ fn check_option_map(value: &Value, variable: &str, path: &str) -> SchemaResult<(
     };
     let compiles = [json!("x"), json!(1)]
         .iter()
-        .any(|input| zcode_cli_domain::option_map::evaluate(source, variable, input).is_ok());
+        .any(|input| zcode_shared::option_map::evaluate(source, variable, input).is_ok());
     if compiles {
         Ok(())
     } else {

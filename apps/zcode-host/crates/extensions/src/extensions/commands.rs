@@ -10,8 +10,8 @@ use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tokio::fs;
-use zcode_cli_domain::js_string::trim as js_trim;
 use zcode_host_kit::{Reply, RpcError, ServiceBuilder};
+use zcode_kit::js::string::trim as js_trim;
 
 use super::fsx;
 use super::json as js;
