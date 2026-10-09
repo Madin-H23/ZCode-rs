@@ -488,6 +488,8 @@ R1–R6 按领域拆成子规格，由并行的分支实现后合入 `feat/rust-
 - 远端 server、Web server、`zcode-server-cli` 改用同一套 Rust Host：`serve --stdio`、`serve --http`。
 - Host 与 CLI 合并：runtime 搬进 Host 进程，去掉按 workspace 启动的 CLI 进程和 stdio。
 
+以上两项连同"每 App 一个 Host"、手机远控，由 [rust-unified-host.md](rust-unified-host.md) 统一规划。
+
 ## 10. 决策
 
 **已定**
