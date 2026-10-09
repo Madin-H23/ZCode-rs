@@ -21,7 +21,8 @@
 // 需要先 cargo build --release）。
 //
 // 每个场景结束时 harness 断言进程表（Rust：Main 下恰好一个 Rust Host、没有 Node Host / scheduler 进程），
-// 然后正常退出 App（SIGTERM 只发给 Main），断言 Main 走完退出流程、Rust Host 经 dispose 退出、不留进程。
+// 然后正常退出 App（SIGTERM 只发给 Main），断言 Main 走完退出流程、Rust Host 经 dispose 退出、不留进程；
+// 最后断言 Host 日志与 runtime 的 JSONL 日志里没有任务 panic、出站积压越过上限而关闭的连接、退出时被中止的任务。
 //
 // 场景模块导出：
 //   run(context)           必需；context = { page, shots, model, workspace, home, temp, runtime, host,
@@ -30,6 +31,7 @@
 //   seed(context)          可选；在启动 App 之前补充隔离 profile（context = { home, workspace, temp, runtime }）
 //   env(context)           可选；返回追加给 App 进程树的环境变量（不能覆盖隔离用的 HOME 等键）
 //   args(context)          可选；返回追加给 Electron 的命令行参数
+//   expectedHostLog        可选；正则数组，场景故意制造、不算异常的 Host / runtime 日志条目（例如故障注入的 panic）
 // context.runtime 是 "embedded" 或 "child"，context.host 是 "rust" 或 "node"；context.mainPid() 是当前
 // Electron Main 的 pid（relaunch 后会变），进程类断言从它向下找 Rust Host（e2e/resilience-helpers.mjs）；
 // context.pages() 是当前所有主窗口的页面；context.main() 是 Main 进程的 inspector（e2e/main-process.mjs）。
@@ -45,7 +47,13 @@ import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 
-import { assertAppProcesses, assertCleanQuit, assertRuntimeLink, launchApp } from "./e2e/app.mjs";
+import {
+  assertAppProcesses,
+  assertCleanQuit,
+  assertHostLogClean,
+  assertRuntimeLink,
+  launchApp,
+} from "./e2e/app.mjs";
 import { lastUserText } from "./e2e/helpers.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -260,6 +268,7 @@ async function runScenario(name, cli) {
     const quit = await app.stop();
     app = undefined;
     await assertCleanQuit(options.host, home, quit);
+    await assertHostLogClean(home, scenario.expectedHostLog);
     console.info(`[e2e:${name}] passed`);
   } catch (error) {
     failed = true;
