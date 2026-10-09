@@ -35,7 +35,7 @@
 - `packages/services`：业务服务；`packages/rpc`：RPC 框架。
 - `packages/shared`：共享协议与类型；`packages/client`：Agent 客户端 SDK。
 - `apps/zcode-cli`：Agent CLI 与运行时。
-- `apps/zcode-cli-rust`：Rust agent runtime；`apps/zcode-host`：Rust Host（连接、调用顺序与出站队列在 `crates/gateway`）；`rust/`：两者共用的 Rust 基础 crate（`zcode-kit`、`zcode-async`、`zcode-proc`），通过路径依赖引用。
+- `apps/zcode-cli-rust`：Rust CLI（agent runtime）；`apps/zcode-host`：Rust Host（连接、调用顺序与出站队列在 `crates/gateway`）；`rust/`：两者共用的 Rust crate，通过路径依赖引用。三者各自是一个 Cargo workspace，不合并。
 - `CONTEXT.md`：插件商店领域词汇；修改相关 UI 前阅读。
 - `DESIGN.md`：UI 设计规范；修改 UI 前阅读。
 
@@ -53,6 +53,11 @@
 ## Rust
 
 - 架构与迁移路线见 `docs/specs/rust-unified-host.md`，工程实践见 `docs/specs/rust-engineering-practices.md`，基础 crate 与护栏见 `docs/specs/rust-u0-foundation.md`。改动遵守其中的分层、依赖方向和唯一入口规则。
+- Host 与 CLI 在代码上保持隔离，能分开编译（`docs/specs/rust-host-cli-boundary.md`）：
+  - CLI 不依赖 Host。Host 只有 `zcode-host-runtime-link` 与二进制 `zcode-host` 可以依赖 CLI，且只依赖顶层 crate `zcode-cli-rust` 的公开入口，不引用 `zcode-cli-*` 的内部 crate。
+  - 两边都要用的代码放进 `rust/`，不放在任何一方。
+  - Host 与 runtime 之间只交换 App 协议的消息；进程内与子进程两种链路都要保持可用，不增加只有进程内才能用的通道。
+  - 合并的二进制以 `cli` 子命令（或以 `zcode-cli-rust` 为名）运行时，行为与独立 CLI 完全相同。
 - 工具链由仓库根 `rust-toolchain.toml` 固定；`clippy.toml`、`deny.toml`、`.cargo/config.toml` 也在仓库根，三个 workspace 共用。`pnpm check:rust` 与测试脚本依赖 `cargo-nextest`、`cargo-deny`、`cargo-shear`，缺失时脚本会给出安装命令。
 - 测试用 `cargo nextest run --workspace`：`apps/zcode-cli-rust` 的根 `Cargo.toml` 同时是一个 package，不加 `--workspace` 时 cargo 只处理根包。
 - 唯一入口（由 `clippy.toml` 的 `disallowed-methods` 或评审保证）：
