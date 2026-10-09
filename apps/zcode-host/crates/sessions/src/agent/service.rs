@@ -175,6 +175,32 @@ fn merge_denylist(current: &Value, denied: &[&str]) -> Value {
     Value::Array(merged)
 }
 
+/// `zcode-agent` 的串行键（docs/specs/rust-u2-gateway.md §2.2 的登记表）：改变某个会话状态的成员用
+/// `session:<workspace key>:<session id>`，同一会话的这些调用在 Host 内按到达顺序逐个执行，Host 因此按
+/// 到达顺序把它们交给 runtime（之后的排队与 admission 仍由 runtime 的 `CommandInbox` 负责）。
+/// 创建会话（V4 `createSession` 信封不带 sessionId）与只读成员没有键。远端 scope 的同名 channel 共用这张表。
+///
+/// 修复 G1：之前同一连接上连续发出的两条会话命令各自是一个任务，可能以相反的顺序到达 runtime；
+/// 键只读参数里的 workspace 与 sessionId（不拷贝整个参数，附件分片可能接近 1 MiB）。
+pub fn serial_key(method: &str, args: &[RpcValue]) -> Option<String> {
+    let Some(RpcValue::Json(params)) = args.first() else {
+        return None;
+    };
+    let session_id = match method {
+        // V4 命令：发送、排队编辑、权限与提问的应答、压缩、目标、删除会话……都以信封的 sessionId 为准。
+        "sendConversationCommandV4" => params["envelope"]["sessionId"].as_str(),
+        // 附件上传事务写入该会话的暂存与附件表。
+        "attachmentBeginV4" | "attachmentChunkV4" | "attachmentCommitV4" | "attachmentAbortV4"
+        // legacy 会话写操作。resume 会把会话载入 runtime 并改写它的运行配置（思考强度、MCP、工具表）。
+        | "resumeSession" | "sendPrompt" | "compactSession" | "goalSession" | "closeSession"
+        | "setModel" | "setThoughtLevel" | "setMode" => params["sessionId"].as_str(),
+        _ => None,
+    }
+    .filter(|session_id| !session_id.is_empty())?;
+    let workspace = WorkspaceTarget::key_of(params)?;
+    Some(format!("session:{workspace}:{session_id}"))
+}
+
 fn raw_reply(raw: impl AsRef<serde_json::value::RawValue>) -> Reply {
     Reply::RawJson(raw.as_ref().get().to_owned())
 }
@@ -1221,6 +1247,15 @@ impl AgentChannel {
 }
 
 impl ServiceChannel for AgentChannel {
+    fn serial_key(
+        &self,
+        _context: &CallContext,
+        method: &str,
+        args: &[RpcValue],
+    ) -> Option<String> {
+        serial_key(method, args)
+    }
+
     fn call(&self, context: &CallContext, method: &str, args: Vec<RpcValue>) -> CallFuture {
         let scope = self.scope(context);
         if let Some(future) = self.dispatch(scope, method, Args::from_rpc(args.clone())) {
@@ -1326,6 +1361,59 @@ mod tests {
         assert_eq!(
             merge_denylist(&Value::Null, &["OffPeakCreate"]),
             json!(["OffPeakCreate"])
+        );
+    }
+
+    #[test]
+    fn session_writes_are_serialized_per_session() {
+        let args = |params: Value| vec![RpcValue::Json(params)];
+        let command = |envelope: Value| {
+            args(json!({"workspacePath": "/w", "workspaceIdentity": " id ", "envelope": envelope}))
+        };
+        let keys: Vec<Option<String>> = vec![
+            serial_key(
+                "sendConversationCommandV4",
+                &command(json!({"type": "sendText", "sessionId": "s1"})),
+            ),
+            // V4 创建会话的信封没有 sessionId。
+            serial_key(
+                "sendConversationCommandV4",
+                &command(json!({"type": "createSession"})),
+            ),
+            serial_key(
+                "setModel",
+                &args(json!({"workspacePath": "/w", "sessionId": "s2"})),
+            ),
+            serial_key(
+                "attachmentChunkV4",
+                &args(json!({"workspacePath": "/w", "sessionId": "s3", "uploadId": "u"})),
+            ),
+            serial_key(
+                "createSession",
+                &args(json!({"workspacePath": "/w", "sessionId": "s4"})),
+            ),
+            serial_key(
+                "readSession",
+                &args(json!({"workspacePath": "/w", "sessionId": "s5"})),
+            ),
+            serial_key("sendPrompt", &args(json!({"sessionId": "s6"}))),
+            serial_key(
+                "sendPrompt",
+                &args(json!({"workspacePath": "/w", "sessionId": ""})),
+            ),
+        ];
+        assert_eq!(
+            keys,
+            [
+                Some("session:id:s1".to_owned()),
+                None,
+                Some("session:/w:s2".to_owned()),
+                Some("session:/w:s3".to_owned()),
+                None,
+                None,
+                None,
+                None,
+            ]
         );
     }
 

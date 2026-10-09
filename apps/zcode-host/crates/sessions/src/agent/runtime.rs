@@ -157,6 +157,19 @@ impl WorkspaceTarget {
         Ok(target)
     }
 
+    /// 调用参数里的身份 key，规则同 [`Self::key`]；只读这两个字段，不拷贝整个参数对象。
+    /// 参数不是合法的 workspace 目标（缺 `workspacePath`）时为 None。
+    pub fn key_of(params: &Value) -> Option<&str> {
+        let path = params["workspacePath"]
+            .as_str()
+            .filter(|path| !path.trim().is_empty())?;
+        let identity = params["workspaceIdentity"]
+            .as_str()
+            .map(str::trim)
+            .filter(|identity| !identity.is_empty());
+        Some(identity.unwrap_or(path))
+    }
+
     /// 身份 key：`workspaceIdentity?.trim() || workspacePath`。
     pub fn key(&self) -> String {
         trimmed(&self.workspace_identity)
