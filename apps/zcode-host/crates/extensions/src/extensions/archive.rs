@@ -332,7 +332,7 @@ fn read_string(header: &[u8], offset: usize, length: usize) -> String {
 /// `Number.parseInt(raw.trim(), 8)`（空串为 0，无合法前缀为 `None`）。
 fn read_octal(header: &[u8], offset: usize, length: usize) -> Option<u64> {
     let raw = read_string(header, offset, length);
-    let raw = zcode_cli_domain::js_string::trim(&raw);
+    let raw = zcode_kit::js::string::trim(&raw);
     if raw.is_empty() {
         return Some(0);
     }

@@ -18,7 +18,7 @@ serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 url.workspace = true
-zcode-cli-domain.workspace = true
+zcode-shared.workspace = true
 zcode-host-kit.workspace = true
 
 [dev-dependencies]

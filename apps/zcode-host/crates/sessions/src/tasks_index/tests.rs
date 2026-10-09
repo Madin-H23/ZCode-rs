@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use rusqlite::types::Value as SqlValue;
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
-use zcode_cli_domain::js_json;
+use zcode_kit::js::json as js_json;
 
 use super::meta::resolve_workspace_key;
 use super::repo::{self, GroupedAdmission, ListFilter, StatePatch, sql_to_json};

@@ -1,0 +1,19 @@
+[package]
+name = "zcode-shared"
+description = "Product-level formats and rules shared by the ZCode CLI and Host (pure data, no IO)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true

@@ -2867,6 +2867,8 @@ dependencies = [
  "sha2",
  "url",
  "zcode-cli-protocol",
+ "zcode-kit",
+ "zcode-shared",
 ]
 
 [[package]]
@@ -3079,11 +3081,13 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "zcode-async",
+ "zcode-cli-rust",
  "zcode-host-control",
  "zcode-host-core",
  "zcode-host-gateway",
  "zcode-host-kit",
  "zcode-host-rpc",
+ "zcode-host-runtime-link",
  "zcode-host-services",
  "zcode-proc",
 ]
@@ -3162,7 +3166,6 @@ dependencies = [
  "tokio",
  "url",
  "windows-sys 0.61.2",
- "zcode-cli-domain",
  "zcode-host-control",
  "zcode-host-kit",
  "zcode-host-rpc",
@@ -3208,12 +3211,13 @@ dependencies = [
  "tokio",
  "toml",
  "yaml-rust2",
- "zcode-cli-domain",
  "zcode-host-base",
  "zcode-host-control",
  "zcode-host-kit",
  "zcode-host-sessions",
  "zcode-host-settings",
+ "zcode-kit",
+ "zcode-shared",
 ]
 
 [[package]]
@@ -3254,9 +3258,9 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
- "zcode-cli-domain",
  "zcode-host-base",
  "zcode-host-kit",
+ "zcode-shared",
 ]
 
 [[package]]
@@ -3269,7 +3273,6 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
- "zcode-cli-domain",
  "zcode-host-account",
  "zcode-host-automation",
  "zcode-host-base",
@@ -3277,8 +3280,10 @@ dependencies = [
  "zcode-host-kit",
  "zcode-host-providers",
  "zcode-host-rpc",
+ "zcode-host-runtime-link",
  "zcode-host-sessions",
  "zcode-host-settings",
+ "zcode-shared",
 ]
 
 [[package]]
@@ -3289,6 +3294,21 @@ dependencies = [
  "futures-util",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "zcode-host-runtime-link"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "regex",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "zcode-cli-rust",
+ "zcode-host-kit",
+ "zcode-proc",
 ]
 
 [[package]]
@@ -3309,6 +3329,7 @@ dependencies = [
  "zcode-host-providers",
  "zcode-host-remote",
  "zcode-host-rpc",
+ "zcode-host-runtime-link",
  "zcode-host-sessions",
  "zcode-host-settings",
  "zcode-host-workspace",
@@ -3330,16 +3351,15 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
- "tokio-util",
  "url",
- "zcode-cli-domain",
- "zcode-cli-rust",
  "zcode-host-base",
  "zcode-host-control",
  "zcode-host-kit",
  "zcode-host-providers",
+ "zcode-host-runtime-link",
  "zcode-host-settings",
- "zcode-proc",
+ "zcode-kit",
+ "zcode-shared",
 ]
 
 [[package]]
@@ -3396,6 +3416,7 @@ dependencies = [
  "libc",
  "regex",
  "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -3408,6 +3429,15 @@ dependencies = [
  "tokio",
  "tracing",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "zcode-shared"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

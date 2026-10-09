@@ -26,14 +26,16 @@
 | 8   | `zcode-host-services`   | 组装（`install`）与对外门面                                                                                     | 0.4k   |
 
 - 表外的 crate：`zcode-host-rpc`、`zcode-host-control`、`zcode-host-kit` 是与业务无关的基础，在第 1 层之下；`zcode-host-gateway`（连接层，[rust-u2-gateway.md](rust-u2-gateway.md)）只依赖这三者与 `zcode-async`，与第 1 层同级、与 `zcode-host-base` 互不依赖，并且只允许 `zcode-host-core` 与 `zcode-host` 依赖它（业务 service 不认识连接层）；`zcode-host-core`（组装）与 `zcode-host`（二进制）在第 8 层之上。
+- `zcode-host-runtime-link`（到 runtime 的链路，[rust-host-cli-boundary.md](rust-host-cli-boundary.md) §2）同样与第 1 层同级：只依赖 `zcode-host-kit`、`zcode-proc`，以及 feature `embedded` 打开时的 `zcode-cli-rust`；与 `zcode-host-base`、`zcode-host-gateway` 互不依赖。只允许 `zcode-host-sessions`（agent 子系统）、`zcode-host-remote`（借用它的子进程工具启动远端连接器）、`zcode-host-services` 的测试（打开 `embedded`）与 `zcode-host`（二进制）依赖它。
 - 第 5 层的三个 crate 互不依赖。
 - 有环的两簇各自留在一个 crate 内（`sessions`、`automation`）。把它们再拆细需要先把环改成事件或端口，属于后续步骤。
 - `zcode-host-services` 重新导出所有模块（`pub use zcode_host_sessions::agent;` 等），外部的 `zcode_host_services::<module>` 路径不变。
-- `crates/services/tests/` 下的集成测试暂留原处，经门面的路径引用各层；随后续步骤逐个移到被测的那一层。
+- `crates/services/tests/` 下的集成测试暂留原处，经门面的路径引用各层；随后续步骤逐个移到被测的那一层。核心对话链路（`agent_cli.rs`）已移到 `crates/zcode-host/tests/`：它的子进程链路用合并二进制的 CLI 入口（`CARGO_BIN_EXE_zcode-host`），只有二进制所在的 crate 能拿到。
+- 层号与“只允许谁依赖”由 `scripts/rust/check-host-layers.mjs` 检查；脚本里第 1 层之下的基础编为 0–2，表中第 1 层起对应脚本的 3 起。
 
 ## 3. 规则
 
-1. **依赖方向**：crate 只能依赖表中层号更小的 crate；同层的 crate 互不依赖。Cargo 保证无环，`scripts/rust/check-host-layers.mjs`（`pnpm check:rust` 的一步）按本表检查越层与同层依赖，包括 dev-dependencies，以及只允许特定 crate 依赖的 crate（`zcode-host-gateway`）。新增 crate 或跨层依赖必须先改本表和脚本里的层号。
+1. **依赖方向**：crate 只能依赖表中层号更小的 crate；同层的 crate 互不依赖。Cargo 保证无环，`scripts/rust/check-host-layers.mjs`（`pnpm check:rust` 的一步）按本表检查越层与同层依赖，包括 dev-dependencies，以及只允许特定 crate 依赖的 crate（`zcode-host-gateway`、`zcode-host-runtime-link`）。Host 与 CLI 之间的依赖另由 `scripts/rust/check-host-cli-boundary.mjs` 检查（[rust-host-cli-boundary.md](rust-host-cli-boundary.md) §5）。新增 crate 或跨层依赖必须先改本表和脚本里的层号。
 2. **模块内的路径不改**：每个 crate 的 `lib.rs` 用 `use zcode_host_<lower>::<module>;` 把下层模块引入 crate 根，原有的 `crate::<module>::…` 路径保持有效。
 3. **可见性最小放开**：只把编译器报告的、确实被上层 crate 用到的 `pub(crate)` / `pub(super)` 条目改为 `pub`；其余保持原样。
 4. **测试替身跨 crate 复用**：用 crate 的 `test-support` feature（`#[cfg(any(test, feature = "test-support"))]`），由使用方在 `[dev-dependencies]` 中开启；测试辅助代码不进入正式构建。目前只有 `zcode-host-automation`（`bots::test_support`，被 `remote` 的测试使用）。

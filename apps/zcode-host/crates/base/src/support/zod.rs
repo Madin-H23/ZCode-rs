@@ -9,7 +9,7 @@
 //! `unrecognized_keys`；`invalid_type`（含 `int` 检查）与 `invalid_value` 会中止，此时对象级
 //! `refine` 不执行；`too_small` / `too_big` / 未知键 / `custom` 不中止。
 use serde_json::{Map, Value, json};
-use zcode_cli_domain::js_string::trim as js_trim;
+use zcode_kit::js::string::trim as js_trim;
 
 /// 数值检查（按声明顺序执行）。
 #[derive(Debug, Clone, Copy)]

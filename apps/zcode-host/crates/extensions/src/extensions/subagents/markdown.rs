@@ -2,7 +2,7 @@
 //! 解析按 runtime 的宽松 frontmatter 语义（YAML 解析结果被宽松读取覆盖），保证 CLI 能加载的
 //! profile 在设置页同样可见。
 use serde_json::{Map, Value, json};
-use zcode_cli_domain::js_string::trim as js_trim;
+use zcode_kit::js::string::trim as js_trim;
 
 use super::super::{json as js, yaml};
 use super::selection;

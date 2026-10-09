@@ -78,7 +78,7 @@ fn skill_metadata(content: &str, fallback: &str) -> (String, String) {
     let Ok(parsed) = yaml::parse(text) else {
         return (fallback.to_owned(), String::new());
     };
-    let trim = zcode_cli_domain::js_string::trim;
+    let trim = zcode_kit::js::string::trim;
     let name = parsed
         .get("name")
         .and_then(Value::as_str)
@@ -95,7 +95,7 @@ fn skill_metadata(content: &str, fallback: &str) -> (String, String) {
 }
 
 fn name_key(name: &str) -> String {
-    zcode_cli_domain::js_string::trim(name).to_lowercase()
+    zcode_kit::js::string::trim(name).to_lowercase()
 }
 
 /// `readSkillFileOrNull`：只有 ENOENT 视为不存在，其余错误抛出。

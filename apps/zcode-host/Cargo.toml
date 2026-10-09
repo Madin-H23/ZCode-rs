@@ -1,5 +1,5 @@
-# Rust Host（docs/specs/rust-host.md）。独立 workspace：只通过路径依赖引用 CLI 的协议 crate，
-# 不链接 CLI runtime，保证“CLI 是独立进程”在编译期成立。
+# Rust Host（docs/specs/rust-host.md）。独立 workspace，与 CLI 在代码上隔离、能分开编译
+# （docs/specs/rust-host-cli-boundary.md）：只有 runtime-link 与二进制 zcode-host 依赖 CLI 的顶层 crate。
 [workspace]
 members = [
   "crates/rpc",
@@ -9,6 +9,7 @@ members = [
   "crates/base",
   "crates/settings",
   "crates/providers",
+  "crates/runtime-link",
   "crates/sessions",
   "crates/account",
   "crates/extensions",
@@ -103,8 +104,8 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
 ] }
-zcode-cli-domain = { path = "../zcode-cli-rust/crates/domain" }
-# 进程内 runtime（docs/specs/rust-u3-single-process.md）：Host 把 CLI 的 runtime 当库链接，不再只是独立进程。
+# 进程内 runtime 与 `cli` 入口（docs/specs/rust-host-cli-boundary.md §3.1）：只有 zcode-host-runtime-link
+# （feature embedded）与二进制 zcode-host（feature embedded-runtime）可以依赖它，且只用公开入口。
 zcode-cli-rust = { path = "../zcode-cli-rust" }
 zcode-host-control = { path = "crates/control" }
 zcode-host-core = { path = "crates/host-core" }
@@ -113,6 +114,7 @@ zcode-host-kit = { path = "crates/kit" }
 zcode-host-base = { path = "crates/base" }
 zcode-host-settings = { path = "crates/settings" }
 zcode-host-providers = { path = "crates/providers" }
+zcode-host-runtime-link = { path = "crates/runtime-link" }
 zcode-host-sessions = { path = "crates/sessions" }
 zcode-host-account = { path = "crates/account" }
 zcode-host-extensions = { path = "crates/extensions" }
@@ -125,6 +127,7 @@ zcode-host-rpc = { path = "crates/rpc" }
 zcode-async = { path = "../../rust/crates/async" }
 zcode-kit = { path = "../../rust/crates/kit" }
 zcode-proc = { path = "../../rust/crates/proc" }
+zcode-shared = { path = "../../rust/crates/shared" }
 
 [profile.release]
 lto = "thin"

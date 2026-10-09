@@ -2,9 +2,9 @@
 //! `workspace-hook-trust-evaluation.ts`, `workspace-hook-trust-records.ts`
 //! and `workspace-hook-review-request.ts`).
 pub use super::review::{REVIEW_TIMEOUT_MS, ReviewHost, review_request};
-pub use super::trust_record::{Record, parse_record, parse_store, store_content};
 use super::workspace::{Entry, Snapshot};
 use std::collections::BTreeSet;
+pub use zcode_shared::hook_trust::{Record, parse_record, parse_store, store_content};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrustState {

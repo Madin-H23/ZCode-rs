@@ -7,8 +7,8 @@ use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
-use zcode_cli_domain::js_string::trim as js_trim;
 use zcode_host_kit::{Reply, RpcError, ServiceBuilder};
+use zcode_kit::js::string::trim as js_trim;
 
 use super::walk::{self, SKILL_FILE_NAME};
 use super::{Roots, bind, fsx, json as js, parse_params, plugin_roots, yaml};

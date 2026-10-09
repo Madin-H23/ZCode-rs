@@ -1,6 +1,6 @@
 [package]
 name = "zcode-kit"
-description = "Filesystem, path, secret and redaction primitives shared by the ZCode Rust workspaces"
+description = "Filesystem, path, secret, redaction and JavaScript-semantics text primitives shared by the ZCode Rust workspaces"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,11 +16,11 @@ doctest = false
 [dependencies]
 regex.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tempfile.workspace = true

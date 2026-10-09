@@ -326,7 +326,7 @@ impl RemoteSources {
         };
         let identity = scope["workspaceIdentity"].as_str();
         let remote_identity = identity.is_some_and(|identity| {
-            zcode_cli_domain::workspace_identity::parse_remote(identity).is_some()
+            zcode_shared::workspace_identity::parse_remote(identity).is_some()
         });
         match self.registry.find_session_for_workspace(path, identity) {
             Ok(Some(session)) => match session.scope() {

@@ -21,6 +21,8 @@ chrono-tz.workspace = true
 sha2.workspace = true
 url.workspace = true
 zcode-cli-protocol.workspace = true
+zcode-kit.workspace = true
+zcode-shared.workspace = true
 
 [lib]
 doctest = false

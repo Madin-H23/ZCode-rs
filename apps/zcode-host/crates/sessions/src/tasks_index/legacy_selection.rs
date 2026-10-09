@@ -5,7 +5,7 @@
 //! parser。
 use rusqlite::Connection;
 use serde_json::{Map, Value};
-use zcode_cli_domain::{js_json, js_string};
+use zcode_kit::js::{json as js_json, string as js_string};
 
 /// 旧 builtin provider 到 provider id 的冻结映射。
 const PROVIDER_NAMES: [(&str, &str); 6] = [

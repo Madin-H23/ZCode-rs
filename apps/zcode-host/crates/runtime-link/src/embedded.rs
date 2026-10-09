@@ -1,4 +1,4 @@
-//! 进程内 runtime 的链路（docs/specs/rust-u3-single-process.md §2.2）。
+//! 进程内 runtime 的链路（docs/specs/rust-u3-single-process.md §2.2，feature `embedded`）。
 //!
 //! runtime 作为库运行在 Host 进程里，经内存管道说与 stdio 相同的协议；实例的环境、路径都由
 //! Host 显式给出，runtime 不读 Host 进程的环境与 cwd。
@@ -12,7 +12,8 @@ use zcode_cli_rust::{embed, runtime::RuntimeOptions, serve::AppServerOptions};
 
 use zcode_host_kit::log;
 
-use super::process::{Exit, Link, Outcome};
+use crate::link::{Exit, Link, Outcome, Start};
+use crate::select::Purpose;
 
 /// 取消后等 runtime 自行收口（取消运行、回收工具进程树、提交中断状态）的上限。
 ///
@@ -21,18 +22,7 @@ use super::process::{Exit, Link, Outcome};
 /// 尚未走完 TERM → KILL 的工具进程树不会再有人回收，所以这里宁可多等：只有收口本身卡住时才中止。
 const WIND_DOWN_LIMIT: Duration = Duration::from_secs(20);
 
-/// 启动一个 runtime 实例所需的事实；`env` 就是子进程链路传给 CLI 的那份环境。
-pub struct Start<'a> {
-    /// Host 提交的原始 workspace 路径（身份用它，不做 realpath）。
-    pub workspace: &'a Path,
-    pub identity: Option<&'a str>,
-    /// 相对路径的解析基准：子进程链路里 CLI 的 cwd。
-    pub cwd: &'a Path,
-    pub env: &'a BTreeMap<String, String>,
-    pub prepare_storage: bool,
-}
-
-pub fn start(start: Start<'_>) -> std::io::Result<Link> {
+pub(crate) fn start(start: Start<'_>, purpose: Purpose) -> std::io::Result<Link> {
     let value = |key: &str| start.env.get(key).filter(|value| !value.is_empty());
     let home = value("HOME")
         .or_else(|| value("USERPROFILE"))
@@ -62,7 +52,10 @@ pub fn start(start: Start<'_>) -> std::io::Result<Link> {
         },
         config: None,
         desktop: true,
-        prepare_storage: start.prepare_storage,
+        prepare_storage: match purpose {
+            Purpose::Serve => false,
+            Purpose::PrepareStorage => true,
+        },
     });
     let (reader, writer) = tokio::io::split(embedded.io);
     Ok(Link {
@@ -70,7 +63,7 @@ pub fn start(start: Start<'_>) -> std::io::Result<Link> {
         writer: Box::new(writer),
         pid: None,
         stderr: None,
-        exit: Exit::Embedded(Running {
+        exit: Exit::in_process(Running {
             task: Some(embedded.task),
             cancel: embedded.cancel,
             tasks: embedded.tasks,
@@ -95,7 +88,7 @@ pub fn init_logging(
 }
 
 /// 一个运行中的嵌入式 runtime 实例。
-pub struct Running {
+pub(crate) struct Running {
     task: Option<JoinHandle<anyhow::Result<()>>>,
     cancel: CancellationToken,
     /// 实例的任务作用域的只读视图：中止时记下还在运行的任务。
@@ -105,7 +98,7 @@ pub struct Running {
 
 impl Running {
     /// 等实例结束；结束事实只计算一次，之后重复返回。
-    pub async fn wait(&mut self) -> Outcome {
+    pub(crate) async fn wait(&mut self) -> Outcome {
         if let Some(task) = self.task.as_mut() {
             let joined = task.await;
             self.finish(joined);
@@ -118,7 +111,7 @@ impl Running {
     }
 
     /// 请求实例收口并等它结束；超过 [`WIND_DOWN_LIMIT`] 仍未结束时中止任务。
-    pub async fn terminate(&mut self) {
+    pub(crate) async fn terminate(&mut self) {
         self.cancel.cancel();
         let Some(task) = self.task.as_mut() else {
             return;

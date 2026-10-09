@@ -29,13 +29,13 @@ use serde_json::value::RawValue;
 use serde_json::{Map, Value, json};
 use tokio::task::JoinHandle;
 use zcode_host_kit::{EventHub, RpcError, log};
+use zcode_host_runtime_link::process::{self, StderrTail};
+use zcode_host_runtime_link::{Exit, RuntimeCommand, Start};
 
 use super::client::{ClientError, ClientHandler, Notification, ProtocolClient, ReverseRequest};
-use super::command::{self, AgentCommand};
 use super::extensions::{
     AgentNotification, Extensions, ProcessEvent, ReverseContext, ReverseReply, UseReason,
 };
-use super::process::{self, StderrTail};
 use crate::providers::ProviderRuntime;
 use crate::settings::SettingStore;
 
@@ -828,8 +828,8 @@ impl AgentRuntime {
     }
 
     /// 选择 runtime 链路（会话库准备与启动共用）。
-    fn resolve_command(&self, workspace: &Path) -> Result<AgentCommand, RpcError> {
-        command::resolve(&self.inner.config.command_vars, workspace)
+    fn resolve_command(&self, workspace: &Path) -> Result<RuntimeCommand, RpcError> {
+        zcode_host_runtime_link::resolve(&self.inner.config.command_vars, workspace)
             .map_err(|error| RpcError::new("Error", format!("{error:#}")))
     }
 
@@ -874,27 +874,16 @@ impl AgentRuntime {
         let workspace = Path::new(&target.workspace_path);
         let command = self.resolve_command(workspace)?;
         let env = self.spawn_env(target).await;
-        let cwd = spawn_cwd(
-            command.cwd.as_deref(),
-            workspace,
-            config.fallback_cwd.as_deref(),
-        )
-        .await;
+        let cwd = spawn_cwd(command.cwd(), workspace, config.fallback_cwd.as_deref()).await;
         let key = target.key();
         let instance_id = format!("agent-{}", super::service::uuid_v4());
-        let program = command.program.display().to_string();
-        // 嵌入式 runtime 不启动子进程：实例运行在 Host 进程内，经内存管道说同一协议。
-        let started = if command.embedded {
-            super::embedded::start(super::embedded::Start {
-                workspace,
-                identity: trimmed(&target.workspace_identity),
-                cwd: &cwd,
-                env: &env,
-                prepare_storage: false,
-            })
-        } else {
-            process::spawn(&command, &cwd, &env).map(process::Link::from)
-        };
+        let program = command.program();
+        let started = command.start(Start {
+            workspace,
+            identity: trimmed(&target.workspace_identity),
+            cwd: &cwd,
+            env: &env,
+        });
         let link = match started {
             Ok(link) => link,
             Err(error) => {
@@ -908,7 +897,7 @@ impl AgentRuntime {
                 message.insert("provider".into(), json!(AGENT_PROVIDER));
                 message.insert("workspacePath".into(), json!(target.workspace_path));
                 message.insert("command".into(), json!(program));
-                message.insert("args".into(), json!(command.args));
+                message.insert("args".into(), json!(command.args()));
                 message.insert("errorName".into(), json!("Error"));
                 if let Some(code) = process::errno_code(&error) {
                     message.insert("errorCode".into(), json!(code));
@@ -933,7 +922,7 @@ impl AgentRuntime {
         log::info(format!(
             "{label} started pid={} storageGate={}",
             link.pid.map(|pid| pid.to_string()).unwrap_or_default(),
-            command.supports_storage_startup
+            command.supports_storage_startup()
         ));
         let diagnostic_sink = self.diagnostic_sink(target, generation, link.pid, &instance_id);
         let (tail, stderr_done) =
@@ -950,7 +939,7 @@ impl AgentRuntime {
         let client = ProtocolClient::start(
             link.reader,
             link.writer,
-            command.supports_storage_startup,
+            command.supports_storage_startup(),
             handler,
         );
         let process = Arc::new(AgentProcess {
@@ -970,7 +959,7 @@ impl AgentRuntime {
         if let Some(mut message) = process.lifecycle_base() {
             message.insert("type".into(), json!("agent-process-spawned"));
             message.insert("command".into(), json!(program));
-            message.insert("args".into(), json!(command.args));
+            message.insert("args".into(), json!(command.args()));
             message.insert("startedAt".into(), json!(started_at_ms));
             message.insert("runtimeGeneration".into(), json!(generation));
             message.insert("runtimeInstanceId".into(), json!(process.instance_id));
@@ -1311,7 +1300,7 @@ fn termination(reason: &str) -> (&'static str, &'static str) {
 
 async fn monitor(
     runtime: AgentRuntime,
-    mut exit: process::Exit,
+    mut exit: Exit,
     process: Arc<AgentProcess>,
     tail: StderrTail,
     stderr_done: process::StderrDone,
@@ -1360,7 +1349,7 @@ async fn monitor(
         log::info(format!("{label} closed: {reason}"));
     }
     process.client.close_input().await;
-    exit.terminate(process.pid).await;
+    exit.terminate().await;
     // 退出先于 stderr EOF 时收齐最后的诊断行（上限 1 s）。
     let _ = tokio::time::timeout(EXIT_FLUSH_WAIT, stderr_done).await;
     let status = exit.exit_status();

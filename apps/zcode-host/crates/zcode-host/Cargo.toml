@@ -13,6 +13,13 @@ workspace = true
 name = "zcode-host"
 path = "src/main.rs"
 
+[features]
+default = ["embedded-runtime"]
+# 合并形态（docs/specs/rust-host-cli-boundary.md §3.3）：进程内 runtime 与 `cli` 入口。关掉它就是
+# “只有 Host”形态：不链接任何 CLI 代码，没有 `cli` 入口，runtime 只能经 ZCODE_AGENT_SERVER_COMMAND
+# 指定的子进程。
+embedded-runtime = ["zcode-host-runtime-link/embedded", "dep:zcode-cli-rust"]
+
 [dependencies]
 anyhow.workspace = true
 futures-util.workspace = true
@@ -25,6 +32,8 @@ zcode-host-gateway.workspace = true
 zcode-host-kit.workspace = true
 zcode-host-services.workspace = true
 zcode-host-rpc.workspace = true
+zcode-host-runtime-link.workspace = true
+zcode-cli-rust = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

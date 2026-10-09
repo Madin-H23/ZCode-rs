@@ -40,9 +40,9 @@ Windows 测试范围先与现有 `rust-npm-windows.yml` 对齐，因为其余 cr
 
 ### 3.1 位置
 
-新 crate 放在仓库根的 `rust/` workspace（`rust/crates/<name>`），即 rust-unified-host.md D-U11 推荐的最终位置。两个应用 workspace 通过路径依赖使用它们，与 Host 现在引用 `zcode-cli-domain` 的方式相同。应用 crate 本期不迁移：迁移是纯机械改动，会让并行分支的合并全部冲突，所以在 U1 开始前，选一个没有并行分支的时间点单独完成。
+新 crate 放在仓库根的 `rust/` workspace（`rust/crates/<name>`）。两个应用 workspace 通过路径依赖使用它们。三个 workspace 保持独立、不合并（D-U11 按 D-U13 修订）：两边都要用的代码放在这里，不放在任何一方（[rust-host-cli-boundary.md](rust-host-cli-boundary.md) §3.1）。目前有 `zcode-kit`、`zcode-async`、`zcode-proc` 与 `zcode-shared`（§3.6）。
 
-依赖方向：`rust/` 下的 crate 不依赖任何应用 crate（由边界检查保证）。
+依赖方向：`rust/` 下的 crate 不依赖任何应用 crate（`scripts/rust/check-foundation-boundaries.mjs` 与 `scripts/rust/check-host-cli-boundary.mjs` 检查）。
 
 ### 3.2 `zcode-kit`
 
@@ -76,7 +76,19 @@ pub mod redact {
     /// 没有命中时返回 `Cow::Borrowed`。
     pub fn redact_secrets(text: &str) -> Cow<'_, str>;
 }
+/// 与 JavaScript 语义一致的文本工具（原在 CLI 的 domain，Host 也要用；rust-host-cli-boundary.md §3.1）。
+pub mod js {
+    /// JS `\s` / `trim` 的空白集合（含 U+FEFF、不含 U+0085）、`trim`、不拆字符的 UTF-16 前缀、
+    /// Node `sanitizeText`、ECMAScript `GetSubstitution`。
+    pub mod string { /* is_space、trim、utf16_prefix、sanitize_message、substitute */ }
+    /// `JSON.stringify`：数组下标键按数值升序在前，数字用 ECMAScript `Number::toString` 的形式。
+    pub mod json { /* stringify、encode、js_double */ }
+    /// `new Date(ms).toISOString()`。
+    pub fn iso_timestamp(ms: u64) -> String;
+}
 ```
+
+`js::json` 依赖 `serde_json` 的 `preserve_order`（按插入顺序输出键），`rust/` 与两个应用 workspace 都打开它。
 
 `atomic_write` 只提供异步版本：迁移的调用处都是异步的，同步版本等有调用方时再加。持久性比 Node 的
 `atomicWriteText` / `atomicWritePrivateTextFile` 强（多了临时文件与父目录的 fsync）；内容、权限、临时文件命名与
@@ -192,6 +204,20 @@ Windows 上的行为变化（CI 的 Windows job 验证 `zcode-proc` 本身；应
 测试代码同样适用：测试经 `zcode-proc`（dev-dependency）创建子进程，不另加 `#[expect]` 豁免；`zcode-proc` 内两个构造函数是仅有的 `#[expect(clippy::disallowed_methods)]`。
 
 原子写暂不加禁令：`std::fs::rename` 还有移动文件等正当用途，按调用逐个判断的成本高于收益；改由评审规则保证。
+
+### 3.6 `zcode-shared`
+
+CLI 与 Host 共用的产品级格式与规则：只有数据与规则，不做 IO、不持有状态，也不依赖任何应用 crate。
+
+| 模块                 | 内容                                                                              | 来源（原在 CLI 的 domain） |
+| -------------------- | --------------------------------------------------------------------------------- | -------------------------- |
+| `workspace_identity` | `Workspace`（key / path）、远程 identity 解析 `parse_remote`                      | `workspace_identity.rs`    |
+| `option_map`         | provider 选项映射的受限 CEL 表达式：`evaluate`、`merge_patch`、`validate_patches` | `option_map.rs`            |
+| `hook_trust`         | 项目 hook 信任记录 `Record` 与信任存储文件的严格解析、序列化（`parse_store` 等）  | `hooks/trust_record.rs`    |
+
+CLI 的 `domain` 按原路径重新导出（`domain::{workspace_identity, option_map}`、`domain::hooks::trust::{Record, …}`），runtime 内部的引用不变；Host 直接依赖 `zcode-shared`。`hooks/trust.rs` 的信任评估（`evaluate`、`grant_records`、`AdmissionView`）用到 domain 的 hook 快照，留在 CLI；它与存储文件格式的对拍测试（`fixtures/workspace-hooks.json`）也留在 domain，经重新导出覆盖 `hook_trust`。
+
+移入 `rust/` 时去掉了 `unwrap()`（`rust/` 禁止），改为等价的写法，行为不变。
 
 ## 4. 缺陷修复
 

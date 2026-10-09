@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 use serde_json::{Map, Value, json};
-use zcode_cli_domain::js_string;
+use zcode_kit::js::string as js_string;
 
 use super::trajectory::parse_iso;
 

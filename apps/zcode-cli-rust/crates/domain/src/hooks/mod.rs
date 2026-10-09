@@ -15,7 +15,6 @@ mod schema;
 #[cfg(test)]
 mod tests;
 pub mod trust;
-mod trust_record;
 pub mod workspace;
 #[cfg(test)]
 mod workspace_tests;

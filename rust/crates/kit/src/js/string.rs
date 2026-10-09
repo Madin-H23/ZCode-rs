@@ -69,7 +69,10 @@ pub fn substitute(
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] != b'$' || i + 1 >= bytes.len() {
-            let ch = replacement[i..].chars().next().unwrap();
+            // `i` 总在字符边界上且小于长度，这里一定有下一个字符（rust/ 不允许 unwrap）。
+            let Some(ch) = replacement[i..].chars().next() else {
+                break;
+            };
             out.push(ch);
             i += ch.len_utf8();
             continue;
@@ -112,18 +115,5 @@ pub fn substitute(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sanitizes_like_node() {
-        assert_eq!(sanitize_message("  a \n\t b\u{feff}"), Some("a b".into()));
-        assert_eq!(sanitize_message(" \n "), None);
-        let long = "字".repeat(600);
-        let cut = sanitize_message(&long).unwrap();
-        assert_eq!(cut.chars().count(), 500);
-        assert!(cut.ends_with("..."));
-        assert_eq!(utf16_prefix("a😀b", 2), "a");
-        assert_eq!(trim("\u{85}x\u{feff}"), "\u{85}x");
-    }
-}
+#[path = "string_tests.rs"]
+mod tests;

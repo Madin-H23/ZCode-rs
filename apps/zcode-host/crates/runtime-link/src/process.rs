@@ -1,5 +1,5 @@
 //! CLI 子进程的启动与进程树回收（zcodeAgentProcessManager.ts startClient、zcodeStdioTransport.ts
-//! disposeAndWaitOnce、agentStderrCollector.ts）。
+//! disposeAndWaitOnce、agentStderrCollector.ts）：子进程链路的基础，远程连接器进程也用它。
 //!
 //! - POSIX 上子进程自成进程组（pgid = pid），回收时对整组发信号，连带工具子进程。
 //! - 回收顺序：关闭 stdin（app-server 把 EOF 当退出请求）→ 等 1.8 s → SIGTERM 整组 → 再等 2 s →
@@ -12,11 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use regex::Regex;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 use zcode_host_kit::log;
-
-use super::command::AgentCommand;
 
 const GRACEFUL_EXIT_WAIT: Duration = Duration::from_millis(1800);
 const TERMINATE_WAIT: Duration = Duration::from_secs(2);
@@ -31,90 +29,16 @@ pub struct Spawned {
     pub stderr: ChildStderr,
 }
 
-/// 一条到 runtime 的协议链路：子进程的 stdio，或进程内 runtime 的内存管道
-/// （docs/specs/rust-u3-single-process.md §2.2）。
-pub struct Link {
-    pub reader: Box<dyn AsyncRead + Send + Unpin>,
-    pub writer: Box<dyn AsyncWrite + Send + Unpin>,
-    /// 子进程才有；嵌入式链路没有 pid，也没有 stderr。
-    pub pid: Option<u32>,
-    pub stderr: Option<ChildStderr>,
-    pub exit: Exit,
-}
-
-impl From<Spawned> for Link {
-    fn from(spawned: Spawned) -> Self {
-        Self {
-            reader: Box::new(spawned.stdout),
-            writer: Box::new(spawned.stdin),
-            pid: spawned.pid,
-            stderr: Some(spawned.stderr),
-            exit: Exit::Process(spawned.child),
-        }
-    }
-}
-
-/// runtime 结束时的事实。
-#[derive(Clone)]
-pub struct Outcome {
-    /// 进入日志与关闭原因的文本。
-    pub reason: String,
-    pub success: bool,
-    /// 子进程才有退出状态。
-    pub status: Option<std::process::ExitStatus>,
-}
-
-/// runtime 的生命期句柄：子进程，或进程内的任务。
-pub enum Exit {
-    Process(Child),
-    Embedded(super::embedded::Running),
-}
-
-impl Exit {
-    /// 等 runtime 结束。
-    pub async fn wait(&mut self) -> Outcome {
-        match self {
-            Self::Process(child) => match child.wait().await {
-                Ok(status) => Outcome {
-                    reason: format!("process_exit: {status}"),
-                    success: status.success(),
-                    status: Some(status),
-                },
-                Err(error) => Outcome {
-                    reason: format!("process_exit: {error}"),
-                    success: false,
-                    status: None,
-                },
-            },
-            Self::Embedded(running) => running.wait().await,
-        }
-    }
-
-    /// 回收：子进程按文件头的顺序升级信号；嵌入式实例先取消，再等任务结束。
-    pub async fn terminate(&mut self, pid: Option<u32>) {
-        match self {
-            Self::Process(child) => terminate(child, pid).await,
-            Self::Embedded(running) => running.terminate().await,
-        }
-    }
-
-    /// 已结束的子进程的退出状态；仍在运行或嵌入式实例为 None。
-    pub fn exit_status(&mut self) -> Option<std::process::ExitStatus> {
-        match self {
-            Self::Process(child) => child.try_wait().ok().flatten(),
-            Self::Embedded(_) => None,
-        }
-    }
-}
-
+/// 启动子进程：自成进程组，环境只用 `env`，三个 stdio 都接管道。
 pub fn spawn(
-    command: &AgentCommand,
+    program: &Path,
+    args: &[String],
     cwd: &Path,
     env: &BTreeMap<String, String>,
 ) -> std::io::Result<Spawned> {
-    let mut process = zcode_proc::command(&command.program);
+    let mut process = zcode_proc::command(program);
     process
-        .args(&command.args)
+        .args(args)
         .current_dir(cwd)
         .env_clear()
         .envs(env)
@@ -246,14 +170,14 @@ fn secret_patterns() -> &'static [Regex; 3] {
 }
 
 /// redactAgentDiagnostic：stderr tail 与进程诊断上报 Main 前的脱敏。
-pub fn redact(line: &str) -> String {
+fn redact(line: &str) -> String {
     let [assignment, scheme, api_key] = secret_patterns();
     let line = assignment.replace_all(line, "${1}<redacted>");
     let line = scheme.replace_all(&line, "${1} <redacted>");
     api_key.replace_all(&line, "${1}<redacted>").into_owned()
 }
 
-pub const DIAGNOSTIC_PREFIX: &str = "[zcode-process-exception] ";
+const DIAGNOSTIC_PREFIX: &str = "[zcode-process-exception] ";
 const DIAGNOSTIC_MAX_LINE_CHARS: usize = 128 * 1024;
 const DIAGNOSTIC_NAME_MAX_CHARS: usize = 128;
 const DIAGNOSTIC_MESSAGE_MAX_CHARS: usize = 4_000;
@@ -289,7 +213,7 @@ fn is_uuid(value: &str) -> bool {
 }
 
 /// parseZCodeProcessDiagnostic + 上报前的脱敏与截断；不是诊断行时返回 None。
-pub fn parse_diagnostic(line: &str) -> Option<serde_json::Value> {
+fn parse_diagnostic(line: &str) -> Option<serde_json::Value> {
     use serde_json::Value;
     let body = line.strip_prefix(DIAGNOSTIC_PREFIX)?;
     if utf16_len(line) > DIAGNOSTIC_MAX_LINE_CHARS {
@@ -500,15 +424,9 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn terminate_escalates_when_stdin_eof_is_ignored() {
-        let command = AgentCommand {
-            program: "/bin/sh".into(),
-            args: vec!["-c".into(), "trap '' TERM; sleep 30".into()],
-            cwd: None,
-            supports_storage_startup: false,
-            embedded: false,
-        };
+        let args = ["-c".to_owned(), "trap '' TERM; sleep 30".to_owned()];
         let env = BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]);
-        let mut spawned = spawn(&command, Path::new("/"), &env).unwrap();
+        let mut spawned = spawn(Path::new("/bin/sh"), &args, Path::new("/"), &env).unwrap();
         drop(spawned.stdin);
         let started = std::time::Instant::now();
         terminate(&mut spawned.child, spawned.pid).await;

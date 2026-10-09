@@ -21,10 +21,11 @@ getrandom.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
-zcode-cli-domain.workspace = true
+zcode-shared.workspace = true
 zcode-host-control.workspace = true
 zcode-host-kit.workspace = true
 zcode-host-rpc.workspace = true
+zcode-host-runtime-link.workspace = true
 
 [dev-dependencies]
 zcode-host-automation = { workspace = true, features = ["test-support"] }

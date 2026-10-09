@@ -29,7 +29,13 @@ tempfile = "3"
 base64.workspace = true
 futures-util.workspace = true
 zcode-host-rpc.workspace = true
+# 集成测试缺省走进程内 runtime（docs/specs/rust-host-cli-boundary.md §3.3）：只为打开 feature，代码里不引用。
+zcode-host-runtime-link = { workspace = true, features = ["embedded"] }
 zcode-proc.workspace = true
+
+[package.metadata.cargo-shear]
+# zcode-host-runtime-link 只用于给测试打开 feature `embedded`（见上）。
+ignored = ["zcode-host-runtime-link"]
 
 [lib]
 doctest = false

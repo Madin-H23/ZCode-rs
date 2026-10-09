@@ -47,7 +47,7 @@ fn workspace_label(id: &str) -> String {
             && bytes[bytes.len() - 17] == b'-'
             && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
         {
-            let slug = zcode_cli_domain::js_string::trim(&id[..id.len() - 17]);
+            let slug = zcode_kit::js::string::trim(&id[..id.len() - 17]);
             if !slug.is_empty() {
                 return slug.to_owned();
             }

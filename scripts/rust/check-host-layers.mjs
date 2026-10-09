@@ -7,13 +7,15 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "../../apps/zcode-host/crates");
 // 目录名 → 层号。0–2 是与业务无关的基础（协议、控制消息、RPC 工具）；3 起是规格第 2 节的表。
-// gateway（连接层，docs/specs/rust-u2-gateway.md）与 base 同层：两者互不依赖。
+// gateway（连接层，docs/specs/rust-u2-gateway.md）、base 与 runtime-link（到 runtime 的链路，
+// docs/specs/rust-host-cli-boundary.md §2）同层：三者互不依赖。
 const LAYERS = {
   rpc: 0,
   control: 1,
   kit: 2,
   gateway: 3,
   base: 3,
+  "runtime-link": 3,
   settings: 4,
   providers: 5,
   sessions: 6,
@@ -27,9 +29,12 @@ const LAYERS = {
   "zcode-host": 12,
 };
 
-// 只允许列出的 crate 依赖它：业务 service 不认识连接层（docs/specs/rust-u2-gateway.md §2.1）。
+// 只允许列出的 crate 依赖它：业务 service 不认识连接层（docs/specs/rust-u2-gateway.md §2.1）；
+// runtime 链路只给 agent 子系统（sessions）、借用它的子进程工具的 remote、打开进程内 runtime 的
+// services 测试与二进制（docs/specs/rust-host-cli-boundary.md §3.2）。
 const DEPENDENTS = {
   gateway: ["host-core", "zcode-host"],
+  "runtime-link": ["sessions", "remote", "services", "zcode-host"],
 };
 
 /** `[dependencies]`、`[dev-dependencies]`、`[target.….dependencies]` 等段里出现的包名。 */

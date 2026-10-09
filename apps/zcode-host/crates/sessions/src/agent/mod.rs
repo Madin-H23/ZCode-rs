@@ -1,16 +1,14 @@
-//! Agent 子系统：每个 workspace 一个 runtime 实例（CLI 子进程，或进程内的嵌入式 runtime），经
-//! NDJSON 行通信（docs/specs/rust-host.md R2、rust-u3-single-process.md）。
+//! Agent 子系统：每个 workspace 一个 runtime 实例，经 NDJSON 行通信（docs/specs/rust-host.md R2）。
+//! 到 runtime 的链路（选择、子进程或进程内、结束与回收）在 `zcode-host-runtime-link`
+//! （docs/specs/rust-host-cli-boundary.md §3.2），这里不区分传输。
 pub mod api;
 pub mod api_plugins;
 pub mod browser;
 pub mod client;
-pub mod command;
-pub mod embedded;
 pub mod extensions;
 mod flow;
 pub mod members;
 pub mod notifications;
-pub mod process;
 pub mod process_events;
 pub mod runtime;
 pub mod schema;

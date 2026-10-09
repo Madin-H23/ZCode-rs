@@ -12,8 +12,8 @@ use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
-use zcode_cli_domain::js_string::trim as js_trim;
 use zcode_host_kit::{Reply, RpcError, ServiceBuilder, log};
+use zcode_kit::js::string::trim as js_trim;
 
 use super::plugin_roots::{OFFICIAL_MARKETPLACE, default_enabled};
 use super::{Roots, bind, fsx, json as js, read_cli_config_lenient};

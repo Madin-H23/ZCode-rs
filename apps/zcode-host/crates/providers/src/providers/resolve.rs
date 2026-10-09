@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use serde_json::{Map, Value, json};
-use zcode_cli_domain::option_map::{evaluate, validate_patches};
+use zcode_shared::option_map::{evaluate, validate_patches};
 
 /// 模型规则：分组顺序决定覆盖顺序。
 struct Rule {

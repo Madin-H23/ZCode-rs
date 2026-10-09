@@ -24,22 +24,22 @@ apps/zcode-host/           Host：自成 Cargo workspace
 
 ### 3.1 依赖方向
 
-| 规则                         | 说明                                                                                                                                                                                                                  |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CLI 不依赖 Host              | `apps/zcode-cli-rust` 的任何 crate 都不引用 `zcode-host-*`                                                                                                                                                            |
-| Host 只经一个 crate 依赖 CLI | 只有 `zcode-host-runtime-link`（feature `embedded`）与二进制 `zcode-host`（`cli` 子命令，同一 feature）可以依赖 CLI，而且只能依赖 CLI 的顶层 crate `zcode-cli-rust`                                                   |
-| 只用公开入口                 | Host 一侧只能使用 `zcode_cli_rust::{embed, runtime::RuntimeOptions, serve::AppServerOptions, logging, log_retention, cli}`；不得引用 `zcode-cli-*` 的内部 crate（domain、core、tools、delivery 等）                   |
-| 共用代码放 `rust/`           | 两边都要用的代码不放在任何一方：与 JS 语义一致的字符串 / JSON 工具进 `zcode-kit`；两边共用的产品级格式与规则（workspace 身份、provider 选项映射、hook 信任记录等）进 `zcode-shared`。CLI 的 `domain` 不再被 Host 引用 |
+| 规则                         | 说明                                                                                                                                                                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| CLI 不依赖 Host              | `apps/zcode-cli-rust` 的任何 crate 都不引用 `zcode-host-*`                                                                                                                                                               |
+| Host 只经一个 crate 依赖 CLI | 只有 `zcode-host-runtime-link`（feature `embedded`）与二进制 `zcode-host`（`cli` 入口，feature `embedded-runtime`，它打开前者的 `embedded`）可以依赖 CLI，而且只能以可选的普通依赖依赖 CLI 的顶层 crate `zcode-cli-rust` |
+| 只用公开入口                 | Host 一侧只能使用 `zcode_cli_rust::{embed, runtime::RuntimeOptions, serve::AppServerOptions, logging, log_retention, cli}`；不得引用 `zcode-cli-*` 的内部 crate（domain、core、tools、delivery 等）                      |
+| 共用代码放 `rust/`           | 两边都要用的代码不放在任何一方：与 JS 语义一致的字符串 / JSON 工具进 `zcode-kit`；两边共用的产品级格式与规则（workspace 身份、provider 选项映射、hook 信任记录等）进 `zcode-shared`。CLI 的 `domain` 不再被 Host 引用    |
 
 ### 3.2 边界是 App 协议
 
 - Host 与 runtime 之间只交换 App 协议的消息：请求与回复、V4 帧、runtime 发给 Host 的请求与通知。协议不因为两者在同一个进程而增加“只有进程内才能用”的通道。
 - 同一份协议有两种传输，Host 在链路之上的代码不区分它们：
 
-| 链路   | 传输                                   | 编译条件                       |
-| ------ | -------------------------------------- | ------------------------------ |
-| 进程内 | 内存管道，runtime 是 Host 进程里的任务 | feature `embedded`（缺省开启） |
-| 子进程 | CLI 进程的 stdio                       | 总是可用，不链接任何 CLI 代码  |
+| 链路   | 传输                                   | 编译条件                                                                                               |
+| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 进程内 | 内存管道，runtime 是 Host 进程里的任务 | `zcode-host-runtime-link` 的 feature `embedded`；`zcode-host` 的缺省 feature `embedded-runtime` 打开它 |
+| 子进程 | CLI 进程的 stdio                       | 总是可用，不链接任何 CLI 代码                                                                          |
 
 - 因此 runtime → Host 的请求（账号头、官方 MCP 鉴权）、provider 配置的传递、控制面的两个 lane、Host 按连接保存的订阅归属都保持今天的形态。它们是协议边界的一部分，不是待清理的重复。
 - 进程内可以做的优化必须保持协议边界，例如在内存里直接传递消息值而不经过文本（消息类型放在共用 crate 里）。是否值得做由测量决定：目前到 runtime 的往返 p50 约 0.2 ms。
@@ -97,3 +97,36 @@ apps/zcode-host/           Host：自成 Cargo workspace
 | U3 B 期：输入队列归一（D-U6）、已接受输入的测试                                                                | 保留，经协议实现                                                                 |
 | D-U11：三个 workspace 合并为 `rust/`                                                                           | 不合并；共用代码进 `rust/`                                                       |
 | D-U12：一个 Engine 管所有 workspace                                                                            | 改为每个本地 workspace 一个 runtime 实例：一条链路对应一个实例，对两种传输都成立 |
+
+## 7. 实现记录（2026-10-10）
+
+### 7.1 代码位置
+
+| 内容             | 位置                                                                                                                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| JS 语义工具      | `zcode_kit::js::{string, json, iso_timestamp}`（原 CLI `domain::{js_string, js_json, hooks::input::iso_timestamp}`）                                                                                   |
+| 产品级格式与规则 | `zcode_shared::{workspace_identity, option_map, hook_trust}`（原 CLI `domain::{workspace_identity, option_map, hooks::trust_record}`）；CLI 的 `domain` 按原路径重新导出（rust-u0-foundation.md §3.6） |
+| 链路             | `zcode-host-runtime-link`：`resolve` → `RuntimeCommand`；`RuntimeCommand::start` → `Link`；`Exit` / `Outcome`；`process`（子进程的启动、stderr、回收）；`init_logging`（`embedded`）                   |
+| CLI 入口         | `zcode_cli_rust::cli::main(program, args) -> ExitCode`（`src/cli.rs`、`src/cli/{args,prompt}.rs`）；独立二进制的 `main.rs` 只调用它                                                                    |
+| 入口分派         | `apps/zcode-host/crates/zcode-host/src/main.rs` 的 `entry`                                                                                                                                             |
+
+- `runtime-link` 在 Host 分层表里与 `base`、`gateway` 同层（rust-u2-host-structure.md §2），只允许 `sessions`、`remote`、`services`（测试打开 `embedded`）与 `zcode-host` 依赖。`remote` 用它的 `process` 模块启动远端连接器与远端 server 进程，与 runtime 无关。
+- 链路之上（`sessions` 的 `agent/runtime.rs`、`agent/storage_prep.rs`）不按传输分支：只调用 `RuntimeCommand` 的方法，pid、stderr 由 `Link` 的可选字段表达，`agent-process-*` 事件仍只在有 pid 时发出（与之前相同）。
+- `process.rs` 的 `drain_stderr` 仍直接 `tokio::spawn`（原样搬移）；`runtime-link` 因此不在 `scripts/rust/check-host-spawns.mjs` 的已迁移列表里，Host 改用作用域任务时一起处理。
+
+### 7.2 与第 3 节的差异或细化
+
+- **CLI 入口的参数**（3.4）：入口除“程序名之后的参数”外还接收程序名，因为它决定 clap 用法文本里的名字和 runtime 看到的 `argv[0]`（`RuntimeEnv` 的 beta 存储判断读它）。独立二进制传自己的 `argv[0]`，输出逐字节不变；以 `zcode-cli-rust` 为名运行时同样传真实的 `argv[0]`；`zcode-host cli` 传 `zcode-cli-rust`，所以用法文本与独立 CLI 相同。`RuntimeOptions::from_process` 改为接收 argv，库内不再读进程的 argv。
+- **入口的运行时**（3.4）：CLI 入口自己建 tokio 多线程运行时（与原来的 `#[tokio::main]` 相同）；`zcode-host` 在建 Host 的运行时、装 panic hook、读 Host 参数之前完成分派。按名字分派比较的是 `argv[0]` 的 file stem（Windows 上 `zcode-cli-rust.exe` 也匹配，区分大小写）。
+- **“只有 Host”形态的 `cli`**（3.4）：stderr 输出 `zcode-host: this build does not include the CLI (built without the embedded-runtime feature); use a zcode-cli-rust executable`，退出码 2（与 Host 的参数错误相同）。以 `zcode-cli-rust` 为名运行时同样报这个错误。
+- **“只有 Host”形态启动 runtime**（3.5）：选择返回错误 `this zcode-host build does not include the in-process runtime; set ZCODE_AGENT_SERVER_COMMAND to a zcode-cli-rust executable and ZCODE_AGENT_SERVER_RUNTIME=zcode-cli-rust`，走与其他选择错误相同的路径：请求以 RPC 错误返回，启动期的会话库准备以 `unsupported_runtime` 失败（并记一条带这段文字的 warn 日志），所以这个形态不给命令就完成不了启动。
+- **行为变化**：Host 参数中有非 Unicode 字符时，原来 `std::env::args()` panic，现在按参数错误处理（错误日志，退出码 2）。Main 不会传这种参数。除此之外没有行为变化。
+
+### 7.3 强制与测试（第 5 节）
+
+- `scripts/rust/check-host-cli-boundary.mjs`（`pnpm check:rust`）：清单取自 `cargo metadata --no-deps`（真实包名、种类、是否可选、路径），源码去掉注释后扫描。规则：CLI 的清单与源码不引用 `zcode-host*`；Host 中只有 `runtime-link`、`zcode-host` 依赖 CLI，只依赖 `zcode-cli-rust`，且是可选的普通依赖；Host 源码不出现 `zcode_cli_*` 内部 crate，`zcode_cli_rust` 只出现在这两个 crate、只用 3.1 列出的路径（展开 use 树，单独使用 crate 名也算违规）；`rust/` 不依赖任何一方；`cargo tree -p zcode-host --no-default-features -e normal` 中没有 `zcode-cli-*`，缺省 feature 的树中必须有 `zcode-cli-rust`（对照，防止检查读错树）。
+- clippy 的三种形态：CLI workspace、Host workspace（合并）、`-p zcode-host-runtime-link -p zcode-host --no-default-features --all-targets`（只有 Host；只有这两个 crate 按 feature 分支）。CI 的 clippy job 同样多跑这一条。
+- 测试：
+  - `crates/zcode-host/tests/cli_entry.rs`：`zcode-host cli` 与以 `zcode-cli-rust` 为名的合并二进制，`--version` / `-v` / `--help`、无效参数（headless 的 `--bogus`、clap 的 `app-server` 缺 `--stdio`、`tui`）的退出码与输出、`app-server --stdio` 会话（存储握手、`runtime/capabilities`、stdin EOF 后以 0 退出、stderr 为空）、对假模型的 `-p` 运行。期望值是独立 CLI 的已知输出；设置 `ZCODE_TEST_CLI_RUST_BINARY` 时再用独立 CLI 跑同样的参数，逐字节比较。
+  - `crates/zcode-host/tests/agent_cli.rs`（从 `services/tests` 移来，因为只有二进制所在的 crate 能拿到 `CARGO_BIN_EXE_zcode-host`）：核心对话链路在进程内（缺省）与子进程（以 `zcode-cli-rust` 为名的合并二进制作为 `ZCODE_AGENT_SERVER_COMMAND`）两种链路上都跑；`ZCODE_TEST_CLI_RUST_BINARY` 的差分对照照旧。
+  - `crates/zcode-host/tests/host_only.rs`（只在关掉 `embedded-runtime` 时编译）与 `runtime-link` 的 `a_host_only_build_needs_a_command`：没有 `cli` 入口；不给命令时启动失败并说明原因。`pnpm test:rust-host` 与 CI 的 test job 用单独的 target 目录（`apps/zcode-host/target/host-only`）运行它们，不覆盖交给 TS 测试的合并形态二进制。

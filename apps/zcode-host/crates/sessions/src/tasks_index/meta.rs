@@ -4,7 +4,8 @@
 //! meta_json 由 Node Host 与 Rust Host 共写，读出的 meta 必须与 TS 完全相同（含键序），写入的
 //! meta_json 也按 TS 对象展开的键序序列化。
 use serde_json::{Map, Number, Value};
-use zcode_cli_domain::{js_json, js_string, workspace_identity};
+use zcode_kit::js::{json as js_json, string as js_string};
+use zcode_shared::workspace_identity;
 
 /// JS 普通对象：保留插入顺序，并区分“键存在但值为 undefined”（`None`）与键缺失。
 ///

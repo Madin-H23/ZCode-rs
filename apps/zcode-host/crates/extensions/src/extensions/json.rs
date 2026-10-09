@@ -5,7 +5,7 @@
 //!   出现的位置）；之后把数组下标形态的键按数值升序提到最前，与 JS 对象的属性顺序一致；
 //! - 写出：`JSON.stringify(value, null, 2)`，数字按 ECMAScript `Number::toString` 输出。
 use serde_json::{Map, Value};
-use zcode_cli_domain::js_json;
+use zcode_kit::js::json as js_json;
 
 /// 数组下标形态的键：`0` 或无前导零、小于 2^32 − 1 的十进制整数。
 fn array_index(key: &str) -> Option<u32> {
