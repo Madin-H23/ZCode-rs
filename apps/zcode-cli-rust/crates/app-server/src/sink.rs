@@ -11,12 +11,18 @@ use std::{
         mpsc as std_mpsc,
     },
 };
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 pub enum Sink {
     Stdout {
         tx: std_mpsc::Sender<Vec<String>>,
+        backlog: Arc<AtomicUsize>,
+    },
+    /// Any async writer (an in-memory pipe when embedded); same contract as `Stdout`.
+    Stream {
+        tx: mpsc::UnboundedSender<Vec<String>>,
         backlog: Arc<AtomicUsize>,
     },
     /// In-process consumer (tests, embedding) receiving parsed values per batch.
@@ -52,12 +58,53 @@ impl Sink {
         (Self::Stdout { tx, backlog }, writer)
     }
 
+    /// Start a writer task over `writer`. Like [`Sink::stdout`]: each batch is
+    /// written then flushed once, the caller never blocks, unwritten bytes count
+    /// as backlog, and a write failure cancels the runtime.
+    pub fn writer<W>(
+        mut writer: W,
+        cancel: CancellationToken,
+    ) -> (Self, tokio::task::JoinHandle<()>)
+    where
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<String>>();
+        let backlog = Arc::new(AtomicUsize::new(0));
+        let pending = backlog.clone();
+        let task = tokio::spawn(async move {
+            while let Some(batch) = rx.recv().await {
+                let bytes = batch.iter().map(|line| line.len() + 1).sum::<usize>();
+                let written = async {
+                    for line in &batch {
+                        writer.write_all(line.as_bytes()).await?;
+                        writer.write_all(b"\n").await?;
+                    }
+                    writer.flush().await
+                }
+                .await;
+                pending.fetch_sub(bytes, Ordering::Relaxed);
+                if written.is_err() {
+                    // 对端已关闭：协议通道不可用，由取消收口整个 runtime（同 stdout 断管）。
+                    cancel.cancel();
+                    return;
+                }
+            }
+            let _ = writer.shutdown().await;
+        });
+        (Self::Stream { tx, backlog }, task)
+    }
+
     pub async fn send(&mut self, lines: Vec<String>) -> Result<()> {
         if lines.is_empty() {
             return Ok(());
         }
         match self {
             Self::Stdout { tx, backlog } => {
+                let bytes = lines.iter().map(|line| line.len() + 1).sum::<usize>();
+                backlog.fetch_add(bytes, Ordering::Relaxed);
+                tx.send(lines).ok().context("Protocol writer stopped")
+            }
+            Self::Stream { tx, backlog } => {
                 let bytes = lines.iter().map(|line| line.len() + 1).sum::<usize>();
                 backlog.fetch_add(bytes, Ordering::Relaxed);
                 tx.send(lines).ok().context("Protocol writer stopped")
@@ -83,7 +130,9 @@ impl Sink {
     /// Bytes queued but not yet written to the transport.
     pub fn backlog(&self) -> usize {
         match self {
-            Self::Stdout { backlog, .. } => backlog.load(Ordering::Relaxed),
+            Self::Stdout { backlog, .. } | Self::Stream { backlog, .. } => {
+                backlog.load(Ordering::Relaxed)
+            }
             Self::Values(_) => 0,
         }
     }

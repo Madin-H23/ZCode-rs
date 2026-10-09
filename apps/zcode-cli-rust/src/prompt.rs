@@ -1,6 +1,5 @@
 //! Top-level entry without a subcommand (spec rust-m4-headless): `-p` runs one
 //! prompt through the headless frontend against an in-process engine.
-use crate::runtime;
 use serde_json::{Value, json};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -12,6 +11,7 @@ use zcode_cli_headless::{
     self as headless,
     args::{self, ArgError, Parsed, PromptArgs},
 };
+use zcode_cli_rust::runtime;
 
 /// Node `DEFAULT_CLI_CLEANUP_TIMEOUT_MS` / `DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS`.
 const CLEANUP: Duration = Duration::from_secs(6);
@@ -189,7 +189,8 @@ async fn run(prompt: PromptArgs, cwd: PathBuf) -> anyhow::Result<i32> {
     let (interrupt_tx, interrupt) = watch::channel(None);
     watch_signals(interrupt_tx);
     let data_dir = prompt.data_dir.as_ref().map(PathBuf::from);
-    let ctx = runtime::Context::prepare(home, Some(cwd.clone()), data_dir).await?;
+    let options = runtime::RuntimeOptions::from_process(home, Some(cwd.clone()), data_dir)?;
+    let ctx = runtime::Context::prepare(options).await?;
     let store: std::sync::Arc<dyn zcode_cli_core_api::SessionStore> =
         std::sync::Arc::new(ctx.node_store().await?);
     let config = prompt.config.as_ref().map(PathBuf::from);

@@ -1,5 +1,7 @@
-//! Composition shared by `app-server` and `-p`: the workspace context read once
-//! at startup and the engine wired to the adapters.
+//! Composition shared by `app-server`, `-p` and embedders: the workspace context
+//! read once at startup and the engine wired to the adapters (spec
+//! rust-u1-runtime-library). Nothing here reads the process environment or the
+//! process cwd except [`RuntimeOptions::from_process`], the binary's entry.
 use anyhow::{Context as _, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,9 +17,62 @@ use zcode_cli_net::{Egress, NetworkPolicy, RuntimeEnv};
 use zcode_cli_state::NodeStore;
 use zcode_cli_tools::WorkspaceTools;
 
+/// Every external fact a runtime starts from. An embedder fills it in; the
+/// binary uses [`RuntimeOptions::from_process`].
+pub struct RuntimeOptions {
+    pub home: PathBuf,
+    /// The environment the runtime sees (including variables an embedder injects).
+    pub env: Vec<(String, String)>,
+    pub argv: Vec<String>,
+    /// The default workspace: its path as given (the identity uses it unresolved).
+    pub cwd: PathBuf,
+    pub workspace_identity: Option<String>,
+    /// What relative paths (data dir, `storage.dir`) resolve against.
+    pub base_dir: PathBuf,
+    pub data_dir: PathBuf,
+}
+
+impl RuntimeOptions {
+    /// The binary's view: process environment, argv and cwd, read exactly once.
+    pub fn from_process(
+        home: PathBuf,
+        cwd: Option<PathBuf>,
+        data_dir: Option<PathBuf>,
+    ) -> std::io::Result<Self> {
+        let lossy = |value: std::ffi::OsString| value.to_string_lossy().into_owned();
+        let base_dir = std::env::current_dir()?;
+        let data_dir = data_dir.unwrap_or_else(|| {
+            std::env::var_os("ZCODE_CLI_RUST_DATA_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".zcode/rust"))
+        });
+        Ok(Self {
+            env: std::env::vars_os()
+                .map(|(key, value)| (lossy(key), lossy(value)))
+                .collect(),
+            argv: std::env::args_os().map(lossy).collect(),
+            cwd: cwd.unwrap_or_else(|| base_dir.clone()),
+            workspace_identity: std::env::var("ZCODE_WORKSPACE_IDENTITY").ok(),
+            base_dir,
+            data_dir,
+            home,
+        })
+    }
+}
+
+/// `path` made absolute against `base` instead of the process cwd.
+fn absolute(base: &std::path::Path, path: &std::path::Path) -> std::io::Result<PathBuf> {
+    if path.is_absolute() {
+        std::path::absolute(path)
+    } else {
+        std::path::absolute(base.join(path))
+    }
+}
+
 /// What every entry resolves before touching storage.
 pub struct Context {
     pub home: PathBuf,
+    base_dir: PathBuf,
     /// The path as given (the workspace identity uses it unresolved).
     pub requested_cwd: PathBuf,
     pub cwd: PathBuf,
@@ -30,42 +85,33 @@ pub struct Context {
 }
 
 impl Context {
-    /// `home` is resolved once by the entry point (`zcode_kit::paths::home_dir`),
-    /// before logging starts, so every reader shares the same directory.
-    pub async fn prepare(
-        home: PathBuf,
-        cwd: Option<PathBuf>,
-        data_dir: Option<PathBuf>,
-    ) -> Result<Self> {
-        let requested_cwd = match cwd {
-            Some(cwd) => cwd,
-            None => std::env::current_dir()?,
-        };
-        let cwd = tokio::fs::canonicalize(&requested_cwd)
+    /// `options.home` is resolved once by the entry point
+    /// (`zcode_kit::paths::home_dir`), before logging starts, so every reader
+    /// shares the same directory.
+    pub async fn prepare(options: RuntimeOptions) -> Result<Self> {
+        let RuntimeOptions {
+            home,
+            env,
+            argv,
+            cwd: requested_cwd,
+            workspace_identity,
+            base_dir,
+            data_dir: requested_data,
+        } = options;
+        let cwd = tokio::fs::canonicalize(base_dir.join(&requested_cwd))
             .await
             .context("Workspace unavailable")?;
-        let requested_data = data_dir.unwrap_or_else(|| {
-            std::env::var_os("ZCODE_CLI_RUST_DATA_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".zcode/rust"))
-        });
-        let data_dir = if requested_data.is_absolute() {
-            requested_data
-        } else {
-            std::env::current_dir()?.join(requested_data)
-        };
+        let data_dir = base_dir.join(requested_data);
         tokio::fs::create_dir_all(&data_dir).await?;
         let data_dir = tokio::fs::canonicalize(data_dir).await?;
         // 身份使用 Host 提交的路径，不把 macOS /var -> /private/var 的 realpath 改写成新工作区。
-        let workspace = zcode_cli_host::workspace_identity(
-            std::env::var("ZCODE_WORKSPACE_IDENTITY").ok().as_deref(),
-            &requested_cwd,
-        );
+        let workspace =
+            zcode_cli_host::workspace_identity(workspace_identity.as_deref(), &requested_cwd);
         // 与 Node 启动时净化 process.env 等价：只捕获一次，所有读取方共用这份视图，不改真实进程环境。
-        let runtime_env = Arc::new(zcode_cli_rust::runtime_env(&home));
+        let runtime_env = Arc::new(RuntimeEnv::capture(env, &home, &argv));
         // 配置按 Node 分层规则从 cwd 解析；各入口每次重新加载，与 Node 一致没有文件监听。
         let workspace_config = Arc::new(WorkspaceConfig::new(
-            std::path::absolute(&requested_cwd)?,
+            absolute(&base_dir, &requested_cwd)?,
             home.clone(),
             runtime_env.vars().to_vec(),
         ));
@@ -83,6 +129,7 @@ impl Context {
         );
         Ok(Self {
             home,
+            base_dir,
             requested_cwd,
             cwd,
             data_dir,
@@ -98,7 +145,7 @@ impl Context {
     pub async fn node_database(&self) -> Result<zcode_cli_host::storage_paths::StoragePaths> {
         let config = self.workspace_config.snapshot().await;
         Ok(zcode_cli_host::storage_paths::resolve(
-            &std::env::current_dir()?,
+            &self.base_dir,
             &self.home,
             &config,
         ))
@@ -166,6 +213,7 @@ impl Context {
         };
         let workspaces = Arc::new(Workspaces {
             home: self.home.clone(),
+            base_dir: self.base_dir.clone(),
             desktop,
             runtime_env: self.runtime_env.clone(),
             tools: tools.clone(),
@@ -212,6 +260,7 @@ impl Context {
 /// startup tool runtime rooted at its path.
 struct Workspaces {
     home: PathBuf,
+    base_dir: PathBuf,
     desktop: bool,
     runtime_env: Arc<RuntimeEnv>,
     tools: Arc<WorkspaceTools>,
@@ -223,8 +272,8 @@ impl WorkspaceSource for Workspaces {
         let requested = PathBuf::from(&workspace.path);
         // 与启动 workspace 相同：配置按给定路径分层解析，文件与命令用解析后的真实路径。
         // 路径不存在时不阻断（列表、索引仍可用），工具使用时按各自规则失败。
-        let root = std::path::absolute(&requested)?;
-        let cwd = tokio::fs::canonicalize(&requested)
+        let root = absolute(&self.base_dir, &requested)?;
+        let cwd = tokio::fs::canonicalize(&root)
             .await
             .unwrap_or_else(|_| root.clone());
         let config = Arc::new(WorkspaceConfig::new(

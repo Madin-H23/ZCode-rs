@@ -3,6 +3,7 @@ use crate::domain::{MAX_REQUEST_BYTES, protocol::Request};
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
 use std::io::BufRead;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -46,12 +47,19 @@ pub fn start(input_closed: CancellationToken) -> mpsc::Receiver<Input> {
     in_rx
 }
 fn dispatch(tx: &mpsc::Sender<Input>, line: &[u8]) -> bool {
-    if line.iter().all(u8::is_ascii_whitespace) {
-        return true;
+    match parse(line) {
+        Some(input) => tx.blocking_send(input).is_ok(),
+        None => true,
     }
-    let value = match serde_json::from_slice::<Value>(line) {
-        Ok(v) => v,
-        Err(_) => return tx.blocking_send(Input::Invalid).is_ok(),
+}
+
+/// One NDJSON line as an [`Input`]; blank lines carry nothing.
+fn parse(line: &[u8]) -> Option<Input> {
+    if line.iter().all(u8::is_ascii_whitespace) {
+        return None;
+    }
+    let Ok(value) = serde_json::from_slice::<Value>(line) else {
+        return Some(Input::Invalid);
     };
     if value.get("method").is_none()
         && let Some(id) = value["id"].as_str()
@@ -63,12 +71,10 @@ fn dispatch(tx: &mpsc::Sender<Input>, line: &[u8]) -> bool {
             Some(error) => Err(HostError::from_error_object(error)),
             None => Ok(value.get("result").cloned().unwrap_or(Value::Null)),
         };
-        return tx
-            .blocking_send(Input::Response {
-                id: id.into(),
-                result,
-            })
-            .is_ok();
+        return Some(Input::Response {
+            id: id.into(),
+            result,
+        });
     }
     let request = {
         if value["method"] == "startup/storagePathReady" {
@@ -79,12 +85,53 @@ fn dispatch(tx: &mpsc::Sender<Input>, line: &[u8]) -> bool {
             serde_json::from_value::<Request>(value)
         }
     };
-    tx.blocking_send(match request {
+    Some(match request {
         Ok(r) if !r.method.trim().is_empty() => Input::Request(r),
         _ => Input::Invalid,
     })
-    .is_ok()
 }
+
+/// Same framing as [`start`] over any async reader (an in-memory pipe when the
+/// runtime is embedded, spec rust-u1-runtime-library §3).
+pub fn start_reader<R>(mut reader: R, input_closed: CancellationToken) -> mpsc::Receiver<Input>
+where
+    R: AsyncBufRead + Unpin + Send + 'static,
+{
+    let (in_tx, in_rx) = mpsc::channel(64);
+    tokio::spawn(async move {
+        let mut line = Vec::new();
+        while let Ok(available) = reader.fill_buf().await {
+            if available.is_empty() {
+                if let Some(input) = parse(&line) {
+                    let _ = in_tx.send(input).await;
+                }
+                break;
+            }
+            let take = available
+                .iter()
+                .position(|b| *b == b'\n')
+                .map_or(available.len(), |i| i + 1);
+            if line.len() + take > MAX_REQUEST_BYTES {
+                let _ = in_tx.send(Input::TooLarge).await;
+                break;
+            }
+            line.extend_from_slice(&available[..take]);
+            reader.consume(take);
+            if line.last() == Some(&b'\n') {
+                if let Some(input) = parse(&line)
+                    && in_tx.send(input).await.is_err()
+                {
+                    return;
+                }
+                line.clear();
+            }
+        }
+        input_closed.cancel();
+        let _ = in_tx.send(Input::Eof).await;
+    });
+    in_rx
+}
+
 pub async fn finish(writer: std::thread::JoinHandle<()>) -> Result<()> {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
     while !writer.is_finished() {
@@ -96,6 +143,14 @@ pub async fn finish(writer: std::thread::JoinHandle<()>) -> Result<()> {
     writer
         .join()
         .map_err(|_| anyhow::anyhow!("Protocol writer failed"))
+}
+
+/// [`finish`] for the writer task of [`Sink::writer`].
+pub async fn finish_task(writer: tokio::task::JoinHandle<()>) -> Result<()> {
+    match tokio::time::timeout(std::time::Duration::from_secs(2), writer).await {
+        Ok(joined) => joined.map_err(|_| anyhow::anyhow!("Protocol writer failed")),
+        Err(_) => bail!("Protocol output drain timed out"),
+    }
 }
 
 pub async fn storage_prepare(

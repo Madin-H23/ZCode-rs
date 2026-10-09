@@ -1,0 +1,272 @@
+//! 嵌入入口的端到端测试（docs/specs/rust-u1-runtime-library.md §5）：runtime 只使用
+//! `RuntimeOptions` 给出的环境与路径，一个 runtime 服务多个 workspace，停掉后可以在同一进程重启。
+use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, ReadHalf, WriteHalf};
+use zcode_cli_rust::{embed, runtime::RuntimeOptions, serve::AppServerOptions};
+
+const LIMIT: Duration = Duration::from_secs(20);
+
+fn sse(delta: Value, finish: Option<&str>) -> String {
+    let mut out = format!("data: {}\n\n", json!({"choices": [{"delta": delta}]}));
+    if let Some(reason) = finish {
+        out.push_str(&format!(
+            "data: {}\n\ndata: [DONE]\n\n",
+            json!({"choices": [{"delta": {}, "finish_reason": reason}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 4}})
+        ));
+    }
+    out
+}
+
+/// Chat Completions 假模型：标题请求回标题；最后一条消息不是工具结果时调用 Write，否则回文本并结束。
+fn respond(body: &str) -> String {
+    if body.contains("Generate a concise title for this coding session.") {
+        return sse(json!({"content": "{\"title\":\"Embedded\"}"}), Some("stop"));
+    }
+    let request: Value = serde_json::from_str(body).unwrap_or_default();
+    let last_is_tool = request["messages"]
+        .as_array()
+        .and_then(|messages| messages.last())
+        .is_some_and(|message| message["role"] == "tool");
+    if last_is_tool {
+        return sse(json!({"content": "done"}), Some("stop"));
+    }
+    let arguments = json!({"file_path": "result.txt", "content": "written by Rust"}).to_string();
+    sse(
+        json!({"tool_calls": [{"index": 0, "id": "call-write", "type": "function",
+            "function": {"name": "Write", "arguments": arguments}}]}),
+        Some("tool_calls"),
+    )
+}
+
+async fn read_request(socket: &mut tokio::net::TcpStream) -> Option<String> {
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let header_end = loop {
+        if let Some(at) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+            break at + 4;
+        }
+        let read = socket.read(&mut chunk).await.ok()?;
+        if read == 0 {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    };
+    let head = String::from_utf8_lossy(&bytes[..header_end]).to_ascii_lowercase();
+    let length: usize = head
+        .lines()
+        .find_map(|line| line.strip_prefix("content-length:"))?
+        .trim()
+        .parse()
+        .ok()?;
+    while bytes.len() < header_end + length {
+        let read = socket.read(&mut chunk).await.ok()?;
+        if read == 0 {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+    Some(String::from_utf8_lossy(&bytes[header_end..header_end + length]).into_owned())
+}
+
+async fn mock_model() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let Some(body) = read_request(&mut socket).await else {
+                    return;
+                };
+                let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
+                let _ = socket.write_all(head.as_bytes()).await;
+                let _ = socket.write_all(respond(&body).as_bytes()).await;
+                let _ = socket.shutdown().await;
+            });
+        }
+    });
+    format!("http://{address}/v1")
+}
+
+struct Client {
+    lines: tokio::io::Lines<BufReader<ReadHalf<tokio::io::DuplexStream>>>,
+    writer: WriteHalf<tokio::io::DuplexStream>,
+    next_id: u64,
+}
+
+impl Client {
+    fn new(io: tokio::io::DuplexStream) -> Self {
+        let (reader, writer) = tokio::io::split(io);
+        Self {
+            lines: BufReader::new(reader).lines(),
+            writer,
+            next_id: 0,
+        }
+    }
+
+    async fn until(&mut self, accept: impl Fn(&Value) -> bool) -> Value {
+        tokio::time::timeout(LIMIT, async {
+            loop {
+                let line = self
+                    .lines
+                    .next_line()
+                    .await
+                    .unwrap()
+                    .expect("runtime closed its output");
+                let message: Value = serde_json::from_str(&line).unwrap();
+                if accept(&message) {
+                    return message;
+                }
+            }
+        })
+        .await
+        .expect("no matching message from the runtime")
+    }
+
+    async fn ready(&mut self) {
+        self.until(|m| m["method"] == "startup/storageState" && m["params"]["phase"] == "ready")
+            .await;
+    }
+
+    async fn request(&mut self, method: &str, params: Value) -> Value {
+        self.next_id += 1;
+        let id = self.next_id;
+        let line = format!(
+            "{}\n",
+            json!({"id": id, "method": method, "params": params})
+        );
+        self.writer.write_all(line.as_bytes()).await.unwrap();
+        let reply = self
+            .until(|m| m["id"] == id && m.get("method").is_none())
+            .await;
+        assert!(reply.get("error").is_none(), "{method} failed: {reply}");
+        reply["result"].clone()
+    }
+
+    async fn create_session(&mut self, workspace: &Path) {
+        let ack = self
+            .request(
+                "v4/command",
+                json!({"commandId": format!("create-{}", self.next_id), "clientId": "embed-test",
+                    "sessionId": null, "type": "createSession", "issuedAt": 1000,
+                    "payload": {"workspaceId": workspace, "firstInput": {"text": "write"}}}),
+            )
+            .await;
+        assert_eq!(ack["status"], "accepted", "{ack}");
+    }
+}
+
+async fn wait_for_file(path: &Path) -> String {
+    tokio::time::timeout(LIMIT, async {
+        loop {
+            if let Ok(content) = tokio::fs::read_to_string(path).await
+                && !content.is_empty()
+            {
+                return content;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("file was not produced: {}", path.display()))
+}
+
+fn options(root: &Path, workspace: &Path, model: &Path) -> AppServerOptions {
+    let text = |path: PathBuf| path.to_string_lossy().into_owned();
+    AppServerOptions {
+        runtime: RuntimeOptions {
+            home: root.to_owned(),
+            // 只出现在这份环境里的变量：进程环境中没有 ZCODE_SESSION_DB_PATH，HOME 也指向别处。
+            env: vec![
+                ("HOME".into(), text(root.to_owned())),
+                ("PATH".into(), std::env::var("PATH").unwrap_or_default()),
+                (
+                    "ZCODE_SESSION_DB_PATH".into(),
+                    text(root.join("sessions.sqlite")),
+                ),
+            ],
+            argv: vec!["zcode-cli-rust".into()],
+            cwd: workspace.to_owned(),
+            workspace_identity: None,
+            // 相对的数据目录按 base_dir 解析，而不是按测试进程的 cwd。
+            base_dir: root.to_owned(),
+            data_dir: PathBuf::from("data"),
+        },
+        config: Some(model.to_owned()),
+        desktop: false,
+        prepare_storage: false,
+    }
+}
+
+#[tokio::test]
+async fn embedded_runtime_uses_its_options_serves_two_workspaces_and_restarts() {
+    let root = tempfile::tempdir().unwrap();
+    let root = tokio::fs::canonicalize(root.path()).await.unwrap();
+    let (first, second) = (root.join("workspace-a"), root.join("workspace-b"));
+    for directory in [&first, &second, &root.join(".zcode/cli")] {
+        tokio::fs::create_dir_all(directory).await.unwrap();
+    }
+    // 与 Node 驱动的夹具相同：yolo 模式下工具不经审批直接执行。
+    tokio::fs::write(
+        root.join(".zcode/cli/config.json"),
+        json!({"permission": {"mode": "yolo"}}).to_string(),
+    )
+    .await
+    .unwrap();
+    let model = root.join("model.json");
+    tokio::fs::write(
+        &model,
+        json!({"providerId": "fixture", "modelId": "core-model", "reasoningLevel": "none",
+            "reasoningParameters": {"reasoning_effort": "none"}, "baseUrl": mock_model().await,
+            "requestTimeoutSeconds": 5})
+        .to_string(),
+    )
+    .await
+    .unwrap();
+    let process_cwd = std::env::current_dir().unwrap();
+    assert!(!process_cwd.join("result.txt").exists());
+
+    let runtime = embed::spawn(options(&root, &first, &model));
+    let mut client = Client::new(runtime.io);
+    client.ready().await;
+    // 同一个 runtime 里的两个 workspace：缺省的和请求里另给的；相对路径各自落在自己的目录下。
+    client.create_session(&first).await;
+    client.create_session(&second).await;
+    for workspace in [&first, &second] {
+        assert_eq!(
+            wait_for_file(&workspace.join("result.txt")).await,
+            "written by Rust"
+        );
+    }
+    assert!(!process_cwd.join("result.txt").exists());
+    assert!(
+        root.join("sessions.sqlite").exists(),
+        "the injected environment names the database"
+    );
+    assert!(
+        root.join("data").is_dir(),
+        "the data dir resolves against base_dir"
+    );
+
+    // 关闭写端等价于 stdin EOF：runtime 收口后任务正常结束。
+    client.writer.shutdown().await.unwrap();
+    tokio::time::timeout(LIMIT, runtime.task)
+        .await
+        .expect("the runtime did not stop after EOF")
+        .unwrap()
+        .unwrap();
+
+    // 同一进程内再启动一个 runtime：进程级状态不会让它卡住。
+    let again = embed::spawn(options(&root, &first, &model));
+    let mut client = Client::new(again.io);
+    client.ready().await;
+    client.request("runtime/capabilities", json!({})).await;
+    client.writer.shutdown().await.unwrap();
+    tokio::time::timeout(LIMIT, again.task)
+        .await
+        .expect("the restarted runtime did not stop after EOF")
+        .unwrap()
+        .unwrap();
+}

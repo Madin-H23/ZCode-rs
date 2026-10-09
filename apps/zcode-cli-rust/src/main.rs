@@ -1,15 +1,12 @@
 mod args;
 mod prompt;
-mod runtime;
 use anyhow::Result;
 use args::{AppServerArgs, Cli, Command};
 use clap::Parser;
-use serde_json::json;
-use sha2::{Digest, Sha256};
-use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use zcode_cli_app_server::{self as app_server, Sink, stdio};
-use zcode_cli_core_api::SessionStore;
+use zcode_cli_app_server::{Sink, stdio};
+use zcode_cli_rust::runtime::RuntimeOptions;
+use zcode_cli_rust::serve::AppServerOptions;
 
 #[tokio::main]
 async fn main() {
@@ -61,9 +58,13 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         prepare_storage = args.prepare_storage,
         "App server starting"
     );
-    let ctx = runtime::Context::prepare(home, args.cwd, args.data_dir).await?;
-    // 会话存储只有 Node 的库（spec rust-m11-node-storage §2.1）。
-    let path = ctx.node_database().await?.database;
+    // 进程环境、argv 与 cwd 只在这里读取一次；库内其余位置只用这份选项。
+    let options = AppServerOptions {
+        runtime: RuntimeOptions::from_process(home, args.cwd, args.data_dir)?,
+        config: args.config,
+        desktop: args.surface == "desktop",
+        prepare_storage: args.prepare_storage,
+    };
     let cancel = CancellationToken::new();
     let signal_cancel = cancel.clone();
     tokio::spawn(async move {
@@ -83,53 +84,10 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         }
         signal_cancel.cancel();
     });
-    let input_closed = CancellationToken::new();
-    let mut input = stdio::start(input_closed.clone());
-    let (mut output, writer) = Sink::stdout(cancel.clone());
-    let attempt = zcode_cli_host::id();
-    let database_id = format!("{:x}", Sha256::digest(path.to_string_lossy().as_bytes()));
-    let progress = |phase: &str, sequence: u64| json!({"method":"startup/storageState","params":{"schemaVersion":1,"attemptId":attempt,"sequence":sequence,"databaseId":database_id,"databaseKind":"session","phase":phase,"elapsedMs":0}});
-    if args.prepare_storage {
-        stdio::storage_prepare(&path, &mut input, &mut output).await?;
-    }
-    output.send_values(vec![progress("checking", 1)]).await?;
-    let store: Arc<dyn SessionStore> = match ctx.node_store().await {
-        Ok(store) => Arc::new(store),
-        Err(error) => {
-            let mut frame = progress("failed", 2);
-            // Node `DatabaseStartupErrorCode`：迁移与打开失败按原因上报，其余为 sql_failed。
-            frame["params"]["errorCode"] = error
-                .downcast_ref::<zcode_cli_state::node::open::StartupError>()
-                .map_or("sql_failed", |e| e.code)
-                .into();
-            output.send_values(vec![frame]).await?;
-            drop(output);
-            let _ = stdio::finish(writer).await;
-            anyhow::bail!("Session storage failed");
-        }
-    };
-    output.send_values(vec![progress("ready", 2)]).await?;
-    if args.prepare_storage {
-        drop(store);
-        output
-            .send_values(vec![
-                json!({"method":"startup/storagePrepared","params":{}}),
-            ])
-            .await?;
-    } else {
-        // Node 的协议会话在首条输入后生成标题（`-p` 不生成）。
-        let engine = ctx
-            .engine(store, args.config.as_ref(), args.surface == "desktop")
-            .await?
-            .with_title_generation(true);
-        // App Server 独占 stdout；返回时已排空 runtime 输出并释放 sink。
-        let served =
-            app_server::serve(move |rx, tx| engine.serve(rx, tx, cancel), input, output).await;
-        // 失败路径同样先等写线程落盘：存储失败的错误响应必须送达 Host 后进程才能退出。
-        stdio::finish(writer).await?;
-        return served;
-    }
-    drop(output);
-    stdio::finish(writer).await?;
-    Ok(())
+    let input = stdio::start(CancellationToken::new());
+    let (output, writer) = Sink::stdout(cancel.clone());
+    let served = zcode_cli_rust::serve::app_server(options, input, output, cancel).await;
+    // 失败路径同样先等写线程落盘：存储失败的错误响应必须送达 Host 后进程才能退出。
+    let drained = stdio::finish(writer).await;
+    served.and(drained)
 }

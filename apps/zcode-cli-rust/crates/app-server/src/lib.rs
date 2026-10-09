@@ -11,4 +11,4 @@ pub mod stdio;
 mod subscription;
 pub use server::serve;
 pub use sink::Sink;
-pub use stdio::{finish, start, storage_prepare};
+pub use stdio::{finish, finish_task, start, start_reader, storage_prepare};

@@ -2,6 +2,9 @@ pub use zcode_cli_app_server as app_server;
 pub use zcode_cli_core as app;
 pub use zcode_cli_core_api as contract;
 pub use zcode_cli_domain as domain;
+pub mod embed;
+pub mod runtime;
+pub mod serve;
 pub mod adapters {
     pub use zcode_cli_host::{SystemClock, context_source};
     pub use zcode_cli_model::{config, model_protocol, provider, registry};
