@@ -2,6 +2,7 @@ pub use zcode_cli_app_server as app_server;
 pub use zcode_cli_core as app;
 pub use zcode_cli_core_api as contract;
 pub use zcode_cli_domain as domain;
+pub mod cli;
 pub mod embed;
 pub mod runtime;
 pub mod serve;

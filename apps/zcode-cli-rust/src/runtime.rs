@@ -1,7 +1,8 @@
 //! Composition shared by `app-server`, `-p` and embedders: the workspace context
 //! read once at startup and the engine wired to the adapters (spec
 //! rust-u1-runtime-library). Nothing here reads the process environment or the
-//! process cwd except [`RuntimeOptions::from_process`], the binary's entry.
+//! process cwd except [`RuntimeOptions::from_process`], called by the CLI entry
+//! ([`crate::cli`]).
 use anyhow::{Context as _, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,7 +19,7 @@ use zcode_cli_state::NodeStore;
 use zcode_cli_tools::WorkspaceTools;
 
 /// Every external fact a runtime starts from. An embedder fills it in; the
-/// binary uses [`RuntimeOptions::from_process`].
+/// CLI entry uses [`RuntimeOptions::from_process`].
 pub struct RuntimeOptions {
     pub home: PathBuf,
     /// The environment the runtime sees (including variables an embedder injects).
@@ -33,13 +34,17 @@ pub struct RuntimeOptions {
 }
 
 impl RuntimeOptions {
-    /// The binary's view: process environment, argv and cwd, read exactly once.
+    /// The CLI entry's view: process environment and cwd, read exactly once.
+    /// `argv` is the command line as the entry received it (spec
+    /// rust-host-cli-boundary §3.4): the merged `zcode-host` binary does not
+    /// pass its own `cli` subcommand on, so nothing here reads the process's.
     #[expect(
         clippy::disallowed_methods,
-        reason = "二进制入口：进程环境与 cwd 只在这里读取"
+        reason = "CLI 入口（crate::cli）：进程环境与 cwd 只在这里读取"
     )]
     pub fn from_process(
         home: PathBuf,
+        argv: Vec<String>,
         cwd: Option<PathBuf>,
         data_dir: Option<PathBuf>,
     ) -> std::io::Result<Self> {
@@ -54,7 +59,7 @@ impl RuntimeOptions {
             env: std::env::vars_os()
                 .map(|(key, value)| (lossy(key), lossy(value)))
                 .collect(),
-            argv: std::env::args_os().map(lossy).collect(),
+            argv,
             cwd: cwd.unwrap_or_else(|| base_dir.clone()),
             workspace_identity: std::env::var("ZCODE_WORKSPACE_IDENTITY").ok(),
             base_dir,
