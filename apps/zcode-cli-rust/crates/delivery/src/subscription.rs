@@ -1,14 +1,18 @@
-//! One topic subscription of the App Server: its flush state and the frames
-//! it encodes (spec rust-m8-delivery §5).
-use super::codec::{self, FrameHeader};
+//! One topic subscription: its flush state and the frames it encodes (spec
+//! rust-m8-delivery §5).
+use crate::codec::{self, FrameHeader};
 use crate::domain::delivery::{self, Buffer, Profile};
+use crate::registry::Target;
 use anyhow::Result;
 use serde_json::Value;
 use std::time::{Duration, Instant};
 
 pub struct Subscription {
-    pub topic: String,
-    pub connection: String,
+    pub(super) topic: String,
+    /// Id of the owning connection.
+    pub(super) connection: String,
+    /// The embedder's dispatch key, handed back with every push.
+    pub(super) workspace_key: String,
     pub(super) profile: Profile,
     pub(super) window: Duration,
     ordinal: u64,
@@ -27,7 +31,13 @@ pub struct Subscription {
 }
 
 impl Subscription {
-    pub(super) fn new(topic: &str, connection: &str, profile: Profile, seq: u64) -> Self {
+    pub(super) fn new(target: &Target, seq: u64) -> Self {
+        let Target {
+            topic,
+            connection,
+            profile,
+            workspace_key,
+        } = target;
         // sessions-index 与 workspace-config 变更后立即刷新（Node flushIndex/flushConfig）。
         let window = if topic.starts_with("conversation/") {
             profile.window()
@@ -35,9 +45,10 @@ impl Subscription {
             Duration::ZERO
         };
         Self {
-            topic: topic.into(),
-            connection: connection.into(),
-            profile,
+            topic: topic.clone(),
+            connection: connection.id.clone(),
+            workspace_key: workspace_key.clone(),
+            profile: *profile,
             window,
             ordinal: 0,
             sent_seq: seq,

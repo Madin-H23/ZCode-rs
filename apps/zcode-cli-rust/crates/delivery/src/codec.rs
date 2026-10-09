@@ -1,10 +1,12 @@
 //! V4 topic frame physical encoding, ported from Node
 //! `packages/shared/src/zcode-protocol-v4/wire-codec.ts`.
 //!
-//! A logical frame is sent as one `complete` notification when every carrier
-//! (CLI NDJSON, Channel socket, mobile relay base64 envelope) fits the physical
+//! A logical frame is sent as one `complete` frame when every carrier (CLI
+//! NDJSON, Channel socket, mobile relay base64 envelope) fits the physical
 //! limit; otherwise its UTF-8 bytes are split into checksummed fragments. The
 //! logical frame JSON is serialized once by the caller and reused here.
+//! Physical frames are wire JSON; the carrier wraps them ([`notification`] for
+//! JSON-RPC lines).
 use anyhow::{Result, bail};
 use base64::Engine as _;
 use std::sync::OnceLock;
@@ -114,11 +116,14 @@ fn fragment_wire(header: &FrameHeader<'_>, fragment: &Fragment<'_>) -> String {
     )
 }
 
-fn notification(wire: &str) -> String {
+/// The `v4/conversation/frame` notification carrying the physical frame
+/// `wire`, as one JSON-RPC line without its trailing newline (the CLI NDJSON
+/// carrier that [`encode`] budgets for).
+pub fn notification(wire: &str) -> String {
     format!("{NOTIFICATION_PREFIX}{wire}}}")
 }
 
-/// Encode one logical frame into NDJSON lines (without trailing newline).
+/// Encode one logical frame into physical frames (wire JSON).
 pub fn encode(header: &FrameHeader<'_>, frame_json: &str) -> Result<Vec<String>> {
     encode_with_limit(header, frame_json, MAX_PHYSICAL_FRAME_BYTES)
 }
@@ -134,7 +139,7 @@ fn encode_with_limit(
     }
     let complete = complete_wire(header, frame_json);
     if measure(&complete) <= max_physical {
-        return Ok(vec![notification(&complete)]);
+        return Ok(vec![complete]);
     }
     let checksum = format!("{:08x}", crc32fast::hash(logical));
     let chunk = fragment_budget(header, logical.len(), &checksum, max_physical);
@@ -146,7 +151,7 @@ fn encode_with_limit(
         bail!("proto.frameFragmentCountExceeded");
     }
     let engine = base64::engine::general_purpose::STANDARD;
-    let mut lines = Vec::with_capacity(count);
+    let mut frames = Vec::with_capacity(count);
     for (index, bytes) in logical.chunks(chunk).enumerate() {
         let data_base64 = engine.encode(bytes);
         let wire = fragment_wire(
@@ -163,9 +168,9 @@ fn encode_with_limit(
         if measure(&wire) > max_physical {
             bail!("proto.frameEnvelopeTooLarge");
         }
-        lines.push(notification(&wire));
+        frames.push(wire);
     }
-    Ok(lines)
+    Ok(frames)
 }
 
 /// Largest chunk size whose worst-case fragment envelope fits, found by binary search
@@ -221,9 +226,15 @@ mod tests {
             .to_string()
     }
 
+    /// The CLI NDJSON lines of one logical frame.
+    fn lines(frame_json: &str) -> Vec<String> {
+        let frames = encode(&header(), frame_json).unwrap();
+        frames.iter().map(|wire| notification(wire)).collect()
+    }
+
     #[test]
     fn small_frames_stay_complete_and_parse() {
-        let lines = encode(&header(), &frame_json(64)).unwrap();
+        let lines = lines(&frame_json(64));
         assert_eq!(lines.len(), 1);
         let line: Value = serde_json::from_str(&lines[0]).unwrap();
         assert_eq!(line["params"]["kind"], "complete");
@@ -234,7 +245,7 @@ mod tests {
     fn every_physical_frame_fits_all_carriers_and_reassembles() {
         // 900 KiB 的逻辑帧在 CLI 行内可放下，但 relay base64 后超过 1 MiB，必须分片。
         let frame = frame_json(900 * 1024);
-        let lines = encode(&header(), &frame).unwrap();
+        let lines = lines(&frame);
         assert!(lines.len() > 1);
         let mut data = Vec::new();
         for line in &lines {

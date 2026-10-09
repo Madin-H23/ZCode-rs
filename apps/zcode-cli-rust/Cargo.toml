@@ -13,6 +13,7 @@ members = [
   "crates/bash-parse",
   "crates/bash",
   "crates/plugins",
+  "crates/delivery",
   "crates/app-server",
   "crates/headless",
   "crates/tui",
@@ -123,6 +124,7 @@ zcode-cli-net = { path = "crates/net" }
 zcode-cli-state = { path = "crates/state" }
 zcode-cli-model = { path = "crates/model" }
 zcode-cli-tools = { path = "crates/tools" }
+zcode-cli-delivery = { path = "crates/delivery" }
 zcode-cli-app-server = { path = "crates/app-server" }
 zcode-cli-headless = { path = "crates/headless" }
 zcode-cli-tui = { path = "crates/tui" }
