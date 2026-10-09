@@ -1,0 +1,97 @@
+# U3：Host 与 runtime 合并为一个进程
+
+日期：2026-10-09。上级规划：[rust-unified-host.md](rust-unified-host.md) 的 U3。前置：[rust-u1-runtime-library.md](rust-u1-runtime-library.md)（嵌入入口与显式环境）。
+
+## 1. 目标与分期
+
+Rust Host 不再为每个 workspace 启动 CLI 子进程，runtime 以库的形式运行在 Host 进程内。分两期：
+
+| 期  | 内容                                                                                                                                                                 | 交付后的形态                                               |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| A   | 嵌入式链路：Host 的 agent 子系统通过内存管道与进程内 runtime 通信，协议仍是今天的 NDJSON 行；进程管理的语义（按 workspace 的实例、代次、惰性重启、生命周期事件）不变 | 一个 Host 进程，没有 CLI 子进程；Host 的其余代码不感知差别 |
+| B   | 去掉进程内的序列化往返，合并两边重复的状态（rust-unified-host.md 2.3 的 P2）：投递与订阅、sessions-index、provider 注册表；反向请求改为端口；已接受输入的持久化      | Host 直接与 runtime 交换类型化消息                         |
+
+本文先规定 A 期。B 期在 A 期验证通过、U2 的服务拆分完成后另写一节。
+
+## 2. A 期的规则
+
+### 2.1 runtime 实例的粒度
+
+A 期每个 workspace key 一个 runtime 实例（一个 Engine），另加 plugin-management 与 mcp-status 两个 lane 的实例，与今天的进程表一一对应。理由：
+
+- Host 按 workspace key 归属帧、发生命周期事件、记代次、做惰性重启；实例粒度不变，这些语义全部保留。
+- 一个实例的 panic 或致命错误只结束这个实例，其他 workspace 不受影响，等同于今天一个 CLI 进程崩溃。
+- “一个 Engine 管所有 workspace”（rust-unified-host.md D-U12）需要改 Host 的帧归属与生命周期，放到 B 期与投递合并一起评估，届时以 rust-unified-host.md 14.1 的测量为依据。
+
+### 2.2 链路
+
+```rust
+/// 一条到 runtime 的协议链路：子进程的 stdio，或进程内 runtime 的内存管道。
+pub struct Link {
+    pub reader: Box<dyn AsyncRead + Send + Unpin>,
+    pub writer: Box<dyn AsyncWrite + Send + Unpin>,
+    /// 子进程才有；嵌入式链路没有 pid，也没有 stderr。
+    pub pid: Option<u32>,
+    pub stderr: Option<ChildStderr>,
+    pub exit: Exit,
+}
+pub enum Exit {
+    Process(Child),
+    Embedded { task: JoinHandle<anyhow::Result<()>>, cancel: CancellationToken },
+}
+impl Exit {
+    /// 等到 runtime 结束，返回结束原因（进入 `agent-process-exited` 的 reason 与日志）。
+    pub async fn wait(&mut self) -> String;
+    /// 回收：子进程按“等 1.8 s → TERM 整组 → 等 2 s → KILL”；嵌入式 runtime 先取消，再等任务结束。
+    pub async fn terminate(&mut self, pid: Option<u32>);
+}
+```
+
+- **选择方式**：`ZCODE_AGENT_SERVER_RUNTIME=embedded` 时使用嵌入式链路，不需要 `ZCODE_AGENT_SERVER_COMMAND`。A 期验证通过后，嵌入式成为 Rust Host 的缺省；子进程链路只保留作差分对照，B 期结束时删除（rust-unified-host.md D-U9：Rust Host 内只运行 Rust runtime）。
+- **环境**：嵌入式 runtime 的 `RuntimeOptions.env` 就是今天传给子进程的那份环境（`spawn_env`：基础环境、网络设置、provider 配置文件路径、各服务贡献的变量、workspace 身份）。runtime 只读这份环境（U1 L4），不读 Host 进程的环境。
+- **路径**：`cwd` 是 Host 提交的原始 workspace 路径；`base_dir` 是今天子进程的 cwd；数据目录取环境中的 `ZCODE_CLI_RUST_DATA_DIR`，缺省 `<home>/.zcode/rust`。
+- **存储准备**：`--prepare-storage` 握手改为以 `prepare_storage: true` 启动一个嵌入式实例，经同一条管道完成，握手内容不变。
+- **日志**：runtime 用 `tracing`。Host 在启动时安装 runtime 的日志 subscriber（写同一个 `zcode-rust-<date>.jsonl`），否则进程内 runtime 的日志无处可去。
+- **结束原因**：任务正常结束为 `runtime_exit: ok`；返回错误为 `runtime_exit: <error>`；panic 为 `runtime_panicked: <message>`。后两者按“意外退出”处理，与子进程异常退出走同一条路径（生命周期 `unavailable`、下次请求时惰性重启、代次加一）。
+- **没有 pid 的后果**：`agent-process-*` 生命周期事件中 `pid` 为 `null`；按 pid 采样的资源统计不再覆盖 runtime（它已经是 Host 进程的一部分），由 Host 进程自身的采样体现。
+
+### 2.3 状态所有者（A 期）
+
+| 状态                                   | 所有者                               | 相对今天                         |
+| -------------------------------------- | ------------------------------------ | -------------------------------- |
+| 会话事实、队列、seq / epoch、V4 帧编码 | runtime 实例（Engine）               | 不变，只是从子进程变成进程内任务 |
+| 实例表、代次、惰性重启、存储准备       | Host `agent` 的 `AgentRuntime`       | 不变                             |
+| 每个 attachment 的 V4 订阅归属与路由   | Host connection scope                | 不变                             |
+| runtime 看到的环境                     | `RuntimeOptions.env`（由 Host 组装） | 取代子进程环境                   |
+| runtime 的 tokio 任务                  | Host 的 tokio 运行时                 | 新增：与 Host 服务共用运行时     |
+
+### 2.4 事件顺序
+
+```mermaid
+sequenceDiagram
+    participant S as Host 服务（zcode-agent 等）
+    participant AR as AgentRuntime（实例表）
+    participant L as Link（内存管道）
+    participant R as runtime 实例（workspace A）
+    S->>AR: 请求（workspace A）
+    alt 没有存活实例
+        AR->>R: embed::spawn(options(A, spawn_env))
+        AR->>L: ProtocolClient::start(reader, writer)
+        R-->>L: startup/storageState（ready 后才放行请求）
+    end
+    AR->>L: 请求行
+    L->>R: Input
+    R-->>L: 回复、V4 帧
+    L-->>AR: 按 workspace key 与代次归属帧
+    AR-->>S: 回复 / 帧
+    R--xAR: 任务结束（错误或 panic）
+    AR->>AR: 实例标记 unavailable，发 agent-process-exited；下次请求时重启，代次加一
+```
+
+## 3. 验收（A 期）
+
+- `cargo nextest`：Host 中驱动真实 CLI 的测试（`crates/services/tests/agent_cli.rs` 等）增加嵌入式变体，全部通过；嵌入式变体不需要预先构建 CLI 二进制。
+- 一个 runtime 实例 panic：只有它的 workspace 收到不可用与退出事件，其他 workspace 的会话继续流式；下一次请求时重启成功。
+- `pnpm test:rust-host` 通过。
+- 桌面 E2E（`scripts/rust-host/e2e`）在 `ZCODE_AGENT_SERVER_RUNTIME=embedded` 下全部通过，`desktop-continuous` 与 `web-remote-replayable` 两种语义都覆盖；进程表中没有 CLI 子进程。
+- 对照测量：N 个 workspace 同时流式时的控制 RPC p95、Host 进程 RSS 与 CPU，和子进程链路对比，写入 `docs/reports/`。
