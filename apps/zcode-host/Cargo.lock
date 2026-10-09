@@ -3081,6 +3081,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "zcode-async",
+ "zcode-cli-rust",
  "zcode-host-control",
  "zcode-host-core",
  "zcode-host-gateway",

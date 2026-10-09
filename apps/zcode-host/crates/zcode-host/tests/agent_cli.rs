@@ -1,8 +1,13 @@
 //! 用真实的 Rust CLI 走一遍核心对话链路：握手 → createSession（带首条输入）→ 订阅会话 →
 //! 收到模型流式回复。模型是本地 mock 的 OpenAI 兼容端点，不需要任何真实凭据。
 //!
-//! 缺省用进程内的嵌入式 runtime（docs/specs/rust-u3-single-process.md），不需要预先构建 CLI；设置
-//! `ZCODE_TEST_CLI_RUST_BINARY` 时改用该可执行文件走子进程链路，作为差分对照。
+//! 两种链路都缺省覆盖（docs/specs/rust-host-cli-boundary.md §5）：
+//!
+//! - 进程内的嵌入式 runtime（docs/specs/rust-u3-single-process.md），不需要预先构建 CLI；设置
+//!   `ZCODE_TEST_CLI_RUST_BINARY` 时改用该可执行文件走子进程链路，作为与独立 CLI 的差分对照；
+//! - 子进程链路：以 `zcode-cli-rust` 为名的合并二进制（`CARGO_BIN_EXE_zcode-host`，所以测试放在
+//!   二进制的 crate 里）经它的 CLI 入口运行。
+#![cfg(feature = "embedded-runtime")]
 #![expect(
     clippy::disallowed_methods,
     reason = "集成测试从进程环境取被测二进制与 PATH"
@@ -209,6 +214,35 @@ fn create_session(workspace: &str, command: u32, text: &str) -> Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn core_chat_flow_against_the_runtime() {
+    core_chat_flow(runtime_vars()).await;
+}
+
+/// 子进程链路，runtime 是合并二进制的 CLI 入口：以 `zcode-cli-rust` 为名运行它（Unix 用符号链接，
+/// 其他平台用副本），Host 按 Rust CLI 的规则给它加 `--cwd` 与 `--surface desktop`。
+#[tokio::test(flavor = "multi_thread")]
+async fn core_chat_flow_over_the_child_process_link() {
+    let bin = tempfile::tempdir().unwrap();
+    let cli = bin
+        .path()
+        .join(format!("zcode-cli-rust{}", std::env::consts::EXE_SUFFIX));
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_zcode-host"), &cli).unwrap();
+    #[cfg(not(unix))]
+    std::fs::copy(env!("CARGO_BIN_EXE_zcode-host"), &cli).unwrap();
+    core_chat_flow(BTreeMap::from([
+        (
+            "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
+            cli.to_string_lossy().into_owned(),
+        ),
+        (
+            "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
+            "zcode-cli-rust".to_owned(),
+        ),
+    ]))
+    .await;
+}
+
+async fn core_chat_flow(command_vars: BTreeMap<String, String>) {
     let home = tempfile::tempdir().unwrap();
     let workspace = tempfile::tempdir().unwrap();
     let workspace_path = workspace.path().to_string_lossy().into_owned();
@@ -240,7 +274,6 @@ async fn core_chat_flow_against_the_runtime() {
     let personal = provider_config(home.path(), port);
     let builtin = builtin_providers();
     let base_env = base_env(home.path());
-    let command_vars = runtime_vars();
     let providers = ProviderRuntime::new(Some(builtin), personal);
     let runtime = AgentRuntime::new(
         AgentRuntimeConfig {
@@ -419,7 +452,10 @@ async fn core_chat_flow_against_the_runtime() {
             )
             .await
             .unwrap();
-        eprintln!(
+        // 测试体移出了 #[test] 函数，clippy 不再放行 eprintln!：直接写 stderr。
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr().lock(),
             "SESSION_READ {}",
             serde_json::to_string_pretty(&snapshot).unwrap()
         );
