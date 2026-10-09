@@ -585,13 +585,15 @@ flowchart LR
 | U8   | M    | • 默认启用；6 个平台的打包与签名<br>• 删除 Node Host、Node server bundle 和桌面包内的 TS CLI（D-U9）<br>• 更新 AGENTS.md（第 15 节）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | • 全平台 E2E 矩阵<br>• 冷启动、常驻 RSS、流式 CPU 都不比 Node Host（当时的发布版）差，实测写入 `docs/reports/`                                                                                                                       |
 | U9   | 持续 | • `zcode-api` 生成 TS 客户端，UI 按领域逐步离开 legacy 映射（D-U5）<br>• runtime 扩展化：goal、todo、title 等移出核心                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 按领域验收                                                                                                                                                                                                                           |
 
-**进度（2026-10-09）**：U0 第 1、2 步已在 `feat/rust-u0-foundation` 完成，见 [rust-u0-foundation.md](rust-u0-foundation.md)。包括：
+**进度（2026-10-09）**：集成分支 `feat/rust-unified-host`。“已完成”指已提交并通过对应的 Rust 测试；桌面 E2E 的结果单独标出。
 
-- 护栏：工具链、lints、nextest、cargo-deny、cargo-shear、PR CI；
-- 三个基础 crate：`zcode-kit`、`zcode-async`、`zcode-proc`；
-- 缺陷 B1–B7 的修复。
-
-U0 的其余部分（应用 crate 迁入 `rust/`、net / sqlite / git / observe 的抽取、测试 harness）尚未开始。
+| 阶段 | 状态                                                                                                                                                                                                                                        | 子规格                                                                                                                                           |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| U0   | 第 1、2 步已完成：护栏（工具链、lints、nextest、cargo-deny、cargo-shear、PR CI），基础 crate `zcode-kit` / `zcode-async` / `zcode-proc`，缺陷 B1–B7。其余未开始：应用 crate 迁入 `rust/`，net / sqlite / git / observe 的抽取，测试 harness | [rust-u0-foundation.md](rust-u0-foundation.md)                                                                                                   |
+| U1   | 已完成本期范围：嵌入入口、显式环境、同进程重启与多实例。规划中 U1 的其余项（类型化 sink、`Environment` 端口、Engine 循环里的慢操作、Engine 的监督重建）移到 U3 B 期或之后                                                                   | [rust-u1-runtime-library.md](rust-u1-runtime-library.md)                                                                                         |
+| U2   | 已完成：`services` 拆成 9 个分层 crate；`TaskScope`。进行中：runtime 的任务归属。未开始：Gateway 的实现、Host 的任务归属、有界通道、拆环与显式组装                                                                                          | [rust-u2-host-structure.md](rust-u2-host-structure.md)、[rust-u2-task-scope.md](rust-u2-task-scope.md)、[rust-u2-gateway.md](rust-u2-gateway.md) |
+| U3   | A 期已完成：Host 进程内运行 runtime（每个 workspace 一个实例）。进行中：嵌入式设为缺省、桌面 E2E、与子进程链路的对比测量。B 期（类型化链路、合并重复状态、一个 Engine）在设计中                                                             | [rust-u3-single-process.md](rust-u3-single-process.md)                                                                                           |
+| U4   | 进行中：调度状态机移入 Host；Host 侧的窗口身份、广播与 claim、设置写入；Main 侧改为每个 App 一个 Host                                                                                                                                       | [rust-u4-app-host.md](rust-u4-app-host.md)                                                                                                       |
 
 **不做中间发布（D-U8）。** U0–U7 都是开发里程碑，不是发布版本：
 
@@ -627,17 +629,22 @@ U0 的其余部分（应用 crate 迁入 `rust/`、net / sqlite / git / observe 
 | D-U8  | 是否先发布中间形态    | 不先发布 R7，也不发布任何中间形态。按最终设计做，U8 一次切换；第 12 节的阶段只是开发里程碑                                                   |
 | D-U12 | runtime 的 actor 粒度 | 一个 Engine 管所有 workspace（沿用进行中的 workspace-scope 工作）。会话级 actor 改造量大，暂不做。约束与兜底见 14.1                          |
 
+**按推荐执行**（2026-10-09 开始实施前已告知用户，未提出异议）
+
+| 编号  | 问题                              | 执行的选项                                                                                                                                      |
+| ----- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-U6  | replayable 模式的输入队列         | 并入 runtime `CommandInbox`，只有一个队列所有者（U3 B 期）                                                                                      |
+| D-U7  | Main 的业务职责是否收回           | 收回 setting 写入、scheduler、BroadcastHub、`taskRealtimeBus`（U4）                                                                             |
+| D-U9  | Rust runtime 何时成为唯一 runtime | Rust Host 内只运行 Rust runtime（U3 起，开发开关下）。[rust-parity-remaining.md](rust-parity-remaining.md) 的剩余项清零仍是 U8 切换默认前的门槛 |
+| D-U10 | 是否接受单进程的爆炸半径          | 接受，用第 10 节的措施兜底。A 期每个 workspace 一个实例，一个实例的 panic 不影响其他 workspace                                                  |
+| D-U11 | 代码放在哪里、怎么命名            | 单一 Cargo workspace `rust/`，crate 前缀 `zcode-`（U0 其余部分落地；Host 拆分出的 crate 暂用 `zcode-host-*`）                                   |
+
 **待定**
 
-| 编号  | 问题                              | 选项                                                              | 推荐与理由                                                                                                          |
-| ----- | --------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| D-U4  | 远端会话在断线后是否继续存活      | ① 保持现状；② 远端 daemon 加 stdio ↔ UDS 转发                     | **先 ①**，U5 之后再评估 ②                                                                                           |
-| D-U5  | 内部 API 以哪边为来源             | ① Rust 方法表为来源，生成 TS 类型；② 继续以 zod 为来源，生成 Rust | **①，从 U9 开始**。行为全部在 Rust 里，类型应该和行为放在一起（Codex 的做法）。V4 命令的 zod 来源在 U9 之前保持不变 |
-| D-U6  | replayable 模式的输入队列         | ① 并入 runtime `CommandInbox`；② 保留 Host 命令队列               | **①**。只有一个队列所有者，符合 AGENTS.md；需要在 U3 子规格中写清 `promote` / `cancel` 的映射                       |
-| D-U7  | Main 的业务职责是否收回           | 收回 setting 写入、scheduler、BroadcastHub、`taskRealtimeBus`     | **收回**（U4）                                                                                                      |
-| D-U9  | Rust runtime 何时成为唯一 runtime | U3 合并的前提是桌面默认改用 Rust runtime                          | 以 [rust-parity-remaining.md](rust-parity-remaining.md) 的剩余项清零为门槛，在 U3 之前确认                          |
-| D-U10 | 是否接受单进程的爆炸半径          | ① 接受，并用第 10 节的措施兜底；② 保留可选的 runtime 子进程模式   | **①**。② 等于长期维护两条链路，与 G1 冲突                                                                           |
-| D-U11 | 代码放在哪里、怎么命名            | 单一 Cargo workspace `rust/`，crate 前缀 `zcode-`                 | 推荐                                                                                                                |
+| 编号 | 问题                         | 选项                                                              | 推荐与理由                                                                                                          |
+| ---- | ---------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| D-U4 | 远端会话在断线后是否继续存活 | ① 保持现状；② 远端 daemon 加 stdio ↔ UDS 转发                     | **先 ①**，U5 之后再评估 ②                                                                                           |
+| D-U5 | 内部 API 以哪边为来源        | ① Rust 方法表为来源，生成 TS 类型；② 继续以 zod 为来源，生成 Rust | **①，从 U9 开始**。行为全部在 Rust 里，类型应该和行为放在一起（Codex 的做法）。V4 命令的 zod 来源在 U9 之前保持不变 |
 
 ### 14.1 D-U12：一个 Engine 管所有 workspace
 
