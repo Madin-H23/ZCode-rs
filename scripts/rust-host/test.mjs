@@ -92,6 +92,24 @@ if (!existsSync(resolve(root, "packages/server/dist/remote/zcode-server.cjs"))) 
 }
 await requireCargoTools(["nextest"]);
 await run("cargo", ["nextest", "run", "--workspace", "--manifest-path", manifest]);
+// “只有 Host”形态（docs/specs/rust-host-cli-boundary.md §3.3、§3.5）：不链接 CLI 的构建能编译，没有
+// `cli` 入口，不给 ZCODE_AGENT_SERVER_COMMAND 时启动 runtime 失败。用单独的 target 目录，不覆盖下面
+// 交给 TS 测试的合并形态二进制。
+await run("cargo", [
+  "nextest",
+  "run",
+  "--manifest-path",
+  manifest,
+  "--target-dir",
+  resolve(root, "apps/zcode-host/target/host-only"),
+  "-p",
+  "zcode-host-runtime-link",
+  "-p",
+  "zcode-host",
+  "--no-default-features",
+  "-E",
+  "package(zcode-host-runtime-link) | binary(host_only)",
+]);
 await run("cargo", ["build", "--manifest-path", manifest]);
 
 // 用 Renderer 实际使用的客户端连接真实二进制；测试放在 client 包内，按公开入口导入 @zcode/shared。
