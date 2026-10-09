@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use zcode_kit::fs::{FileMode, ParentDir, TempName, WriteOptions, atomic_write};
 
 const LOCK_RETRY_DELAY: Duration = Duration::from_millis(10);
 const LOCK_RETRY_COUNT: usize = 200;
@@ -107,26 +108,17 @@ async fn locked(
     Ok(generated.to_owned())
 }
 
-/// Atomic replace so Desktop never reads a torn file.
+/// Atomic replace so Desktop never reads a torn file. Hidden temp name and
+/// default permissions as before; the directory is created by [`persisted`].
 async fn write_state(path: &Path, state: &Map<String, Value>) -> std::io::Result<()> {
-    let directory = path.parent().unwrap_or(Path::new("."));
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("state");
-    let temp = directory.join(format!(
-        ".{name}.{}.{}.{}.tmp",
-        std::process::id(),
-        now_ms(),
-        uuid::Uuid::new_v4().simple()
-    ));
     let body = serde_json::to_vec_pretty(state).map_err(std::io::Error::other)?;
-    let result = async {
-        tokio::fs::write(&temp, body).await?;
-        tokio::fs::rename(&temp, path).await
-    }
-    .await;
-    if result.is_err() {
-        let _ = tokio::fs::remove_file(&temp).await;
-    }
-    result
+    let options = WriteOptions {
+        mode: FileMode::Default,
+        temp_name: TempName::Hidden,
+        parent: ParentDir::Existing,
+        rename_retry: &[],
+    };
+    atomic_write(path, &body, options).await
 }
 
 /// Node `removeStaleTelemetryLockIfNeeded`.

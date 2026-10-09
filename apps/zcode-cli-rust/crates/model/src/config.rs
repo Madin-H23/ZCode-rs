@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::path::PathBuf;
+use zcode_kit::secret::RedactedString;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -13,10 +14,12 @@ pub struct ModelConfig {
     pub supports_native_web_search: bool,
     #[serde(skip)]
     pub max_output_map: Option<String>,
+    /// Configured provider key; only [`RedactedString::expose`] reveals it.
     #[serde(skip)]
-    pub api_key_value: Option<String>,
+    pub api_key_value: Option<RedactedString>,
+    /// Configured `api.headers`; values may carry credentials.
     #[serde(skip)]
-    pub headers: std::collections::BTreeMap<String, String>,
+    pub headers: std::collections::BTreeMap<String, RedactedString>,
     #[serde(skip)]
     pub account_access: Option<serde_json::Value>,
     #[serde(skip)]
@@ -114,7 +117,7 @@ impl ModelConfig {
     }
     pub fn api_key(&self) -> Result<Option<String>> {
         if let Some(key) = &self.api_key_value {
-            return Ok(Some(key.clone()));
+            return Ok(Some(key.expose().to_owned()));
         }
         match &self.api_key_env {
             Some(name) => Ok(Some(

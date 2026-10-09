@@ -16,6 +16,7 @@ serde_json.workspace = true
 tokio.workspace = true
 zcode-host-control.workspace = true
 zcode-host-rpc.workspace = true
+zcode-kit.workspace = true
 
 [lib]
 doctest = false

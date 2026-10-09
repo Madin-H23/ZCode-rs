@@ -163,7 +163,7 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         ("PATH".to_owned(), std::env::var("PATH").unwrap_or_default()),
         ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
     ]);
-    let environment = HostEnvironment::capture(vars.clone());
+    let environment = HostEnvironment::capture(vars.clone()).unwrap();
     let config_dir = environment.app_config_dir();
     std::fs::create_dir_all(&config_dir).unwrap();
 

@@ -125,6 +125,8 @@ zcode-cli-tools = { path = "crates/tools" }
 zcode-cli-app-server = { path = "crates/app-server" }
 zcode-cli-headless = { path = "crates/headless" }
 zcode-cli-tui = { path = "crates/tui" }
+# 基础 crate（docs/specs/rust-u0-foundation.md §3）。
+zcode-kit = { path = "../../rust/crates/kit" }
 
 [package]
 name = "zcode-cli-rust"
@@ -157,6 +159,7 @@ zcode-cli-tools.workspace = true
 zcode-cli-app-server.workspace = true
 zcode-cli-headless.workspace = true
 zcode-cli-tui.workspace = true
+zcode-kit.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

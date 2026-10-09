@@ -98,6 +98,8 @@ zcode-host-core = { path = "crates/host-core" }
 zcode-host-kit = { path = "crates/kit" }
 zcode-host-services = { path = "crates/services" }
 zcode-host-rpc = { path = "crates/rpc" }
+# 基础 crate（docs/specs/rust-u0-foundation.md §3）。
+zcode-kit = { path = "../../rust/crates/kit" }
 
 [profile.release]
 lto = "thin"

@@ -140,7 +140,7 @@ async fn logged_in_coding_plan_drives_off_peak_requests() {
         ("ZCODE_APP_VERSION".to_owned(), "9.9.9".to_owned()),
         ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
     ]);
-    let environment = HostEnvironment::capture(vars.clone());
+    let environment = HostEnvironment::capture(vars.clone()).unwrap();
     let config_dir = environment.app_config_dir();
     std::fs::create_dir_all(&config_dir).unwrap();
 

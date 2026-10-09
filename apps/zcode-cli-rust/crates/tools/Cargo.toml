@@ -37,6 +37,7 @@ zcode-cli-core-api.workspace = true
 zcode-cli-domain.workspace = true
 zcode-cli-host.workspace = true
 zcode-cli-net.workspace = true
+zcode-kit.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

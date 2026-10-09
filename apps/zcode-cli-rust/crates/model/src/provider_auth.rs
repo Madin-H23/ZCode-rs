@@ -20,7 +20,7 @@ impl HttpModel {
             self.config
                 .headers
                 .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str())),
+                .map(|(k, v)| (k.as_str(), v.expose())),
         );
         if let Some(extra) = auth["requestAuth"]["headers"].as_object() {
             for (name, value) in extra {

@@ -40,16 +40,17 @@ async fn discover_inner(
     if !catalog.enabled {
         return Ok(catalog);
     }
+    let home = zcode_kit::paths::home_dir()?;
     let mut roots = config::strings(&config["skills"]["roots"])
         .into_iter()
         .map(|p| Root {
-            path: config::resolve(cwd, p),
+            path: config::resolve(cwd, p, &home),
             scope: "workspace".into(),
             plugin_name: None,
             plugin_root: None,
         })
         .collect::<Vec<_>>();
-    let mut bases = vec![(config::home(), "user")];
+    let mut bases = vec![(home.clone(), "user")];
     bases.extend(
         config::project_directories(cwd)
             .await
@@ -80,7 +81,7 @@ async fn discover_inner(
         if let Some(entries) = config[group].as_object() {
             for (path, value) in entries {
                 if value["enable"] == false {
-                    let path = config::resolve(cwd, path);
+                    let path = config::resolve(cwd, path, &home);
                     if let Ok(real) = tokio::fs::canonicalize(&path).await {
                         disabled.insert(real);
                     }

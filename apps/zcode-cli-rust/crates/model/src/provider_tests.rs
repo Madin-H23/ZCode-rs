@@ -14,7 +14,7 @@ fn model(api: &str, base: &str, headers: &[(&str, &str)]) -> HttpModel {
     .unwrap();
     config.headers = headers
         .iter()
-        .map(|(k, v)| ((*k).into(), (*v).into()))
+        .map(|(k, v)| ((*k).into(), zcode_kit::secret::RedactedString::new(*v)))
         .collect();
     let env = RuntimeEnv::from_vars(vec![("ZCODE_APP_VERSION".into(), "2.0.0".into())]);
     let egress = Egress::new(

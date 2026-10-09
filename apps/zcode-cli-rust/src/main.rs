@@ -46,7 +46,9 @@ pub(crate) fn tui_unavailable() -> ! {
 }
 
 async fn app_server(args: AppServerArgs) -> Result<()> {
-    let home = runtime::home();
+    // B4 缺陷修复：HOME 为空时旧的 home() 返回空路径，日志与数据会写到当前工作目录下。
+    // 现在解析失败就让启动失败（main 把错误写到 stderr 并以 1 退出）。
+    let home = zcode_kit::paths::home_dir()?;
     let log_options = zcode_cli_host::logging::LogOptions::from_env(&home);
     let log_dir = log_options.directory.clone();
     let _logs = zcode_cli_host::logging::init(log_options);
@@ -59,7 +61,7 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         prepare_storage = args.prepare_storage,
         "App server starting"
     );
-    let ctx = runtime::Context::prepare(args.cwd, args.data_dir).await?;
+    let ctx = runtime::Context::prepare(home, args.cwd, args.data_dir).await?;
     // 会话存储只有 Node 的库（spec rust-m11-node-storage §2.1）。
     let path = ctx.node_database().await?.database;
     let cancel = CancellationToken::new();

@@ -14,3 +14,13 @@ workspace = true
 doctest = false
 
 [dependencies]
+regex.workspace = true
+serde.workspace = true
+tokio.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true

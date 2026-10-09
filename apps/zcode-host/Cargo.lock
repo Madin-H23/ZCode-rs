@@ -2467,6 +2467,7 @@ dependencies = [
  "tokio",
  "zcode-host-control",
  "zcode-host-rpc",
+ "zcode-kit",
 ]
 
 [[package]]
@@ -2514,7 +2515,18 @@ dependencies = [
  "zcode-host-control",
  "zcode-host-kit",
  "zcode-host-rpc",
+ "zcode-kit",
  "zip",
+]
+
+[[package]]
+name = "zcode-kit"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "regex",
+ "serde",
+ "tokio",
 ]
 
 [[package]]

@@ -15,14 +15,6 @@ use zcode_cli_net::{Egress, NetworkPolicy, RuntimeEnv};
 use zcode_cli_state::NodeStore;
 use zcode_cli_tools::WorkspaceTools;
 
-pub fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_default()
-}
-
 /// What every entry resolves before touching storage.
 pub struct Context {
     pub home: PathBuf,
@@ -38,8 +30,13 @@ pub struct Context {
 }
 
 impl Context {
-    pub async fn prepare(cwd: Option<PathBuf>, data_dir: Option<PathBuf>) -> Result<Self> {
-        let home = home();
+    /// `home` is resolved once by the entry point (`zcode_kit::paths::home_dir`),
+    /// before logging starts, so every reader shares the same directory.
+    pub async fn prepare(
+        home: PathBuf,
+        cwd: Option<PathBuf>,
+        data_dir: Option<PathBuf>,
+    ) -> Result<Self> {
         let requested_cwd = match cwd {
             Some(cwd) => cwd,
             None => std::env::current_dir()?,
@@ -100,7 +97,11 @@ impl Context {
     /// The Node session database and artifact root (spec rust-m11-node-storage §2.1).
     pub async fn node_database(&self) -> Result<zcode_cli_host::storage_paths::StoragePaths> {
         let config = self.workspace_config.snapshot().await;
-        zcode_cli_host::storage_paths::resolve(&std::env::current_dir()?, &config)
+        Ok(zcode_cli_host::storage_paths::resolve(
+            &std::env::current_dir()?,
+            &self.home,
+            &config,
+        ))
     }
 
     /// The Node database as the session store.
