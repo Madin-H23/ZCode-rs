@@ -68,11 +68,11 @@
   - 维护保留日志：每个会话一份，另有一份 index 日志；
   - 计算 `state.updated` 的差量；
   - 裁决 resume 还是 snapshot，并生成快照或回放。
-- **App Server** 负责：
+- **投递**（`zcode-cli-delivery` crate，App Server 是它的一个使用方，见 rust-u3-stage-b.md 3.2）负责：
   - 订阅注册表与 profile；
   - 每个订阅者的缓冲与定时器；
   - 连接暂停；
-  - stdout 拥塞阀；
+  - 积压暂停与恢复（stdout 拥塞阀的水位由 App Server 测量，经连接的 sink 告知投递）；
   - 打帧与分片。
 - **Host** 负责上报 `saturated`、`drained`、`closed`。
 - 本方案不涉及 Main 和 relay。
