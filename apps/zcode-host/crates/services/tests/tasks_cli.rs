@@ -37,7 +37,16 @@ fn runtime_vars() -> BTreeMap<String, String> {
                 "ZCODE_TEST_CLI_RUST_BINARY is not a file: {}",
                 cli.display()
             );
-            runtime_vars()
+            BTreeMap::from([
+                (
+                    "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
+                    cli.to_string_lossy().into_owned(),
+                ),
+                (
+                    "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
+                    "zcode-cli-rust".to_owned(),
+                ),
+            ])
         }
         None => BTreeMap::from([(
             "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
