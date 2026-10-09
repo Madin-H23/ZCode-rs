@@ -35,7 +35,7 @@
 - `packages/services`：业务服务；`packages/rpc`：RPC 框架。
 - `packages/shared`：共享协议与类型；`packages/client`：Agent 客户端 SDK。
 - `apps/zcode-cli`：Agent CLI 与运行时。
-- `apps/zcode-cli-rust`：Rust agent runtime；`apps/zcode-host`：Rust Host；`rust/`：两者共用的 Rust 基础 crate（`zcode-kit`、`zcode-async`、`zcode-proc`），通过路径依赖引用。
+- `apps/zcode-cli-rust`：Rust agent runtime；`apps/zcode-host`：Rust Host（连接、调用顺序与出站队列在 `crates/gateway`）；`rust/`：两者共用的 Rust 基础 crate（`zcode-kit`、`zcode-async`、`zcode-proc`），通过路径依赖引用。
 - `CONTEXT.md`：插件商店领域词汇；修改相关 UI 前阅读。
 - `DESIGN.md`：UI 设计规范；修改 UI 前阅读。
 
@@ -60,7 +60,7 @@
   - Node 风格的“临时文件 + rename”原子写用 `zcode_kit::fs::atomic_write`；数据目录的 home 由二进制入口经 `zcode_kit::paths::home_dir` 解析一次，库内用 runtime 给定的 home（`Egress::home`），不得回落到空路径或 cwd。
   - 进程环境与进程 cwd 只在二进制入口读取（`clippy.toml` 禁用 `std::env::{var, var_os, vars, vars_os, current_dir}`）；库内用 `RuntimeEnv` 快照、workspace 根或显式基准目录，允许的位置用 `#[expect]` 标注理由（`docs/specs/rust-u1-runtime-library.md`）。
   - 秘密值用 `zcode_kit::secret::RedactedString`，日志中的值经 `zcode_kit::redact::redact_secrets`。
-  - 任务只经 `zcode_async` 启动并有唯一所有者：作用域任务用 `Spawner::spawn` / `spawn_blocking`，函数内启动并等待的用 `owned` / `blocking`；runtime 非测试代码由 `scripts/check-zcode-cli-rust-boundaries.mjs` 禁止直接 `tokio::spawn` / `spawn_blocking`（例外只有 `src/embed.rs`），Host 迁移后改由 clippy 强制（`docs/specs/rust-u2-task-scope.md`）。
+  - 任务只经 `zcode_async` 启动并有唯一所有者：作用域任务用 `Spawner::spawn` / `spawn_blocking`，函数内启动并等待的用 `owned` / `blocking`；runtime 非测试代码由 `scripts/check-zcode-cli-rust-boundaries.mjs` 禁止直接 `tokio::spawn` / `spawn_blocking`（例外只有 `src/embed.rs`），Host 已迁移的 crate（`gateway`、`host-core`、`zcode-host`）由 `scripts/rust/check-host-spawns.mjs` 检查，Host 全部迁移后改由 clippy 强制（`docs/specs/rust-u2-task-scope.md`）。
   - spawn 出去、负责发出终态或回复的任务用 `zcode_async::catch_panic` 兜住 panic。
 - 不新增 `#[expect(clippy::await_holding_invalid_type)]`：现有标注是待 U2 清理的存量。
 - 编码约定：

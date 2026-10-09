@@ -19,7 +19,7 @@ Host 有约 139 处直接的 `tokio::spawn`，runtime 有约 44 处 `tokio::spaw
 2. 作用域可以有子作用域。关闭或释放父作用域，等同于关闭或释放所有子作用域。
 3. 任务有名字（静态字符串，说明它在做什么）。panic 被捕获并交给根作用域的上报函数（作用域路径、任务名、panic 信息），等待该任务结果的一方得到错误，而不是一直等待。
 4. 关闭作用域分三步：发出取消信号 → 在给定的宽限期内等任务自行结束 → 中止剩余任务并返回它们的名字。关闭之后在这个作用域上启动的任务不会运行，其句柄立即得到“作用域已关闭”。
-5. `tokio::spawn` 与 `tokio::task::spawn_blocking` 只允许出现在 `zcode-async` 内。`clippy.toml` 由所有 Rust workspace 共用，Host 迁移完成后再由它的 `disallowed-methods` 强制；在那之前，runtime（`apps/zcode-cli-rust` 的 `crates/` 与 `src/`）由 `scripts/check-zcode-cli-rust-boundaries.mjs` 扫描非测试代码强制，例外文件逐个列出（见 4.1）。
+5. `tokio::spawn` 与 `tokio::task::spawn_blocking` 只允许出现在 `zcode-async` 内。`clippy.toml` 由所有 Rust workspace 共用，Host 迁移完成后再由它的 `disallowed-methods` 强制；在那之前，runtime（`apps/zcode-cli-rust` 的 `crates/` 与 `src/`）由 `scripts/check-zcode-cli-rust-boundaries.mjs` 扫描非测试代码强制，例外文件逐个列出（见 4.1）；Host 中已迁移的 crate（`gateway`、`host-core`、`zcode-host`）由 `scripts/rust/check-host-spawns.mjs` 扫描，其余 crate 迁移后加入它的列表。
 
 ## 3. 接口（`zcode-async`）
 
@@ -76,7 +76,8 @@ pub async fn blocking<F, T>(work: F) -> Result<T, TaskError>;
 | 作用域                    | 所有者                                      | 何时关闭                              |
 | ------------------------- | ------------------------------------------- | ------------------------------------- |
 | `host`（根）              | `HostCore`                                  | Host 退出（`dispose` / 控制通道关闭） |
-| `host/connection:<id>`    | 连接                                        | 连接断开                              |
+| `host/connection:<id>`    | Gateway 的连接循环（rust-u2-gateway.md）    | 连接断开                              |
+| `host/websocket`          | WebSocket 监听任务                          | 随 Host                               |
 | `host/<service>`          | 各 service（组装时由根派生）                | 随 Host                               |
 | `host/agent/<key>#<代次>` | runtime 实例的监视任务所在的 `AgentRuntime` | 实例结束或被回收                      |
 | `host/remote/<session>`   | 远端连接注册表里的一个会话                  | 会话断开或被回收                      |

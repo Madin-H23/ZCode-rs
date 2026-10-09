@@ -26,17 +26,46 @@
 | 出站队列   | 2.3                                                                                                                        |
 | 调用通道   | 2.2 的串行键                                                                                                               |
 
-transport（今天只有 WebSocket）只做握手、鉴权与分帧，把一条已鉴权的字节流交给 Gateway：
+transport（今天只有 WebSocket）只做握手、鉴权与分帧，把一条已鉴权的字节流交给 Gateway。接口不含 WebSocket 类型，U5 的 stdio 链路与测试用的进程内连接直接使用：
 
 ```rust
 impl Gateway {
+    /// `root`：连接循环所在的作用域（Host 的根作用域）；连接的作用域 `<root>/connection:<id>` 由它派生。
+    pub fn new(root: Spawner, observer: Arc<dyn CallObserver>, limits: OutboundLimits) -> Self;
     /// 接入一条已鉴权的连接。transport 把收到的完整 rpc 消息写进 `Connection::inbound`，
-    /// 从 `Connection::outbound` 取出要发送的消息，每发完一条调用 `written`。
-    pub fn connect(&self, meta: AttachmentMeta, registry: ChannelSource) -> Connection;
+    /// 从 `Connection::outbound` 取出要发送的消息，每发完一条调用 `written`；结束读取时释放 `inbound`。
+    pub fn connect(&self, meta: AttachmentMeta, channels: ChannelSource) -> Connection;
+    /// `detach-service-port`：关闭该 attachment 的全部连接。
+    pub fn close_attachment(&self, attachment_id: &str) -> usize;
+    /// 诊断：当前连接（id、attachment 元数据、出站积压）。
+    pub fn connections(&self) -> Vec<ConnectionInfo>;
 }
+pub struct Connection { pub id: u64, pub inbound: Inbound, pub outbound: Outbound }
+impl Inbound {
+    /// 入站队列满时等待；连接已关闭时返回 Err。
+    pub async fn send(&self, message: Vec<u8>) -> Result<(), ConnectionClosed>;
+    /// Gateway 关闭这条连接（停止读取）时完成。
+    pub async fn closed(&self);
+}
+impl Outbound {
+    /// 下一条要发送的消息；连接关闭后为 None。只有一个消费者。
+    pub async fn next(&self) -> Option<Vec<u8>>;
+    pub fn written(&self, bytes: usize);
+    /// transport 写失败：关闭这条连接。
+    pub fn close(&self);
+}
+/// channel 表的来源：本地 scope 等 Host 就绪，远端 scope 等对应 workspace 接入；None 时不发 `[200]` 就关闭。
+pub type ChannelSource = Pin<Box<dyn Future<Output = Option<Channels>> + Send>>;
+pub struct Channels { pub registry: Arc<ChannelRegistry>, pub closed: Option<watch::Receiver<bool>> }
+/// 每个调用结束时的观测（RPC 网络遥测，由 `host-core` 的 `RpcTelemetry` 实现）。
+pub trait CallObserver: Send + Sync { fn call_finished(&self, channel: &str, method: &str, elapsed: Duration, error: Option<&RpcError>); }
 ```
 
-`host-core` 保留组装职责（启动顺序、存储准备、安装 service、远端 scope 的 channel 表解析）。
+- 入站队列有界（64 条）。满了以后 transport 停止读 socket，背压经 TCP 到达对端。连接循环处理一条请求时不等待任何东西（调用在任务里执行），队列只会在循环还没拿到 channel 表时积压，而客户端在收到 `[200]` 之前不发请求。
+- WebSocket transport 每条 socket 一个任务（`host/websocket` 里的 `socket`），在同一个任务里并发地读（重组完整 rpc 消息 → `Inbound`）和写（`Outbound` → 帧）。原来的三条无界队列、计数任务与写任务不再存在。
+- 分层：`zcode-host-gateway` 与 `zcode-host-base` 同层、互不依赖；只有 `zcode-host-core` 与 `zcode-host` 可以依赖它（`scripts/rust/check-host-layers.mjs`）。`AttachmentMeta` 随连接注册表移入 Gateway，`host-core` 重新导出。
+
+`host-core` 保留组装职责（启动顺序、存储准备、安装 service、capability 的签发与兑换、远端 scope 的 channel 表解析），经 `HostCore::connect(meta)` 构造 `ChannelSource` 后调用 Gateway。
 
 ### 2.2 调用顺序：串行键
 
@@ -48,6 +77,25 @@ impl Gateway {
 - `zcode-agent`：改变某个会话状态的方法（V4 命令、legacy 的会话写操作）使用 `session:<workspace key>:<session id>`；创建会话与只读方法不设键。其余 channel 暂不设键，发现顺序依赖时逐个补上，并在本节登记。
 
 这只保证 Host 把请求按到达顺序交给 runtime；已接受输入的排队与 admission 仍由 runtime 的 `CommandInbox` 负责（AGENTS.md）。
+
+实现：
+
+- 通道表 `key → { 队首, 排队的 (ticket, 连接, 唤醒端) }` 由 Gateway 持有，所有连接共用，`std::sync::Mutex` 保护，持锁期间不 await。连接循环按到达顺序处理请求，在循环里同步登记得到排队位置（`Ticket`）；队首的 `Ticket` 释放（完成、失败、panic、任务被中止）时把通道交给下一个仍在排队的调用。
+- 没有键的调用在到达时就调用 `channel.call`（与之前相同：转发型 channel 在 `call` 里同步发出请求，因此按到达顺序转发）；有键的调用轮到它时才调用 `channel.call`，排队中的调用不会执行 handler 的任何部分。
+- 一个调用的应答先入出站队列，再释放通道：同一键的应答也按到达顺序发出。
+- 客户端取消：先从队中撤出（同步），再中止任务。连接关闭：先撤出这条连接全部排队的调用，再中止它的任务，见 2.4。
+
+`zcode-agent` 的串行键（`crates/sessions/src/agent/service.rs` 的 `serial_key`；远端 scope 的同名 channel 共用这张表）：
+
+| 方法                                                                                                                                                          | 会话 id 的位置       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| `sendConversationCommandV4`（发送、排队编辑与删除、权限与提问的应答、压缩、目标、回退、删除会话等全部 V4 命令）                                               | `envelope.sessionId` |
+| `attachmentBeginV4`、`attachmentChunkV4`、`attachmentCommitV4`、`attachmentAbortV4`（写入会话的上传暂存与附件表）                                             | `sessionId`          |
+| `resumeSession`（把会话载入 runtime 并改写运行配置）、`sendPrompt`、`compactSession`、`goalSession`、`closeSession`、`setModel`、`setThoughtLevel`、`setMode` | `sessionId`          |
+
+没有键：V4 `createSession`（信封不带 sessionId）、legacy `createSession`、握手与订阅（`hello`、`initialize`、`subscribe*`、`unsubscribe*`、`resync*`）、全部读取（`read*`、`list*`、`conversation*V4` 的查询、`attachmentReadV4`、`attachmentPreviewSourceV4`、`queryConversationCommandsV4`、`backgroundBashOutputV4`）、workspace 与 App 级的成员（插件、MCP、工作流、生成文本、用量、`disposeWorkspace` 等）。参数缺 `workspacePath` 或 sessionId 为空时不设键（调用本身会以参数错误失败）。
+
+占用通道的时间：上面的方法都在 runtime 接受（ACK）时返回，不等 run 结束；runtime 的 Engine 逐个处理请求，本来也不会在请求里等一个 run 跑完。会有限地等待的情形：runtime 实例启动与存储就绪（`get_ready_client`）、`sendText` 向 Main 取浏览器环境（每个请求至多 30 s）、`deleteSession` / `closeSession` 等被取消的 run 收口、到 runtime 的请求超时（180 s；`compactSession` 放宽到 5 min）。这些等待期间同一会话的后续写操作排在后面，这正是要保证的顺序。
 
 ### 2.3 出站队列
 
@@ -61,15 +109,31 @@ impl Gateway {
 
 - 队列顺序即发送顺序。回复与事件走同一个队列，保持它们之间的先后。
 - 一条连接的积压不影响其他连接。
+- 积压是已入队、还没写完的字节数（含 transport 已取出、正在写的那一条）。边沿经连接循环交给各 channel，与请求在同一个循环里处理。
+- 连接关闭（任何原因）时，还没发送的消息随连接一起丢弃。越过上限时记 `connection <id> outbound backlog exceeded <limit> bytes; closing the connection`。
+- 生产者入队不等待：调用任务、订阅转发与连接循环都不会因为对端读得慢而挂起；约束来自上限，而不是阻塞生产者。
 
 ### 2.4 连接关闭
 
-顺序：停止读取 → 排队中的调用离队 → 中止这条连接作用域里的任务（进行中的调用、订阅转发、写任务）→ 通知各 channel `connection_closed`（按连接持有状态的 channel 在这里清理，例如 V4 订阅归属、广播的 claim）。`connection_closed` 对每条连接恰好调用一次，且在该连接的任何调用任务结束之后。
+顺序：停止读取 → 排队中的调用离队 → 中止这条连接作用域里的任务（进行中的调用、订阅转发）并关闭出站队列（transport 的写循环随之结束）→ 通知各 channel `connection_closed`（按连接持有状态的 channel 在这里清理，例如 V4 订阅归属、广播的 claim）。`connection_closed` 对每条连接恰好调用一次，且在该连接的任何调用任务结束之后：Gateway 中止任务后等待它们的句柄，任务的 future（含 channel 的调用 future）都已释放才通知。
+
+任务与作用域：
+
+| 任务                         | 作用域                 | 说明                                                                                                               |
+| ---------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `connection`（连接循环）     | `host`                 | 执行上面的收口；不在连接作用域里，否则会中止自己                                                                   |
+| `call`、`listen`             | `host/connection:<id>` | 作用域由连接循环持有                                                                                               |
+| `socket`（WebSocket 读与写） | `host/websocket`       | 出站队列关闭后发 WebSocket Close（至多等 1 s：对端可能已经不读）并结束；对端断开时释放 `inbound`，Gateway 随之收口 |
+
+- 关闭的触发：transport 释放 `inbound`（对端断开）、`close_attachment`（Main 的 `detach-service-port`）、出站队列越过上限、transport 写失败（`Outbound::close`）、`Channels::closed`（远端 scope 的会话断开）。多个触发同时到达时只收口一次。
+- 连接循环被中止（Host 退出时关闭根作用域）时：排队的调用离队，出站队列关闭，连接作用域被释放（其中的任务被中止）。此时不调用 `connection_closed`：Host 正在退出。
+- handler panic：调用任务回 `[202]`（`<channel>.<method> failed: internal error in the Rust Host`），释放通道，再把 panic 交还给作用域上报（Host 日志 error：`task panicked: scope=host/connection:<id> task=call: …`）。`serial_key`、`listen` 或 `call` 返回 future 之前的同步部分 panic 时，连接循环回 `[202]`（订阅则不应答）并记 error 日志，循环继续。
 
 ### 2.5 状态所有者
 
 | 状态                           | 所有者              |
 | ------------------------------ | ------------------- |
+| 根作用域 `host`                | `HostCore`          |
 | 连接表、连接作用域             | Gateway             |
 | 出站队列与水位                 | Gateway（每连接）   |
 | 串行键的队列                   | Gateway（Host 级）  |
@@ -101,7 +165,7 @@ sequenceDiagram
   - 排队中的调用被取消后不执行；连接关闭后它排队的调用不执行，其他连接同一键的调用继续。
   - 水位边沿与今天相同；越过上限时只关闭这一条连接。
   - `connection_closed` 恰好一次，且晚于该连接所有调用任务的结束。
-- `tokio::spawn` 不出现在 `zcode-host-gateway`、`host-core` 与 `zcode-host` 中（任务都在作用域里）。
+- `tokio::spawn` 不出现在 `zcode-host-gateway`、`host-core` 与 `zcode-host` 中（任务都在作用域里）：`scripts/rust/check-host-spawns.mjs`（`pnpm check:rust` 的一步）扫描这三个 crate 的非测试代码，也禁止取运行时句柄自行 spawn。其余 crate 迁移后加入它的列表。
 - 现有测试、`pnpm test:rust-host`、桌面 E2E 全部通过；控制 RPC 的延迟测试（`control_latency`）不退化。
 
 ## 4. 本期不做
