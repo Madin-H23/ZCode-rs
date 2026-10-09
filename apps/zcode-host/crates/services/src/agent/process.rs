@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use regex::Regex;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 use zcode_host_kit::log;
 
 use super::command::AgentCommand;
@@ -36,7 +36,7 @@ pub fn spawn(
     cwd: &Path,
     env: &BTreeMap<String, String>,
 ) -> std::io::Result<Spawned> {
-    let mut process = Command::new(&command.program);
+    let mut process = zcode_proc::command(&command.program);
     process
         .args(&command.args)
         .current_dir(cwd)
@@ -381,7 +381,7 @@ async fn signal_tree(pid: Option<u32>, signal: Signal) {
 #[cfg(windows)]
 async fn signal_tree(pid: Option<u32>, _signal: Signal) {
     let Some(pid) = pid else { return };
-    let mut command = Command::new("taskkill");
+    let mut command = zcode_proc::command("taskkill");
     command
         .args(["/T", "/F", "/PID", &pid.to_string()])
         .stdin(Stdio::null())

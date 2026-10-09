@@ -125,6 +125,8 @@ zcode-cli-tools = { path = "crates/tools" }
 zcode-cli-app-server = { path = "crates/app-server" }
 zcode-cli-headless = { path = "crates/headless" }
 zcode-cli-tui = { path = "crates/tui" }
+# 基础 crate（rust/，docs/specs/rust-u0-foundation.md §3.1）。
+zcode-proc = { path = "../../rust/crates/proc" }
 
 [package]
 name = "zcode-cli-rust"
@@ -165,6 +167,7 @@ tokio = { workspace = true, features = ["test-util"] }
 base64.workspace = true
 libc.workspace = true
 rusqlite.workspace = true
+zcode-proc.workspace = true
 
 [profile.release]
 lto = "thin"

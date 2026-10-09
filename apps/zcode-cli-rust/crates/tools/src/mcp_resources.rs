@@ -66,7 +66,7 @@ async fn probe() -> Option<HashMap<u32, Row>> {
     } else {
         ("ps", &["-eo", "pid=,ppid=,rss=,cputime="], false)
     };
-    let output = tokio::process::Command::new(program)
+    let output = zcode_proc::command(program)
         .args(args)
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -113,7 +113,7 @@ fn total_memory_gb() -> u64 {
             })
             .map_or(0, |kib| kib * 1024)
     } else if cfg!(target_os = "macos") {
-        std::process::Command::new("sysctl")
+        zcode_proc::std_command("sysctl")
             .args(["-n", "hw.memsize"])
             .output()
             .ok()

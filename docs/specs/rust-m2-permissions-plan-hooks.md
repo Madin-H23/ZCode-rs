@@ -461,7 +461,7 @@ sequenceDiagram
   - command hook 用 `/bin/sh -c`（或配置的 shell，Windows 为 `cmd.exe /d /s /c`），process hook 按 argv 执行；
   - cwd 与环境变量同 M1 工具环境，再加 hook 覆盖变量；
   - 进程单独成组；stdout 与 stderr 分别只保留前 `maxOutputBytes` 字节，超出部分读取后丢弃；
-  - 超时由此处的唯一截止时间负责，结果为 `timed_out`；取消结果为 `cancelled`；两种情况都复用 `process_tree::terminate` 回收整个进程树；
+  - 超时由此处的唯一截止时间负责，结果为 `timed_out`；取消结果为 `cancelled`；两种情况都复用 `zcode_proc::tree::terminate`（Unix）/ Job Object（Windows）回收整个进程树；
   - 根进程退出后最多再等 1 s 管道关闭，超时则回收进程树；临时目录在任何结果下都会删除。
 - **运行器（core `hook_runner`）**：
   - 每个 run 持有一个 `HookRunner`，其中有：注册表、`Arc<dyn ToolPort>`、事件 sink、工作目录，以及 M2.6 的准入回调。

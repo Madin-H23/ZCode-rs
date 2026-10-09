@@ -4,7 +4,6 @@
 //! 读写同一个临时目录里的 credentials.json：Rust 写的 TS 能读，TS 写的 Rust 能读，
 //! 两边并发写入都不丢更新，固定 IV 的密文逐字节相同。没有安装 node_modules 时跳过。
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Value, json};
 use zcode_host_services::account::credential::{CredentialCipher, CredentialStore};
@@ -23,7 +22,7 @@ fn tsx_available(root: &Path) -> bool {
 }
 
 fn run_ts(root: &Path, home: &Path, mode: &str, payload: Value) -> Value {
-    let output = Command::new("node")
+    let output = zcode_proc::std_command("node")
         .current_dir(root)
         .args([
             "--import",

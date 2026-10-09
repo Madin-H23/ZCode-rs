@@ -7,7 +7,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -81,7 +81,7 @@ async fn failed_startup_retries_with_a_new_attempt() {
     // tasks-index.sqlite 是目录：SQLite 打不开，属于可重试的失败。
     let blocker = home.path().join(".zcode/v2/tasks-index.sqlite");
     std::fs::create_dir_all(&blocker).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zcode-host"))
+    let mut child = zcode_proc::command(env!("CARGO_BIN_EXE_zcode-host"))
         .args(["--allowed-origin", "file://"])
         .env("HOME", home.path())
         .env("USERPROFILE", home.path())

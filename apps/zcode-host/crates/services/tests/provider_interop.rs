@@ -1,7 +1,6 @@
 //! Rust Host 写出的 provider_config.json 必须是 TS 的规范形态：真实的 TS codec 能解码，
 //! 重新编码后与文件逐字节相同（scripts/rust-host/provider-config-interop.ts）。没有 node_modules 时跳过。
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Value, json};
 use zcode_host_services::providers::ProviderRuntime;
@@ -15,7 +14,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn check(root: &Path, file: &Path) -> Value {
-    let output = Command::new("node")
+    let output = zcode_proc::std_command("node")
         .current_dir(root)
         .args([
             "--import",

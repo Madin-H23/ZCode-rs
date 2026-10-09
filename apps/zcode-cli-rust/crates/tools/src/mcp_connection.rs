@@ -17,10 +17,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use std::{collections::BTreeSet, process::Stdio, time::Duration};
-use tokio::{
-    process::{Child, Command},
-    sync::Mutex,
-};
+use tokio::{process::Child, sync::Mutex};
 use tokio_util::{
     codec::{FramedRead, FramedWrite},
     sync::CancellationToken,
@@ -86,7 +83,7 @@ impl Connection {
         let mut ended = None;
         let init = async {
             if config.transport == "stdio" {
-                let mut command = Command::new(config.raw["command"].as_str().unwrap());
+                let mut command = zcode_proc::command(config.raw["command"].as_str().unwrap());
                 // Node buildMcpStdioEnv：净化后的出口环境为底，服务器自身 env 覆盖其上。
                 command.env_clear().envs(
                     env.as_deref()
@@ -370,7 +367,9 @@ impl Connection {
 }
 async fn cleanup_child(child: &mut Option<(Child, u32)>) -> Result<()> {
     if let Some((mut child, pid)) = child.take()
-        && let Err(error) = super::tool_process::terminate(&mut child, pid, true).await
+        && let Err(error) = super::tool_process::ProcessTree::uncontained(pid)
+            .terminate(&mut child, super::tool_process::Shutdown::Graceful)
+            .await
     {
         use std::io::Write;
         let _ = writeln!(

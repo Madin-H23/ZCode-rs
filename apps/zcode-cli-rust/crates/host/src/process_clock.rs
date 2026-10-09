@@ -80,7 +80,7 @@ pub(crate) async fn process_start_ms(pid: i64) -> Option<i64> {
         return Some(boot_time_ms() + (ticks * 1000.0 / 100.0) as i64);
     }
     if cfg!(target_os = "macos") {
-        let output = tokio::process::Command::new("ps")
+        let output = zcode_proc::command("ps")
             .args(["-o", "lstart=", "-p", &pid.to_string()])
             .env("LC_ALL", "C")
             .kill_on_drop(true)

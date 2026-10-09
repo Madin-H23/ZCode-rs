@@ -1,20 +1,28 @@
-//! Owned POSIX process-tree snapshot. No global process registry or background polling.
-use anyhow::{Context, Result, ensure};
-use std::{collections::BTreeMap, time::Duration};
-use tokio::{
-    io::AsyncReadExt,
-    process::{Child, Command},
-    time::Instant,
-};
+//! 进程表快照与按身份追踪的进程树（自 apps/zcode-cli-rust/crates/tools/src/process_tree.rs 移入，行为不变）。
+//! 没有全局进程注册表，也没有后台轮询。
 
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::process::Stdio;
+use std::time::Duration;
+
+use anyhow::{Context, Result, ensure};
+use tokio::io::AsyncReadExt;
+
+use super::posix::{alive, send};
+
+/// 一次快照中进程的身份：启动时间（`lstart`）与 pid 一起区分 pid 复用。
 #[derive(Clone)]
-struct Process {
+pub(super) struct Process {
     parent: i32,
     group: i32,
     started: String,
     zombie: bool,
 }
-type Table = BTreeMap<i32, Process>;
+
+pub(super) type Table = BTreeMap<i32, Process>;
+
+const SNAPSHOT_TIMEOUT: Duration = Duration::from_millis(500);
+const SNAPSHOT_MAX_BYTES: usize = 2 * 1024 * 1024;
 
 fn parse(text: &str) -> Table {
     text.lines()
@@ -37,27 +45,29 @@ fn parse(text: &str) -> Table {
         })
         .collect()
 }
-async fn snapshot() -> Result<Table> {
+
+/// `/bin/ps` 给出的进程表。
+pub(super) async fn snapshot() -> Result<Table> {
     // 只在终止路径探测；限制大小和查表时间，ps 自身由 kill_on_drop 回收。
-    tokio::time::timeout(Duration::from_millis(500), async {
-        let mut child = Command::new("/bin/ps")
+    tokio::time::timeout(SNAPSHOT_TIMEOUT, async {
+        let mut child = crate::command("/bin/ps")
             .args(["-A", "-o", "pid=,ppid=,pgid=,stat=,lstart="])
             .env("LC_ALL", "C")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
             .kill_on_drop(true)
             .spawn()?;
         let mut bytes = vec![];
         child
             .stdout
             .take()
-            .unwrap()
-            .take(2 * 1024 * 1024 + 1)
+            .context("Missing process lookup output")?
+            .take(SNAPSHOT_MAX_BYTES as u64 + 1)
             .read_to_end(&mut bytes)
             .await?;
         ensure!(
-            bytes.len() <= 2 * 1024 * 1024,
+            bytes.len() <= SNAPSHOT_MAX_BYTES,
             "Process table exceeds budget"
         );
         ensure!(child.wait().await?.success(), "Process lookup failed");
@@ -67,12 +77,14 @@ async fn snapshot() -> Result<Table> {
     .context("Process lookup timed out")?
 }
 
-struct Tree {
+/// 本次终止拥有的进程（pid → 启动时间）与进程组（pgid → 组长启动时间）。
+pub(super) struct Tree {
     processes: BTreeMap<i32, String>,
     groups: BTreeMap<i32, Option<String>>,
 }
+
 impl Tree {
-    fn new(root: i32, table: &Table) -> Self {
+    pub(super) fn new(root: i32, table: &Table) -> Self {
         let mut tree = Self {
             processes: BTreeMap::new(),
             groups: BTreeMap::new(),
@@ -85,6 +97,7 @@ impl Tree {
         tree.refresh(table);
         tree
     }
+
     fn owns_group(&self, group: i32, table: &Table) -> bool {
         self.groups.get(&group).is_some_and(|identity| {
             // 新进程占用了已退出组长的 PID 时不能对其组发信号。无组长的旧组仍需清理。
@@ -93,14 +106,15 @@ impl Tree {
                 .is_none_or(|p| identity.as_ref() == Some(&p.started))
         })
     }
-    fn refresh(&mut self, table: &Table) {
+
+    pub(super) fn refresh(&mut self, table: &Table) {
         let mut children: BTreeMap<i32, Vec<i32>> = BTreeMap::new();
         let mut members: BTreeMap<i32, Vec<i32>> = BTreeMap::new();
         for (&pid, process) in table {
             children.entry(process.parent).or_default().push(pid);
             members.entry(process.group).or_default().push(pid);
         }
-        let mut queue = std::collections::VecDeque::new();
+        let mut queue = VecDeque::new();
         for (&pid, identity) in &self.processes {
             if table.get(&pid).is_some_and(|p| &p.started == identity) {
                 queue.push_back(pid);
@@ -113,12 +127,14 @@ impl Tree {
                 queue.extend(pids);
             }
         }
-        let mut seen = std::collections::BTreeSet::new();
+        let mut seen = BTreeSet::new();
         while let Some(pid) = queue.pop_front() {
             if pid <= 1 || !seen.insert(pid) {
                 continue;
             }
-            let process = &table[&pid];
+            let Some(process) = table.get(&pid) else {
+                continue;
+            };
             self.processes.insert(pid, process.started.clone());
             if let Some(pids) = children.get(&pid) {
                 queue.extend(pids);
@@ -132,18 +148,28 @@ impl Tree {
             }
         }
     }
-    fn live(&self, table: &Table) -> bool {
+
+    /// 快照中还有本次拥有的、未成为僵尸的进程。
+    pub(super) fn live(&self, table: &Table) -> bool {
         self.processes.iter().any(|(pid, identity)| {
             table
                 .get(pid)
                 .is_some_and(|p| &p.started == identity && !p.zombie)
         })
     }
-    fn maybe_live(&self) -> bool {
+
+    /// 不查进程表的粗略判断：任一拥有的组或 pid 仍可被发信号。
+    pub(super) fn maybe_live(&self) -> bool {
         self.groups.keys().any(|group| alive(-*group))
             || self.processes.keys().any(|pid| alive(*pid))
     }
-    async fn signal(&self, signal: i32, table: &Table) -> Result<()> {
+
+    pub(super) async fn signal(
+        &self,
+        signal: i32,
+        table: &Table,
+        snapshot: &impl AsyncFn() -> Result<Table>,
+    ) -> Result<()> {
         for &group in self.groups.keys() {
             if self.owns_group(group, table)
                 && table.values().any(|p| p.group == group && !p.zombie)
@@ -177,82 +203,7 @@ impl Tree {
         Ok(())
     }
 }
-fn alive(pid: i32) -> bool {
-    (unsafe { libc::kill(pid, 0) == 0 })
-        || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-fn send(pid: i32, signal: i32) -> Result<()> {
-    if unsafe { libc::kill(pid, signal) } == 0 {
-        return Ok(());
-    }
-    let error = std::io::Error::last_os_error();
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(());
-    }
-    Err(error).context("Cannot signal owned process")
-}
-
-pub(super) async fn terminate(child: &mut Child, pid: u32, graceful: bool) -> Result<()> {
-    let root = pid as i32;
-    if !graceful && !alive(-root) {
-        return Ok(());
-    }
-    let began = Instant::now();
-    let table = snapshot().await?;
-    let mut tree = Tree::new(root, &table);
-    if graceful {
-        tree.signal(libc::SIGTERM, &table).await?;
-        while began.elapsed() < Duration::from_millis(1500) {
-            child.try_wait()?;
-            if !tree.maybe_live() {
-                return Ok(());
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    }
-    // 单次 killpg 与 fork 竞争会漏掉持有管道的后代。保留组所有权，直到当前快照
-    // 确认没有活工作进程；SIGKILL 后的组长退出不是整个工具完成的替代事实。
-    let deadline = Instant::now() + Duration::from_secs(1);
-    loop {
-        let table = snapshot().await?;
-        tree.refresh(&table);
-        if !tree.live(&table) {
-            break;
-        }
-        ensure!(
-            Instant::now() < deadline,
-            "Owned Bash processes did not terminate"
-        );
-        tree.signal(libc::SIGKILL, &table).await?;
-        child.try_wait()?;
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    if child.id().is_some() {
-        child.wait().await?;
-    }
-    Ok(())
-}
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn snapshots_keep_owned_groups_and_reject_reused_identities() {
-        let first = parse(
-            "10 1 10 S Mon Sep 21 00:00:00 2026\n11 10 11 S Mon Sep 21 00:00:00 2026\n12 11 11 S Mon Sep 21 00:00:00 2026\n99 1 99 S Mon Sep 21 00:00:00 2026",
-        );
-        let mut tree = Tree::new(10, &first);
-        assert_eq!(tree.processes.len(), 3);
-        assert!(!tree.groups.contains_key(&99));
-        let next = parse(
-            "11 1 11 S Mon Sep 21 00:00:00 2026\n13 1 10 S Mon Sep 21 00:00:01 2026\n14 11 11 S Mon Sep 21 00:00:01 2026\n12 1 12 S Mon Sep 21 00:01:00 2026",
-        );
-        tree.refresh(&next);
-        assert!(tree.processes.contains_key(&13));
-        assert!(tree.processes.contains_key(&14));
-        assert_ne!(tree.processes[&12], next[&12].started);
-        assert!(!tree.groups.contains_key(&12));
-        assert!(!tree.owns_group(11, &parse("11 1 11 S Mon Sep 21 00:02:00 2026")));
-        assert!(tree.owns_group(10, &next));
-    }
-}
+#[path = "table_tests.rs"]
+mod tests;

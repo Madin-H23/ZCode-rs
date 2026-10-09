@@ -29,8 +29,6 @@ mod plugin_admin;
 mod plugin_io;
 mod plugin_requests;
 mod plugin_suggested;
-#[cfg(unix)]
-mod process_tree;
 mod read_media;
 mod read_pdf;
 mod read_state;

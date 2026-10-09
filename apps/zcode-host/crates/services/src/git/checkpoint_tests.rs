@@ -1,7 +1,6 @@
 //! 用真实 git 仓库（临时目录）验证 `git-checkpoint`：创建、diff、无冲突恢复、冲突拒绝、
 //! force 覆盖、删除。git 全局配置与数据目录都在临时目录里，不读写开发者的真实目录。
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -51,7 +50,7 @@ impl Fixture {
     }
 
     fn sh(&self, cwd: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
+        let output = zcode_proc::std_command("git")
             .args(args)
             .current_dir(cwd)
             .env_clear()

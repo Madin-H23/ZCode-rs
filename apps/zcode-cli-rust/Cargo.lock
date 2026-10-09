@@ -2350,6 +2350,7 @@ dependencies = [
  "uuid",
  "zcode-cli-core-api",
  "zcode-cli-domain",
+ "zcode-proc",
 ]
 
 [[package]]
@@ -2393,6 +2394,7 @@ dependencies = [
  "url",
  "uuid",
  "windows-sys 0.61.2",
+ "zcode-proc",
 ]
 
 [[package]]
@@ -2413,6 +2415,7 @@ dependencies = [
  "uuid",
  "windows-sys 0.61.2",
  "zcode-cli-domain",
+ "zcode-proc",
  "zip",
 ]
 
@@ -2452,6 +2455,7 @@ dependencies = [
  "zcode-cli-state",
  "zcode-cli-tools",
  "zcode-cli-tui",
+ "zcode-proc",
 ]
 
 [[package]]
@@ -2509,11 +2513,23 @@ dependencies = [
  "zcode-cli-host",
  "zcode-cli-net",
  "zcode-cli-plugins",
+ "zcode-proc",
 ]
 
 [[package]]
 name = "zcode-cli-tui"
 version = "0.1.0"
+
+[[package]]
+name = "zcode-proc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "tokio",
+ "tracing",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "zerofrom"

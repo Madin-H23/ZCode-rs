@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
 
 fn cli_binary() -> Option<PathBuf> {
     let path = std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY")
@@ -29,7 +28,7 @@ async fn startup_prepares_session_storage_with_the_cli() {
     // 测试 Host 的 home 与数据根：绝不能读写开发机真实的 ~/.zcode。
     let home = tempfile::tempdir().unwrap();
     let workspace = tempfile::tempdir().unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zcode-host"))
+    let mut child = zcode_proc::command(env!("CARGO_BIN_EXE_zcode-host"))
         .args(["--allowed-origin", "file://"])
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())

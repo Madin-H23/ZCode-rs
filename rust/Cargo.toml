@@ -50,5 +50,25 @@ unwrap_used = "deny"
 
 [workspace.dependencies]
 # 只列出已使用的依赖（cargo-shear 会拒绝未使用的 workspace 依赖）。
+anyhow = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt", "rt-multi-thread", "sync", "time"] }
+libc = "0.2"
+tokio = { version = "1", features = [
+  "fs",
+  "io-util",
+  "macros",
+  "process",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+# 只用门面宏；订阅者由应用安装（同 apps/zcode-cli-rust）。
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+# zcode-proc 的 Job Object（与两个应用 workspace 同一主版本）。
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }

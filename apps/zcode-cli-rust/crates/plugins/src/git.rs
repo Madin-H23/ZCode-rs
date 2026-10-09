@@ -84,7 +84,7 @@ fn terminate(child: &mut tokio::process::Child) {
 /// Node `execGitCommand`.
 async fn run(git: &Git, args: &[String], cancel: &CancellationToken) -> Result<()> {
     crate::failure::check(cancel)?;
-    let spawned = tokio::process::Command::new(&git.binary)
+    let spawned = zcode_proc::command(&git.binary)
         .args(args)
         .env_clear()
         .envs(git.env.iter().cloned())
