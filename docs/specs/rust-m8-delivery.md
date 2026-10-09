@@ -165,6 +165,7 @@ sequenceDiagram
 - **`drained`**：解除暂停，立即刷新该连接的全部订阅。
 - **`closed`**：Rust 仍直接移除该连接的全部订阅，并释放它们的 pin 与上传。Host 在 closed 之后总会逐个 unsubscribe，终态与 Node 相同，只是更早释放内存。
 - **stdout 拥塞阀**（保留）：写队列积压超过 64 MiB 时，清空全部缓冲、标记 `resyncRequired` 并停止刷新；降到 16 MiB 以下后逐个快照恢复。这是 Node 没有的安全阀，防止 Host 读不动 stdout 时无界积压。
+  - 修复：拥塞期间跳过增量的订阅都标记 `resyncRequired`。以前只在进入拥塞时标记，拥塞期间才登记或刚拿到快照（resync、恢复、历史重置）的订阅跳过增量后不标记，解除后要等下一次增量暴露断档才补齐。
 
 ## 7. 与 Node 的差异
 

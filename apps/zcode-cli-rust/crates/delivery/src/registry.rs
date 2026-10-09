@@ -145,7 +145,8 @@ impl Delivery {
     }
 
     /// Buffers one runtime publication `(from, to]` for every subscriber of
-    /// `topic` whose connection is not congested.
+    /// `topic`; a subscriber of a congested connection skips it and waits for
+    /// a snapshot instead.
     pub(crate) fn deltas(
         &mut self,
         topic: &str,
@@ -154,13 +155,15 @@ impl Delivery {
         now: Instant,
     ) {
         for sub in self.subscriptions.values_mut() {
-            if sub.topic != topic
-                // 积压期间该连接的订阅都等待快照恢复，增量无需缓冲。
-                || congested(&self.connections, &sub.connection)
-                || sub.resync
-                || sub.recovering > 0
-                || from < sub.seq
-            {
+            if sub.topic != topic || sub.resync || sub.recovering > 0 || from < sub.seq {
+                continue;
+            }
+            if congested(&self.connections, &sub.connection) {
+                // 修复：拥塞期间跳过的增量只能由快照补齐。以前只在进入拥塞时标记一次，拥塞期间才登记、
+                // 或经 resync / 快照恢复 / 历史重置拿到新快照的订阅跳过增量后不再标记，拥塞解除时
+                // relieve 不会让它到期，要等下一次增量暴露断档才补齐，会话空闲时一直停在旧状态。
+                sub.buffer.clear();
+                sub.resync = true;
                 continue;
             }
             if from > sub.seq {

@@ -84,6 +84,65 @@ fn resuming_a_paused_connection_recovers_it_by_snapshot() {
     );
 }
 
+/// 拥塞期间才登记的订阅、拥塞期间经历史重置拿到新快照的订阅，跳过增量后同样要在拥塞解除时
+/// 经快照恢复，而不是停在旧状态等下一次增量（修复前失败）。
+#[test]
+fn subscriptions_that_skip_deltas_while_paused_recover_after_relief() {
+    let mut h = Harness::default();
+    let (desktop, desktop_sink) = h.connection("desktop");
+    let (mobile, mobile_sink) = h.connection("mobile");
+    let c = h.subscribed(&desktop, Profile::Continuous, TOPIC, snapshot(0));
+    desktop_sink.pause();
+    mobile_sink.pause();
+    assert_eq!(h.flush(0), vec![]);
+    let m = h.subscribed(&mobile, Profile::Replayable, TOPIC, snapshot(0));
+    let reset = zcode_cli_core_api::RuntimeEvent::ConversationReset {
+        session: "s".into(),
+        seq: 0,
+        snapshot: json!({"seq":0}),
+    };
+    h.event(reset, 0);
+    let reset = |subscription: &str| Frame {
+        delivery: "recovery".into(),
+        subscription: subscription.into(),
+        range: (0, 0),
+        payload: json!({"kind":"snapshot","snapshot":{"seq":0}}),
+        ttft: None,
+    };
+    assert_eq!(
+        h.seen(),
+        vec![
+            frames("desktop", TOPIC, vec![reset(&c)]),
+            frames("mobile", TOPIC, vec![reset(&m)]),
+        ],
+        "a history reset still goes to paused connections"
+    );
+    h.event(conversation(0, 1, &[text("a")], vec![]), 0);
+    assert_eq!(h.flush(1000), vec![]);
+
+    desktop_sink.unpause();
+    mobile_sink.unpause();
+    h.delivery
+        .relieve(h.t0 + std::time::Duration::from_millis(1000));
+    assert_eq!(h.flush(1000), vec![]);
+    let recovered = |subscription: &str| Frame {
+        delivery: "online".into(),
+        subscription: subscription.into(),
+        range: (0, 1),
+        payload: json!({"kind":"snapshot","snapshot":{"seq":1}}),
+        ttft: None,
+    };
+    h.reply(Ok(snapshot(1)));
+    h.reply(Ok(snapshot(1)));
+    assert_eq!(
+        h.seen(),
+        vec![
+            frames("desktop", TOPIC, vec![recovered(&c)]),
+            frames("mobile", TOPIC, vec![recovered(&m)]),
+        ]
+    );
+}
+
 /// `saturated` 只暂停刷新、保留缓冲，`drained` 后直接发增量，不需要快照。
 #[test]
 fn a_saturated_connection_keeps_its_buffer_until_drained() {
