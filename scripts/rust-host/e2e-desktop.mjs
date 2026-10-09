@@ -1,24 +1,31 @@
 #!/usr/bin/env node
 // Rust Host 的桌面端到端验证（docs/specs/rust-host-r2.md 第 6 节）。
 //
-// 每个场景启动一个与开发者环境完全隔离的 Electron 实例：Main 起 Rust Host，Agent 用 Rust CLI，
-// 模型是本地 mock 的 OpenAI 兼容端点；经 CDP（私有端口）驱动界面。
-// 不使用固定的 Vite 5174 / CDP 9229 端口，不读写 ~/.zcode，遥测端点置空。
+// 每个场景启动一个与开发者环境完全隔离的 Electron 实例：Main 起 Rust Host（调试构建），runtime 缺省
+// 运行在 Host 进程内（docs/specs/rust-u3-single-process.md §2.2），模型是本地 mock 的 OpenAI 兼容端点；
+// 经 CDP（私有端口）驱动界面。不使用固定的 Vite 5174 / CDP 9229 端口，不读写 ~/.zcode，遥测端点置空。
 //
-// 用法：node scripts/rust-host/e2e-desktop.mjs [--scenario <name>]... [--skip-build] [--keep] [--explore]
+// 用法：node scripts/rust-host/e2e-desktop.mjs [--scenario <name>]... [--runtime embedded|child]
+//                                             [--skip-build] [--keep] [--explore]
 //   --scenario    要运行的场景（scripts/rust-host/e2e/scenarios/<name>.mjs），可重复；默认 core
+//   --runtime     runtime 链路：embedded（缺省）= Host 的缺省链路，进程内 runtime，不需要 CLI 二进制，
+//                 继承环境里的 ZCODE_AGENT_SERVER_* 一律清掉；child = 差分对照，经
+//                 ZCODE_AGENT_SERVER_COMMAND 让 Host 为每个 workspace 启动 Rust CLI 子进程
 //   --skip-build  复用已有的 out/ 与 Rust 构建
 //   --keep        结束后保留临时目录（截图、日志都在里面）
 //   --explore     只启动并每隔几秒截图，便于查看界面
-// 环境变量 ZCODE_E2E_CLI_RUST_BINARY 可指定 Rust CLI 可执行文件（默认用本仓库的 release 构建）。
+// child 模式下环境变量 ZCODE_E2E_CLI_RUST_BINARY 可指定 Rust CLI 可执行文件（默认用本仓库的 release 构建，
+// 需要先 cargo build --release）。
 //
 // 场景模块导出：
-//   run(context)           必需；context = { page, shots, model, workspace, home, temp, relaunch }
+//   run(context)           必需；context = { page, shots, model, workspace, home, temp, runtime,
+//                          mainPid, relaunch, secondInstance }
 //   mockRules              可选；按顺序匹配的 mock 模型规则 { name, match(request), respond(request) }
-//   seed(context)          可选；在启动 App 之前补充隔离 profile（context = { home, workspace, temp }）
-//   env(context)           可选；返回追加给 Electron 进程树的环境变量（例如指向场景自己的 mock 后端）
+//   seed(context)          可选；在启动 App 之前补充隔离 profile（context = { home, workspace, temp, runtime }）
 //   env(context)           可选；返回追加给 App 进程树的环境变量（不能覆盖隔离用的 HOME 等键）
 //   args(context)          可选；返回追加给 Electron 的命令行参数
+// context.runtime 是 "embedded" 或 "child"；context.mainPid() 是当前 Electron Main 的 pid（relaunch 后会变），
+// 进程类断言从它向下找 Rust Host（e2e/resilience-helpers.mjs）。
 // run(context) 另可用 context.secondInstance(args)：以同一隔离环境再启动一次 App，
 // 由单实例锁把 argv（例如 zcode:// deep link）转交给已运行的实例后退出。
 import { spawn } from "node:child_process";
@@ -34,6 +41,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 
 import { lastUserText } from "./e2e/helpers.mjs";
+import { hostLogLines, runtimeProcessesUnder } from "./e2e/resilience-helpers.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const desktop = join(root, "packages/desktop");
@@ -44,8 +52,11 @@ const { values: options } = parseArgs({
     "skip-build": { type: "boolean" },
     keep: { type: "boolean" },
     explore: { type: "boolean" },
+    runtime: { type: "string", default: "embedded" },
   },
 });
+if (!["embedded", "child"].includes(options.runtime))
+  throw new Error(`--runtime must be embedded or child, got ${options.runtime}`);
 
 function run(command, args, cwd, env = process.env) {
   return new Promise((done, fail) => {
@@ -221,7 +232,33 @@ async function appPage(browser) {
   throw new Error("renderer page not found");
 }
 
+/**
+ * 本次运行确实走了选定的 runtime 链路。Host 每启动一个 runtime 实例写一行
+ * `agent[<key>#<代次>] started pid=<pid>`（经 Main 落盘），嵌入式实例没有 pid：
+ *   embedded  没有一行带 pid，Electron Main 的进程树里也没有 CLI 进程；
+ *   child     至少一行带 pid（启动时的预热就会拉起一个）。
+ */
+async function assertRuntimeLink(runtime, home, mainPid) {
+  const lines = (await hostLogLines(home)).filter((line) => /agent\[.*\] started pid=/.test(line));
+  const withPid = lines.filter((line) => /started pid=\d+/.test(line));
+  if (runtime === "embedded") {
+    if (withPid.length > 0)
+      throw new Error(`embedded run started CLI processes:\n${withPid.join("\n")}`);
+    const processes = mainPid ? await runtimeProcessesUnder(mainPid) : [];
+    if (processes.length > 0)
+      throw new Error(
+        `embedded run has CLI processes: ${processes.map((row) => row.command).join("; ")}`,
+      );
+  } else if (withPid.length === 0) {
+    throw new Error("child run never started a CLI process");
+  }
+  console.info(
+    `[e2e] runtime link ${runtime}: ${lines.length} runtime starts, ${withPid.length} with a pid`,
+  );
+}
+
 async function runScenario(name, cli) {
+  const runtime = options.runtime;
   const scenario = await import(`./e2e/scenarios/${name}.mjs`);
   const temp = await mkdtemp(join(tmpdir(), `zcode-rust-host-e2e-${name}-`));
   const home = join(temp, "home");
@@ -231,15 +268,15 @@ async function runScenario(name, cli) {
   console.info(`[e2e:${name}] temp dir: ${temp}`);
   const model = await startMockModel(workspace, scenario.mockRules ?? []);
   await seedProfile(home, workspace, model.baseUrl);
-  await scenario.seed?.({ home, workspace, temp });
+  await scenario.seed?.({ home, workspace, temp, runtime });
   // Host 启动即检查内置 Provider 配置的 CDN 更新（与 Node Host 相同）：ZCode 控制面默认指向本地
   // 一律 404 的桩，不访问真实服务；场景可以用 env() 换成自己的 mock 后端。
   const controlPlane = await startOfflineControlPlane();
   const env = {
     ZCODE_BASE_URL: controlPlane.origin,
-    ...(await scenario.env?.({ home, workspace, temp })),
+    ...(await scenario.env?.({ home, workspace, temp, runtime })),
   };
-  const args = (await scenario.args?.({ home, workspace, temp })) ?? [];
+  const args = (await scenario.args?.({ home, workspace, temp, runtime })) ?? [];
   let app;
   let failed = false;
   try {
@@ -259,6 +296,8 @@ async function runScenario(name, cli) {
       workspace,
       home,
       temp,
+      runtime,
+      mainPid: () => app.pid,
       secondInstance: (extraArgs) => app.secondInstance(extraArgs),
       relaunch: async () => {
         await app.stop();
@@ -266,6 +305,7 @@ async function runScenario(name, cli) {
         return app.page;
       },
     });
+    await assertRuntimeLink(runtime, home, app.pid);
     console.info(`[e2e:${name}] passed`);
   } catch (error) {
     failed = true;
@@ -285,10 +325,15 @@ async function runScenario(name, cli) {
 }
 
 async function main() {
-  const cli =
-    process.env.ZCODE_E2E_CLI_RUST_BINARY?.trim() ||
-    join(root, "apps/zcode-cli-rust/target/release/zcode-cli-rust");
-  if (!existsSync(cli)) throw new Error(`Rust CLI release build missing: ${cli}`);
+  // embedded 模式不需要 CLI 二进制；child 模式缺少时直接失败，不回退到嵌入式。
+  let cli = null;
+  if (options.runtime === "child") {
+    cli =
+      process.env.ZCODE_E2E_CLI_RUST_BINARY?.trim() ||
+      join(root, "apps/zcode-cli-rust/target/release/zcode-cli-rust");
+    if (!existsSync(cli)) throw new Error(`Rust CLI release build missing: ${cli}`);
+  }
+  console.info(`[e2e] runtime: ${options.runtime}${cli ? ` (${cli})` : ""}`);
   if (!options["skip-build"]) {
     await run("cargo", ["build"], join(root, "apps/zcode-host"));
     await run("node", ["scripts/ensure-local-runtime-assets.mjs"], desktop);
@@ -315,13 +360,18 @@ async function main() {
 async function launchApp({ temp, home, cli, env = {}, args = [] }) {
   const cdpPort = await freePort();
   const electronBinary = require("electron");
+  // runtime 链路只由 --runtime 决定：先清掉开发者环境里可能残留的选择变量。
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("ZCODE_AGENT_SERVER_")),
+  );
   const appEnv = {
-    ...process.env,
+    ...inherited,
     ...env,
     ZCODE_ENV: "production",
     ZCODE_DESKTOP_HOST: "rust",
-    ZCODE_AGENT_SERVER_COMMAND: cli,
-    ZCODE_AGENT_SERVER_RUNTIME: "zcode-cli-rust",
+    ...(cli
+      ? { ZCODE_AGENT_SERVER_COMMAND: cli, ZCODE_AGENT_SERVER_RUNTIME: "zcode-cli-rust" }
+      : {}),
     // Main 直接用 os.homedir() 读 setting.json 并据此下发预热 workspace；不覆盖 HOME 就会
     // 读到开发者真实的最近项目，并在那些目录里启动 CLI。所以整个进程树都换成临时 HOME。
     HOME: home,
@@ -384,7 +434,7 @@ async function launchApp({ temp, home, cli, env = {}, args = [] }) {
       consoleLog.write(`[${new Date().toISOString()}] [${message.type()}] ${message.text()}\n`);
     });
     exited.then(() => consoleLog.end());
-    return { page, stop, secondInstance };
+    return { page, stop, secondInstance, pid: electron.pid };
   } catch (error) {
     await stop();
     throw error;

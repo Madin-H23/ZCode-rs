@@ -164,6 +164,6 @@ Main                          RustHostProcess（Main）                Rust Host
   - Claude 扫描（侧链、subagents 目录被排除）→ 导入（去重、缺失记 skipped）→ 广播 → 全文搜索命中 → resume。
 - `cargo test -p zcode-host --test end_to_end`：replayable 本地 attachment 可签发，hello 报告 replayable 与受限能力。
 - `ZCODE_RUST_HOST_BINARY=… node --import tsx --test packages/desktop/test/rustHostPortBridge.test.ts`：MessagePort 经 Main 的桥连到真实 Rust Host 的 replayable attachment，关闭端口即关闭连接。
-- 桌面 E2E（`node scripts/rust-host/e2e-desktop.mjs --scenario <name>`，隔离 Electron + Rust Host + Rust CLI）：
+- 桌面 E2E（`node scripts/rust-host/e2e-desktop.mjs --scenario <name>`，隔离 Electron + Rust Host，runtime 缺省在 Host 进程内）：
   - `tasks-search`：命令中心搜索只在回复正文里出现的词，结果带正文摘要，可点击；
   - `tasks-archive`：右键归档 → 归档列表 → 删除全部已归档任务，tasks-index 写入墓碑，列表刷新。

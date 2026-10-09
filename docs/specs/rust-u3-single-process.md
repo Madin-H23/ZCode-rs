@@ -118,5 +118,8 @@ runtime 是独立进程时，它崩溃后操作系统回收一切，Host 再按�
 - `cargo nextest`：Host 中驱动真实 CLI 的测试（`crates/services/tests/agent_cli.rs` 等）增加嵌入式变体，全部通过；嵌入式变体不需要预先构建 CLI 二进制。
 - 一个 runtime 实例 panic：只有它的 workspace 收到不可用与退出事件，其他 workspace 的会话继续流式；下一次请求时重启成功。
 - `pnpm test:rust-host` 通过。
-- 桌面 E2E（`scripts/rust-host/e2e`）在 `ZCODE_AGENT_SERVER_RUNTIME=embedded` 下全部通过，`desktop-continuous` 与 `web-remote-replayable` 两种语义都覆盖；进程表中没有 CLI 子进程。
+- 桌面 E2E（`scripts/rust-host/e2e`）缺省走嵌入式链路，全部场景通过；`--runtime child` 走子进程链路作差分对照。每个场景结束时 harness 断言链路：嵌入式下 Host 日志里没有带 pid 的 runtime 启动，Electron Main 的进程树里没有 CLI 进程；子进程模式下至少有一个带 pid 的启动。
+  - `resilience-cli-crash`：子进程模式杀 CLI 进程；嵌入式模式以 `ZCODE_RUNTIME_FAULT_MARKER` 让该 workspace 的 Engine 循环 panic。两种模式都要求：界面给出“发送失败”且输入退回输入框、Host pid 不变、下一条消息由新一代 runtime 处理、同一会话继续；嵌入式另要求 Host 日志记下 runtime 给出的结束原因。
+  - `resilience-reload`：reload 前后 Host pid 不变，runtime 实例不变（子进程比较 CLI pid，嵌入式比较 Host 日志里的 runtime 代次）。
+  - `desktop-continuous` 由桌面 E2E 覆盖。`web-remote-replayable` 没有桌面 E2E 场景（手机远控需要外部 relay），由 `crates/services/tests/agent_cli.rs` 的 replayable 测试（在 runtime 上建会话、流式、断线后另一条 replayable 连接从快照恢复）与 `pnpm test:rust-host` 中的 `rustHostPortBridge.test.ts` 覆盖。
 - 对照测量：N 个 workspace 同时流式时的控制 RPC p95、Host 进程 RSS 与 CPU，和子进程链路对比，写入 `docs/reports/`。

@@ -30,9 +30,10 @@ async function roundTrip(page, text) {
   await page.getByText(`Reply to: ${text}`).first().waitFor({ state: "visible", timeout: 60_000 });
 }
 
-export async function run({ page, shots, workspace }) {
+export async function run(context) {
+  const { page, shots } = context;
   await roundTrip(page, "before the crash");
-  const first = await findRunProcesses(workspace);
+  const first = await findRunProcesses(context);
   console.info(`[e2e] host pid=${first.host}, electron pid=${first.electron}`);
 
   // 第 1 次崩溃：立即离开旧界面，显示“正在重启”，随后自动 reload 并恢复。
@@ -44,6 +45,9 @@ export async function run({ page, shots, workspace }) {
     throw new Error("expected the reconnecting state");
   let host = await newHost(first.electron, first.host);
   await roundTrip(page, "after the restart");
+  // 新 Host 同样按选定的链路运行 runtime（embedded：Host 下没有 CLI 进程）。
+  if ((await findRunProcesses(context)).host !== host)
+    throw new Error("the restarted Host is not the one serving the workspace");
   await page.screenshot({ path: join(shots, "02-recovered.png") });
   console.info(`[e2e] host restarted automatically (pid=${host}) and the app is usable`);
 

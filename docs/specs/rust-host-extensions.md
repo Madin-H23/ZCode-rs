@@ -142,7 +142,7 @@ AgentRuntime.start(target)
   - Rust 与 TS 两个进程各写 150 次 `config.json`（命令开关、MCP upsert），最终 300 个键都在；用修复前的 TS 写入方运行时失败；
   - Rust 导出的 skill / plugin 归档由 TS 解包（含插件元数据与可执行位），TS 导出的 skill 归档由 Rust 导入。
 - `node --import tsx --test packages/services/test/cliConfigCrossProcess.test.ts`：4 个 Node 进程并发写 `config.json` 不丢键（修复前失败）。
-- 真实 App（`ZCODE_E2E_CLI_RUST_BINARY=… node scripts/rust-host/e2e-desktop.mjs --scenario <name>`）：
+- 真实 App（`node scripts/rust-host/e2e-desktop.mjs --scenario <name>`；缺省进程内 runtime，`--runtime child` 走 CLI 子进程作对照）：
   - `extensions-memory`：Memory 设置页列出预置项目与文件；磁盘新增文件后刷新，列表随之更新；
   - `extensions-skills`：`/` 选择器 AGENTS 列出内置与用户 Subagent；设置页 Skills 列出用户（`.zcode` 与 `.agents`）与 workspace 技能，关闭开关写入 `config.json`；Commands 页列出用户与 workspace 命令，关闭开关写入 `config.json` 且不覆盖技能开关；SKILLS 分组在 `getSkillReferenceCatalog` 实现后必须列出预置技能；
   - `extensions-plugins`：marketplace 安装的插件 agent 出现在 `/` 选择器与 Subagents 页的插件分组，选模型写入 `agents-state.json` 的插件覆盖；插件页可用（列表由 plugin-management 提供）。

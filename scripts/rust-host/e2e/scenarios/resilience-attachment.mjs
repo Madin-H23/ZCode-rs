@@ -5,7 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 
-import { sendMessage, sseText } from "../helpers.mjs";
+import { sendMessage, sseText, submitComposer } from "../helpers.mjs";
 import { waitUsable } from "../resilience-helpers.mjs";
 
 /** 生成一张合法的 16×16 红色 PNG（CRC 与压缩都由 node:zlib 计算，CLI 会解码并预处理图片）。 */
@@ -74,7 +74,7 @@ export async function run({ page, shots, model }) {
   await page.screenshot({ path: join(shots, "01-attached.png") });
   await input.click();
   await page.keyboard.type("please describe the image");
-  await page.keyboard.press("Enter");
+  await submitComposer(page);
   try {
     await page
       .getByText(/IMAGE_RECEIVED_OK|NO_IMAGE_IN_REQUEST/)
