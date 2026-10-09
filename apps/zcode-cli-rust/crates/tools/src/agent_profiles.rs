@@ -8,18 +8,26 @@ use std::{
 };
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
+use zcode_cli_net::Egress;
 
+/// `ZCODE_STORAGE_DIR` of the runtime's environment, else `storage.dir`
+/// (relative to home), else `~/.zcode`.
+fn storage(egress: &Egress, config: &serde_json::Value) -> PathBuf {
+    let home = egress.home();
+    egress
+        .runtime_env()
+        .get("ZCODE_STORAGE_DIR")
+        .or_else(|| config["storage"]["dir"].as_str())
+        .map(|p| config::resolve(home, p, home))
+        .unwrap_or_else(|| home.join(".zcode"))
+}
 pub(super) async fn discover(
+    egress: &Egress,
     cwd: &Path,
     config: &serde_json::Value,
     cancel: &CancellationToken,
 ) -> Result<Vec<Profile>> {
-    let home = zcode_kit::paths::home_dir()?;
-    let root = std::env::var("ZCODE_STORAGE_DIR")
-        .ok()
-        .or_else(|| config["storage"]["dir"].as_str().map(str::to_owned))
-        .map(|p| config::resolve(&home, &p, &home))
-        .unwrap_or_else(|| home.join(".zcode"));
+    let root = storage(egress, config);
     let state = config::json_file(&root.join("v2/agents-state.json")).await?;
     let mut result = builtins()
         .into_iter()
@@ -48,7 +56,7 @@ pub(super) async fn discover(
     }
     let mut imported = vec![];
     let mut counts = BTreeMap::<String, usize>::new();
-    let outcome = super::extension_config::plugins(cwd, config, cancel).await?;
+    let outcome = super::extension_config::plugins(egress, cwd, config, cancel).await?;
     for plugin in outcome.plugins.iter().filter(|p| p.enabled) {
         let (id, name, root) = (&plugin.loaded.id, plugin.loaded.name(), &plugin.loaded.root);
         for path in markdown(&root.join("agents"), cancel).await? {
@@ -132,6 +140,7 @@ async fn read(path: &Path, source: &str, cancel: &CancellationToken) -> Result<O
     Ok(profile)
 }
 pub(super) async fn memory(
+    egress: &Egress,
     cwd: &Path,
     config: &serde_json::Value,
     profile: &Profile,
@@ -147,12 +156,7 @@ pub(super) async fn memory(
     if config["features"]["memory"] == false || config["memory"]["use"] == false {
         return Ok(None);
     }
-    let home = zcode_kit::paths::home_dir()?;
-    let storage = std::env::var("ZCODE_STORAGE_DIR")
-        .ok()
-        .or_else(|| config["storage"]["dir"].as_str().map(str::to_owned))
-        .map(|p| config::resolve(&home, &p, &home))
-        .unwrap_or_else(|| home.join(".zcode"));
+    let storage = storage(egress, config);
     let key = profile
         .name
         .chars()
@@ -198,3 +202,7 @@ pub(super) async fn memory(
             ),
     ))
 }
+
+#[cfg(test)]
+#[path = "agent_profiles_tests.rs"]
+mod tests;

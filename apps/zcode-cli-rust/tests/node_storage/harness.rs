@@ -295,6 +295,7 @@ pub struct Harness {
 /// A runtime in a fresh root: `ZCODE_CLI_RUST_NODE_DUMP/<dump>` when set
 /// (kept for `scripts/zcode-cli-rust-node-storage-check.mjs`), else a
 /// temporary one.
+#[expect(clippy::disallowed_methods, reason = "测试从进程环境取转储目录")]
 pub async fn start(
     dump: Option<&str>,
     gate: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,

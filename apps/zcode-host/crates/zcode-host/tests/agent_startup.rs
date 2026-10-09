@@ -2,6 +2,10 @@
 //! 以 Rust CLI 的 `--prepare-storage` 准备 warmup workspace 的会话库，启动状态必须经过
 //! `preparing_session_storage` 再进入 `ready`。CLI 取 `ZCODE_TEST_CLI_RUST_BINARY`，
 //! 否则用工作区内的 release 构建；都不存在时跳过。
+#![expect(
+    clippy::disallowed_methods,
+    reason = "集成测试从进程环境取被测二进制与 PATH"
+)]
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;

@@ -61,9 +61,9 @@ fn github_repository(url: &str) -> bool {
     })
 }
 
-/// Node `resolvePathInput`: relative to the process working directory,
-/// `~` against `HOME`.
-fn path_input(input: &str, home: &str) -> Option<PathBuf> {
+/// Node `resolvePathInput`: relative to `cwd` (Node's process working
+/// directory, the workspace root), `~` against `HOME`.
+fn path_input(input: &str, home: &str, cwd: &Path) -> Option<PathBuf> {
     let drive = input.len() >= 3
         && input.as_bytes()[0].is_ascii_alphabetic()
         && input.as_bytes()[1] == b':'
@@ -86,11 +86,11 @@ fn path_input(input: &str, home: &str) -> Option<PathBuf> {
         };
         return Some(crate::fsx::normalize(Path::new(&joined)));
     }
-    let cwd = std::env::current_dir().unwrap_or_default();
-    Some(crate::fsx::resolve(&cwd, input))
+    Some(crate::fsx::resolve(cwd, input))
 }
 
-pub async fn parse(input: &str, home: &str) -> Result<Value> {
+/// `home` is Node's `process.env.HOME`; `cwd` resolves relative paths.
+pub async fn parse(input: &str, home: &str, cwd: &Path) -> Result<Value> {
     let trimmed = crate::js::trim(input);
     if trimmed.is_empty() {
         bail!("Marketplace source is empty");
@@ -109,7 +109,7 @@ pub async fn parse(input: &str, home: &str) -> Result<Value> {
         let (url, reference) = split_ref(trimmed);
         return Ok(git(url, reference));
     }
-    if let Some(resolved) = path_input(trimmed, home) {
+    if let Some(resolved) = path_input(trimmed, home, cwd) {
         let shown = resolved.display();
         let Ok(metadata) = tokio::fs::metadata(&resolved).await else {
             bail!("Marketplace source path does not exist: {shown}");
@@ -142,7 +142,7 @@ mod tests {
 
     #[tokio::test]
     async fn source_strings_follow_node() {
-        let parse = |s: &'static str| async move { parse(s, "/home/u").await };
+        let parse = |s: &'static str| async move { parse(s, "/home/u", Path::new("/w")).await };
         assert_eq!(
             parse("https://github.com/o/r#v1").await.unwrap(),
             json!({"source":"git","url":"https://github.com/o/r.git","ref":"v1"})
@@ -196,12 +196,22 @@ mod tests {
                 .starts_with("Marketplace source path does not exist")
         );
         assert_eq!(
-            path_input("~/m", "/home/u"),
+            path_input("~/m", "/home/u", Path::new("/w")),
             Some(PathBuf::from("/home/u/m"))
+        );
+        // 相对路径按给定的工作目录解析，不读进程 cwd。
+        assert_eq!(
+            path_input("./m/../n", "/home/u", Path::new("/w")),
+            Some(PathBuf::from("/w/n"))
+        );
+        let relative = super::parse("./", "/home/u", dir.path()).await.unwrap();
+        assert_eq!(
+            relative,
+            json!({"source":"directory","path":dir.path().to_string_lossy()})
         );
     }
 
     async fn parse_owned(input: &str) -> Result<Value> {
-        parse(input, "/home/u").await
+        parse(input, "/home/u", Path::new("/w")).await
     }
 }

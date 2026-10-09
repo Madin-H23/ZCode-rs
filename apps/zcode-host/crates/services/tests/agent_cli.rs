@@ -2,6 +2,10 @@
 //! 收到模型流式回复。模型是本地 mock 的 OpenAI 兼容端点，不需要任何真实凭据。
 //!
 //! CLI 可执行文件取 `ZCODE_TEST_CLI_RUST_BINARY`，否则用工作区内的 release 构建；都不存在时跳过。
+#![expect(
+    clippy::disallowed_methods,
+    reason = "集成测试从进程环境取被测二进制与 PATH"
+)]
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;

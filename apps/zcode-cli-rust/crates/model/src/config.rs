@@ -115,15 +115,16 @@ impl ModelConfig {
         }
         Ok(Some(config))
     }
-    pub fn api_key(&self) -> Result<Option<String>> {
+    /// The configured key, or the named variable of the runtime's environment.
+    pub fn api_key(&self, env: &zcode_cli_net::RuntimeEnv) -> Result<Option<String>> {
         if let Some(key) = &self.api_key_value {
             return Ok(Some(key.expose().to_owned()));
         }
         match &self.api_key_env {
             Some(name) => Ok(Some(
-                std::env::var(name)
-                    .ok()
+                env.get(name)
                     .filter(|s| !s.trim().is_empty())
+                    .map(str::to_owned)
                     .context("Provider API key environment variable is missing")?,
             )),
             None => Ok(None),
@@ -141,5 +142,20 @@ mod tests {
         })).unwrap();
         assert_eq!(config.request_timeout_seconds, None);
         assert_eq!(config.stream_idle_timeout_ms, 600_000);
+    }
+
+    #[test]
+    fn api_key_variables_come_from_the_runtime_snapshot() {
+        let config: ModelConfig = serde_json::from_value(serde_json::json!({
+            "providerId":"fixture","modelId":"fixture","reasoningLevel":"none",
+            "baseUrl":"https://example.invalid","apiKeyEnv":"ZCODE_TEST_SNAPSHOT_ONLY_KEY"
+        }))
+        .unwrap();
+        let env = zcode_cli_net::RuntimeEnv::from_vars(vec![(
+            "ZCODE_TEST_SNAPSHOT_ONLY_KEY".into(),
+            "secret".into(),
+        )]);
+        assert_eq!(config.api_key(&env).unwrap().as_deref(), Some("secret"));
+        assert!(config.api_key(&Default::default()).is_err());
     }
 }

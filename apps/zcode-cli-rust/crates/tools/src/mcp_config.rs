@@ -19,7 +19,8 @@ pub(super) struct Server {
     pub enabled: bool,
 }
 impl Server {
-    pub fn parse(name: &str, mut raw: Value, cwd: &Path) -> Result<Self> {
+    /// `cwd` resolves the server's relative `cwd`; `home` expands `~` (the runtime's home).
+    pub fn parse(name: &str, mut raw: Value, (cwd, home): (&Path, &Path)) -> Result<Self> {
         ensure!(
             !name.trim().is_empty() && name.len() <= 256,
             "Invalid MCP name"
@@ -94,11 +95,7 @@ impl Server {
         Ok(Self {
             invalid: false,
             name: name.into(),
-            cwd: config::resolve(
-                cwd,
-                raw["cwd"].as_str().unwrap_or("."),
-                &zcode_kit::paths::home_dir()?,
-            ),
+            cwd: config::resolve(cwd, raw["cwd"].as_str().unwrap_or("."), home),
             workspace: raw["isolation"] == "workspace",
             enabled: raw["enabled"] != false && raw["enable"] != false,
             raw,
@@ -106,8 +103,8 @@ impl Server {
             timeout: std::time::Duration::from_millis(timeout),
         })
     }
-    fn configured(name: &str, raw: Value, cwd: &Path) -> Self {
-        Self::parse(name, raw.clone(), cwd).unwrap_or_else(|_| Self {
+    fn configured(name: &str, raw: Value, (cwd, home): (&Path, &Path)) -> Self {
+        Self::parse(name, raw.clone(), (cwd, home)).unwrap_or_else(|_| Self {
             invalid: true,
             name: name.into(),
             enabled: raw["enabled"] != false && raw["enable"] != false,
@@ -136,7 +133,7 @@ impl Server {
         )
     }
 }
-pub(super) fn explicit(value: &Value, cwd: &Path) -> Result<Vec<Server>> {
+pub(super) fn explicit(value: &Value, (cwd, home): (&Path, &Path)) -> Result<Vec<Server>> {
     let list = value.as_array().context("MCP servers must be an array")?;
     ensure!(list.len() <= 64, "Too many MCP servers");
     let mut seen = std::collections::BTreeSet::new();
@@ -144,44 +141,49 @@ pub(super) fn explicit(value: &Value, cwd: &Path) -> Result<Vec<Server>> {
         .map(|v| {
             let name = v["name"].as_str().context("MCP server name required")?;
             ensure!(seen.insert(name), "Duplicate MCP server name");
-            Server::parse(name, v.clone(), cwd)
+            Server::parse(name, v.clone(), (cwd, home))
         })
         .collect()
 }
 pub(super) async fn configured(
-    cwd: &Path,
+    (egress, cwd): (&zcode_cli_net::Egress, &Path),
     config: &Value,
     overrides: Option<&Value>,
     cancel: &CancellationToken,
 ) -> Result<Vec<Server>> {
+    let home = egress.home();
     if config["features"]["mcp"] == false {
         return Ok(vec![]);
     }
     let mut merged = BTreeMap::new();
     // 插件 server 由统一发现层按 Node 规则解析（模板变量、ZCODE_PLUGIN_ID）。
-    for (name, raw) in config::plugins(cwd, config, cancel).await?.mcp_servers {
-        merged.insert(name.clone(), Server::configured(&name, raw, cwd));
+    for (name, raw) in config::plugins(egress, cwd, config, cancel)
+        .await?
+        .mcp_servers
+    {
+        merged.insert(name.clone(), Server::configured(&name, raw, (cwd, home)));
     }
     if overrides.is_none() {
         if let Some(servers) = config["mcp"]["servers"].as_object() {
             for (name, server) in servers {
-                merged.insert(name.clone(), Server::configured(name, server.clone(), cwd));
+                let server = Server::configured(name, server.clone(), (cwd, home));
+                merged.insert(name.clone(), server);
             }
         }
         // App 同时发现 .agents；冷恢复也必须读取这条持久配置来源，不能依赖 UI 再次传参。
-        for base in [zcode_kit::paths::home_dir()?, cwd.to_owned()] {
+        for base in [home.to_owned(), cwd.to_owned()] {
             let file = config::json_file(&base.join(".agents/mcp.json")).await?;
             if let Some(servers) = file["mcpServers"].as_object() {
                 for (name, server) in servers {
                     merged
                         .entry(name.clone())
-                        .or_insert_with(|| Server::configured(name, server.clone(), &base));
+                        .or_insert_with(|| Server::configured(name, server.clone(), (&base, home)));
                 }
             }
         }
     }
     if let Some(overrides) = overrides {
-        for server in explicit(overrides, cwd)? {
+        for server in explicit(overrides, (cwd, home))? {
             merged.insert(server.name.clone(), server);
         }
     }

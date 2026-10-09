@@ -83,11 +83,14 @@ async fn git(at: &Probe<'_>, args: &[&str], cancel: &CancellationToken) -> Strin
         .trim()
         .into()
 }
-async fn may_have_git(cwd: &Path, cancel: &CancellationToken) -> bool {
-    if std::env::var_os("GIT_DIR").is_some() || std::env::var_os("GIT_WORK_TREE").is_some() {
+async fn may_have_git(at: &Probe<'_>, cancel: &CancellationToken) -> bool {
+    // 探测进程拿到的是 runtime 环境，显式 Git 环境也按它判断，不读宿主进程的环境。
+    if crate::env_var(at.env, "GIT_DIR").is_some()
+        || crate::env_var(at.env, "GIT_WORK_TREE").is_some()
+    {
         return true;
     }
-    let cwd = match tokio::fs::canonicalize(cwd).await {
+    let cwd = match tokio::fs::canonicalize(at.cwd).await {
         Ok(path) => path,
         Err(_) => return true,
     };
@@ -105,7 +108,7 @@ async fn may_have_git(cwd: &Path, cancel: &CancellationToken) -> bool {
 }
 pub(super) async fn snapshot(at: &Probe<'_>, cancel: &CancellationToken) -> Option<GitSnapshot> {
     // macOS 的系统 git 启动成本显著；不存在仓库标记时无需启动探测进程。显式 Git 环境仍交给 Git。
-    if !may_have_git(at.cwd, cancel).await {
+    if !may_have_git(at, cancel).await {
         return None;
     }
     if git(at, &["rev-parse", "--is-inside-work-tree"], cancel).await != "true" {
@@ -199,4 +202,26 @@ pub(super) async fn os_release(at: &Probe<'_>, cancel: &CancellationToken) -> St
     )
     .await;
     result.unwrap_or_else(|| "unknown".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn explicit_git_environment_comes_from_the_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let cancel = CancellationToken::new();
+        let plain = Probe {
+            cwd: root.path(),
+            env: &[],
+        };
+        assert!(!may_have_git(&plain, &cancel).await);
+        let env = [("GIT_DIR".to_owned(), "/elsewhere/.git".to_owned())];
+        let explicit = Probe {
+            cwd: root.path(),
+            env: &env,
+        };
+        assert!(may_have_git(&explicit, &cancel).await);
+    }
 }

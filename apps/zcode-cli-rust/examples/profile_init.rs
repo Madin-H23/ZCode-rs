@@ -10,6 +10,10 @@ fn stage(name: &str, start: Instant) {
     println!("{name}: {:.3} ms", start.elapsed().as_secs_f64() * 1000.0);
 }
 #[tokio::main]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "示例从进程环境取 HOME 与探测环境"
+)]
 async fn main() -> anyhow::Result<()> {
     let root = PathBuf::from(std::env::args().nth(1).expect("isolated workspace"));
     anyhow::ensure!(

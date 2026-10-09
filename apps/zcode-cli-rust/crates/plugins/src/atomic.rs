@@ -4,15 +4,44 @@
 //! replaces it. Readers recover a dead writer's leftovers and, while the writer
 //! is alive, read the generation its authority file has committed.
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
 /// This process's writer identity in transaction records.
 pub static OWNER_ID: LazyLock<String> = LazyLock::new(|| uuid::Uuid::new_v4().to_string());
 
 /// In-process writers keyed by target path (M10.4 registers them).
-pub static ACTIVE: LazyLock<Mutex<std::collections::HashMap<PathBuf, Live>>> =
-    LazyLock::new(Default::default);
+pub static ACTIVE: LazyLock<Mutex<HashMap<PathBuf, Live>>> = LazyLock::new(Default::default);
+
+/// Transactions of this process whose writer is still running. Every runtime
+/// in the process records the same `OWNER_ID`, so a record carrying it is
+/// live only while its transaction is registered (spec rust-u1-runtime-library L6).
+static RUNNING: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
+
+/// A process-wide registry; its maps change by single inserts and removals,
+/// so a panic elsewhere never leaves them half-updated and poisoning is ignored.
+pub(crate) fn registry<T>(lock: &'static Mutex<T>) -> MutexGuard<'static, T> {
+    lock.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Registers a transaction as running until dropped. Writers create it before
+/// writing their record and drop it after removing the record; a cancelled or
+/// panicking writer unregisters too, so its leftovers become recoverable.
+pub(crate) struct Running(String);
+
+impl Running {
+    pub(crate) fn register(transaction_id: &str) -> Self {
+        registry(&RUNNING).insert(transaction_id.to_owned());
+        Self(transaction_id.to_owned())
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        registry(&RUNNING).remove(&self.0);
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Live {
@@ -79,9 +108,12 @@ async fn read_record(path: &Path) -> Option<Record> {
 }
 
 /// Node `isAtomicTransactionOwnerAlive`.
-fn owner_alive(owner_id: &str, pid: i64) -> bool {
+fn owner_alive(owner_id: &str, pid: i64, transaction_id: &str) -> bool {
     if pid == std::process::id() as i64 {
-        return owner_id == OWNER_ID.as_str();
+        // L6 修复：同一进程可能先后或同时运行多个 runtime，它们共用 OWNER_ID。旧逻辑把带本
+        // OWNER_ID 的记录一律视为存活，已停止或 panic 的 runtime 留下的事务在进程退出前永远
+        // 不会恢复；现在只有仍在运行的事务算存活，另一个 runtime 正在进行的事务不会被误回滚。
+        return owner_id == OWNER_ID.as_str() && registry(&RUNNING).contains(transaction_id);
     }
     process_alive(pid)
 }
@@ -173,7 +205,7 @@ async fn remove_all(path: &Path) -> std::io::Result<()> {
 pub async fn recover(target: &Path) -> std::io::Result<PathBuf> {
     let (backup, transaction_path) = sidecars(target);
     let key = crate::fsx::normalize(&std::path::absolute(target)?);
-    let active = ACTIVE.lock().expect("atomic registry").get(&key).cloned();
+    let active = registry(&ACTIVE).get(&key).cloned();
     if let Some(live) = active {
         return Ok(live_read_path(target, &backup, &live).await);
     }
@@ -184,7 +216,7 @@ pub async fn recover(target: &Path) -> std::io::Result<PathBuf> {
         owner_pid,
         ..
     }) = &record
-        && owner_alive(owner_id, *owner_pid)
+        && owner_alive(owner_id, *owner_pid, &live.transaction_id)
     {
         return Ok(live_read_path(target, &backup, live).await);
     }

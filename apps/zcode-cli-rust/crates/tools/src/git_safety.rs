@@ -57,13 +57,8 @@ fn context_unsafe(cwd: &Path) -> bool {
 
 /// Node `path.resolve` / `path.join`: lexical, `..` collapsed before realpath.
 fn lexical(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir().unwrap_or_default().join(path)
-    };
     let mut out = PathBuf::new();
-    for component in absolute.components() {
+    for component in path.components() {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {
@@ -77,6 +72,12 @@ fn lexical(path: &Path) -> PathBuf {
 
 /// Node `normalizeCanonicalPath(realpathSync.native(resolve(path)))`.
 fn canonical(path: &Path) -> Option<String> {
+    // runtime 的工作目录总是绝对路径（workspace 根）。相对路径只能按进程 cwd 解析，而嵌入后
+    // 进程 cwd 不是 workspace（spec rust-u1-runtime-library L4），所以按无法确认处理：
+    // 调用方据此判为不安全（fail-closed）。
+    if !path.is_absolute() {
+        return None;
+    }
     let real = fs::canonicalize(lexical(path)).ok()?;
     let text = real.to_string_lossy();
     // Windows 的 canonicalize 带 `\\?\` 前缀，realpathSync.native 没有。

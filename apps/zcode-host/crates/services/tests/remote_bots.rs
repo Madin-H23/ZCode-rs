@@ -8,6 +8,10 @@
 //! 所有出站 HTTP 只到 127.0.0.1（其余指向已关闭的端口），HOME、数据目录与凭据都在临时目录。
 //! 需要：node、`pnpm --filter @zcode/server build:remote` 的产物、Rust CLI（`ZCODE_TEST_CLI_RUST_BINARY`
 //! 或工作区内的 release 构建）；缺任一项时跳过并说明原因。
+#![expect(
+    clippy::disallowed_methods,
+    reason = "集成测试从进程环境取被测二进制与 PATH"
+)]
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

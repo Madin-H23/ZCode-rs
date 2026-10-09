@@ -34,6 +34,10 @@ pub struct RuntimeOptions {
 
 impl RuntimeOptions {
     /// The binary's view: process environment, argv and cwd, read exactly once.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "二进制入口：进程环境与 cwd 只在这里读取"
+    )]
     pub fn from_process(
         home: PathBuf,
         cwd: Option<PathBuf>,
@@ -122,6 +126,7 @@ impl Context {
                 runtime_env.clone(),
                 &NetworkPolicy::from_config(&startup_config.config["network"]),
                 &home,
+                &base_dir,
                 "electron",
             )
             .map_err(anyhow::Error::msg)
@@ -166,7 +171,7 @@ impl Context {
         config: Option<&PathBuf>,
         desktop: bool,
     ) -> Result<Engine> {
-        let question_timing = zcode_cli_host::question_timing()?;
+        let question_timing = zcode_cli_host::question_timing(self.runtime_env.vars())?;
         let config = ModelConfig::load(config).await?;
         let registry = if config.is_none() {
             Registry::from_env(self.egress.clone())

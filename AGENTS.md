@@ -57,7 +57,8 @@
 - 测试用 `cargo nextest run --workspace`：`apps/zcode-cli-rust` 的根 `Cargo.toml` 同时是一个 package，不加 `--workspace` 时 cargo 只处理根包。
 - 唯一入口（由 `clippy.toml` 的 `disallowed-methods` 或评审保证）：
   - 子进程只经 `zcode_proc::command` / `std_command` 创建；结束进程树用 `zcode_proc::tree` 与 Windows `zcode_proc::job`。
-  - Node 风格的“临时文件 + rename”原子写用 `zcode_kit::fs::atomic_write`；数据目录的 home 用 `zcode_kit::paths::home_dir`，不得回落到空路径或 cwd。
+  - Node 风格的“临时文件 + rename”原子写用 `zcode_kit::fs::atomic_write`；数据目录的 home 由二进制入口经 `zcode_kit::paths::home_dir` 解析一次，库内用 runtime 给定的 home（`Egress::home`），不得回落到空路径或 cwd。
+  - 进程环境与进程 cwd 只在二进制入口读取（`clippy.toml` 禁用 `std::env::{var, var_os, vars, vars_os, current_dir}`）；库内用 `RuntimeEnv` 快照、workspace 根或显式基准目录，允许的位置用 `#[expect]` 标注理由（`docs/specs/rust-u1-runtime-library.md`）。
   - 秘密值用 `zcode_kit::secret::RedactedString`，日志中的值经 `zcode_kit::redact::redact_secrets`。
   - spawn 出去、负责发出终态或回复的任务用 `zcode_async::catch_panic` 兜住 panic。
 - 不新增 `#[expect(clippy::await_holding_invalid_type)]`：现有标注是待 U2 清理的存量。

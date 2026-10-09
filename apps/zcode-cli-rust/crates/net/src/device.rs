@@ -3,7 +3,9 @@
 //! id that is valid for this process only; the caller caches the result.
 use serde_json::{Map, Value};
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
+    sync::{LazyLock, Mutex, PoisonError},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use zcode_kit::fs::{FileMode, ParentDir, TempName, WriteOptions, atomic_write};
@@ -11,6 +13,34 @@ use zcode_kit::fs::{FileMode, ParentDir, TempName, WriteOptions, atomic_write};
 const LOCK_RETRY_DELAY: Duration = Duration::from_millis(10);
 const LOCK_RETRY_COUNT: usize = 200;
 const LOCK_STALE: Duration = Duration::from_secs(5 * 60);
+
+/// Lock tokens held by a live owner in this process. Several runtimes share
+/// the pid (spec rust-u1-runtime-library L6), so a lock with this pid is live
+/// only while its token is registered here.
+static HELD: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
+
+fn held() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    // 集合只做单次插入/删除，panic 不会留下半更新的数据，中毒后继续使用。
+    HELD.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// This process's registration of one lock token; dropping it (including a
+/// cancelled or panicking owner) unregisters the token.
+pub(crate) struct Token(pub(crate) String);
+
+impl Token {
+    pub(crate) fn register() -> Self {
+        let token = uuid::Uuid::new_v4().to_string();
+        held().insert(token.clone());
+        Self(token)
+    }
+}
+
+impl Drop for Token {
+    fn drop(&mut self) {
+        held().remove(&self.0);
+    }
+}
 
 /// `${ZCODE_DATA_BASE_DIR || home}/.zcode/v2/telemetry-state.json`.
 pub fn state_file(base_dir: Option<&str>, home: &Path, cwd: &Path) -> PathBuf {
@@ -67,6 +97,8 @@ async fn persisted(state_file: &Path, generated: &str) -> std::io::Result<String
     let directory = state_file.parent().unwrap_or(Path::new("."));
     tokio::fs::create_dir_all(directory).await?;
     let lock = directory.join("telemetry-state.lock");
+    // 先登记再写锁：同进程的其他 runtime 读到这个 token 时它一定已登记。
+    let token = Token::register();
     for _ in 0..LOCK_RETRY_COUNT {
         match tokio::fs::OpenOptions::new()
             .write(true)
@@ -75,7 +107,7 @@ async fn persisted(state_file: &Path, generated: &str) -> std::io::Result<String
             .await
         {
             Ok(mut handle) => {
-                let result = locked(state_file, &mut handle, generated).await;
+                let result = locked(state_file, &mut handle, (generated, &token.0)).await;
                 drop(handle);
                 let _ = tokio::fs::remove_file(&lock).await;
                 return result;
@@ -94,10 +126,12 @@ async fn persisted(state_file: &Path, generated: &str) -> std::io::Result<String
 async fn locked(
     state_file: &Path,
     handle: &mut tokio::fs::File,
-    generated: &str,
+    (generated, token): (&str, &str),
 ) -> std::io::Result<String> {
     use tokio::io::AsyncWriteExt;
-    let owner = serde_json::json!({"createdAt": now_ms(), "pid": std::process::id()});
+    // `token` 只供同进程区分 owner；Node 只读 createdAt 与 pid，多出的字段不影响它。
+    let owner =
+        serde_json::json!({"createdAt": now_ms(), "pid": std::process::id(), "token": token});
     handle.write_all(owner.to_string().as_bytes()).await?;
     let mut state = read_state(state_file).await;
     if let Some(id) = device_id(&state) {
@@ -136,10 +170,18 @@ async fn remove_stale_lock(lock: &Path) -> bool {
             .await
             .ok()
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-            .filter(|o| o["createdAt"].is_number())
-            .and_then(|o| o["pid"].as_f64());
-        match owner {
+            .filter(|o| o["createdAt"].is_number());
+        let pid = owner.as_ref().and_then(|o| o["pid"].as_f64());
+        match pid {
             None => return false,
+            // L6 修复：同进程的多个 runtime 共用 pid，“pid 存活”不能说明 owner 存活。被取消或
+            // panic 的 owner 留下的锁曾要等 5 分钟才过期；现在以本进程登记的 token 为准。
+            Some(pid) if pid == f64::from(std::process::id()) => {
+                let token = owner.as_ref().and_then(|o| o["token"].as_str());
+                if token.is_some_and(|t| held().contains(t)) {
+                    return false;
+                }
+            }
             Some(pid) if process_alive(pid) => return false,
             Some(_) => {}
         }

@@ -7,7 +7,9 @@ use crate::process_clock::{alive, boot_time_ms, process_start_ms};
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use zcode_kit::fs::{FileMode, ParentDir, TempName, WriteOptions, atomic_write};
@@ -23,6 +25,33 @@ const RENAME_RETRIES: [Duration; 5] = [
     Duration::from_millis(800),
 ];
 const START_TIME_TOLERANCE_MS: i64 = 2_000;
+
+/// Lock tokens whose owner is alive in this process. Runtimes in one process
+/// share the pid (spec rust-u1-runtime-library L6), so a lock with this pid is
+/// live only while its token is registered here.
+static HELD: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
+
+fn held() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    // 集合只做单次插入/删除，panic 不会留下半更新的数据，中毒后继续使用。
+    HELD.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The registration of one lock token; dropping it unregisters the token.
+struct Token(String);
+
+impl Token {
+    fn register() -> Self {
+        let token = uuid::Uuid::new_v4().to_string();
+        held().insert(token.clone());
+        Self(token)
+    }
+}
+
+impl Drop for Token {
+    fn drop(&mut self) {
+        held().remove(&self.0);
+    }
+}
 
 /// Node `resolveWorkspaceHookTrustStorePath`: `storage.dir` of the user config
 /// file only (`~/x`, absolute, or relative to home), default `~/.zcode`.
@@ -90,8 +119,10 @@ impl FileTrustStore {
         result
     }
 
-    async fn acquire(&self) -> Result<String> {
+    async fn acquire(&self) -> Result<Token> {
         let started = std::time::Instant::now();
+        // 先登记再写锁：同进程的其他 runtime 读到这个 token 时它一定已登记。
+        let token = Token::register();
         loop {
             let mut options = tokio::fs::OpenOptions::new();
             options.write(true).create_new(true);
@@ -99,11 +130,11 @@ impl FileTrustStore {
             options.mode(0o600);
             match options.open(&self.lock).await {
                 Ok(mut handle) => {
-                    let token = uuid::Uuid::new_v4().to_string();
                     let owner = format!(
-                        "{{\"pid\":{},\"startTime\":{},\"token\":\"{token}\"}}\n",
+                        "{{\"pid\":{},\"startTime\":{},\"token\":\"{}\"}}\n",
                         std::process::id(),
-                        boot_time_ms()
+                        boot_time_ms(),
+                        token.0
                     );
                     if let Err(error) = handle.write_all(owner.as_bytes()).await {
                         // 只可能删除自己用 create_new 独占创建的锁，不越权。
@@ -129,8 +160,20 @@ impl FileTrustStore {
     }
 
     /// Node `removeStaleLock`: only locks older than 30 s whose owner is gone
-    /// (dead pid, or a pid reused by another process instance).
+    /// (dead pid, or a pid reused by another process instance). Locks of this
+    /// process are judged by the token registry instead, at any age.
     async fn remove_stale(&self) -> Result<()> {
+        // L6 修复：同进程可能同时运行多个 runtime，也可能有已停止或 panic 的 runtime 留下的锁。
+        // 旧逻辑把本 pid 的锁一律视为存活，残留锁在进程退出前永远无法回收；现在以本进程登记的
+        // token 为准：已注销即无主，立即按 token 回收（核对 token，不误删新持有者的锁）。
+        if let Some(owner) = read_owner(&self.lock).await
+            && owner.pid == std::process::id() as i64
+        {
+            if !held().contains(&owner.token) {
+                release(&self.lock, &owner.token).await;
+            }
+            return Ok(());
+        }
         let metadata = match tokio::fs::metadata(&self.lock).await {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -147,9 +190,6 @@ impl FileTrustStore {
         let Some(owner) = read_owner(&self.lock).await else {
             return remove(&self.lock).await;
         };
-        if owner.pid == std::process::id() as i64 {
-            return Ok(());
-        }
         if !alive(owner.pid) {
             return remove(&self.lock).await;
         }
@@ -257,27 +297,29 @@ impl TrustStorePort for FileTrustStore {
 }
 
 /// The lock file this process created. Released explicitly; a dropped
-/// operation (cancelled future) still frees it so the process never waits on
-/// its own lock.
+/// operation (cancelled future) unregisters its token at once, so other
+/// owners in this process may reclaim the file even if the spawned removal
+/// never runs.
 struct LockGuard {
     path: PathBuf,
-    token: Option<String>,
+    token: Option<Token>,
 }
 
 impl LockGuard {
     async fn release(&mut self) {
         if let Some(token) = self.token.take() {
-            release(&self.path, &token).await;
+            release(&self.path, &token.0).await;
         }
     }
 }
 
 impl Drop for LockGuard {
     fn drop(&mut self) {
+        // 取出的 Token 在本函数结束时注销，删除任务是否还能运行都不影响同进程回收。
         if let Some(token) = self.token.take()
             && let Ok(handle) = tokio::runtime::Handle::try_current()
         {
-            let path = self.path.clone();
+            let (path, token) = (self.path.clone(), token.0.clone());
             handle.spawn(async move { release(&path, &token).await });
         }
     }

@@ -88,3 +88,11 @@ fn head_must_name_a_ref_or_an_object_id() {
         assert_eq!(super::valid_head(&root.join(".git")), trusted, "{head:?}");
     }
 }
+
+/// Relative working directories are never resolved against the process cwd
+/// (spec rust-u1-runtime-library L4); they cannot be verified, so they are unsafe.
+#[test]
+fn relative_working_directories_fail_closed() {
+    assert!(context_unsafe(Path::new(".")));
+    assert!(context_unsafe(Path::new("src")));
+}

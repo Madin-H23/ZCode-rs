@@ -699,6 +699,7 @@ pub async fn prepare_for_init(
         .iter()
         .map(|target| target.workspace_path.clone())
         .collect();
+    #[expect(clippy::disallowed_methods, reason = "存量，U3 改为显式传入")]
     let fallback = init
         .agent_spawn_fallback_cwd
         .as_deref()

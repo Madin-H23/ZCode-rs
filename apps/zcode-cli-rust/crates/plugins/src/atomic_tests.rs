@@ -73,9 +73,36 @@ async fn a_live_writer_is_read_through_its_committed_generation() {
     write(&backup.join("f"), "old").await;
     let me = std::process::id() as i64;
     write(&transaction, &record(&authority, me, &OWNER_ID, true)).await;
-    // 活跃 writer 的事务未写入权威状态：读备份，且不做任何恢复。
+    // 同进程另一个 runtime 的 writer 仍在运行：读它已提交的一代，且不做任何恢复。
+    let running = Running::register("tx-1");
     assert_eq!(recover(&target).await.unwrap(), backup);
     assert!(crate::fsx::exists(&transaction).await);
     write(&authority, r#"{"x":{"cacheTransactionId":"tx-1"}}"#).await;
     assert_eq!(recover(&target).await.unwrap(), target);
+    drop(running);
+}
+
+/// Spec rust-u1-runtime-library L6: a record with this process's owner id
+/// whose writer is gone (its runtime stopped or panicked) is recovered at
+/// once instead of being treated as live until the process exits.
+#[tokio::test]
+async fn leftovers_of_a_stopped_runtime_in_this_process_are_recovered() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("t");
+    let (backup, transaction) = sidecars(&target);
+    let authority = dir.path().join("installed.json");
+    write(&authority, r#"{"plugins":[]}"#).await;
+    write(&target.join("f"), "new").await;
+    write(&backup.join("f"), "old").await;
+    let me = std::process::id() as i64;
+    // 事务 id 与其他测试不同：登记表是进程级的，并行测试共用。
+    let stopped = record(&authority, me, &OWNER_ID, true).replace("tx-1", "tx-stopped");
+    write(&transaction, &stopped).await;
+    assert_eq!(recover(&target).await.unwrap(), target);
+    assert_eq!(
+        tokio::fs::read_to_string(target.join("f")).await.unwrap(),
+        "old"
+    );
+    assert!(!crate::fsx::exists(&transaction).await);
+    assert!(!crate::fsx::exists(&backup).await);
 }

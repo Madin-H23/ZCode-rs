@@ -201,7 +201,7 @@ pub async fn validate(context: &Context<'_>, params: &Value) -> Result<Value> {
     let ports = &context.ports;
     crate::market::ensure_defaults(ports.storage).await?;
     let diagnostics = if let Some(source) = params["source"].as_str() {
-        match crate::source_input::parse(source, context.home).await {
+        match crate::source_input::parse(source, context.home, ports.cwd).await {
             Ok(source) => crate::validate::marketplace_source(ports, &source, None, None).await,
             Err(error) => vec![Diagnostic::new(
                 "plugin_marketplace_invalid",

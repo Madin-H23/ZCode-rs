@@ -17,7 +17,11 @@ pub use env::{PASSTHROUGH_KEY, RuntimeEnv};
 pub use headers::Headers;
 pub use proxy::{ProxyResolution, ProxyRules};
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::OnceCell;
 
 /// What a client is used for; each purpose gets one lazily built client.
@@ -51,8 +55,12 @@ impl std::error::Error for EgressError {}
 /// Single owner of the startup network policy, identity headers, device id and
 /// HTTP clients. Node reads the `network` section once when the app is created;
 /// changing it afterwards does not affect existing egress, so neither does Rust.
+/// It also carries the runtime's home and base directory, so adapters never
+/// fall back to the process environment or cwd (spec rust-u1-runtime-library L4).
 pub struct Egress {
     env: Arc<RuntimeEnv>,
+    home: PathBuf,
+    base_dir: PathBuf,
     rules: Arc<ProxyRules>,
     ca_cert_file: Option<String>,
     identity: Headers,
@@ -65,10 +73,13 @@ pub struct Egress {
 
 impl Egress {
     /// `title` is `electron` for the app server and `cli` for terminal frontends.
+    /// `home` is the runtime's home directory; `base_dir` resolves relative
+    /// paths that belong to no workspace (the binary passes the process cwd).
     pub fn new(
         env: Arc<RuntimeEnv>,
         policy: &NetworkPolicy,
-        home: &std::path::Path,
+        home: &Path,
+        base_dir: &Path,
         title: &str,
     ) -> Result<Self, String> {
         let lookup = |key: &str| env.get(key);
@@ -84,18 +95,29 @@ impl Egress {
         .map(str::trim)
         .find(|p| !p.is_empty())
         .map(str::to_owned);
-        let cwd = std::env::current_dir().unwrap_or_default();
         Ok(Self {
             rules: Arc::new(ProxyRules::new(policy, lookup)),
             ca_cert_file,
             identity,
             origin,
             tool_env: tool_env(env.vars(), policy, cfg!(windows)).into(),
-            device_file: device::state_file(env.get("ZCODE_DATA_BASE_DIR"), home, &cwd),
+            device_file: device::state_file(env.get("ZCODE_DATA_BASE_DIR"), home, base_dir),
             device: OnceCell::new(),
             clients: Default::default(),
             env,
+            home: home.to_owned(),
+            base_dir: base_dir.to_owned(),
         })
+    }
+
+    /// The home directory the runtime was started with (never the process's).
+    pub fn home(&self) -> &Path {
+        &self.home
+    }
+
+    /// Base of relative paths outside any workspace (provider files, data dirs).
+    pub fn base_dir(&self) -> &Path {
+        &self.base_dir
     }
 
     /// Node's `process.env` after startup sanitization; used as-is by plain

@@ -82,6 +82,7 @@ impl DataDirMove {
         };
 
         // 安装目录由安装器 / 自动更新管理，迁移前在 service 层拦截，绕过前端的 RPC 也拦得住。
+        #[expect(clippy::disallowed_methods, reason = "存量，U3 改为显式传入")]
         let cwd = if inner.windows {
             std::env::current_dir()
                 .map(|dir| dir.to_string_lossy().into_owned())

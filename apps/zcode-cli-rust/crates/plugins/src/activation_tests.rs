@@ -124,3 +124,29 @@ async fn cancellation_and_prepare_failures_keep_the_target() {
         .await;
     assert!(!crate::fsx::exists(&target.join("f")).await);
 }
+
+/// Spec rust-u1-runtime-library L6: an activation dropped without finalize or
+/// rollback (its runtime stopped mid-operation) no longer counts as live; the
+/// next reader in this process restores the uncommitted target.
+#[tokio::test]
+async fn an_abandoned_activation_is_recovered_in_this_process() {
+    let dir = tempfile::tempdir().unwrap();
+    let (source, target) = (dir.path().join("src"), dir.path().join("t"));
+    let authority = dir.path().join("installed.json");
+    write(&source.join("f"), "new").await;
+    write(&target.join("f"), "old").await;
+    write(&authority, "{}").await;
+    let cancel = CancellationToken::new();
+    let activation = activate(
+        input(&target, Some(&source), Some(&authority), &cancel),
+        |_| async { Ok(()) },
+    )
+    .await
+    .unwrap();
+    let (backup, marker) = sidecars(&target);
+    drop(activation);
+    assert!(crate::fsx::exists(&marker).await);
+    assert_eq!(recover(&target).await.unwrap(), target);
+    assert_eq!(read(&target.join("f")).await, "old");
+    assert!(!crate::fsx::exists(&marker).await && !crate::fsx::exists(&backup).await);
+}

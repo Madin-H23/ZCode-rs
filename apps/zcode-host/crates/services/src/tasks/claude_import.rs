@@ -46,6 +46,7 @@ pub fn imported_task_id(workspace_path: &str, session_id: &str) -> String {
 /// `normalize(resolve(path))`（Windows 上再转小写）。
 fn normalize_for_comparison(path: &str) -> String {
     let path = Path::new(path);
+    #[expect(clippy::disallowed_methods, reason = "存量，U3 改为显式传入")]
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {

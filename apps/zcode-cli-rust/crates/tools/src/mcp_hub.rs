@@ -71,7 +71,7 @@ impl Hub {
         }
     }
     pub fn configure(&self, cwd: &Path, session: &str, servers: &Value) -> Result<()> {
-        mcp_config::explicit(servers, cwd)?;
+        mcp_config::explicit(servers, (cwd, self.egress.home()))?;
         self.state
             .write()
             .unwrap()
@@ -185,7 +185,7 @@ impl Hub {
         cancel: &CancellationToken,
     ) -> Result<()> {
         let config = scope.config.load().await?;
-        let configs = tokio::select! {biased;_=cancel.cancelled()=>anyhow::bail!("Cancelled"),result=mcp_config::configured(scope.cwd,&config.config,overrides,cancel)=>result?};
+        let configs = tokio::select! {biased;_=cancel.cancelled()=>anyhow::bail!("Cancelled"),result=mcp_config::configured((&self.egress,scope.cwd),&config.config,overrides,cancel)=>result?};
         let mut bindings = vec![];
         let mut statuses = BTreeMap::new();
         let mut names = BTreeSet::new();

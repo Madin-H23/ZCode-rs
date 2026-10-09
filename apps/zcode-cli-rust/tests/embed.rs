@@ -1,5 +1,9 @@
 //! 嵌入入口的端到端测试（docs/specs/rust-u1-runtime-library.md §5）：runtime 只使用
 //! `RuntimeOptions` 给出的环境与路径，一个 runtime 服务多个 workspace，停掉后可以在同一进程重启。
+#![expect(
+    clippy::disallowed_methods,
+    reason = "读取测试进程自己的 PATH 与 cwd，用来证明 runtime 没有使用它们"
+)]
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::Duration;

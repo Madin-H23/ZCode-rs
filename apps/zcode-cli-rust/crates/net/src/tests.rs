@@ -295,3 +295,40 @@ async fn stale_device_lock_from_a_dead_process_is_taken_over() {
     let state: Value = serde_json::from_slice(&tokio::fs::read(&file).await.unwrap()).unwrap();
     assert_eq!(state["deviceMid"], id.as_str());
 }
+
+/// A lock this process wrote whose owner is gone (a cancelled or panicked
+/// runtime, spec rust-u1-runtime-library L6) is taken over at once; a lock of
+/// a live owner in this process (another runtime) is waited for.
+#[tokio::test]
+async fn device_locks_of_this_process_follow_the_live_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let file = device::state_file(None, root.path(), root.path());
+    tokio::fs::create_dir_all(file.parent().unwrap())
+        .await
+        .unwrap();
+    let lock = file.with_file_name("telemetry-state.lock");
+    let owner = |token: &str| {
+        json!({"createdAt": 1, "pid": std::process::id(), "token": token}).to_string()
+    };
+    tokio::fs::write(&lock, owner("gone")).await.unwrap();
+    let started = std::time::Instant::now();
+    let id = device::ensure(&file).await;
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    let state: Value = serde_json::from_slice(&tokio::fs::read(&file).await.unwrap()).unwrap();
+    assert_eq!(state["deviceMid"], id.as_str());
+
+    tokio::fs::remove_file(&file).await.unwrap();
+    let live = device::Token::register();
+    tokio::fs::write(&lock, owner(&live.0)).await.unwrap();
+    let held = lock.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        tokio::fs::remove_file(held).await.unwrap();
+        drop(live);
+    });
+    let started = std::time::Instant::now();
+    let id = device::ensure(&file).await;
+    assert!(started.elapsed() >= std::time::Duration::from_millis(100));
+    let state: Value = serde_json::from_slice(&tokio::fs::read(&file).await.unwrap()).unwrap();
+    assert_eq!(state["deviceMid"], id.as_str());
+}

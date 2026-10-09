@@ -46,7 +46,9 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
     // B4 缺陷修复：HOME 为空时旧的 home() 返回空路径，日志与数据会写到当前工作目录下。
     // 现在解析失败就让启动失败（main 把错误写到 stderr 并以 1 退出）。
     let home = zcode_kit::paths::home_dir()?;
-    let log_options = zcode_cli_host::logging::LogOptions::from_env(&home);
+    #[expect(clippy::disallowed_methods, reason = "二进制入口读取进程环境")]
+    let log_options =
+        zcode_cli_host::logging::LogOptions::from_env(&home, |name| std::env::var_os(name));
     let log_dir = log_options.directory.clone();
     let _logs = zcode_cli_host::logging::init(log_options);
     zcode_cli_host::log_retention::schedule(log_dir);

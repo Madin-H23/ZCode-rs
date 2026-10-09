@@ -7,13 +7,35 @@ use crate::domain::read_pdf::{self as pdf, code};
 use crate::domain::session::StoredAttachment;
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
+use std::collections::HashSet;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-/// `pdftoppm` answered once in this process (a failed probe is not cached).
-static RENDERER: AtomicBool = AtomicBool::new(false);
+/// Tool-environment `PATH` values under which `pdftoppm` answered (a failed
+/// probe is not cached). Keyed by `PATH`: runtimes in one process can carry
+/// different environments (spec rust-u1-runtime-library L6).
+static RENDERER: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
+
+/// The `PATH` that locates `pdftoppm` for `env` (case-insensitive on Windows).
+fn search_path(env: &[(String, String)]) -> String {
+    env.iter()
+        .find(|(name, _)| {
+            if cfg!(windows) {
+                name.eq_ignore_ascii_case("PATH")
+            } else {
+                name == "PATH"
+            }
+        })
+        .map(|(_, value)| value.clone())
+        .unwrap_or_default()
+}
+
+fn renderers() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    // 集合只做单次插入/查询，panic 不会留下半更新的数据，中毒后继续使用。
+    RENDERER.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// The model's input formats, as core attaches them to the call.
 #[derive(Clone, Copy, Default)]
@@ -154,7 +176,10 @@ async fn native(
 
 /// Node Poppler `ensureAvailable`.
 async fn renderer(env: &[(String, String)], cancel: &CancellationToken) -> Result<()> {
-    if RENDERER.load(Ordering::Relaxed) {
+    // L6 修复：可用性曾按进程缓存，另一个 runtime 的 PATH 找不到 pdftoppm 时会跳过探测，
+    // 报出 “pdftoppm failed.” 而不是未安装；现在按 PATH 缓存。
+    let path = search_path(env);
+    if renderers().contains(&path) {
         return Ok(());
     }
     match run("pdftoppm", &["-v"], env, pdf::PROBE_TIMEOUT_MS, cancel).await? {
@@ -169,7 +194,7 @@ async fn renderer(env: &[(String, String)], cancel: &CancellationToken) -> Resul
             if run.code == Some(0)
                 || run.code.is_some_and(|c| c != 127) && !run.stderr.is_empty() =>
         {
-            RENDERER.store(true, Ordering::Relaxed);
+            renderers().insert(path);
             Ok(())
         }
         _ => Err(failure(
@@ -352,3 +377,7 @@ pub(super) async fn read(
         }
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "read_pdf_tests.rs"]
+mod tests;

@@ -174,14 +174,15 @@ impl ToolPort for WorkspaceTools {
         cancel: &CancellationToken,
     ) -> Result<Option<String>> {
         let config = self.config.load().await?;
-        super::agent_profiles::memory(&self.cwd, &config.config, profile, cancel).await
+        super::agent_profiles::memory(&self.egress, &self.cwd, &config.config, profile, cancel)
+            .await
     }
     async fn agent_profiles(
         &self,
         cancel: &CancellationToken,
     ) -> Result<Vec<crate::domain::subagent::Profile>> {
         let config = self.config.load().await?;
-        super::agent_profiles::discover(&self.cwd, &config.config, cancel).await
+        super::agent_profiles::discover(&self.egress, &self.cwd, &config.config, cancel).await
     }
     async fn inherit_session(&self, parent: &str, child: &str) -> Result<()> {
         self.shared.mcp.inherit(parent, child);
@@ -263,7 +264,7 @@ impl ToolPort for WorkspaceTools {
         cancel: &CancellationToken,
     ) -> Result<crate::domain::skills::SkillCatalog> {
         let config = self.config.load().await?;
-        super::tool_skills::discover(&self.cwd, &config.config, cancel).await
+        super::tool_skills::discover(&self.egress, &self.cwd, &config.config, cancel).await
     }
     async fn load_skill(
         &self,

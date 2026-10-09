@@ -7,6 +7,13 @@ use std::path::{Path, PathBuf};
 /// 当前用户的 home 目录：`HOME` → `USERPROFILE` → 系统用户数据库（Unix `getpwuid_r`）。
 ///
 /// 空值按未设置处理；都拿不到时返回错误，绝不返回空路径。
+///
+/// 这是进程级的解析：读进程环境，只供二进制入口调用。库内使用 runtime 启动时给定的 home
+/// （docs/specs/rust-u1-runtime-library.md L4）。
+#[expect(
+    clippy::disallowed_methods,
+    reason = "进程级 home 解析，只供二进制入口"
+)]
 pub fn home_dir() -> io::Result<PathBuf> {
     home_dir_with(|name| std::env::var_os(name))
 }

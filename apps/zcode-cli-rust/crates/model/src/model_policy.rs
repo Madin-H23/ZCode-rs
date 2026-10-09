@@ -17,10 +17,11 @@ pub struct RetryPolicy {
     jitter: bool,
 }
 impl RetryPolicy {
-    pub fn resolve(config: &RetryConfig) -> Self {
+    /// `config` first, then the `ZCODE_MODEL_RETRY_*` variables of the runtime's environment.
+    pub fn resolve(config: &RetryConfig, runtime_env: &zcode_cli_net::RuntimeEnv) -> Self {
         let env = |name: &str| {
-            std::env::var(name)
-                .ok()
+            runtime_env
+                .get(name)
                 .filter(|s| !s.trim().is_empty())
                 .and_then(|s| s.trim().parse::<f64>().ok())
                 .filter(|n| n.is_finite() && *n >= 0.0)
@@ -85,5 +86,30 @@ mod tests {
         assert_eq!(policy.delay_ms(1, Some(120000), 0.0), 120000);
         assert_eq!(policy.delay_ms(1, Some(900000), 0.0), 1000);
         assert_eq!(policy.delay_ms(10, Some(900000), 0.0), 900000);
+    }
+
+    #[test]
+    fn environment_defaults_come_from_the_runtime_snapshot() {
+        let env = zcode_cli_net::RuntimeEnv::from_vars(vec![
+            ("ZCODE_MODEL_RETRY_MAX_RETRIES".into(), " 3 ".into()),
+            ("ZCODE_MODEL_RETRY_BASE_DELAY_MS".into(), "100".into()),
+            ("ZCODE_MODEL_RETRY_BACKOFF_FACTOR".into(), "0".into()),
+            ("ZCODE_MODEL_RETRY_MAX_DELAY_MS".into(), "x".into()),
+        ]);
+        let policy = RetryPolicy::resolve(&RetryConfig::default(), &env);
+        let expected = (4, 100, 2.0, 60000, true);
+        let actual = (
+            policy.max_attempts,
+            policy.base,
+            policy.factor,
+            policy.max_delay,
+            policy.jitter,
+        );
+        assert_eq!(actual, expected);
+        let configured = RetryConfig {
+            max_retries: Some(1),
+            ..RetryConfig::default()
+        };
+        assert_eq!(RetryPolicy::resolve(&configured, &env).max_attempts, 2);
     }
 }

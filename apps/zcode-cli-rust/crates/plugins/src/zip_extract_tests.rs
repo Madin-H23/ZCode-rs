@@ -108,6 +108,7 @@ async fn zip_sources_verify_the_digest_and_pick_the_plugin_root() {
     let cancel = CancellationToken::new();
     let ports = Ports {
         storage: dir.path(),
+        cwd: dir.path(),
         cancel: &cancel,
         http: &http,
         git: &git,

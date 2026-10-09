@@ -21,6 +21,7 @@ fn model(api: &str, base: &str, headers: &[(&str, &str)]) -> HttpModel {
         Arc::new(env),
         &NetworkPolicy::default(),
         std::path::Path::new("/nonexistent"),
+        std::path::Path::new("/nonexistent"),
         "electron",
     )
     .unwrap();

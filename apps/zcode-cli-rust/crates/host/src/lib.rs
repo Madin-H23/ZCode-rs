@@ -25,6 +25,19 @@ pub fn now() -> u64 {
 pub fn id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
+/// One variable of a runtime environment snapshot; names are case-insensitive
+/// on Windows like the process environment.
+pub(crate) fn env_var<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    env.iter()
+        .find(|(name, _)| {
+            if cfg!(windows) {
+                name.eq_ignore_ascii_case(key)
+            } else {
+                name == key
+            }
+        })
+        .map(|(_, value)| value.as_str())
+}
 pub fn workspace_identity(identity: Option<&str>, workspace_path: &Path) -> String {
     identity
         .map(str::trim)

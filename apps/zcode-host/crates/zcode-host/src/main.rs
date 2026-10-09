@@ -74,6 +74,7 @@ async fn write_control(mut messages: mpsc::UnboundedReceiver<HostToMain>) {
     }
 }
 
+#[expect(clippy::disallowed_methods, reason = "存量，U3 改为显式传入")]
 fn capture_environment() -> Result<HostEnvironment> {
     let mut environment =
         HostEnvironment::capture(std::env::vars()).context("capture host environment")?;
@@ -145,6 +146,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    #[expect(clippy::disallowed_methods, reason = "存量，U3 改为显式传入")]
     log::set_debug(std::env::var("ZCODE_HOST_LOG").is_ok_and(|value| value == "debug"));
     // tokio task 里的 panic 不会结束进程，但必须进 Main 的日志，否则只有 stderr 里能看到。
     let default_hook = std::panic::take_hook();

@@ -89,7 +89,7 @@ pub(super) fn git(egress: &Egress) -> Git {
 }
 
 /// Node `process.env.HOME` (empty when unset). Plugin sources and templates see
-/// exactly what Node sees; this is not the storage home (`zcode_kit::paths::home_dir`).
+/// exactly what Node sees; this is not the storage home (`Egress::home`).
 pub(super) fn home(egress: &Egress) -> String {
     egress
         .runtime_env()
