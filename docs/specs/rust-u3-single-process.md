@@ -65,7 +65,7 @@ impl Exit {
 - **路径**：`cwd` 是 Host 提交的原始 workspace 路径；`base_dir` 是今天子进程的 cwd；数据目录取环境中的 `ZCODE_CLI_RUST_DATA_DIR`，缺省 `<home>/.zcode/rust`。
 - **存储准备**：`--prepare-storage` 握手改为以 `prepare_storage: true` 启动一个嵌入式实例，经同一条管道完成，握手内容不变。
 - **日志**：runtime 用 `tracing`。Host 在启动时安装 runtime 的日志 subscriber（写同一个 `zcode-rust-<date>.jsonl`），否则进程内 runtime 的日志无处可去。
-- **结束原因**：任务正常结束为 `runtime_exit: ok`；返回错误为 `runtime_exit: <error>`；panic 为 `runtime_panicked: <message>`。后两者按“意外退出”处理，与子进程异常退出走同一条路径（生命周期 `unavailable`、下次请求时惰性重启、代次加一）。
+- **结束原因**：任务正常结束为 `runtime_exit: ok`；返回错误为 `runtime_exit: <error>`；panic 为 `runtime_panicked: <message>`。后两者按“意外退出”处理，与子进程异常退出走同一条路径（生命周期 `unavailable`、下次请求时惰性重启、代次加一）。Engine 循环里的 panic 由 Engine 转成错误（§2.5），所以表现为 `runtime_exit: task panicked: …`。Host 日志中实例结束的那一行（`agent[<key>#<代次>] closed: <原因>`）记的是这个原因：runtime 结束时输出管道随之关闭，读循环往往先看到 `stdout_closed`；这时 Host 再等结束结果（至多 1 s），runtime 没有正常结束就记它给出的原因。嵌入式 runtime 没有 stderr，不这样做原因就会整个丢失。挂起的请求仍以 `ZCode agent transport closed: stdout_closed` 失败，界面显示“发送失败”并把输入退回输入框，与子进程链路相同。
 - **没有 pid 的后果**：不发 `agent-process-*` 事件（它们描述的是进程，Main 的校验要求数字 pid）；runtime 实例的启动与结束写 Host 日志，异常结束记 warn。按 pid 采样的资源统计不再覆盖 runtime（它已经是 Host 进程的一部分），由 Host 进程自身的采样体现。稳定性遥测里的“agent 进程退出”因此没有嵌入式对应项，U8 接入遥测时补一条不带 pid 的事件。
 - **子进程归属**：runtime 启动的 MCP 与工具进程现在是 Host 的子进程。`collectLocalRuntimeChildProcesses` 仍按 workspace 与 lane 列出它们，条目里的 `pid` 是 Host 进程自己的 pid。
 

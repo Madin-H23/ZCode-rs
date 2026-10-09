@@ -1320,12 +1320,29 @@ async fn monitor(
         .inner
         .lifecycle
         .emit(lifecycle_event(&process, "unavailable"));
+    // 缺陷修复：输出流关闭（stdout_closed）只是 runtime 自己结束的结果，读循环往往先于任务结果看到它，
+    // 原来这里一律记成 stdout_closed。嵌入式 runtime 没有 stderr，它返回的错误（例如 workspace
+    // 不可用）或 panic 只在任务结果里，于是原因整个丢失。改为：输出流先关闭时，再等一下结束结果
+    // （与上面冲刷输出的等待相同），runtime 没有正常结束就记它给出的原因。
+    let reason = if reason == "stdout_closed" {
+        match tokio::time::timeout(EXIT_FLUSH_WAIT, exit.wait()).await {
+            Ok(outcome) if !outcome.success => outcome.reason,
+            _ => reason,
+        }
+    } else {
+        reason
+    };
     let (kind, termination_reason) = termination(&reason);
     if kind == "unexpected" {
-        log::warn(format!(
-            "{label} closed: {reason}; stderr tail:\n{}",
-            tail.lines().join("\n")
-        ));
+        let lines = tail.lines();
+        if lines.is_empty() {
+            log::warn(format!("{label} closed: {reason}"));
+        } else {
+            log::warn(format!(
+                "{label} closed: {reason}; stderr tail:\n{}",
+                lines.join("\n")
+            ));
+        }
     } else {
         log::info(format!("{label} closed: {reason}"));
     }

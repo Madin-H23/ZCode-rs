@@ -692,3 +692,67 @@ async fn an_embedded_runtime_panic_only_restarts_its_own_workspace() {
     channel.connection_closed(&context);
     runtime.dispose_all().await;
 }
+
+/// 嵌入式 runtime 没有 stderr：实例自己结束时（启动失败、返回错误、Engine panic），结束原因只在
+/// 任务的结果里，输出管道随之关闭只是结果。Host 日志必须记下 runtime 给出的原因
+/// （docs/specs/rust-u3-single-process.md §2.2“结束原因”），不能只记 `stdout_closed`。
+#[tokio::test(flavor = "multi_thread")]
+async fn an_embedded_runtime_that_ends_on_its_own_logs_why() {
+    if std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").is_some() {
+        // 子进程链路的错误在 stderr 尾巴里，由同一行日志带出。
+        return;
+    }
+    struct Capture(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+    impl zcode_host_kit::log::LogSink for Capture {
+        fn log(&self, _level: zcode_host_control::LogLevel, message: String) {
+            self.0.lock().unwrap().push(message);
+        }
+    }
+    let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    zcode_host_kit::log::set_sink(Box::new(Capture(lines.clone())));
+    let home = tempfile::tempdir().unwrap();
+    // workspace 目录不存在且没有回退目录：runtime 在准备阶段以错误结束。
+    let missing = home.path().join("no-such-workspace");
+    let runtime = AgentRuntime::new(
+        AgentRuntimeConfig {
+            base_env: base_env(home.path()),
+            command_vars: runtime_vars(),
+            fallback_cwd: None,
+        },
+        SettingStore::new(home.path()),
+        ProviderRuntime::new(
+            Some(builtin_providers()),
+            home.path().join("provider_config.json"),
+        ),
+    );
+    let target = WorkspaceTarget::local(missing.to_string_lossy().into_owned());
+    runtime
+        .acquire(
+            &target,
+            zcode_host_services::agent::RuntimePolicy::StartIfNeeded,
+        )
+        .await
+        .unwrap();
+    let label = format!("agent[{}#1]", target.key());
+    let closed = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let found = lines
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|line| line.starts_with(&format!("{label} closed:")))
+                .cloned();
+            if let Some(line) = found {
+                return line;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the runtime instance did not end");
+    assert!(
+        closed.contains("runtime_exit: Workspace unavailable"),
+        "{closed}"
+    );
+    runtime.dispose_all().await;
+}
