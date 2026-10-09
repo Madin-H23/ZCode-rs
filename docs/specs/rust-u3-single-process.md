@@ -122,4 +122,4 @@ runtime 是独立进程时，它崩溃后操作系统回收一切，Host 再按�
   - `resilience-cli-crash`：子进程模式杀 CLI 进程；嵌入式模式以 `ZCODE_RUNTIME_FAULT_MARKER` 让该 workspace 的 Engine 循环 panic。两种模式都要求：界面给出“发送失败”且输入退回输入框、Host pid 不变、下一条消息由新一代 runtime 处理、同一会话继续；嵌入式另要求 Host 日志记下 runtime 给出的结束原因。
   - `resilience-reload`：reload 前后 Host pid 不变，runtime 实例不变（子进程比较 CLI pid，嵌入式比较 Host 日志里的 runtime 代次）。
   - `desktop-continuous` 由桌面 E2E 覆盖。`web-remote-replayable` 没有桌面 E2E 场景（手机远控需要外部 relay），由 `crates/services/tests/agent_cli.rs` 的 replayable 测试（在 runtime 上建会话、流式、断线后另一条 replayable 连接从快照恢复）与 `pnpm test:rust-host` 中的 `rustHostPortBridge.test.ts` 覆盖。
-- 对照测量：N 个 workspace 同时流式时的控制 RPC p95、Host 进程 RSS 与 CPU，和子进程链路对比，写入 `docs/reports/`。
+- 对照测量：N 个 workspace 同时流式时的控制 RPC p95、Host 进程 RSS 与 CPU，和子进程链路对比，写入 [docs/reports/rust-u3-embedded-runtime.md](../reports/rust-u3-embedded-runtime.md)（测量用 `crates/zcode-host/tests/control_latency.rs` 的 `runtime_link_comparison`）。
