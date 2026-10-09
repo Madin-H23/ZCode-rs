@@ -1,15 +1,16 @@
 use std::sync::{Arc, Mutex};
 
+use zcode_host_runtime_link::ProcessCommand;
+
 use super::*;
 
-fn script_command(script: &str) -> AgentCommand {
-    AgentCommand {
+fn script_command(script: &str) -> RuntimeCommand {
+    RuntimeCommand::Process(ProcessCommand {
         program: "/bin/sh".into(),
         args: vec!["-c".into(), script.into(), "sh".into()],
         cwd: None,
         supports_storage_startup: true,
-        embedded: false,
-    }
+    })
 }
 
 fn env() -> BTreeMap<String, String> {
@@ -127,8 +128,12 @@ exit 1"#;
     .unwrap_err();
     assert_eq!(error.error_code, "transport_closed");
 
-    let mut unsupported = script_command("exit 0");
-    unsupported.supports_storage_startup = false;
+    let unsupported = RuntimeCommand::Process(ProcessCommand {
+        program: "/bin/sh".into(),
+        args: vec!["-c".into(), "exit 0".into(), "sh".into()],
+        cwd: None,
+        supports_storage_startup: false,
+    });
     let error = prepare_directory(
         &unsupported,
         dir.path(),

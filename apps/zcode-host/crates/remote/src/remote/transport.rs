@@ -20,8 +20,7 @@ use zcode_host_control::LogLevel;
 use zcode_host_kit::log;
 use zcode_host_rpc::{FrameReader, RpcClient, frame};
 
-use crate::agent::command::AgentCommand;
-use crate::agent::process::{self, StderrTail};
+use zcode_host_runtime_link::process::{self, StderrTail};
 
 const STREAM_CONTROL: u8 = 0;
 const STREAM_SERVER: u8 = 1;
@@ -253,14 +252,7 @@ async fn connect_via_connector(
 ) -> Result<Connection, String> {
     let mut env = config.env.clone();
     env.insert("ELECTRON_RUN_AS_NODE".into(), "1".into());
-    let command = AgentCommand {
-        program: config.node_exec.clone(),
-        args: config.args.clone(),
-        cwd: None,
-        supports_storage_startup: false,
-        embedded: false,
-    };
-    let spawned = process::spawn(&command, &config.cwd, &env)
+    let spawned = process::spawn(&config.node_exec, &config.args, &config.cwd, &env)
         .map_err(|error| format!("无法启动远程连接器：{error}"))?;
     let (stderr, _) = process::drain_stderr(Some(spawned.stderr), "remote-connector".into(), None);
     let child = ChildHandle::watch(spawned.child, spawned.pid);
@@ -521,14 +513,7 @@ async fn connect_process(
     config: ProcessTransport,
     mut params: ConnectParams,
 ) -> Result<Connection, String> {
-    let command = AgentCommand {
-        program: config.program.clone(),
-        args: config.args.clone(),
-        cwd: None,
-        supports_storage_startup: false,
-        embedded: false,
-    };
-    let spawned = process::spawn(&command, &config.cwd, &config.env)
+    let spawned = process::spawn(&config.program, &config.args, &config.cwd, &config.env)
         .map_err(|error| format!("无法启动远端 server：{error}"))?;
     let (stderr, _) = process::drain_stderr(Some(spawned.stderr), "remote-server".into(), None);
     let child = ChildHandle::watch(spawned.child, spawned.pid);

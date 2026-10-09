@@ -16,9 +16,8 @@ use std::time::Duration;
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use zcode_host_kit::log;
+use zcode_host_runtime_link::{Link, RuntimeCommand, Start, process};
 
-use super::command::{self, AgentCommand};
-use super::process;
 use super::schema::{self, Field, Ty};
 
 const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(30);
@@ -186,17 +185,6 @@ pub async fn candidate_directories(
         }
     }
     directories
-}
-
-/// 准备用的命令：同一命令加 `--prepare-storage`（嵌入式 runtime 以 `prepare_storage` 启动）。
-fn preparation_command(command: &AgentCommand, cwd: &Path) -> Option<AgentCommand> {
-    if !command.supports_storage_startup {
-        return None;
-    }
-    let mut prep = command.clone();
-    prep.cwd = Some(command.cwd.clone().unwrap_or_else(|| cwd.to_owned()));
-    prep.args.push("--prepare-storage".into());
-    Some(prep)
 }
 
 const PATH_PARAMS: &[Field] = &[Field {
@@ -388,33 +376,28 @@ fn parse_frame(line: &str) -> Option<Frame> {
 
 /// 准备一个目录的会话库；`prepared` 记录本次启动已准备过的真实路径。
 pub async fn prepare_directory(
-    command: &AgentCommand,
+    command: &RuntimeCommand,
     cwd: &Path,
     env: &BTreeMap<String, String>,
     prepared: &mut HashSet<PathBuf>,
     final_database: bool,
     report: &(dyn Fn(Progress) + Send + Sync),
 ) -> Result<(), PrepareError> {
-    let Some(prep) = preparation_command(command, cwd) else {
+    // 同一 runtime 以准备存储为目的启动（子进程加 `--prepare-storage`），握手内容两种链路相同。
+    let Some(prep) = command.for_storage_preparation(cwd) else {
         return Err(PrepareError::status("unsupported_runtime", None));
     };
-    let spawn_cwd = prep.cwd.clone().unwrap_or_else(|| cwd.to_owned());
-    // 嵌入式 runtime 以 prepare_storage 启动一个进程内实例，握手内容与子进程相同。
-    let started = if prep.embedded {
-        super::embedded::start(super::embedded::Start {
-            workspace: cwd,
-            identity: None,
-            cwd: &spawn_cwd,
-            env,
-            prepare_storage: true,
-        })
-    } else {
-        process::spawn(&prep, &spawn_cwd, env).map(process::Link::from)
-    };
-    let process::Link {
+    let spawn_cwd = prep.cwd().unwrap_or(cwd).to_owned();
+    let started = prep.start(Start {
+        workspace: cwd,
+        identity: None,
+        cwd: &spawn_cwd,
+        env,
+    });
+    let Link {
         reader,
         writer,
-        pid,
+        pid: _,
         stderr,
         mut exit,
     } = started.map_err(|error| PrepareError::io(&error))?;
@@ -533,13 +516,13 @@ pub async fn prepare_directory(
     }
     drop(stdin.take());
     let succeeded = if failure.is_some() {
-        exit.terminate(pid).await;
+        exit.terminate().await;
         false
     } else {
         match tokio::time::timeout(Duration::from_secs(10), exit.wait()).await {
             Ok(outcome) => outcome.success,
             Err(_) => {
-                exit.terminate(pid).await;
+                exit.terminate().await;
                 false
             }
         }
@@ -570,7 +553,7 @@ pub async fn prepare_session_storage(
     let mut prepared = HashSet::new();
     let count = directories.len();
     for (index, cwd) in directories.iter().enumerate() {
-        let command = match command::resolve(command_vars, cwd) {
+        let command = match zcode_host_runtime_link::resolve(command_vars, cwd) {
             Ok(command) => command,
             Err(error) => {
                 log::warn(format!("session storage preparation: {error:#}"));

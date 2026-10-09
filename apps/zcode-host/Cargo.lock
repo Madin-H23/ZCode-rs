@@ -3086,6 +3086,7 @@ dependencies = [
  "zcode-host-gateway",
  "zcode-host-kit",
  "zcode-host-rpc",
+ "zcode-host-runtime-link",
  "zcode-host-services",
  "zcode-proc",
 ]
@@ -3278,6 +3279,7 @@ dependencies = [
  "zcode-host-kit",
  "zcode-host-providers",
  "zcode-host-rpc",
+ "zcode-host-runtime-link",
  "zcode-host-sessions",
  "zcode-host-settings",
  "zcode-shared",
@@ -3291,6 +3293,21 @@ dependencies = [
  "futures-util",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "zcode-host-runtime-link"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "regex",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "zcode-cli-rust",
+ "zcode-host-kit",
+ "zcode-proc",
 ]
 
 [[package]]
@@ -3311,6 +3328,7 @@ dependencies = [
  "zcode-host-providers",
  "zcode-host-remote",
  "zcode-host-rpc",
+ "zcode-host-runtime-link",
  "zcode-host-sessions",
  "zcode-host-settings",
  "zcode-host-workspace",
@@ -3332,16 +3350,14 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
- "tokio-util",
  "url",
- "zcode-cli-rust",
  "zcode-host-base",
  "zcode-host-control",
  "zcode-host-kit",
  "zcode-host-providers",
+ "zcode-host-runtime-link",
  "zcode-host-settings",
  "zcode-kit",
- "zcode-proc",
  "zcode-shared",
 ]
 
