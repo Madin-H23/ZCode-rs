@@ -12,7 +12,7 @@ R2 只移植了侧栏子集。本规格把 `zcode-task` channel 的其余成员�
 | zcode-task 其余成员                  | `zcodeTaskServiceAdapter.ts`、`claude-native/*`、`modelTrajectory*.ts` | `tasks/index_members.rs`、`lifecycle.rs`、`queries.rs`、`claude_import.rs`、`task_events.rs` |
 | window-controller                    | `windowHostControllerService.ts`                                       | `tasks/controller.rs`                                                                        |
 | replayable attachment                | `zcodeAgentConnectionScope.ts`、`desktopRemoteSessions.ts`             | `host-core`、`agent/service.rs`、`rustDesktopHost.ts`                                        |
-| task realtime bridge                 | `host/taskRealtimeBridge.ts`、`main/taskRealtimeBus.ts`                | `tasks/realtime.rs`                                                                          |
+| task realtime bridge（U4 删除）      | `host/taskRealtimeBridge.ts`、`main/taskRealtimeBus.ts`                | 会话消息应答在 `tasks/session_messages.rs`                                                   |
 
 automation 与闲时任务的表、调度和派发属于另一部分，不在本规格。
 
@@ -91,13 +91,13 @@ Node 经 IZCodeAgentService 的 legacy 方法转发，Rust 直接请求 CLI（`t
 3. **角色**：Node Host 的 attachment 全部是 `terminal-client`；`trusted-host-relay` 只出现在远端 `zcode-server`，Rust Host 不承担这个角色，因此 relay 规则（flow 控制、relay 身份、路由精确命中）不适用，`setConnectionFlowStateV4` 保持拒绝。
 4. **Main 侧**：Rust Host 不能接收 MessagePort。Main 收到发往 Rust Host 的本地 `AttachServicePort` 时，签发同 clientMode 的 endpoint，再把端口与 WebSocket 逐条消息互转（`rustHostPortBridge.ts`）；任一侧关闭都会关闭另一侧，`DetachServicePort` 关闭桥，同一 attachmentId 重新 attach 时替换旧桥。
 
-### 2.8 task realtime bridge
+### 2.8 task realtime bridge（U4 删除）
 
-1. InitLocal 带 `hostId` 时建立（`deliveryKind` 缺省 `desktop_window`）。消息与 Node `taskRealtimeBridge.ts` 相同：
-   - Host → Main：`task-realtime-publish`、`task-run-lease-acquire`（带 leaseRequestId）、`task-run-lease-release`、`task-stream-op-publish`、`task-owner-command-request`（带 commandRequestId）、`task-owner-command-result`。
-   - Main → Host：`task-run-lease-result`、`task-owner-command-result` 按请求 id 回到等待者；`task-realtime-deliver` 按 eventId 去重（最近 1000 个）后发给订阅者；`task-owner-command-deliver` 发给订阅者。
-2. Node Host 里 bridge 的唯一使用方是远端 workspace 的 sendPrompt 镜像；送达事件与 owner 命令没有订阅者。Rust 提供同样的 API（`TaskContext::realtime()`）给远端 workspace 接入时使用。
-3. **会话消息**：`session-message-deliver` 总是回 `session-message-deliver-result {status: "failed"}`，错误文案同 Node 的 `deliverSessionMessage`，避免 Main 等 30 s 超时；`session-message-delivery-result` 只记 warn。
+窗口级 Host 时，InitLocal 带 `hostId` 才与 Main 的 `taskRealtimeBus` 建立实时桥（lease、stream op、owner 命令、会话消息中继），Node Host 里它的唯一使用方是远端 workspace 的 sendPrompt 镜像，送达事件与 owner 命令没有订阅者。U4 起一个 App 只有一个 Host（[rust-u4-app-host.md](rust-u4-app-host.md) §2.5），Rust Host 不再建立这座桥：
+
+1. `init-local` 的 `hostId` / `deliveryKind` 仍可解析（Main 旧路径落地前可能携带），不再使用；Host 不发也不处理 `task-realtime-*`、`task-run-lease-*`、`task-stream-op-publish`、`task-owner-command-*`、`session-message-*`、`session-route-announce`。
+2. run 的 owner 判断、stale run 防护与 owner 错误码一直在 `TaskLifecycle`（`queries.rs`），与这座桥无关，行为不变。
+3. **会话消息**：远端 workspace 的 `workspace_session_message_send_requested` 在 Host 内应答（`tasks::session_messages::answer_send_request`）：结果 `{status: "failed"}`，错误文案同 Node 的 `deliverSessionMessage`（适配器不支持）；发起方同样无法转交结果（`sendSessionMessageDeliveryResult` 不支持），记一条 warn，与经 Main 绕回时一致。
 
 ## 3. 状态所有者
 
@@ -158,7 +158,7 @@ Main                          RustHostProcess（Main）                Rust Host
 ## 6. 验收
 
 - `pnpm exec tsx scripts/rust-host/tasks-index-groups-fixtures.ts [--check]`：用真实 TS `TaskIndexRepo` 在固定时钟下生成 `tasks_index/fixtures/parity-groups.json`（分组 CRUD、grouped 结构与排序、搜索与摘要、自动归档、归档删除；每步返回值或错误文案，以及最终表内容）。`cargo test -p zcode-host-services tasks_index::groups_tests` 逐项复现。`scripts/rust-host/test.mjs` 先跑 `--check`。
-- `cargo test -p zcode-host-services --lib tasks::`：搜索 / 归档删除 / 分组事件与 controller 全文搜索、自动归档、V4 信封与 ACK、configOptions 与模型选择字符串、轨迹解析、Claude 解析规则、realtime bridge（lease 往返、eventId 去重、会话消息应答）。
+- `cargo test -p zcode-host-services --lib tasks::`：搜索 / 归档删除 / 分组事件与 controller 全文搜索、自动归档、V4 信封与 ACK、configOptions 与模型选择字符串、轨迹解析、Claude 解析规则、会话消息在 Host 内应答（`tasks::session_messages`）。
 - `ZCODE_TEST_CLI_RUST_BINARY=… cargo test -p zcode-host-services --test tasks_cli`：真实 Rust CLI + 本地 mock 模型：
   - initialize → createTask（legacy）→ sendPrompt → terminal 带 inputId、ready → configOptions、切换权限模式（V4 CAS）、读模型、token 用量 → enqueue 在 ready 边界 drain → resume → close；
   - Claude 扫描（侧链、subagents 目录被排除）→ 导入（去重、缺失记 skipped）→ 广播 → 全文搜索命中 → resume。

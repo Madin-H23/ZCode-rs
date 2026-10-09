@@ -29,7 +29,11 @@ Rust Host 从“每个窗口一个进程”改为“每个 App 一个进程”�
 - `issue-attachment-endpoint` 增加 `windowId`（主窗口的窗口 id，与今天 `sourceWindowId` 用的是同一个值）。
 - Host 把 `windowId` 记在 attachment 上，连接建立后进入该连接的调用上下文（`CallContext.window_id`）。
 - 一个窗口可以有多条连接（reload 前后的新旧连接、同一窗口的多个 attachment），它们的窗口身份相同。
-- 需要回到某个窗口的 Host→Main 请求（`browser-execute-request`、Bot 重连通知）带上发起调用的 `windowId`；Main 按它路由，窗口已不存在时回失败。
+- `windowId` 必须是 ≥ 1 的整数，可省略但不可为 `null`；不合法时按非法载荷回 `ok:false`。
+- 需要回到某个窗口的 Host→Main 请求带上发起调用的连接的 `windowId`；Main 按它路由，窗口已不存在时回失败。只有能直接归属到一条连接的请求才带：
+  - `browser-execute-request`：发送消息时收集浏览器环境（ambient context）的两条请求带发送方连接的 `windowId`；CLI 回合中的 `browserExecute` 没有“回合 → 连接”的既有关联，不带（Host 不为此新建状态）。
+  - `bot-remote-workspace-reconnect-request`：发起方是 Bot 而不是窗口，不带；workspace route 属于哪个窗口由 Main 的 route 表决定（3 节，U5 前归 Main）。
+- Host 的 WebSocket 连接上限是 App 级的 64 条（握手前的连接也占名额）：每个主窗口一条本地 attachment 加上每个远端 workspace 一条远端 scope attachment，reload 时新旧连接短暂并存。
 
 ### 2.3 广播与 claim
 
@@ -40,10 +44,11 @@ Rust Host 从“每个窗口一个进程”改为“每个 App 一个进程”�
 | 某个窗口的连接              | 原样（没有 `sourceWindowId`） | 带 `sourceWindowId` = 发送方的窗口 id |
 | Host 内部（如账号失效通知） | 所有连接都收到原样的消息      | 同左                                  |
 
-- UI 用“消息没有 `sourceWindowId`”判断是不是自己窗口发的，这条语义保持不变。
-- 没有窗口身份的连接（U7 的手机远控）按“另一个窗口”对待：收到的窗口广播带 `sourceWindowId`；它发出的广播到达窗口时 `sourceWindowId` 为 `0`（窗口 id 从 1 开始，`0` 表示来源不是窗口）。
+- UI 用“消息没有 `sourceWindowId`”判断是不是自己窗口发的，这条语义保持不变。发送方自带的 `sourceWindowId` 在同窗口原样保留，到达其他窗口时改写为真实来源（同 BroadcastHub）。
+- 没有窗口身份的连接（U7 的手机远控）按“另一个窗口”对待：收到的窗口广播带 `sourceWindowId`；它发出的广播回到它自己时原样（本地回声），到达其他连接时 `sourceWindowId` 为 `0`（窗口 id 从 1 开始，`0` 表示来源不是窗口）。
+- 每条连接收到的消息由 Host 按该连接的调用上下文决定（`onMessage` 订阅时取连接的窗口身份），不靠 UI 过滤。
 - claim 表在 Host 内，规则与 BroadcastHub 相同：先到先得；`reserved` 5 s 过期；只有持有 token 的申请方可以 commit 或 release；`committed` 永久保留；上限 1024 条，超出时淘汰最早的。申请方是一条连接，连接关闭时回收它尚未 commit 的 reservation。
-- `acquireClaim` 不再需要 2 s 的等待上限：结果在 Host 内同步得出。
+- `acquireClaim` 不再需要 2 s 的等待上限：结果在 Host 内同步得出。返回给 Renderer 的形状不变：`{status:"acquired", lease:{key, token}}`、`{status:"busy", retryAfterMs}`（`min(250, reservation 剩余时间)`）、`{status:"committed"}`、空 key 时 `{status:"unavailable"}`。
 
 ### 2.4 调度
 
@@ -66,9 +71,10 @@ Rust 开关下 Main 不再启动 scheduler 进程，也不再转发 `cron-run` /
 
 只有一个 Host 时，`taskRealtimeBus` 协调的对象只剩它自己。Rust 开关下：
 
-- Main 不把 Host 注册到 `taskRealtimeBus`，`init-local` 不带 `hostId`，Host 不建立到 Main 的实时桥。
-- run 的 owner 判断、stale run 防护、owner 相关错误码留在 Host 内，行为不变（AGENTS.md 的 owner / lease 规则）。
-- 远端 workspace 的 `sendPrompt` 镜像（今天经 Main 绕回同一个 Host 并固定回失败）改为在 Host 内直接应答，错误码不变。
+- Main 不把 Host 注册到 `taskRealtimeBus`，`init-local` 不带 `hostId`，Host 不建立到 Main 的实时桥。Main 的旧路径落地前 `init-local` 仍可能带 `hostId` / `deliveryKind`：Host 照常解析、不再使用。
+- run 的 owner 判断、stale run 防护、owner 相关错误码（`NO_ACTIVE_TASK_OWNER`、`STALE_TASK_OWNER_COMMAND`、`OWNER_COMMAND_FAILED`）一直由 Host 的 `TaskLifecycle` 判定，不经实时桥，行为不变（AGENTS.md 的 owner / lease 规则）。
+- 远端 workspace 的 `sendPrompt` 不再向 Main 申请 run lease、不再镜像用户消息与流事件（`mirrorRemotePrompt`）：只有一个 Host 时 lease 总归它自己，镜像回到它自己也没有订阅者，lease 结果从不阻止发送，所以直接转发远端。
+- 远端 workspace 的会话消息请求（`workspace_session_message_send_requested`，今天经 Main 绕回同一个 Host 并固定回失败）改为在 Host 内直接应答：结果 `{status:"failed", error: zcode-task 适配器不支持 deliverSessionMessage 的文案}`，发起方同样无法转交结果、记同一条 warn；错误文案与 `ZCODE_AGENT_UNSUPPORTED_LEGACY_TASK_METHOD` 不变。
 
 ### 2.6 设置
 
@@ -80,14 +86,24 @@ Rust 开关下 Main 不再启动 scheduler 进程，也不再转发 `cron-run` /
 | Host → Main | `setting-write-result{requestId, ok, error?}` |                                                                                          |
 | Host → Main | `setting-changed{setting}`                    | 任何一次成功写入之后推送完整快照；Main 的设置缓存只由它更新                              |
 
+- `setting-changed` 由 `SettingStore` 的写队列在每次成功写入后发出（`setting` channel 的 `update`、Main 的 `setting-write`、Host 内部写入方，以及读取时补写迁移标记），快照是写入后重读的完整设置；控制通道是有序的，所以一次写入的 `setting-write-result` 先于它引起的 `setting-changed`，`setting-changed` 按写入顺序。失败的写入不发。
+
+```text
+写入方：Main 的 setting-write（有界队列，按到达顺序）│ Renderer 的 setting.update │ Host 内部写入方
+  ─► SettingStore 写队列：文件锁 → 合并 → 原子写 → 重读完整设置
+  ─► setting-write-result{requestId, ok}（只对 Main 的写入，先发）
+  ─► setting-changed{setting}（每次成功写入）─► Main 的设置缓存
+```
+
+- Host 按到达顺序串行处理 `setting-write`（Main 先后两次写同一字段时后到的后写）；排队上限 64，满时直接回 `ok:false`。`patch` 的校验与 `setting` channel 的 `update` 相同，不合法时回 `ok:false` 和错误文案；没有 `requestId` 的请求无法应答，忽略。服务安装之前（`init-local` 后、`database-startup-state` 到 ready 之前）到达的 `setting-write` 立即回 `ok:false`（`Rust Host services are not initialized`），不让 Main 等满超时。
 - Host 启动之前的读取（数据目录、硬件加速、启动 workspace）仍然直接读文件：这些值决定 Host 怎么启动。
 - Host 不可用时（启动中、重启中）Main 的写入请求等待 Host 就绪；超过 10 s 记 warn 并放弃这次写入，不回落到直接写文件。
 - App 退出与安装更新前的写入，先等结果再 `dispose` Host。
 
 ### 2.7 Bot 远端运行时
 
-- 连接状态查询改为 Host 直接读自己的远端注册表，不经 Main。
-- 重连仍由 Main 的远端会话管理器执行（它持有 SSH 连接器，U5 替换）。请求带 `windowId`；通知发给发起连接的那个窗口。
+- 连接状态查询改为 Host 直接读自己的远端注册表，不经 Main：存在同 workspaceKey（`workspaceIdentity?.trim() || workspacePath`）、同 target（Main `isSameRemoteTarget` 的比较规则）、在线且 workspace 运行时就绪的 logical session 即为已连接，与 Main 原来按 route 表的判定对应。注册表是 App 级的，不区分窗口。
+- 重连仍由 Main 的远端会话管理器执行（它持有 SSH 连接器，U5 替换）。重连只由 Bot 的入站消息发起，没有发起窗口，请求不带 `windowId`；Main 把重连结果通知发给持有该 workspace route 的窗口（没有时任意一个主窗口）。
 - Main 的 `ensureHostListener` 不再把第一个窗口固定为 Host 的归属窗口，连接结果按请求里的窗口路由。
 
 ### 2.8 Host 意外退出
@@ -130,8 +146,8 @@ Rust 开关下 Main 不再启动 scheduler 进程，也不再转发 `cron-run` /
 | Host → Main | `setting-write-result`                   | `requestId: string`，`ok: boolean`，`error?: string` | 写入落盘后才回 `ok: true`                                                                                 |
 | Host → Main | `setting-changed`                        | `setting: object`                                    | 写入后的完整设置（与 `setting` channel 的 `get` 返回值相同）；每次成功写入后发一次，不论写入方是谁        |
 | Host → Main | `off-peak-active-count`                  | `count: number`（整数，≥ 0）                         | 只在数值变化时发                                                                                          |
-| Host → Main | `browser-execute-request`                | `+ windowId?: number`                                | 发起调用的连接的窗口 id；没有窗口身份时省略，Main 用任意一个主窗口                                        |
-| Host → Main | `bot-remote-workspace-reconnect-request` | `+ windowId?: number`                                | 发起连接的窗口；省略时 Main 用持有该 workspace route 的窗口                                               |
+| Host → Main | `browser-execute-request`                | `+ windowId?: number`                                | 发起调用的连接的窗口 id（目前只有发送时收集浏览器环境的请求带）；省略时 Main 用任意一个主窗口             |
+| Host → Main | `bot-remote-workspace-reconnect-request` | `+ windowId?: number`                                | 发起连接的窗口；Bot 发起的重连没有窗口，Rust Host 目前总是省略，Main 用持有该 workspace route 的窗口      |
 
 `init-local` 不新增字段：App 级 Host 的 `init-local` 不带 `hostId` 与 `deliveryKind`，其余字段的含义见 2.1。
 
