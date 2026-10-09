@@ -504,9 +504,7 @@ mod tests {
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "trap '' TERM; sleep 30".into()],
             cwd: None,
-            env: BTreeMap::new(),
             supports_storage_startup: false,
-            storage_entry: None,
             embedded: false,
         };
         let env = BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]);

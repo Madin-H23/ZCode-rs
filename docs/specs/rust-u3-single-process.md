@@ -47,7 +47,20 @@ impl Exit {
 }
 ```
 
-- **选择方式**：`ZCODE_AGENT_SERVER_RUNTIME=embedded` 时使用嵌入式链路，不需要 `ZCODE_AGENT_SERVER_COMMAND`。A 期验证通过后，嵌入式成为 Rust Host 的缺省；子进程链路只保留作差分对照，B 期结束时删除（rust-unified-host.md D-U9：Rust Host 内只运行 Rust runtime）。
+- **选择方式**：嵌入式链路是 Rust Host 的缺省（A 期已验证，见 [rust-u3-embedded-runtime.md](../reports/rust-u3-embedded-runtime.md)）。子进程链路只在显式给出命令时使用，只作差分对照，B 期结束时删除（rust-unified-host.md D-U9：Rust Host 内只运行 Rust runtime）。命令解析（`agent/command.rs`）只读 Host 环境里的两个变量，规则如下：
+
+  | `ZCODE_AGENT_SERVER_COMMAND` | `ZCODE_AGENT_SERVER_RUNTIME`  | 结果                                                                                                                                                                                 |
+  | ---------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | 未设置（或为空）             | 未设置或 `embedded`           | 嵌入式链路                                                                                                                                                                           |
+  | 未设置                       | 其他值（含 `zcode-cli-rust`） | 解析失败：子进程链路必须给出命令，不回退到嵌入式                                                                                                                                     |
+  | 已设置                       | `zcode-cli-rust`              | Rust CLI 子进程：参数取 `ZCODE_AGENT_SERVER_ARGS_JSON`（缺省 `app-server --stdio`），Host 追加 `--cwd <workspacePath>`；等 `startup/storageState`；会话库以 `--prepare-storage` 准备 |
+  | 已设置                       | 未设置                        | 协议替身：按命令原样启动，不等存储就绪，会话库准备报 `unsupported_runtime`。只用于 Host 测试里的脚本替身                                                                             |
+  | 已设置                       | `embedded` 或其他值           | 解析失败                                                                                                                                                                             |
+
+  子进程命令最后一律去掉已有的 `--surface` 参数，再追加 `--surface desktop`。解析失败时，请求以错误返回，会话库准备以 `unsupported_runtime` 失败。
+
+  Rust Host 不再查找其他 runtime：开发态 `zcode.cjs`（`ZCODE_HOST_NODE_EXEC_PATH` 加向上查找、`ZCODE_AGENT_BUNDLE_PATH`、`ZCODE_DESKTOP_AGENT_BYTECODE`）和已部署的二进制（`GLM_BINARY_PATH`）都已删除。Main 给 Node Host 准备的环境里带着 `GLM_BINARY_PATH`，Rust Host 忽略它；`ZCODE_HOST_NODE_EXEC_PATH` 仍由 Main 传入，只给远端连接器用（rust-host-remote.md）。
+
 - **环境**：嵌入式 runtime 的 `RuntimeOptions.env` 就是今天传给子进程的那份环境（`spawn_env`：基础环境、网络设置、provider 配置文件路径、各服务贡献的变量、workspace 身份）。runtime 只读这份环境（U1 L4），不读 Host 进程的环境。
 - **路径**：`cwd` 是 Host 提交的原始 workspace 路径；`base_dir` 是今天子进程的 cwd；数据目录取环境中的 `ZCODE_CLI_RUST_DATA_DIR`，缺省 `<home>/.zcode/rust`。
 - **存储准备**：`--prepare-storage` 握手改为以 `prepare_storage: true` 启动一个嵌入式实例，经同一条管道完成，握手内容不变。

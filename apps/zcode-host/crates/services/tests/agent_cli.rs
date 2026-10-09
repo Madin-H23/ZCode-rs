@@ -28,7 +28,7 @@ use zcode_host_services::settings::SettingStore;
 
 const MOCK_REPLY: &str = "Hello from the mock model";
 
-/// runtime 的选择：缺省嵌入式；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
+/// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
 fn runtime_vars() -> BTreeMap<String, String> {
     match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
         Some(cli) => {
@@ -48,10 +48,8 @@ fn runtime_vars() -> BTreeMap<String, String> {
                 ),
             ])
         }
-        None => BTreeMap::from([(
-            "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
-            "embedded".to_owned(),
-        )]),
+        // 不设置任何选择变量：走 Host 的缺省链路（嵌入式）。
+        None => BTreeMap::new(),
     }
 }
 
@@ -248,7 +246,6 @@ async fn core_chat_flow_against_the_runtime() {
         AgentRuntimeConfig {
             base_env,
             command_vars,
-            search_roots: Vec::new(),
             fallback_cwd: None,
         },
         SettingStore::new(home.path()),
@@ -627,7 +624,6 @@ async fn an_embedded_runtime_panic_only_restarts_its_own_workspace() {
         AgentRuntimeConfig {
             base_env: env,
             command_vars: runtime_vars(),
-            search_roots: Vec::new(),
             fallback_cwd: None,
         },
         SettingStore::new(home.path()),

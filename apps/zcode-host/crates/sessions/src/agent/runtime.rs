@@ -460,10 +460,8 @@ impl AgentProcess {
 pub struct AgentRuntimeConfig {
     /// 清洗后的 Host 环境 + Main 的登录 shell 补丁（support::env::ProcessEnv::for_children）。
     pub base_env: BTreeMap<String, String>,
-    /// 命令解析读取的变量（`ZCODE_AGENT_SERVER_*` 等），即 Host 自身环境。
+    /// 链路选择读取的变量（`ZCODE_AGENT_SERVER_*`），即 Host 自身环境。
     pub command_vars: BTreeMap<String, String>,
-    /// 向上查找开发态 `zcode.cjs` 的起点。
-    pub search_roots: Vec<PathBuf>,
     pub fallback_cwd: Option<PathBuf>,
 }
 
@@ -785,11 +783,7 @@ impl AgentRuntime {
         }
     }
 
-    async fn spawn_env(
-        &self,
-        target: &WorkspaceTarget,
-        command: &AgentCommand,
-    ) -> BTreeMap<String, String> {
+    async fn spawn_env(&self, target: &WorkspaceTarget) -> BTreeMap<String, String> {
         let config = &self.inner.config;
         let mut env = config.base_env.clone();
         let runtime_env = config
@@ -814,17 +808,15 @@ impl AgentRuntime {
             "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE".into(),
             self.inner.providers.personal_file().display().to_string(),
         );
-        env.extend(command.env.clone());
         if let Some(identity) = trimmed(&target.workspace_identity) {
             env.insert("ZCODE_WORKSPACE_IDENTITY".into(), identity.to_owned());
         }
         env
     }
 
-    /// 解析 CLI 命令（会话库准备与 spawn 共用）。
-    pub fn resolve_command(&self, workspace: &Path) -> Result<Option<AgentCommand>, RpcError> {
-        let config = &self.inner.config;
-        command::resolve(&config.command_vars, &config.search_roots, workspace)
+    /// 选择 runtime 链路（会话库准备与启动共用）。
+    fn resolve_command(&self, workspace: &Path) -> Result<AgentCommand, RpcError> {
+        command::resolve(&self.inner.config.command_vars, workspace)
             .map_err(|error| RpcError::new("Error", format!("{error:#}")))
     }
 
@@ -867,14 +859,8 @@ impl AgentRuntime {
     async fn start(&self, target: &WorkspaceTarget) -> Result<Arc<AgentProcess>, RpcError> {
         let config = &self.inner.config;
         let workspace = Path::new(&target.workspace_path);
-        let command = self.resolve_command(workspace)?.ok_or_else(|| {
-            RpcError::new(
-                "Error",
-                "ZCode agent runtime command could not be resolved.",
-            )
-            .with_code(RUNTIME_UNAVAILABLE_CODE)
-        })?;
-        let env = self.spawn_env(target, &command).await;
+        let command = self.resolve_command(workspace)?;
+        let env = self.spawn_env(target).await;
         let cwd = spawn_cwd(
             command.cwd.as_deref(),
             workspace,

@@ -234,7 +234,6 @@ pub(crate) mod testing {
             AgentRuntimeConfig {
                 base_env: Default::default(),
                 command_vars: Default::default(),
-                search_roots: Vec::new(),
                 fallback_cwd: None,
             },
             settings.clone(),

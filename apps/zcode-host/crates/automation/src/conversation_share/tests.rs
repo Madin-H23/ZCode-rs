@@ -160,7 +160,6 @@ async fn import_installs_artifacts_then_cleans_up_when_the_session_cannot_be_cre
         crate::agent::AgentRuntimeConfig {
             base_env: Default::default(),
             command_vars: Default::default(),
-            search_roots: Vec::new(),
             fallback_cwd: None,
         },
         crate::settings::SettingStore::new(dir.path()),

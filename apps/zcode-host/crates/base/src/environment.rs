@@ -16,8 +16,6 @@ pub struct HostEnvironment {
     pub user_home: PathBuf,
     /// Host 自身的环境变量（Main 启动 Host 时给的），子进程环境以它为底。
     pub vars: BTreeMap<String, String>,
-    /// 向上查找开发态 CLI bundle 的起点：进程 cwd 与 Host 可执行文件所在目录。
-    pub search_roots: Vec<PathBuf>,
 }
 
 impl HostEnvironment {
@@ -40,7 +38,6 @@ impl HostEnvironment {
             data_base_dir: override_or_home("ZCODE_DATA_BASE_DIR"),
             user_home,
             vars,
-            search_roots: Vec::new(),
         })
     }
 

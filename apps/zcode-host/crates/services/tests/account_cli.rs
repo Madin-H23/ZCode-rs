@@ -30,7 +30,7 @@ impl ControlSink for NullSink {
     fn send(&self, _message: HostToMain) {}
 }
 
-/// runtime 的选择：缺省嵌入式；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
+/// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
 fn runtime_vars() -> BTreeMap<String, String> {
     match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
         Some(cli) => {
@@ -50,10 +50,8 @@ fn runtime_vars() -> BTreeMap<String, String> {
                 ),
             ])
         }
-        None => BTreeMap::from([(
-            "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
-            "embedded".to_owned(),
-        )]),
+        // 不设置任何选择变量：走 Host 的缺省链路（嵌入式）。
+        None => BTreeMap::new(),
     }
 }
 
@@ -235,7 +233,6 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         AgentRuntimeConfig {
             base_env: vars.clone(),
             command_vars: vars.clone(),
-            search_roots: Vec::new(),
             fallback_cwd: None,
         },
         settings.clone(),

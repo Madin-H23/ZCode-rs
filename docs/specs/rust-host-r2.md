@@ -13,12 +13,9 @@
 ### 2.1 CLI 进程
 
 1. **每个 workspace 一个 CLI 进程**（chat lane），以 `workspaceIdentity?.trim() || workspacePath` 为 key。启动是 single-flight：同一 key 的并发请求只拉起一个进程。
-2. **命令解析**，命中第一个即用：
-   1. `ZCODE_AGENT_SERVER_COMMAND`。附带参数来自 `ZCODE_AGENT_SERVER_ARGS_JSON`，缺省为 `app-server --stdio`。`ZCODE_AGENT_SERVER_RUNTIME` 只允许 `zcode-cli-rust`；这时 Host 追加 `--cwd <workspacePath>`，并且参数里出现 `--cwd` 就报错。
-   2. `ZCODE_HOST_NODE_EXEC_PATH` 加上开发态 `zcode.cjs`（从进程 cwd 和 Host 可执行文件目录向上查找，或者取 `ZCODE_AGENT_BUNDLE_PATH`），以 `ELECTRON_RUN_AS_NODE=1` 运行。Rust Host 不是 Node，所以由 Main 把 `process.execPath` 作为 `ZCODE_HOST_NODE_EXEC_PATH` 传给它。
-   3. `GLM_BINARY_PATH`。
+2. **命令解析**：U3 起由 [rust-u3-single-process.md](rust-u3-single-process.md) §2.2 的“选择方式”取代。缺省是进程内的嵌入式 runtime；只有显式的 `ZCODE_AGENT_SERVER_COMMAND`（加 `ZCODE_AGENT_SERVER_RUNTIME=zcode-cli-rust`）才启动 CLI 子进程，这时 Host 追加 `--cwd <workspacePath>`，参数里出现 `--cwd` 就报错。原来的开发态 `zcode.cjs` 与 `GLM_BINARY_PATH` 查找已删除。
 
-   最后一律去掉已有的 `--surface` 参数，再追加 `--surface desktop`。
+   子进程命令最后一律去掉已有的 `--surface` 参数，再追加 `--surface desktop`。
 
 3. **spawn 环境**，后写的覆盖先写的：
    1. 清洗后的 Host 环境，加上 Main 给的登录 shell 补丁（`runtimeProcessEnvPatch`）。Rust Host 不改自己的进程环境，而是算出这份有效环境，显式交给子进程。
