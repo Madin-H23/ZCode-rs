@@ -199,7 +199,8 @@ impl OfficialAuth {
         if events.send(event).await.is_err() {
             return Err(UNAVAILABLE);
         }
-        let Ok(result) = answer.await else {
+        // Host 的错误应答（code 与 message 已由 Engine 记录）与没有应答一样按不可用处理。
+        let Ok(Ok(result)) = answer.await else {
             return Err(UNAVAILABLE);
         };
         parse_reply(&result)

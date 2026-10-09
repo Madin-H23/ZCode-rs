@@ -50,7 +50,11 @@ pub struct DurableCommitReceipt {
 
 pub enum Input {
     Request(zcode_cli_domain::protocol::Request),
-    Response { id: String, result: Value },
+    /// Host 对反向请求的应答；error 应答保留为 [`crate::HostError`]，不能当作空结果。
+    Response {
+        id: String,
+        result: std::result::Result<Value, crate::HostError>,
+    },
     Invalid,
     TooLarge,
     Eof,

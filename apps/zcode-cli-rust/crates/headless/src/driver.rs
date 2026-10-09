@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use std::collections::VecDeque;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
-use zcode_cli_core_api::{ClientMsg, Method, RuntimeError, ServerMsg};
+use zcode_cli_core_api::{ClientMsg, HostError, Method, RuntimeError, ServerMsg};
 
 const CLIENT: &str = "zcode-cli-headless";
 
@@ -122,11 +122,15 @@ impl<O: AsyncWrite + Unpin, E: AsyncWrite + Unpin> Driver<'_, O, E> {
                 method: "session/event",
                 params,
             } if params["sessionId"] == self.session.as_str() => self.event(params).await?,
-            // Host 反向请求在无头模式下没有应答方：与 Host 返回错误时一样以 null 回复。
+            // Host 反向请求在无头模式下没有应答方：回复“方法不可用”的错误，等待方按失败处理。
             ServerMsg::HostRequest { id, .. } => {
                 let reply = ClientMsg::HostReply {
                     id,
-                    result: Value::Null,
+                    result: Err(HostError {
+                        code: -32601,
+                        message: "Host requests are unavailable in headless mode".into(),
+                        data: None,
+                    }),
                 };
                 let _ = self.to.send(reply).await;
             }

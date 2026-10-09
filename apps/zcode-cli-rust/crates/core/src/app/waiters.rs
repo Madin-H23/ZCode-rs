@@ -21,7 +21,7 @@ pub(super) struct WaitingQuestion {
 pub(super) struct HostWait {
     pub owner: String,
     pub workspace: Value,
-    pub reply: oneshot::Sender<Value>,
+    pub reply: oneshot::Sender<Result<Value, crate::contract::HostError>>,
 }
 
 /// A permission prompt: `owner` runs the tool, `host` shows the prompt (the root

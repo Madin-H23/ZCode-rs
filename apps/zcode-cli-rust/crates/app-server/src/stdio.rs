@@ -6,6 +6,7 @@ use std::io::BufRead;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use crate::contract::HostError;
 pub use crate::contract::Input;
 
 /// Start stdin framing: one NDJSON message per line, bounded by `MAX_REQUEST_BYTES`.
@@ -56,10 +57,16 @@ fn dispatch(tx: &mpsc::Sender<Input>, line: &[u8]) -> bool {
         && let Some(id) = value["id"].as_str()
         && (value.get("result").is_some() ^ value.get("error").is_some())
     {
+        // Host 的 error 应答必须原样交给等待方：以前它被当成 null 结果，Host 给出的错误原因
+        // （如鉴权失败的具体说明）随之丢失，等待方只能报通用失败。
+        let result = match value.get("error") {
+            Some(error) => Err(HostError::from_error_object(error)),
+            None => Ok(value.get("result").cloned().unwrap_or(Value::Null)),
+        };
         return tx
             .blocking_send(Input::Response {
                 id: id.into(),
-                result: value.get("result").cloned().unwrap_or(Value::Null),
+                result,
             })
             .is_ok();
     }
@@ -106,3 +113,7 @@ pub async fn storage_prepare(
         _ => bail!("Storage preparation handshake failed"),
     }
 }
+
+#[cfg(test)]
+#[path = "stdio_tests.rs"]
+mod tests;

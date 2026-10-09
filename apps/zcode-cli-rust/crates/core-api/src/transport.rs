@@ -116,7 +116,10 @@ pub enum ClientMsg {
         params: Value,
     },
     /// Reply to a [`ServerMsg::HostRequest`].
-    HostReply { id: String, result: Value },
+    HostReply {
+        id: String,
+        result: Result<Value, crate::HostError>,
+    },
     /// A delivery subscription on `topic` ended; releases the pin taken by [`Method::TopicOpen`].
     TopicReleased { topic: String },
     /// A client connection closed; runtime releases connection-scoped staging (uploads).

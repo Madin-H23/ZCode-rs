@@ -303,7 +303,7 @@ impl Engine {
         provider: String,
         selection: Value,
         access: Value,
-        reply: tokio::sync::oneshot::Sender<Value>,
+        reply: tokio::sync::oneshot::Sender<Result<Value, crate::contract::HostError>>,
     ) {
         if reply.is_closed() {
             return;

@@ -85,7 +85,9 @@ impl HttpModel {
         let auth = tokio::time::timeout(Duration::from_secs(180), received)
             .await
             .map_err(|_| ModelFailure::new("auth_failed", false))?
-            .map_err(|_| ModelFailure::cancelled())?;
+            .map_err(|_| ModelFailure::cancelled())?
+            // Host 的错误应答（code 与 message 已由 Engine 记录）按鉴权失败处理。
+            .map_err(|_| ModelFailure::new("auth_failed", false))?;
         if auth["headersApplied"] != true || !auth["requestAuth"].is_object() {
             return Err(ModelFailure::new("auth_failed", false));
         }

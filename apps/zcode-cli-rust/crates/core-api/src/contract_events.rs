@@ -107,7 +107,7 @@ pub enum Event {
     HostCall {
         method: &'static str,
         params: Value,
-        reply: Option<oneshot::Sender<Value>>,
+        reply: Option<oneshot::Sender<std::result::Result<Value, crate::HostError>>>,
     },
     /// A detached workspace request's reply with a protocol error (plugin management).
     AuxiliaryReply {
@@ -121,7 +121,7 @@ pub enum Event {
         provider: String,
         selection: Value,
         access: Value,
-        reply: oneshot::Sender<Value>,
+        reply: oneshot::Sender<std::result::Result<Value, crate::HostError>>,
     },
     /// The model window and, for a root-session step, the context breakdown of
     /// the step request about to be sent (spec rust-m9-usage-logs §4.1).

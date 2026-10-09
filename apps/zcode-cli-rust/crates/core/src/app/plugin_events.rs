@@ -8,13 +8,37 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 impl Engine {
+    /// Host 对反向请求的应答交给等待方。错误应答在这里记录一次（Host 给出的 code 与
+    /// message），等待方再按各自的失败路径处理。
+    pub(super) fn host_reply(
+        &mut self,
+        id: String,
+        result: Result<serde_json::Value, crate::contract::HostError>,
+    ) {
+        if let Err(error) = &result {
+            tracing::warn!(
+                target: "zcode::runtime",
+                event = "host.request.failed",
+                request_id = %id,
+                code = error.code,
+                message = %error.message,
+                "Host request failed"
+            );
+        }
+        if let Some(wait) = self.waiters.take_host(&id) {
+            let _ = wait.reply.send(result);
+        }
+    }
+
     /// An adapter's Host interaction: a notification, or a request keyed by
     /// its `requestId` whose reply is released only at shutdown otherwise.
     pub(super) fn host_call(
         &mut self,
         method: &'static str,
         params: serde_json::Value,
-        reply: Option<tokio::sync::oneshot::Sender<serde_json::Value>>,
+        reply: Option<
+            tokio::sync::oneshot::Sender<Result<serde_json::Value, crate::contract::HostError>>,
+        >,
     ) {
         let Some(reply) = reply else {
             self.outbox

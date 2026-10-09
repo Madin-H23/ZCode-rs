@@ -177,7 +177,7 @@ impl Engine {
                     _=cancel.cancelled()=>break,
                     message=input.recv()=>match message {
                         Some(ClientMsg::Request{token,method,params})=>self.request(Call{token,method,params},&output).await?,
-                        Some(ClientMsg::HostReply{id,result})=> { if let Some(wait) = self.waiters.take_host(&id) { let _ = wait.reply.send(result); } },
+                        Some(ClientMsg::HostReply{id,result})=> self.host_reply(id, result),
                         Some(ClientMsg::TopicReleased{topic})=>{self.release_topic(&topic);self.trim_resident().await?;},
                         Some(ClientMsg::ConnectionClosed{connection})=>{self.uploads.clear_connection(&connection);self.trim_resident().await?;},
                         Some(ClientMsg::Eof) | None=>break,
