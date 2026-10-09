@@ -294,6 +294,7 @@ async fn subscribe(
             connection: NEXT_SCOPE.fetch_add(1, Ordering::SeqCst),
             attachment_id: inner.bot_id.clone(),
             client_mode: ClientMode::DesktopContinuous,
+            window_id: None,
         },
     };
     let agent = scope.agent.clone();

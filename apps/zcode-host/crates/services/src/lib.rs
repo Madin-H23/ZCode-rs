@@ -112,7 +112,8 @@ pub fn install(
 ) -> Installed {
     let bridge = MainBridge::new(context.control.clone());
     let settings = settings::SettingStore::new(&context.environment.home_dir);
-    let (broadcast_service, broadcaster) = broadcast::service_with_sender(bridge.clone(), router);
+    // 广播扇出与 claim 的所有者（rust-u4-app-host.md §2.3），不经 Main。
+    let (broadcast_service, broadcaster) = broadcast::service_with_sender();
     registry.implement(broadcast_service);
     registry.implement(settings::service(settings.clone()));
 

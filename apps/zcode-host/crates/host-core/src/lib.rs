@@ -102,6 +102,7 @@ impl HostCore {
                     attachment_id: request.attachment_id,
                     client_mode: request.client_mode,
                     scope: request.scope,
+                    window_id: request.window_id,
                 });
                 self.inner
                     .control
@@ -352,6 +353,7 @@ impl HostCore {
             connection: NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed),
             attachment_id: meta.attachment_id.clone(),
             client_mode: meta.client_mode,
+            window_id: meta.window_id,
         };
         let (close_tx, close_rx) = watch::channel(false);
         {
@@ -502,6 +504,7 @@ mod remote_scope_tests {
             attachment_id: "a1".into(),
             client_mode,
             scope,
+            window_id: None,
         }
     }
 
@@ -521,6 +524,31 @@ mod remote_scope_tests {
             core.issue_endpoint(meta(AttachmentScope::Local, ClientMode::DesktopContinuous)),
             AttachmentEndpointResult::Issued { url, .. } if url == "ws://127.0.0.1:4242/rpc"
         ));
+    }
+
+    #[test]
+    fn issued_capability_carries_the_window_id() {
+        let (core, sink) = core();
+        let window_id = zcode_host_control::WindowId::new(2);
+        core.on_control(MainToHost::IssueAttachmentEndpoint(
+            zcode_host_control::IssueAttachmentEndpoint {
+                kind: "issue-attachment-endpoint".into(),
+                request_id: "r1".into(),
+                attachment_id: "a1".into(),
+                client_mode: ClientMode::DesktopContinuous,
+                scope: AttachmentScope::Local,
+                window_id,
+            },
+        ));
+        let capability = match sink.0.lock().unwrap().last() {
+            Some(HostToMain::AttachmentEndpointIssued {
+                result: AttachmentEndpointResult::Issued { capability, .. },
+                ..
+            }) => capability.clone(),
+            other => panic!("expected an issued endpoint, got {other:?}"),
+        };
+        let meta = core.redeem_capability(&capability).unwrap();
+        assert_eq!(meta.window_id, window_id);
     }
 
     #[tokio::test]

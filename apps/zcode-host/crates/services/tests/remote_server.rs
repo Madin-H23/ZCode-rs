@@ -66,6 +66,7 @@ fn context(connection: u64, mode: ClientMode) -> CallContext {
         connection,
         attachment_id: format!("attachment-{connection}"),
         client_mode: mode,
+        window_id: None,
     }
 }
 

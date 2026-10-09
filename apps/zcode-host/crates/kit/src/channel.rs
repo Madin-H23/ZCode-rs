@@ -10,7 +10,7 @@ use std::sync::Arc;
 use futures_util::stream::{self, Stream};
 use serde::Serialize;
 use serde_json::{Value, json};
-use zcode_host_control::ClientMode;
+use zcode_host_control::{ClientMode, WindowId};
 use zcode_host_rpc::{RpcError, RpcValue};
 
 use crate::builder::ServiceBuilder;
@@ -58,6 +58,26 @@ pub struct CallContext {
     pub connection: u64,
     pub attachment_id: String,
     pub client_mode: ClientMode,
+    /// 连接所属主窗口（`issue-attachment-endpoint.windowId`，rust-u4-app-host.md §2.2）。一个窗口可有
+    /// 多条连接（reload 前后、远端 scope 的 attachment）；没有窗口身份的连接（手机远控、Host 内部）为 None。
+    pub window_id: Option<WindowId>,
+}
+
+impl CallContext {
+    /// 没有窗口身份的连接上下文。
+    pub fn new(connection: u64, attachment_id: impl Into<String>, client_mode: ClientMode) -> Self {
+        Self {
+            connection,
+            attachment_id: attachment_id.into(),
+            client_mode,
+            window_id: None,
+        }
+    }
+
+    pub fn with_window(mut self, window_id: Option<WindowId>) -> Self {
+        self.window_id = window_id;
+        self
+    }
 }
 
 /// 接入层观测到的连接发送积压边沿（docs/specs/rust-host-resilience.md §2.3）。

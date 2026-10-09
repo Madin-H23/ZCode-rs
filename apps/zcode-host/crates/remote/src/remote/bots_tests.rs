@@ -411,6 +411,7 @@ async fn remote_send_prompt_holds_a_realtime_lease_and_mirrors_the_stream() {
         connection: 1,
         attachment_id: "a1".into(),
         client_mode: ClientMode::DesktopContinuous,
+        window_id: None,
     };
     tasks
         .call(
@@ -520,6 +521,7 @@ async fn remote_attachment_bots_channel_runs_on_the_connection() {
         connection: 1,
         attachment_id: "a1".into(),
         client_mode: ClientMode::DesktopContinuous,
+        window_id: None,
     };
     // 配置与本地实例同一份存储。
     let config = reply_value(channel.call(&ui, "getConfig", Vec::new()).await.unwrap());

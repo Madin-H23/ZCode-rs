@@ -264,6 +264,7 @@ async fn core_chat_flow_against_the_runtime() {
         connection: 1,
         attachment_id: "test".into(),
         client_mode: ClientMode::DesktopContinuous,
+        window_id: None,
     };
     let target = json!({"workspacePath": workspace_path});
     let mut lifecycle = Box::pin(runtime.lifecycle().subscribe());
@@ -641,6 +642,7 @@ async fn an_embedded_runtime_panic_only_restarts_its_own_workspace() {
         connection: 1,
         attachment_id: "test".into(),
         client_mode: ClientMode::DesktopContinuous,
+        window_id: None,
     };
     call(&channel, &context, "helloConversationV4", Value::Null).await;
     call(

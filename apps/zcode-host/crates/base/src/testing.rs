@@ -16,6 +16,7 @@ fn context() -> CallContext {
         connection: 1,
         attachment_id: "test".to_owned(),
         client_mode: ClientMode::DesktopContinuous,
+        window_id: None,
     }
 }
 

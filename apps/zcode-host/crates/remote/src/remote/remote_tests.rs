@@ -23,6 +23,7 @@ fn context(connection: u64) -> CallContext {
         connection,
         attachment_id: format!("a{connection}"),
         client_mode: ClientMode::DesktopContinuous,
+        window_id: None,
     }
 }
 
@@ -664,6 +665,7 @@ async fn remote_attachments_route_usage_and_share_like_node() {
     // replayable 连接交给本机实现（它先按 desktop-only 拒绝写操作）。
     let replay = CallContext {
         client_mode: ClientMode::WebRemoteReplayable,
+        window_id: None,
         ..context(2)
     };
     let delegated = reply_value(
