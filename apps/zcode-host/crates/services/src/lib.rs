@@ -362,9 +362,14 @@ pub fn install(
 
     // ── scheduler ──（docs/specs/rust-u4-app-host.md §2.4）
     // 所有服务都已安装、tasks-index 已就绪：启动调度状态机（回收中断的闲时任务 → 第一轮）。
-    // U4 接线点：执行中的闲时任务数 → Host → Main 的 `off-peak-active-count`（Main 据此维持防休眠）。
-    // 控制消息由另一项改动定义并接在这里；在那之前上报为空操作。
-    let scheduler = automation.start_scheduler(Arc::new(|_active_count: u64| {}));
+    // 执行中的闲时任务数只在变化时上报给 Main（`off-peak-active-count`，rust-u4-app-host.md §4.1）。
+    let active_count_control = context.control.clone();
+    let scheduler = automation.start_scheduler(Arc::new(move |count: u64| {
+        active_count_control.send(zcode_host_control::HostToMain::Raw(serde_json::json!({
+            "type": "off-peak-active-count",
+            "count": count,
+        })));
+    }));
 
     agent::session::warm_up(
         agent.clone(),

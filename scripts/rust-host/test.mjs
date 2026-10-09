@@ -101,6 +101,12 @@ const tests = [
   "packages/desktop/test/rustHostPortBridge.test.ts",
   // Main 的自动重启策略（纯逻辑，docs/specs/rust-host-resilience.md §2.1）。
   "packages/desktop/test/rustHostRestartPolicy.test.ts",
+  // 一个 App 一个 Rust Host（纯逻辑，docs/specs/rust-u4-app-host.md §2.1、§2.6、§2.8）：
+  // 代次与重启、窗口接入、设置写入与 setting-changed 的应用、按 windowId 路由。
+  "packages/desktop/test/rustAppHostCore.test.ts",
+  "packages/desktop/test/rustAppHostSettings.test.ts",
+  // U4 新增控制消息的严格校验（§4.1）。
+  "packages/shared/test/rustU4ControlMessages.test.ts",
 ];
 await run(process.execPath, ["--import", "tsx", "--test", ...tests], {
   ...process.env,

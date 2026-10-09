@@ -15,6 +15,8 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use zcode_host_rpc::{FrameReader, Reader, RpcValue, codec, frame};
 
+/// 调度器对执行中闲时任务数的上报：与请求无关、随时可能到达，读“下一条控制消息”时跳过。
+const UNSOLICITED_REPORT: &str = "off-peak-active-count";
 const DEV_ORIGIN: &str = "http://localhost:5173";
 const STEP_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -77,6 +79,9 @@ impl Host {
                 .unwrap()
                 .expect("control stdout open");
             let message: Value = serde_json::from_str(&line).unwrap();
+            if message["type"] == UNSOLICITED_REPORT {
+                continue;
+            }
             if message["type"] != "log" {
                 return message;
             }

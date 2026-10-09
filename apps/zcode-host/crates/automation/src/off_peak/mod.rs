@@ -16,7 +16,6 @@ mod tests;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use zcode_host_control::ControlRouter;
 use zcode_host_kit::{
     Args, CallContext, CallFuture, ChannelRegistry, EventStream, Reply, RpcError, RpcValue,
     ServiceBuilder, ServiceChannel, log,
@@ -231,11 +230,7 @@ pub struct Installed {
     pub dispatcher: Arc<dispatch::OffPeakDispatcher>,
 }
 
-pub fn install(
-    area: &Arc<Area>,
-    registry: &mut ChannelRegistry,
-    router: &mut ControlRouter,
-) -> Option<Installed> {
+pub fn install(area: &Arc<Area>, registry: &mut ChannelRegistry) -> Option<Installed> {
     let vars = area.context.environment.vars.clone();
     // 真实凭据链（docs/specs/rust-host-integration.md §2.1）：账号栈注入时用它，否则只有 mock。
     let credentials = credentials::CredentialSource::new(
@@ -301,9 +296,6 @@ pub fn install(
         reverse::register(area, service.clone(), inner);
     }
     let dispatcher = dispatch::OffPeakDispatcher::start(area.clone(), service.clone());
-    // Main 的 Node scheduler 经 Main 转发的派发；Rust 开关下 Main 停止拉起它之后不再有发送方，集成时删除。
-    let run = dispatcher.clone();
-    router.on(dispatch::OFF_PEAK_RUN, move |message| run.handle(message));
     // 合并 automation 与 agent 两个区域时发现两条推送 updateOffPeakToolPolicy 的写路径（这里的使用前钩子
     // 与 agent runtime 的启动回放）。统一由 agent runtime 在每代 CLI 启动时推送（同 Node 的 replay），
     // 这里只打开门禁；门禁同时让 createSession 带上 offPeakToolEnabled。

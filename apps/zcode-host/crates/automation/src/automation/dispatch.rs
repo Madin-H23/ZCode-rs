@@ -1,8 +1,9 @@
 //! 定时任务派发（packages/desktop/src/host/index.ts 的 dispatchCronRun / dispatchManualAutomationRun
 //! 与 cronRunLifecycle.ts、automationModelSelection.ts、cronBotDelivery.ts）。
 //!
-//! Main 的 scheduler（Node）认领到期项后经 Main 发 `cron-run`；`runAutomationNow` 在当前 Host
-//! 直接派发 manual run。两者都走 [`Dispatcher::dispatch`]，再按会话终态结算 run。
+//! Host 内的 Scheduler（docs/specs/rust-u4-app-host.md §2.4）认领到期项后调用派发器，请求沿用
+//! `cron-run` 的形状；`runAutomationNow` 直接派发 manual run。两者都走 [`Dispatcher::dispatch`]，
+//! 再按会话终态结算 run。
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -169,34 +170,6 @@ impl Dispatcher {
         {
             heartbeat.abort();
         }
-    }
-
-    /// Main → Host `cron-run`：派发后回 `cron-run-result`（失败一律 transient，由 scheduler 退避）。
-    pub fn handle_cron_run(self: &Arc<Self>, message: Value) {
-        let Some(request) = CronRunRequest::parse(&message) else {
-            log::warn("ignored invalid cron-run message");
-            return;
-        };
-        let dispatcher = self.clone();
-        tokio::spawn(async move {
-            let reply = match dispatcher.dispatch(&request).await {
-                Ok(task_id) => json!({
-                    "type": "cron-run-result",
-                    "runId": request.run_id,
-                    "ok": true,
-                    "taskId": task_id,
-                    "sessionId": task_id,
-                }),
-                Err(error) => json!({
-                    "type": "cron-run-result",
-                    "runId": request.run_id,
-                    "ok": false,
-                    "error": error,
-                    "failureKind": "transient",
-                }),
-            };
-            dispatcher.area.bridge.post(reply);
-        });
     }
 
     /// `resolveAutomationSubmissionModelSelection`：已固定的 run 直接复用；否则读持久层的新版意图，

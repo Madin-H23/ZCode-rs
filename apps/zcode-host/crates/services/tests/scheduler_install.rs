@@ -240,4 +240,11 @@ async fn due_automation_is_dispatched_and_settled_without_any_connection() {
             "{kind} was sent to Main"
         );
     }
+    // 执行中的闲时任务数：启动后的第一次上报总会发出（这里没有闲时任务，是 0），之后只在变化时发。
+    let counts: Vec<&Value> = sent
+        .iter()
+        .filter(|message| message["type"] == "off-peak-active-count")
+        .collect();
+    assert_eq!(counts.len(), 1, "{counts:?}");
+    assert_eq!(counts[0]["count"], 0);
 }

@@ -15,6 +15,7 @@ import {
   hostAttachmentEndpointIssuedResponseSchema,
   hostEndpointReadyResponseSchema,
   hostLogResponseSchema,
+  hostOffPeakActiveCountResponseSchema,
   serviceEndpointPayloadSchema,
 } from "@zcode/shared";
 
@@ -48,6 +49,11 @@ function startHost(): Host {
     // 结构化日志必须符合 Main 的 hostLogResponseSchema，校验后不交给测试步骤。
     if (message.type === "log") {
       hostLogResponseSchema.parse(message);
+      return;
+    }
+    // 调度器对执行中闲时任务数的上报与测试步骤无关、随时可能到达：按 Main 的 schema 校验后同样不交给步骤。
+    if (message.type === "off-peak-active-count") {
+      hostOffPeakActiveCountResponseSchema.parse(message);
       return;
     }
     const waiter = waiters.shift();

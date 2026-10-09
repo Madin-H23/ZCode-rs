@@ -1,5 +1,5 @@
-//! `off-peak-run` 派发（packages/desktop/src/host/index.ts 的 dispatchOffPeakRun、finalizeOffPeakRun
-//! 与 offPeakDispatchPlan.ts）。
+//! 闲时任务派发（packages/desktop/src/host/index.ts 的 dispatchOffPeakRun、finalizeOffPeakRun
+//! 与 offPeakDispatchPlan.ts）。由 Host 内的 Scheduler 调用，请求沿用 `off-peak-run` 的形状。
 //!
 //! 三个分支：resume（已跑过，续跑同一会话、发续跑提示词）、bound-first-run（会话内创建，恢复绑定
 //! 会话执行原 prompt）、init（新建专属会话）。闲时 Selection 与逐请求鉴权只注入本轮执行。
@@ -144,34 +144,6 @@ impl OffPeakDispatcher {
         self.tracked
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    /// Main → Host `off-peak-run`：派发后回 `off-peak-run-result`。
-    pub fn handle(self: &Arc<Self>, message: Value) {
-        let Some(request) = OffPeakRunRequest::parse(&message) else {
-            log::warn("ignored invalid off-peak-run message");
-            return;
-        };
-        let dispatcher = self.clone();
-        tokio::spawn(async move {
-            let reply = match dispatcher.dispatch(&request).await {
-                Ok(session_id) => json!({
-                    "type": "off-peak-run-result",
-                    "offPeakTaskId": request.off_peak_task_id,
-                    "ok": true,
-                    "conversationId": session_id,
-                    "sessionId": session_id,
-                }),
-                Err(error) => json!({
-                    "type": "off-peak-run-result",
-                    "offPeakTaskId": request.off_peak_task_id,
-                    "ok": false,
-                    "error": error.message,
-                    "failureKind": if error.permanent { "permanent" } else { "transient" },
-                }),
-            };
-            dispatcher.area.bridge.post(reply);
-        });
     }
 
     pub async fn dispatch(

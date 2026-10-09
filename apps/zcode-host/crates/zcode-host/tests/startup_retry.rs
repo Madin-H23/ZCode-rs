@@ -13,6 +13,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use zcode_host_rpc::{FrameReader, Reader};
 
+/// 调度器对执行中闲时任务数的上报：与请求无关、随时可能到达，读“下一条控制消息”时跳过。
+const UNSOLICITED_REPORT: &str = "off-peak-active-count";
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct Host {
@@ -38,6 +40,9 @@ impl Host {
                 .unwrap()
                 .expect("control stdout open");
             let message: Value = serde_json::from_str(&line).unwrap();
+            if message["type"] == UNSOLICITED_REPORT {
+                continue;
+            }
             if message["type"] != "log" {
                 return Some(message);
             }
@@ -184,9 +189,16 @@ async fn failed_startup_retries_with_a_new_attempt() {
     .expect("Initialize after retry");
     assert_eq!(initialize, json!([200]));
 
-    // ready 之后的 retry 是空操作：不再产生状态。
+    // ready 之后的 retry 是空操作：不再产生启动状态。服务装好后 Host 会发与启动无关的消息
+    // （如调度器上报的 off-peak-active-count），所以只看启动状态。
     host.send(json!({"type": "database-startup-control", "control": {"action": "retry", "attemptId": new_attempt}}))
         .await;
-    assert!(host.recv_within(Duration::from_millis(300)).await.is_none());
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(300);
+    while let Some(message) = host
+        .recv_within(deadline.saturating_duration_since(tokio::time::Instant::now()))
+        .await
+    {
+        assert_ne!(message["type"], "database-startup-state", "{message}");
+    }
     assert!(port > 0);
 }

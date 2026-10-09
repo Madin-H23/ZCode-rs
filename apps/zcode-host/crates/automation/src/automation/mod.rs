@@ -184,11 +184,11 @@ pub fn install(
 ) -> AreaHandle {
     let area = Arc::new(area);
     let mut parts: Vec<Keepalive> = vec![Box::new(area.clone())];
-    let (service, cron) = install_automation(&area, router);
+    let (service, cron) = install_automation(&area);
     parts.extend(crate::cua_permission::install(&area, registry, router));
     parts.extend(crate::conversation_share::install(&area, registry, router));
     let bots = crate::bots::install(&area, registry, router);
-    let off_peak = crate::off_peak::install(&area, registry, router).map(|installed| {
+    let off_peak = crate::off_peak::install(&area, registry).map(|installed| {
         parts.push(installed.keepalive);
         installed.dispatcher
     });
@@ -202,10 +202,9 @@ pub fn install(
     }
 }
 
-/// automation 本体：服务、`zcode-agent` 成员、CLI 反向请求与 `cron-run` 派发。
+/// automation 本体：服务、`zcode-agent` 成员、CLI 反向请求与派发器（由 Scheduler 调用）。
 fn install_automation(
     area: &Arc<Area>,
-    router: &mut ControlRouter,
 ) -> (Arc<service::AutomationService>, Arc<dispatch::Dispatcher>) {
     let zone: Arc<dyn time::Zone> = Arc::new(time::local_zone());
     let clock: service::Clock = Arc::new(|| {
@@ -220,10 +219,5 @@ fn install_automation(
         dispatch::Dispatcher::start(area.clone(), service.clone(), area.driver.clone());
     members::register(&area.agent, service.clone(), dispatcher.clone());
     reverse::register(&area.agent, service.clone(), area.tasks_index.clone());
-    // Main 的 Node scheduler 经 Main 转发的派发；Rust 开关下 Main 停止拉起它之后不再有发送方，集成时删除。
-    let cron = dispatcher.clone();
-    router.on(dispatch::CRON_RUN, move |message| {
-        cron.handle_cron_run(message)
-    });
     (service, dispatcher)
 }

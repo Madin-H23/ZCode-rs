@@ -57,7 +57,7 @@ pub(super) fn cron_run_message(
     fixed_selection: Option<&Value>,
 ) -> Value {
     let mut message = Map::new();
-    message.insert("type".into(), json!("cron-run"));
+    message.insert("type".into(), json!(crate::automation::dispatch::CRON_RUN));
     message.insert("automationId".into(), automation["automationId"].clone());
     message.insert("runId".into(), json!(run_id));
     message.insert("prompt".into(), automation["prompt"].clone());
@@ -80,7 +80,10 @@ pub(super) fn cron_run_message(
 /// `offpeak-dispatch-request` 经 Main 翻译后的 `off-peak-run` 消息。
 pub(super) fn off_peak_run_message(task: &Value) -> Value {
     let mut message = Map::new();
-    message.insert("type".into(), json!("off-peak-run"));
+    message.insert(
+        "type".into(),
+        json!(crate::off_peak::dispatch::OFF_PEAK_RUN),
+    );
     for key in [
         "offPeakTaskId",
         "prompt",

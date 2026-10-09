@@ -28,6 +28,8 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use zcode_host_rpc::{FrameReader, Reader, codec, frame};
 
+/// 调度器对执行中闲时任务数的上报：与请求无关、随时可能到达，读“下一条控制消息”时跳过。
+const UNSOLICITED_REPORT: &str = "off-peak-active-count";
 const WORKSPACES: usize = 4;
 const STREAM_CHUNKS: usize = 600;
 const CHUNK_GAP: Duration = Duration::from_millis(20);
@@ -148,6 +150,9 @@ impl Control {
                 .unwrap()
                 .expect("control stdout open");
             let message: Value = serde_json::from_str(&line).unwrap();
+            if message["type"] == UNSOLICITED_REPORT {
+                continue;
+            }
             if message["type"] != "log" {
                 return message;
             }
