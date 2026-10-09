@@ -11,7 +11,7 @@ Rust Host 不再为每个 workspace 启动 CLI 子进程，runtime 以库的形�
 | A   | 嵌入式链路：Host 的 agent 子系统通过内存管道与进程内 runtime 通信，协议仍是今天的 NDJSON 行；进程管理的语义（按 workspace 的实例、代次、惰性重启、生命周期事件）不变 | 一个 Host 进程，没有 CLI 子进程；Host 的其余代码不感知差别 |
 | B   | 去掉进程内的序列化往返，合并两边重复的状态（rust-unified-host.md 2.3 的 P2）：投递与订阅、sessions-index、provider 注册表；反向请求改为端口；已接受输入的持久化      | Host 直接与 runtime 交换类型化消息                         |
 
-本文先规定 A 期。B 期在 A 期验证通过、U2 的服务拆分完成后另写一节。
+本文规定 A 期。B 期见 [rust-u3-stage-b.md](rust-u3-stage-b.md)。
 
 ## 2. A 期的规则
 
