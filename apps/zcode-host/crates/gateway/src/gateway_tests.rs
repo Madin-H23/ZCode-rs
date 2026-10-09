@@ -105,7 +105,7 @@ impl Client {
     }
 }
 
-/// 可观测的 channel：参数 `{n, gate?, panic?, bytes?}`。
+/// 可观测的 channel：参数 `{n, key?, gate?, panic?, bytes?}`。
 #[derive(Default)]
 struct Probe {
     log: Mutex<Vec<String>>,
@@ -129,6 +129,15 @@ impl Probe {
             .entry(name.to_owned())
             .or_insert_with(|| watch::Sender::new(false))
             .subscribe()
+    }
+
+    fn open(&self, name: &str) {
+        self.gates
+            .lock()
+            .unwrap()
+            .entry(name.to_owned())
+            .or_insert_with(|| watch::Sender::new(false))
+            .send_replace(true);
     }
 
     async fn wait_for(&self, entry: &str) {
@@ -163,6 +172,10 @@ fn params(args: &[RpcValue]) -> Option<&Value> {
 }
 
 impl ServiceChannel for ProbeChannel {
+    fn serial_key(&self, _: &CallContext, _: &str, args: &[RpcValue]) -> Option<String> {
+        params(args)?["key"].as_str().map(str::to_owned)
+    }
+
     fn call(&self, _: &CallContext, _: &str, args: Vec<RpcValue>) -> CallFuture {
         let params = params(&args).cloned().unwrap_or_default();
         let probe = self.0.clone();
@@ -327,13 +340,134 @@ async fn listen_is_accepted_without_reply() {
     assert_eq!(client.next().await.0, json!([202, 6]));
 }
 
+/// G1：同一连接上连续到达的同键调用按到达顺序逐个执行。修复前（每个调用一个任务、谁先被调度谁先
+/// 执行）同样的 2000 个调用里有六百多对相邻调用的开始顺序与到达顺序相反。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn calls_with_one_key_run_one_at_a_time_in_arrival_order() {
+    const CALLS: i64 = 2000;
+    let host = host(OutboundLimits::default());
+    let (probe, registry) = probe_registry();
+    let client = connected(&host, "a1", &registry).await;
+    for n in 0..CALLS {
+        client
+            .call(n as i32 + 10, "x", json!({"n": n, "key": "session:w:s"}))
+            .await;
+    }
+    let mut replies = Vec::new();
+    for _ in 0..CALLS {
+        replies.push(client.next().await.0);
+    }
+    let expected_log: Vec<String> = (0..CALLS)
+        .flat_map(|n| [format!("start:{n}"), format!("end:{n}")])
+        .collect();
+    assert_eq!(probe.log(), expected_log, "no overlap, arrival order");
+    let expected_replies: Vec<Value> = (0..CALLS).map(|n| json!([201, n + 10])).collect();
+    assert_eq!(replies, expected_replies);
+    eventually("the idle lane is removed", || {
+        host.gateway.shared.lanes.is_empty()
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn different_keys_run_in_parallel() {
+    let host = host(OutboundLimits::default());
+    let (probe, registry) = probe_registry();
+    let client = connected(&host, "a1", &registry).await;
+    client
+        .call(1, "x", json!({"n": 1, "key": "a", "gate": "a"}))
+        .await;
+    probe.wait_for("start:1").await;
+    client.call(2, "x", json!({"n": 2, "key": "b"})).await;
+    assert_eq!(client.next().await.0, json!([201, 2]), "b is not behind a");
+    probe.open("a");
+    assert_eq!(client.next().await.0, json!([201, 1]));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unkeyed_calls_are_not_blocked_by_a_keyed_lane() {
+    let host = host(OutboundLimits::default());
+    let (probe, registry) = probe_registry();
+    let client = connected(&host, "a1", &registry).await;
+    client
+        .call(1, "x", json!({"n": 1, "key": "k", "gate": "k"}))
+        .await;
+    client.call(2, "x", json!({"n": 2, "key": "k"})).await;
+    client.call(3, "x", json!({"n": 3})).await;
+    assert_eq!(client.next().await.0, json!([201, 3]));
+    assert!(
+        !probe.log().contains(&"start:2".to_owned()),
+        "the second keyed call waits for the first"
+    );
+    probe.open("k");
+    assert_eq!(client.next().await.0, json!([201, 1]));
+    assert_eq!(client.next().await.0, json!([201, 2]));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cancelled_queued_call_never_runs() {
+    let host = host(OutboundLimits::default());
+    let (probe, registry) = probe_registry();
+    let client = connected(&host, "a1", &registry).await;
+    client
+        .call(1, "x", json!({"n": 1, "key": "k", "gate": "k"}))
+        .await;
+    client.call(2, "x", json!({"n": 2, "key": "k"})).await;
+    client.call(3, "x", json!({"n": 3, "key": "k"})).await;
+    probe.wait_for("start:1").await;
+    client.send(json!([101, 2]), None).await;
+    probe.open("k");
+    assert_eq!(client.next().await.0, json!([201, 1]));
+    assert_eq!(client.next().await.0, json!([201, 3]));
+    assert_eq!(
+        probe.log(),
+        ["start:1", "end:1", "start:3", "end:3"],
+        "the cancelled call left the queue without starting"
+    );
+    eventually("the idle lane is removed", || {
+        host.gateway.shared.lanes.is_empty()
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closing_a_connection_drops_its_queued_calls_and_the_key_moves_on() {
+    let host = host(OutboundLimits::default());
+    let (probe, registry) = probe_registry();
+    let first = connected(&host, "a1", &registry).await;
+    let second = connected(&host, "a2", &registry).await;
+    first
+        .call(1, "x", json!({"n": 1, "key": "k", "gate": "k"}))
+        .await;
+    probe.wait_for("start:1").await;
+    first.call(2, "x", json!({"n": 2, "key": "k"})).await;
+    second.call(3, "x", json!({"n": 3, "key": "k"})).await;
+    let Client(Connection {
+        id,
+        inbound,
+        outbound,
+        ..
+    }) = first;
+    // transport 停止读取（对端断开）。
+    drop(inbound);
+    assert_eq!(second.next().await.0, json!([201, 3]));
+    probe.wait_for(&format!("closed:{id}")).await;
+    let log = probe.log();
+    assert!(log.contains(&"dropped:1".to_owned()), "{log:?}");
+    assert!(!log.contains(&"start:2".to_owned()), "{log:?}");
+    assert_eq!(outbound.next().await, None);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn connection_closed_runs_once_after_the_connection_tasks_ended() {
     let host = host(OutboundLimits::default());
     let (probe, registry) = probe_registry();
     let client = connected(&host, "a1", &registry).await;
     client.call(1, "x", json!({"n": 1, "gate": "g"})).await;
-    client.call(2, "x", json!({"n": 2, "gate": "g"})).await;
+    client
+        .call(2, "x", json!({"n": 2, "key": "k", "gate": "g"}))
+        .await;
+    client.call(3, "x", json!({"n": 3, "key": "k"})).await;
     client.send(json!([102, 4, "probe", "onEvent"]), None).await;
     probe.wait_for("start:1").await;
     probe.wait_for("start:2").await;
@@ -359,7 +493,9 @@ async fn connection_closed_runs_once_after_the_connection_tasks_ended() {
         let at = log.iter().position(|entry| entry == dropped);
         assert!(at.is_some_and(|at| at < closed_at), "{log:?}");
     }
+    assert!(!log.contains(&"start:3".to_owned()), "{log:?}");
     assert!(host.gateway.connections().is_empty());
+    assert!(host.gateway.shared.lanes.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -424,15 +560,17 @@ async fn a_panicking_handler_answers_with_an_error_and_is_reported() {
     let host = host(OutboundLimits::default());
     let (_, registry) = probe_registry();
     let client = connected(&host, "a1", &registry).await;
-    client.call(1, "x", json!({"n": 1, "panic": true})).await;
+    client
+        .call(1, "x", json!({"n": 1, "key": "k", "panic": true}))
+        .await;
     let (header, body) = client.next().await;
     assert_eq!(header, json!([202, 1]));
     assert_eq!(
         body.into_json()["message"],
         "probe.x failed: internal error in the Rust Host"
     );
-    // 连接继续工作。
-    client.call(2, "x", json!({"n": 2})).await;
+    // 通道已释放，连接继续工作。
+    client.call(2, "x", json!({"n": 2, "key": "k"})).await;
     assert_eq!(client.next().await.0, json!([201, 2]));
     eventually("the panic is reported", || {
         !host.panics.lock().unwrap().is_empty()

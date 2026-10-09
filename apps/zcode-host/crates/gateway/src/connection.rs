@@ -9,6 +9,7 @@
 //!
 //! ```text
 //! 停止读取（释放 inbound 接收端）
+//!   → 排队中的调用离开串行通道（不会开始）
 //!   → 出站队列关闭（transport 的写循环结束），中止连接作用域里的调用与订阅转发，等它们结束
 //!   → 各 channel 的 connection_closed（恰好一次）
 //! ```
@@ -22,10 +23,13 @@ use std::time::Instant;
 use futures_util::{FutureExt, StreamExt};
 use tokio::sync::{mpsc, watch};
 use zcode_async::{Spawner, Task, TaskScope};
-use zcode_host_kit::{CallContext, CallFuture, ChannelRegistry, FlowState, Reply, log};
+use zcode_host_kit::{
+    CallContext, CallFuture, ChannelRegistry, FlowState, Reply, ServiceChannel, log,
+};
 use zcode_host_rpc::codec::{self, RESPONSE_EVENT_FIRE, RESPONSE_PROMISE_SUCCESS};
 use zcode_host_rpc::{Request, RequestKind, RpcError, RpcValue, read_request};
 
+use crate::lanes::Ticket;
 use crate::outbound::{CloseSwitch, Outbound, Queue};
 use crate::{AttachmentMeta, ChannelSource, Channels, Entry, Shared};
 
@@ -113,7 +117,8 @@ pub(crate) fn connect(
 }
 
 /// 连接在注册表里的登记与它的作用域。正常收口由 [`Live::close`] 按顺序完成；循环被中止或 panic
-/// 时由这里兜底：出站队列关闭（transport 随之结束），之后字段 `scope` 被释放，作用域里的任务被中止。
+/// 时由这里兜底：排队中的调用离队，出站队列关闭（transport 随之结束），之后字段 `scope` 被释放，
+/// 作用域里的任务被中止。
 struct Registration {
     shared: Arc<Shared>,
     id: u64,
@@ -123,6 +128,7 @@ struct Registration {
 
 impl Drop for Registration {
     fn drop(&mut self) {
+        self.shared.lanes.withdraw_connection(self.id);
         self.queue.close();
         self.shared.connections().remove(&self.id);
     }
@@ -207,11 +213,29 @@ async fn wait_ended(ended: Option<&mut watch::Receiver<bool>>) {
     std::future::pending().await
 }
 
-/// 连接作用域里的任务（调用或订阅转发），按请求 id。
-type RunningTasks = Arc<Mutex<HashMap<i32, Task<()>>>>;
+/// 连接作用域里的一个任务（调用或订阅转发）。
+struct Running {
+    task: Task<()>,
+    /// 有串行键的调用：键与排队位置，客户端取消时用来离队。
+    lane: Option<(String, u64)>,
+}
 
-fn lock(running: &RunningTasks) -> MutexGuard<'_, HashMap<i32, Task<()>>> {
+type RunningTasks = Arc<Mutex<HashMap<i32, Running>>>;
+
+fn lock(running: &RunningTasks) -> MutexGuard<'_, HashMap<i32, Running>> {
     running.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// 调用怎样开始：没有键的调用在到达时就调用 `channel.call`（与今天相同，转发型 channel 因此按到达
+/// 顺序发出请求）；有键的调用轮到它时才调用。
+enum Start {
+    Now(CallFuture),
+    Queued {
+        ticket: Ticket,
+        channel: Arc<dyn ServiceChannel>,
+        context: CallContext,
+        args: Vec<RpcValue>,
+    },
 }
 
 struct Live {
@@ -257,13 +281,43 @@ impl Live {
                 .push(codec::promise_error(id, &unknown_channel(&channel_name)));
             return;
         };
-        // RPC 网络遥测（NetworkTelemetryChannelServer）：只包已登记的 channel，计时含整个调用。
+        // RPC 网络遥测（NetworkTelemetryChannelServer）：只包已登记的 channel，计时含排队与整个调用。
         let started = Instant::now();
-        let future = match std::panic::catch_unwind(AssertUnwindSafe(|| {
-            channel.call(&self.context, &method, args)
+        let key = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+            channel.serial_key(&self.context, &method, &args)
         })) {
-            Ok(future) => future,
+            Ok(key) => key,
             Err(payload) => return self.panicked_in_loop(id, &channel_name, &method, &*payload),
+        };
+        let (start, lane) = match key {
+            Some(key) => {
+                // 修复 G1（rust-u2-gateway.md §1）：之前每个调用一到达就各自成为一个任务，多线程运行时上
+                // 谁先执行不确定，同一连接连续 2000 个调用里有六百多对相邻调用的执行顺序与到达顺序相反，
+                // 连续发出的两条会话命令可能以相反的顺序到达 runtime。现在有键的调用在这里同步登记排队
+                // 位置（连接循环按到达顺序处理请求），轮到它时才开始，不依赖任务调度或异步锁的公平性。
+                let ticket = self
+                    .shared
+                    .lanes
+                    .enter(key.clone(), self.context.connection);
+                let lane = Some((key, ticket.id()));
+                (
+                    Start::Queued {
+                        ticket,
+                        channel,
+                        context: self.context.clone(),
+                        args,
+                    },
+                    lane,
+                )
+            }
+            None => match std::panic::catch_unwind(AssertUnwindSafe(|| {
+                channel.call(&self.context, &method, args)
+            })) {
+                Ok(call) => (Start::Now(call), None),
+                Err(payload) => {
+                    return self.panicked_in_loop(id, &channel_name, &method, &*payload);
+                }
+            },
         };
         let call = Call {
             id,
@@ -274,7 +328,7 @@ impl Live {
             observer: self.shared.observer.clone(),
             running: self.running.clone(),
         };
-        self.track(id, "call", call.run(future));
+        self.track(id, lane, "call", call.run(start));
     }
 
     fn listen(&self, request: Request) {
@@ -306,7 +360,7 @@ impl Live {
             }
         };
         let (id, queue, running) = (request.id, self.queue.clone(), self.running.clone());
-        self.track(id, "listen", async move {
+        self.track(id, None, "listen", async move {
             while let Some(event) = events.next().await {
                 if !queue.push(encode_reply(RESPONSE_EVENT_FIRE, id, event)) {
                     break;
@@ -320,24 +374,29 @@ impl Live {
     fn track(
         &self,
         id: i32,
+        lane: Option<(String, u64)>,
         name: &'static str,
         future: impl Future<Output = ()> + Send + 'static,
     ) {
         let mut running = lock(&self.running);
         let task = self.spawner.spawn(name, future);
-        running.insert(id, task);
+        running.insert(id, Running { task, lane });
     }
 
-    /// 客户端取消调用或订阅。被中止的任务留在表里，直到它真正结束后被清掉（或在连接关闭时被等待）。
+    /// 客户端取消调用或订阅。排队中的调用先离队，保证不会开始；被中止的任务留在表里，直到它真正
+    /// 结束后被清掉（或在连接关闭时被等待）。
     fn cancel(&self, id: i32) {
         let mut running = lock(&self.running);
-        if let Some(task) = running.get(&id) {
-            task.abort();
+        if let Some(entry) = running.get(&id) {
+            if let Some((key, ticket)) = &entry.lane {
+                self.shared.lanes.withdraw(key, *ticket);
+            }
+            entry.task.abort();
         }
-        running.retain(|_, task| !task.is_finished());
+        running.retain(|_, entry| !entry.task.is_finished());
     }
 
-    /// 同步部分（`call` 返回 future 之前）panic：回错误，不让连接循环随之结束。
+    /// 同步部分（`serial_key`、`call` 返回 future 之前）panic：回错误，不让连接循环随之结束。
     fn panicked_in_loop(&self, id: i32, channel: &str, method: &str, payload: &(dyn Any + Send)) {
         let message = panic_message(payload);
         log::error(format!(
@@ -356,18 +415,25 @@ impl Live {
 
     /// 连接关闭（§2.4）。调用方已停止读取。
     async fn close(self, registration: Registration) {
-        // 2. 出站队列关闭（transport 的写循环随之结束），中止调用与订阅转发并等它们真正结束：
+        // 2. 排队中的调用离队：之后释放通道的调用不会把通道交给这条连接的调用。
+        self.shared
+            .lanes
+            .withdraw_connection(self.context.connection);
+        // 3. 出站队列关闭（transport 的写循环随之结束），中止调用与订阅转发并等它们真正结束：
         //    任务的 future（含 channel 的调用 future）都已释放之后才通知 channel。
         self.queue.close();
-        let tasks: Vec<Task<()>> = lock(&self.running).drain().map(|(_, task)| task).collect();
-        for task in &tasks {
-            task.abort();
+        let tasks: Vec<Running> = lock(&self.running)
+            .drain()
+            .map(|(_, entry)| entry)
+            .collect();
+        for entry in &tasks {
+            entry.task.abort();
         }
-        for task in tasks {
-            let _ = task.await;
+        for entry in tasks {
+            let _ = entry.task.await;
         }
         drop(registration);
-        // 3. 按连接持有状态的 channel 清理；每条连接只走到这里一次。
+        // 4. 按连接持有状态的 channel 清理；每条连接只走到这里一次。
         self.registry.connection_closed(&self.context);
         log::debug(format!("attachment {} closed", self.context.attachment_id));
     }
@@ -385,13 +451,40 @@ struct Call {
 }
 
 impl Call {
-    async fn run(self, call: CallFuture) {
+    async fn run(self, start: Start) {
+        let (call, ticket) = match start {
+            Start::Now(call) => (call, None),
+            Start::Queued {
+                mut ticket,
+                channel,
+                context,
+                args,
+            } => {
+                if !ticket.turn().await {
+                    // 排队中被撤出（取消、连接关闭）：不开始，也不应答。
+                    drop(ticket);
+                    lock(&self.running).remove(&self.id);
+                    return;
+                }
+                let method = &self.method;
+                match std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    channel.call(&context, method, args)
+                })) {
+                    Ok(call) => (call, Some(ticket)),
+                    Err(payload) => return self.finish(Err(payload), Some(ticket)),
+                }
+            }
+        };
         let outcome = AssertUnwindSafe(call).catch_unwind().await;
-        self.finish(outcome);
+        self.finish(outcome, ticket);
     }
 
-    /// 应答 → 从连接的任务表移除；handler panic 时回错误后把 panic 交还作用域上报。
-    fn finish(self, outcome: Result<Result<Reply, RpcError>, Box<dyn Any + Send>>) {
+    /// 应答 → 释放串行通道 → 从连接的任务表移除；handler panic 时回错误后把 panic 交还作用域上报。
+    fn finish(
+        self,
+        outcome: Result<Result<Reply, RpcError>, Box<dyn Any + Send>>,
+        ticket: Option<Ticket>,
+    ) {
         let elapsed = self.started.elapsed();
         let (response, panic) = match outcome {
             Ok(result) => {
@@ -414,7 +507,9 @@ impl Call {
                 (codec::promise_error(self.id, &error), Some(payload))
             }
         };
+        // 应答先于释放通道入队：同一键的下一个调用的应答排在它后面。
         self.queue.push(response);
+        drop(ticket);
         lock(&self.running).remove(&self.id);
         if let Some(payload) = panic {
             // 交给作用域的上报（作用域路径与任务名进 Host 日志）；应答已经发出，等待方不会挂起。

@@ -6,10 +6,12 @@
 //! - 连接注册表：每条连接的 id、attachment 元数据、任务作用域与关闭开关；
 //! - 每条连接的 `@zcode/rpc` 服务端循环（`connection.rs`）；
 //! - 每条连接一个按字节计数的出站队列与积压水位（`outbound.rs`）；
+//! - Host 级的串行键通道（`lanes.rs`）。
 //!
 //! 它只认识 [`zcode_host_kit::ServiceChannel`]，不认识任何业务 service；channel 表由组装层经 [`ChannelSource`] 给出。
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 mod connection;
+mod lanes;
 mod outbound;
 
 use std::collections::HashMap;
@@ -28,6 +30,7 @@ use zcode_host_rpc::RpcError;
 pub use connection::{Connection, ConnectionClosed, Inbound};
 pub use outbound::{Outbound, OutboundLimits};
 
+use lanes::Lanes;
 use outbound::{CloseSwitch, Queue};
 
 /// 签发 capability 时登记的 attachment 元数据；连接建立后成为它的可信上下文（`CallContext`）。
@@ -81,6 +84,7 @@ pub struct Gateway {
 pub(crate) struct Shared {
     /// 连接循环所在的作用域；每条连接的作用域是它的子作用域 `connection:<id>`。
     root: Spawner,
+    lanes: Arc<Lanes>,
     observer: Arc<dyn CallObserver>,
     limits: OutboundLimits,
     next_connection: AtomicU64,
@@ -109,6 +113,7 @@ impl Gateway {
         Self {
             shared: Arc::new(Shared {
                 root,
+                lanes: Arc::default(),
                 observer,
                 limits,
                 next_connection: AtomicU64::new(1),
@@ -163,3 +168,7 @@ mod tests;
 #[cfg(test)]
 #[path = "outbound_tests.rs"]
 mod outbound_tests;
+
+#[cfg(test)]
+#[path = "lanes_tests.rs"]
+mod lanes_tests;
