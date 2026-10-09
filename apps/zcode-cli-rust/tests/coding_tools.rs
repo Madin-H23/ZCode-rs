@@ -4,7 +4,8 @@ use tokio_util::sync::CancellationToken;
 #[tokio::test]
 async fn files_are_paged_fresh_and_session_scoped() {
     let root = tempfile::tempdir().unwrap();
-    let tools = zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts"));
+    let tools =
+        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap();
     let c = CancellationToken::new();
     tools
         .call(
@@ -83,7 +84,8 @@ async fn search_pagination_and_regex_are_native() {
     tokio::fs::write(root.path().join(".ignore"), "b.txt\n")
         .await
         .unwrap();
-    let tools = zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts"));
+    let tools =
+        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap();
     let c = CancellationToken::new();
     let out = tools
         .call("s", "Glob", &json!({"pattern":"**/*.rs"}), &c)
@@ -126,10 +128,9 @@ async fn background_registration_requires_commit_and_eof_reaps_processes() {
     use tokio::sync::mpsc;
     use zcode_cli_core_api::{Event, EventSink, ToolPort};
     let root = tempfile::tempdir().unwrap();
-    let tools = std::sync::Arc::new(zcode_cli_rust::workspace_tools(
-        root.path().into(),
-        root.path().join("artifacts"),
-    ));
+    let tools = std::sync::Arc::new(
+        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap(),
+    );
     let (tx, mut rx) = mpsc::channel(16);
     let sink = EventSink {
         session_id: "one".into(),
@@ -229,10 +230,9 @@ async fn background_registration_requires_commit_and_eof_reaps_processes() {
 async fn cancelled_background_registration_has_terminal_event_without_spawning() {
     use zcode_cli_core_api::{Event, EventSink, ToolPort};
     let root = tempfile::tempdir().unwrap();
-    let tools = std::sync::Arc::new(zcode_cli_rust::workspace_tools(
-        root.path().into(),
-        root.path().join("artifacts"),
-    ));
+    let tools = std::sync::Arc::new(
+        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap(),
+    );
     let (tx, mut rx) = tokio::sync::mpsc::channel(16);
     let sink = EventSink {
         session_id: "s".into(),
@@ -284,7 +284,8 @@ async fn cancelled_background_registration_has_terminal_event_without_spawning()
 async fn close_releases_only_its_session_file_observations() {
     use zcode_cli_core_api::ToolPort;
     let root = tempfile::tempdir().unwrap();
-    let tools = zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts"));
+    let tools =
+        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap();
     tokio::fs::write(root.path().join("a.txt"), "one")
         .await
         .unwrap();
@@ -307,7 +308,8 @@ async fn huge_unicode_read_and_shell_output_are_bounded() {
         return;
     }
     let root = tempfile::tempdir().unwrap();
-    let tools = zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts"));
+    let tools =
+        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap();
     tokio::fs::write(root.path().join("large"), "汉".repeat(100_000))
         .await
         .unwrap();

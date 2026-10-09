@@ -14,11 +14,12 @@ pub(super) async fn discover(
     config: &serde_json::Value,
     cancel: &CancellationToken,
 ) -> Result<Vec<Profile>> {
+    let home = zcode_kit::paths::home_dir()?;
     let root = std::env::var("ZCODE_STORAGE_DIR")
         .ok()
         .or_else(|| config["storage"]["dir"].as_str().map(str::to_owned))
-        .map(|p| config::resolve(&config::home(), &p))
-        .unwrap_or_else(|| config::home().join(".zcode"));
+        .map(|p| config::resolve(&home, &p, &home))
+        .unwrap_or_else(|| home.join(".zcode"));
     let state = config::json_file(&root.join("v2/agents-state.json")).await?;
     let mut result = builtins()
         .into_iter()
@@ -146,11 +147,12 @@ pub(super) async fn memory(
     if config["features"]["memory"] == false || config["memory"]["use"] == false {
         return Ok(None);
     }
+    let home = zcode_kit::paths::home_dir()?;
     let storage = std::env::var("ZCODE_STORAGE_DIR")
         .ok()
         .or_else(|| config["storage"]["dir"].as_str().map(str::to_owned))
-        .map(|p| config::resolve(&config::home(), &p))
-        .unwrap_or_else(|| config::home().join(".zcode"));
+        .map(|p| config::resolve(&home, &p, &home))
+        .unwrap_or_else(|| home.join(".zcode"));
     let key = profile
         .name
         .chars()

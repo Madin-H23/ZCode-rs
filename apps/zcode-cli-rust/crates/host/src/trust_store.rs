@@ -10,11 +10,18 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
+use zcode_kit::fs::{FileMode, ParentDir, TempName, WriteOptions, atomic_write};
 
 const LOCK_TIMEOUT: Duration = Duration::from_millis(5_000);
 const STALE_LOCK_MS: u64 = 30_000;
 const LOCK_RETRY: Duration = Duration::from_millis(10);
-const RENAME_RETRIES_MS: [u64; 5] = [50, 100, 200, 400, 800];
+const RENAME_RETRIES: [Duration; 5] = [
+    Duration::from_millis(50),
+    Duration::from_millis(100),
+    Duration::from_millis(200),
+    Duration::from_millis(400),
+    Duration::from_millis(800),
+];
 const START_TIME_TOLERANCE_MS: i64 = 2_000;
 
 /// Node `resolveWorkspaceHookTrustStorePath`: `storage.dir` of the user config
@@ -197,46 +204,18 @@ impl FileTrustStore {
         .await
     }
 
-    /// Node `atomicWrite`: temp file, fsync, rename (retried when the target
-    /// is briefly busy), 0600.
+    /// Node `atomicWrite`: hidden temp file, 0600, rename retried while the
+    /// target is briefly busy (zcode-kit also fsyncs the file and directory).
     async fn write(&self, records: &[Record]) -> Result<()> {
-        let directory = self.file.parent().context("Trust store has no directory")?;
-        let name = self.file.file_name().unwrap_or_default().to_string_lossy();
-        let temp = directory.join(format!(
-            ".{name}.{}.{}.{:x}.tmp",
-            std::process::id(),
-            crate::now(),
-            uuid::Uuid::new_v4().as_u128() as u64
-        ));
-        let written = async {
-            let mut options = tokio::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            options.mode(0o600);
-            let mut handle = options.open(&temp).await?;
-            handle
-                .write_all(trust::store_content(records).as_bytes())
-                .await?;
-            handle.sync_all().await?;
-            drop(handle);
-            let mut attempt = 0;
-            loop {
-                match tokio::fs::rename(&temp, &self.file).await {
-                    Ok(()) => break,
-                    Err(error) if attempt < RENAME_RETRIES_MS.len() && retryable(&error) => {
-                        tokio::time::sleep(Duration::from_millis(RENAME_RETRIES_MS[attempt])).await;
-                        attempt += 1;
-                    }
-                    Err(error) => return Err(anyhow::Error::from(error)),
-                }
-            }
-            set_mode(&self.file, 0o600).await
-        }
-        .await;
-        if written.is_err() {
-            let _ = tokio::fs::remove_file(&temp).await;
-        }
-        written
+        let options = WriteOptions {
+            mode: FileMode::Private,
+            temp_name: TempName::Hidden,
+            // 目录由 locked() 的 ensure_directory 创建并设为 0700。
+            parent: ParentDir::Existing,
+            rename_retry: &RENAME_RETRIES,
+        };
+        let content = trust::store_content(records);
+        Ok(atomic_write(&self.file, content.as_bytes(), options).await?)
     }
 }
 
@@ -331,11 +310,6 @@ async fn remove(path: &Path) -> Result<()> {
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.into()),
         _ => Ok(()),
     }
-}
-
-fn retryable(error: &std::io::Error) -> bool {
-    error.kind() == std::io::ErrorKind::PermissionDenied
-        || matches!(error.raw_os_error(), Some(code) if code == 16 || code == 32)
 }
 
 async fn set_mode(path: &Path, mode: u32) -> Result<()> {

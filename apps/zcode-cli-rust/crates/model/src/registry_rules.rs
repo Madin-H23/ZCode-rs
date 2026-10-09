@@ -6,6 +6,7 @@ use crate::domain::option_map::{evaluate, validate_patches};
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
+use zcode_kit::secret::RedactedString;
 pub(super) fn validate_account(v: &Value) -> Result<()> {
     for k in ["revision", "basedOnZCodeBuiltinRevision"] {
         ensure!(
@@ -214,7 +215,7 @@ pub(super) fn resolve(
                         for (k, v) in headers {
                             c.headers.insert(
                                 k.clone(),
-                                v.as_str().context("Invalid provider header")?.into(),
+                                RedactedString::new(v.as_str().context("Invalid provider header")?),
                             );
                         }
                     }
@@ -223,7 +224,8 @@ pub(super) fn resolve(
                             json!({"type":"zhipu-account","accountType":config["access"]["accountType"],"mode":config["access"]["mode"],"entitled":true}),
                         );
                     } else {
-                        c.api_key_value = config["access"]["apiKey"].as_str().map(str::to_owned);
+                        c.api_key_value =
+                            config["access"]["apiKey"].as_str().map(RedactedString::new);
                     }
                     prepared.push((
                         (id.clone(), model.clone(), level.clone()),

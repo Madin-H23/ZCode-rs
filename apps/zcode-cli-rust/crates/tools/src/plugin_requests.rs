@@ -45,7 +45,7 @@ pub(super) async fn handle(
     } else {
         &snapshot.config
     };
-    let storage = plugins::records::storage_root(view, &config::home());
+    let storage = plugins::records::storage_root(view, &zcode_kit::paths::home_dir()?);
     let env = env_lookup(tools);
     let lookup = |name: &str| env.get(name).map(|v| (*v).to_owned());
     let request = plugins::Request {

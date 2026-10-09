@@ -6,8 +6,8 @@
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
 use std::path::Path;
-use tokio::io::AsyncWriteExt;
 use zcode_cli_domain::json_order::Ordered;
+use zcode_kit::fs::{FileMode, ParentDir, TempName, WriteOptions, atomic_write};
 
 const LEGACY_CUA: &str = "zcode-cua@zcode-plugins-official";
 const CANONICAL_CUA: &str = "computer-use@zcode-plugins-official";
@@ -44,36 +44,18 @@ async fn read(path: &Path) -> Result<Ordered> {
     Ok(tree)
 }
 
-/// Node `atomicWriteJson`: a same-directory 0600 temp file renamed over the target.
+/// Node `atomicWriteJson`: a same-directory hidden 0600 temp file renamed over the target.
 async fn write(path: &Path, tree: &Ordered) -> Result<()> {
-    let directory = path.parent().unwrap_or(Path::new("."));
-    tokio::fs::create_dir_all(directory).await?;
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let temp = directory.join(format!(
-        ".{name}.{}.{}.{}.tmp",
-        std::process::id(),
-        chrono::Utc::now().timestamp_millis(),
-        uuid::Uuid::new_v4().simple()
-    ));
+    let options = WriteOptions {
+        mode: FileMode::Private,
+        temp_name: TempName::Hidden,
+        parent: ParentDir::Create,
+        rename_retry: &[],
+    };
     let content = format!("{}\n", tree.pretty());
-    let result = async {
-        let mut options = tokio::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        options.mode(0o600);
-        let mut file = options.open(&temp).await?;
-        file.write_all(content.as_bytes()).await?;
-        file.sync_all().await?;
-        drop(file);
-        tokio::fs::rename(&temp, path).await
-    }
-    .await;
-    if let Err(error) = result {
-        let _ = tokio::fs::remove_file(&temp).await;
-        return Err(error)
-            .with_context(|| format!("Unable to write config file: {}", path.display()));
-    }
-    Ok(())
+    atomic_write(path, content.as_bytes(), options)
+        .await
+        .with_context(|| format!("Unable to write config file: {}", path.display()))
 }
 
 /// `parsed.plugins` as an object, created when missing or not an object.

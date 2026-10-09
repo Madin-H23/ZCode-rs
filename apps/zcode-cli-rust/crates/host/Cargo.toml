@@ -21,6 +21,7 @@ tracing.workspace = true
 uuid.workspace = true
 zcode-cli-core-api.workspace = true
 zcode-cli-domain.workspace = true
+zcode-kit.workspace = true
 zcode-proc.workspace = true
 
 [dev-dependencies]

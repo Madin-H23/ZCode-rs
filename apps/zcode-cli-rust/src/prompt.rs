@@ -172,7 +172,8 @@ fn watch_signals(interrupt: watch::Sender<Option<i32>>) {
 }
 
 async fn run(prompt: PromptArgs, cwd: PathBuf) -> anyhow::Result<i32> {
-    let home = runtime::home();
+    // B4 缺陷修复：同 app-server，home 解析失败时报错退出，不再把数据写到当前工作目录下。
+    let home = zcode_kit::paths::home_dir()?;
     let log_options = zcode_cli_host::logging::LogOptions::from_env(&home);
     let log_dir = log_options.directory.clone();
     let _logs = zcode_cli_host::logging::init(log_options);
@@ -188,7 +189,7 @@ async fn run(prompt: PromptArgs, cwd: PathBuf) -> anyhow::Result<i32> {
     let (interrupt_tx, interrupt) = watch::channel(None);
     watch_signals(interrupt_tx);
     let data_dir = prompt.data_dir.as_ref().map(PathBuf::from);
-    let ctx = runtime::Context::prepare(Some(cwd.clone()), data_dir).await?;
+    let ctx = runtime::Context::prepare(home, Some(cwd.clone()), data_dir).await?;
     let store: std::sync::Arc<dyn zcode_cli_core_api::SessionStore> =
         std::sync::Arc::new(ctx.node_store().await?);
     let config = prompt.config.as_ref().map(PathBuf::from);

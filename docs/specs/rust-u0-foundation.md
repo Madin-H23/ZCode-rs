@@ -48,35 +48,66 @@ Windows 测试范围先与现有 `rust-npm-windows.yml` 对齐，因为其余 cr
 
 ```rust
 pub mod fs {
-    /// 原子写：同目录 create_new 临时文件 → 写入 → sync_all → rename → fsync 父目录（Unix）。
+    /// 原子写：同目录 create_new 临时文件 → 写入 → sync_all → rename（按表重试）→ fsync 父目录（Unix，尽力而为）。
     /// 任一步失败都删除临时文件；目标文件要么是旧内容，要么是新内容。
     pub async fn atomic_write(path: &Path, bytes: &[u8], options: WriteOptions) -> io::Result<()>;
-    pub fn atomic_write_sync(path: &Path, bytes: &[u8], options: WriteOptions) -> io::Result<()>;
-    pub struct WriteOptions { pub mode: Option<u32> /* Unix 权限，如 0o600 */ }
+    pub struct WriteOptions {
+        pub mode: FileMode,                  // Default（0o666 & !umask）| Private（Unix 恰好 0600）
+        pub temp_name: TempName,             // Hidden `.<name>.<pid>.<ms>.<rand>.tmp` | Visible（不带前导点）
+        pub parent: ParentDir,               // Existing | Create（create_dir_all）
+        pub rename_retry: &'static [Duration], // PermissionDenied / ResourceBusy / Windows 32、33 时依次等待后重试
+    }
 }
 pub mod paths {
-    /// HOME → USERPROFILE（Windows）→ 系统用户数据库（Unix getpwuid_r）；都拿不到时报错，绝不返回空路径。
+    /// HOME → USERPROFILE → 系统用户数据库（Unix getpwuid_r）；空值视为未设置；都拿不到时报错，绝不返回空路径。
     pub fn home_dir() -> io::Result<PathBuf>;
-    /// `~` 与 `~/…`（Windows 也接受 `~\…`）展开为 home 下的路径；其余原样返回。
+    /// 同上，环境变量从 lookup 读取（composition root 捕获的环境快照，例如 Host 的 HostEnvironment）。
+    pub fn home_dir_with(lookup: impl Fn(&str) -> Option<OsString>) -> io::Result<PathBuf>;
+    /// `~` 与 `~/…`（Windows 也接受 `~\…`）展开为 home 下的路径；`~user` 与其余原样返回。
     pub fn expand_home(input: &str, home: &Path) -> PathBuf;
 }
 pub mod secret {
-    /// Debug / Display 输出 `<redacted>`；序列化为原值（发给 provider 时需要）。取值只能经 `expose()`。
-    pub struct RedactedString(String);
+    /// Debug / Display 输出 `<redacted>`；serde 按原值透明序列化（发给 provider 时需要）。取值只能经 `expose()`。
+    pub struct RedactedString(String); // new(impl Into<String>)、expose(&self) -> &str
 }
 pub mod redact {
-    /// 按值脱敏：`sk-…`、`Bearer …`、`AKIA…`、`ghp_…` 等形态替换为 `[REDACTED]`。
+    /// 按值脱敏（规则移植自 Codex secrets/sanitizer.rs，补充 GitHub token 与 `sk-proj-` / `sk-ant-`）：
+    /// `Bearer …`、`sk-…`、`AKIA…`、`gh[pousr]_…`、`github_pat_…`、`api_key=… / token: …` 等替换为 `[REDACTED]`。
+    /// 没有命中时返回 `Cow::Borrowed`。
     pub fn redact_secrets(text: &str) -> Cow<'_, str>;
 }
 ```
 
-迁移：
+`atomic_write` 只提供异步版本：迁移的调用处都是异步的，同步版本等有调用方时再加。持久性比 Node 的
+`atomicWriteText` / `atomicWritePrivateTextFile` 强（多了临时文件与父目录的 fsync）；内容、权限、临时文件命名与
+Node 一致，Node 与 Rust 交替写同一个文件时，Node 的过期临时文件清理（`<name>.*.tmp`）照常生效。
 
-- CLI 中手写的原子写（`plugins/src/{atomic_write,config_file}.rs`、`net/src/device.rs`、`host/src/{trust_store,hook_toggle}.rs`、`tools/src/{file_write,file_rewind,tools,checkpoint_blobs}.rs` 等）改用 `atomic_write`。各处原有的权限语义保留：原本写 0600 的继续写 0600，原本沿用已有文件权限的继续沿用。
-- Host `services/src/store/atomic.rs` 的写入部分改用 `atomic_write`；锁目录协议不变。
-- CLI 的 5 份 `home()` 改用 `paths::home_dir()`，`~` 展开改用 `expand_home`。Host 在 `HostEnvironment` 的构造中使用 `home_dir()`。
-- CLI `ModelConfig` 的 API key 与 header 值改为 `RedactedString`。
-- CLI `host/src/logging.rs` 与 Host `kit/src/log.rs`：日志文件以 0600 创建（Unix）；写入前对值调用 `redact_secrets`；CLI 退出时，若有丢弃的日志行，写一行 warn 记录数量。
+迁移（原子写，B6）：
+
+| 调用处                                             | 选项                                                            | 行为变化                                            |
+| -------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------- |
+| CLI `host/src/trust_store.rs`                      | Private、Hidden、Existing（目录由锁流程建并设 0700）、50…800 ms | 增加父目录 fsync；0600 改为 rename 前对临时文件设置 |
+| CLI `host/src/hook_toggle.rs`                      | Private、Hidden、Create、不重试                                 | 增加父目录 fsync                                    |
+| CLI `plugins/src/config_file.rs`                   | Private、Hidden、Create、不重试                                 | 增加父目录 fsync；建目录失败也带上下文信息          |
+| CLI `net/src/device.rs`（telemetry-state.json）    | Default、Hidden、Existing、不重试（与 Node 相同权限）           | 增加临时文件与父目录 fsync                          |
+| Host `store/atomic.rs` `atomic_write_text`         | Default、Visible、Existing、50…3200 ms                          | 增加 fsync；锁与过期临时文件清理仍在 Host，包在外层 |
+| Host `store/atomic.rs` `atomic_write_private_text` | Private、Hidden、Create、50…800 ms                              | 增加 fsync；临时文件改为 create_new、恰好 0600      |
+
+不迁移（语义不同，不是“临时文件 + rename 替换”）：
+
+- `plugins/src/atomic_write.rs`：Node `writeFileAtomically` 的事务协议（stage、备份、sidecar 事务记录与回滚）。
+- `tools/src/file_write.rs`：Write 工具沿用目标文件的已有权限，并在 rename 前核对观察到的版本（防止覆盖外部写入）。
+- `tools/src/checkpoint_blobs.rs`：按内容寻址的 blob，已 fsync 文件与父目录，已存在即复用。
+- `tools/src/file_rewind.rs`：rewind journal 的恢复协议（固定 `.tmp` 名，写后逐个恢复文件与权限）。
+- `tools/src/tools.rs` 的 `agent.output`、`state/src/node/artifacts.rs`：一次性产物，路径与临时名由 Node 的查找规则决定（artifacts 的临时名不能含 artifact id）。
+
+迁移（其余）：
+
+- CLI 的 5 份 `home()`（`src/lib.rs`、`src/runtime.rs`、`tools/src/extension_config.rs`、`tools/src/plugin_io.rs`、`host/src/storage_paths.rs`）改用 `paths::home_dir()`：`app-server` 与 `-p` 在入口解析一次（日志初始化之前），失败时报错退出；`storage_paths::resolve` 改为接收这个 home。`~` 展开统一用 `expand_home`，各调用处原有的相对路径基准不变（storage 相对 cwd，extension 配置相对各自的 base）；裸 `~` 现在展开为 home（以前被当作名为 `~` 的相对路径）。`plugin_io::home` 以前只读运行时环境里的 `HOME`（Windows 上通常为空），现在同样走 `home_dir()`。`lib.rs` 的 `egress()` / `workspace_tools()` 改为返回 `Result`。
+- Host `HostEnvironment::capture` 用 `home_dir_with` 读捕获的环境快照（仍先 trim），缺失时退回系统用户数据库，返回 `io::Result`；`main.rs` 在启动时传播错误。
+- CLI `ModelConfig.api_key_value` 与 `headers` 的值改为 `RedactedString`。
+- CLI `host/src/logging.rs`：新日志文件以 0600 创建，旧文件打开时收紧到 0600（Unix）；字符串字段、消息与错误文本写入前经 `redact_secrets`（原有的按字段名脱敏保留）；退出时的 Flush 若发现丢弃过日志行，写一行 `logging.lines_dropped` warn 记录数量（队列满时由临时线程等待空位，仍以 1 s 为上限）。
+- Host `kit/src/log.rs`：发给 Main 的日志与 stderr 输出都经 `redact_secrets`；Host 不自己创建日志文件（Main 落盘），无文件权限可设。
 
 ### 3.3 `zcode-async`
 

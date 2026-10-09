@@ -74,8 +74,9 @@ async fn write_control(mut messages: mpsc::UnboundedReceiver<HostToMain>) {
     }
 }
 
-fn capture_environment() -> HostEnvironment {
-    let mut environment = HostEnvironment::capture(std::env::vars());
+fn capture_environment() -> Result<HostEnvironment> {
+    let mut environment =
+        HostEnvironment::capture(std::env::vars()).context("capture host environment")?;
     environment.search_roots = [
         std::env::current_dir().ok(),
         std::env::current_exe()
@@ -85,10 +86,11 @@ fn capture_environment() -> HostEnvironment {
     .into_iter()
     .flatten()
     .collect();
-    environment
+    Ok(environment)
 }
 
 async fn run(args: Args) -> Result<()> {
+    let environment = capture_environment()?;
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await
         .context("bind 127.0.0.1")?;
@@ -99,7 +101,7 @@ async fn run(args: Args) -> Result<()> {
     let core = HostCore::new(
         HostConfig {
             ws_port: port,
-            environment: capture_environment(),
+            environment,
         },
         Arc::new(StdoutControl(control_tx.clone())),
     );

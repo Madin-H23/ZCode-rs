@@ -144,7 +144,7 @@ done
         let settings = SettingStore::new(home);
         let providers = ProviderRuntime::new(None, home.join("provider_config.json"));
         let context = ServiceContext {
-            environment: HostEnvironment::capture(vars),
+            environment: HostEnvironment::capture(vars).unwrap(),
             init: InitLocal::default(),
             control: Arc::new(NullSink),
         };

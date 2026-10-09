@@ -3,18 +3,12 @@ use serde_json::{Value, json};
 use std::path::{Component, Path, PathBuf};
 use tokio::io::AsyncReadExt;
 
-pub(super) fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .filter(|v| !v.is_empty())
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_default()
-}
-pub(super) fn resolve(base: &Path, path: &str) -> PathBuf {
-    let raw = path
-        .strip_prefix("~/")
-        .map(|p| home().join(p))
-        .unwrap_or_else(|| base.join(path));
+/// `~` / `~/…` against `home`, other relative paths against `base`; `.` and
+/// `..` components are folded. `home` comes from `zcode_kit::paths::home_dir`.
+pub(super) fn resolve(base: &Path, path: &str, home: &Path) -> PathBuf {
+    // B4 缺陷修复：旧实现在 HOME 为空时把 `~/x` 解析成相对路径 `x`（落到进程 cwd 下）；
+    // 现在 home 由调用方经 home_dir() 取得，绝不为空，`~` 展开与其他入口一致。
+    let raw = base.join(zcode_kit::paths::expand_home(path, home));
     let mut result = PathBuf::new();
     for part in raw.components() {
         match part {
@@ -70,7 +64,7 @@ pub(super) async fn plugins(
     config: &Value,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<zcode_cli_plugins::Outcome> {
-    let storage = zcode_cli_plugins::records::storage_root(config, &home());
+    let storage = zcode_cli_plugins::records::storage_root(config, &zcode_kit::paths::home_dir()?);
     let lookup = |name: &str| std::env::var(name).ok();
     zcode_cli_plugins::discover(&zcode_cli_plugins::Request {
         config,
@@ -101,3 +95,7 @@ pub(super) async fn contained_file(root: &Path, path: &Path) -> bool {
     }
     true
 }
+
+#[cfg(test)]
+#[path = "extension_config_tests.rs"]
+mod tests;

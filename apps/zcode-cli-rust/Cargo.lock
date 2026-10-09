@@ -2358,6 +2358,7 @@ dependencies = [
  "uuid",
  "zcode-cli-core-api",
  "zcode-cli-domain",
+ "zcode-kit",
  "zcode-proc",
 ]
 
@@ -2385,6 +2386,7 @@ dependencies = [
  "zcode-cli-domain",
  "zcode-cli-host",
  "zcode-cli-net",
+ "zcode-kit",
 ]
 
 [[package]]
@@ -2402,6 +2404,7 @@ dependencies = [
  "url",
  "uuid",
  "windows-sys 0.61.2",
+ "zcode-kit",
  "zcode-proc",
 ]
 
@@ -2423,6 +2426,7 @@ dependencies = [
  "uuid",
  "windows-sys 0.61.2",
  "zcode-cli-domain",
+ "zcode-kit",
  "zcode-proc",
  "zip",
 ]
@@ -2463,6 +2467,7 @@ dependencies = [
  "zcode-cli-state",
  "zcode-cli-tools",
  "zcode-cli-tui",
+ "zcode-kit",
  "zcode-proc",
 ]
 
@@ -2521,12 +2526,23 @@ dependencies = [
  "zcode-cli-host",
  "zcode-cli-net",
  "zcode-cli-plugins",
+ "zcode-kit",
  "zcode-proc",
 ]
 
 [[package]]
 name = "zcode-cli-tui"
 version = "0.1.0"
+
+[[package]]
+name = "zcode-kit"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "regex",
+ "serde",
+ "tokio",
+]
 
 [[package]]
 name = "zcode-proc"

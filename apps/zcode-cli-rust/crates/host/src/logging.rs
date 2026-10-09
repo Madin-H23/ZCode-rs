@@ -2,9 +2,11 @@
 //!
 //! Runtime code logs through `tracing` macros with target prefix `zcode`. This
 //! subscriber formats events like Node `adapters/logging/serialize.ts`, redacts
-//! credential-like keys, and hands lines to a bounded queue drained by one
-//! writer thread. When the queue is full the line is dropped and counted; a
-//! logging stall never blocks the runtime. stdout is never written.
+//! credential-like keys and secret-looking values (`zcode_kit::redact`), and
+//! hands lines to a bounded queue drained by one writer thread. When the queue
+//! is full the line is dropped and counted; the count is logged once at
+//! shutdown. A logging stall never blocks the runtime. stdout is never written.
+//! Log files are created owner-only (0600) on Unix.
 //!
 //! The global subscriber keeps a queue sender for the process lifetime, so the
 //! writer thread never observes a closed channel. Shutdown therefore flushes
@@ -17,7 +19,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
-        mpsc::{SyncSender, TrySendError, sync_channel},
+        mpsc::{Receiver, SyncSender, TrySendError, sync_channel},
     },
     time::Duration,
 };
@@ -26,6 +28,7 @@ use tracing::{
     field::{Field, Visit},
     span::{Attributes, Id, Record},
 };
+use zcode_kit::redact::redact_secrets;
 
 const QUEUE_LINES: usize = 4096;
 /// Upper bound for flushing queued lines at shutdown.
@@ -90,10 +93,20 @@ impl LogGuard {
 impl Drop for LogGuard {
     fn drop(&mut self) {
         let (ack, done) = sync_channel(1);
-        // 队列满或写线程卡在 IO 时最多等待 FLUSH_TIMEOUT，日志不能阻止进程退出。
-        if self.tx.try_send(Message::Flush(ack)).is_ok() {
-            let _ = done.recv_timeout(FLUSH_TIMEOUT);
+        match self.tx.try_send(Message::Flush(ack)) {
+            Ok(()) => {}
+            // 队列满时由临时线程阻塞等待空位，本线程仍最多等 FLUSH_TIMEOUT；这正是丢过行的情形，
+            // 不能因为排不进 Flush 就漏掉丢弃计数。写线程卡在 IO 时进程照常退出。
+            Err(TrySendError::Full(flush)) => {
+                let tx = self.tx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(flush);
+                });
+            }
+            Err(TrySendError::Disconnected(_)) => return,
         }
+        // 队列满或写线程卡在 IO 时最多等待 FLUSH_TIMEOUT，日志不能阻止进程退出。
+        let _ = done.recv_timeout(FLUSH_TIMEOUT);
     }
 }
 
@@ -107,38 +120,86 @@ pub fn init(options: LogOptions) -> Option<LogGuard> {
         dropped: dropped.clone(),
     };
     tracing::subscriber::set_global_default(subscriber).ok()?;
-    let console = options.console;
-    let directory = options.directory;
-    std::thread::spawn(move || {
-        let mut current: Option<(String, std::fs::File)> = None;
+    let writer = Writer {
+        directory: options.directory,
+        console: options.console,
+        current: None,
+        dropped: dropped.clone(),
+    };
+    std::thread::spawn(move || writer.run(rx));
+    Some(LogGuard { tx, dropped })
+}
+
+/// The writer thread: one daily file `zcode-rust-<date>.jsonl`, opened lazily.
+struct Writer {
+    directory: PathBuf,
+    console: bool,
+    current: Option<(String, std::fs::File)>,
+    dropped: Arc<AtomicU64>,
+}
+
+impl Writer {
+    fn run(mut self, rx: Receiver<Message>) {
         while let Ok(message) = rx.recv() {
-            let line = match message {
-                Message::Line(line) => line,
+            match message {
+                Message::Line(line) => self.write(&line),
                 Message::Flush(ack) => {
+                    self.report_dropped();
                     let _ = ack.send(());
-                    continue;
                 }
-            };
-            if console {
-                let _ = writeln!(std::io::stderr().lock(), "{line}");
-            }
-            let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-            if current.as_ref().is_none_or(|(day, _)| *day != date) {
-                let _ = std::fs::create_dir_all(&directory);
-                current = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(directory.join(format!("zcode-rust-{date}.jsonl")))
-                    .ok()
-                    .map(|file| (date, file));
-            }
-            if let Some((_, file)) = &mut current {
-                // 与 Node 一致：写失败只丢弃该行，不影响 runtime。
-                let _ = file.write_all(format!("{line}\n").as_bytes());
             }
         }
-    });
-    Some(LogGuard { tx, dropped })
+    }
+
+    /// 被丢弃的行不会出现在文件里；不记一笔，读日志的人无从知道日志不完整。只在退出前的 Flush 写一次。
+    fn report_dropped(&mut self) {
+        let dropped = self.dropped.load(Ordering::Relaxed);
+        if dropped == 0 {
+            return;
+        }
+        let mut fields = Fields {
+            message: "Log lines were dropped because the log queue was full".into(),
+            ..Fields::default()
+        };
+        fields
+            .top
+            .insert("event".into(), "logging.lines_dropped".into());
+        fields.context.insert("dropped".into(), dropped.into());
+        self.write(&format_line(Level::WARN, "zcode::logging", fields));
+    }
+
+    fn write(&mut self, line: &str) {
+        if self.console {
+            let _ = writeln!(std::io::stderr().lock(), "{line}");
+        }
+        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+        if self.current.as_ref().is_none_or(|(day, _)| *day != date) {
+            self.current = self.open(&date).map(|file| (date, file));
+        }
+        if let Some((_, file)) = &mut self.current {
+            // 与 Node 一致：写失败只丢弃该行，不影响 runtime。
+            let _ = file.write_all(format!("{line}\n").as_bytes());
+        }
+    }
+
+    /// 日志可能带有路径、命令与错误详情，只给属主读写：新文件以 0600 创建，旧版本留下的文件
+    /// 打开时收紧到 0600（尽力而为）。
+    fn open(&self, date: &str) -> Option<std::fs::File> {
+        let _ = std::fs::create_dir_all(&self.directory);
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let file = options
+            .open(self.directory.join(format!("zcode-rust-{date}.jsonl")))
+            .ok()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
+        Some(file)
+    }
 }
 
 struct JsonLines {
@@ -192,14 +253,21 @@ impl Fields {
     }
 }
 
+/// Values leave the process in the log file: secret-looking substrings are
+/// replaced even when the field name looks harmless (e.g. an error message
+/// that quotes a request header).
+fn clean(text: &str) -> Value {
+    Value::String(redact_secrets(text).into_owned())
+}
+
 impl Visit for Fields {
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
         let mut text = String::new();
         let _ = write!(text, "{value:?}");
-        self.put(field, Value::String(text));
+        self.put(field, clean(&text));
     }
     fn record_str(&mut self, field: &Field, value: &str) {
-        self.put(field, value.into());
+        self.put(field, clean(value));
     }
     fn record_i64(&mut self, field: &Field, value: i64) {
         self.put(field, value.into());
@@ -211,7 +279,7 @@ impl Visit for Fields {
         self.put(field, value.into());
     }
     fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
-        self.put(field, json!({"message": value.to_string()}));
+        self.put(field, json!({"message": clean(&value.to_string())}));
     }
 }
 
@@ -224,7 +292,7 @@ fn level_name(level: Level) -> &'static str {
     }
 }
 
-fn format_line(metadata: &Metadata<'_>, fields: Fields) -> String {
+fn format_line(level: Level, target: &str, fields: Fields) -> String {
     let mut line = Map::new();
     line.insert(
         "timestamp".into(),
@@ -233,8 +301,8 @@ fn format_line(metadata: &Metadata<'_>, fields: Fields) -> String {
             .to_string()
             .into(),
     );
-    line.insert("level".into(), level_name(*metadata.level()).into());
-    line.insert("module".into(), metadata.target().into());
+    line.insert("level".into(), level_name(level).into());
+    line.insert("module".into(), target.into());
     line.insert("message".into(), fields.message.into());
     line.extend(fields.top);
     if !fields.context.is_empty() {
@@ -259,7 +327,8 @@ impl Subscriber for JsonLines {
     fn event(&self, event: &Event<'_>) {
         let mut fields = Fields::default();
         event.record(&mut fields);
-        let line = format_line(event.metadata(), fields);
+        let metadata = event.metadata();
+        let line = format_line(*metadata.level(), metadata.target(), fields);
         if let Err(TrySendError::Full(_)) = self.tx.try_send(Message::Line(line)) {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
@@ -269,59 +338,5 @@ impl Subscriber for JsonLines {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lines_follow_node_fields_and_redact_credentials() {
-        let (tx, rx) = sync_channel(8);
-        let subscriber = JsonLines {
-            level: Level::INFO,
-            tx,
-            dropped: Arc::new(AtomicU64::new(0)),
-        };
-        tracing::subscriber::with_default(subscriber, || {
-            tracing::info!(
-                target: "zcode::test",
-                event = "session.started",
-                session_id = "s1",
-                api_key = "secret-value",
-                count = 3,
-                "Session started"
-            );
-            tracing::debug!(target: "zcode::test", "hidden at info level");
-            tracing::info!(target: "hyper::proto", "dependency noise");
-        });
-        let Ok(Message::Line(line)) = rx.recv() else {
-            panic!("expected a log line")
-        };
-        let line: Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(line["level"], "info");
-        assert_eq!(line["event"], "session.started");
-        assert_eq!(line["sessionId"], "s1");
-        assert_eq!(line["message"], "Session started");
-        assert_eq!(line["context"]["api_key"], "[Redacted]");
-        assert_eq!(line["context"]["count"], 3);
-        assert!(
-            rx.try_recv().is_err(),
-            "debug and dependency events are filtered"
-        );
-    }
-
-    #[test]
-    fn full_queue_drops_instead_of_blocking() {
-        let (tx, _rx) = sync_channel(1);
-        let dropped = Arc::new(AtomicU64::new(0));
-        let subscriber = JsonLines {
-            level: Level::INFO,
-            tx,
-            dropped: dropped.clone(),
-        };
-        tracing::subscriber::with_default(subscriber, || {
-            for _ in 0..3 {
-                tracing::info!(target: "zcode::test", "line");
-            }
-        });
-        assert_eq!(dropped.load(Ordering::Relaxed), 2);
-    }
-}
+#[path = "logging_tests.rs"]
+mod tests;

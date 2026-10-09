@@ -21,6 +21,7 @@ tokio-util.workspace = true
 url.workspace = true
 uuid.workspace = true
 zcode-cli-domain.workspace = true
+zcode-kit.workspace = true
 zip.workspace = true
 zcode-proc.workspace = true
 

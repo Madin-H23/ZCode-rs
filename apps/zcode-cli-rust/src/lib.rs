@@ -25,14 +25,6 @@ pub async fn serve_values(
     .await
 }
 
-fn home() -> std::path::PathBuf {
-    std::env::var_os("HOME")
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default()
-}
-
 /// The process environment as Node sees it after startup sanitization.
 /// Non-Unicode entries are converted lossily, like Node's `process.env`.
 pub fn runtime_env(home: &std::path::Path) -> zcode_cli_net::RuntimeEnv {
@@ -49,14 +41,14 @@ pub fn runtime_env(home: &std::path::Path) -> zcode_cli_net::RuntimeEnv {
 }
 
 /// Egress built from the process environment without network configuration.
-/// Used by tests, examples and embedders.
-pub fn egress() -> std::sync::Arc<zcode_cli_net::Egress> {
-    let home = home();
+/// Used by tests, examples and embedders. Fails when the home directory
+/// cannot be resolved (`zcode_kit::paths::home_dir`).
+pub fn egress() -> anyhow::Result<std::sync::Arc<zcode_cli_net::Egress>> {
+    let home = zcode_kit::paths::home_dir()?;
     let env = std::sync::Arc::new(runtime_env(&home));
-    std::sync::Arc::new(
-        zcode_cli_net::Egress::new(env, &Default::default(), &home, "electron")
-            .expect("valid endpoint origin"),
-    )
+    let egress = zcode_cli_net::Egress::new(env, &Default::default(), &home, "electron")
+        .map_err(anyhow::Error::msg)?;
+    Ok(std::sync::Arc::new(egress))
 }
 
 /// Workspace tools wired to the process environment's layered configuration,
@@ -64,12 +56,17 @@ pub fn egress() -> std::sync::Arc<zcode_cli_net::Egress> {
 pub fn workspace_tools(
     cwd: std::path::PathBuf,
     artifacts: std::path::PathBuf,
-) -> zcode_cli_tools::WorkspaceTools {
-    let egress = egress();
+) -> anyhow::Result<zcode_cli_tools::WorkspaceTools> {
+    let egress = egress()?;
     let config = zcode_cli_host::WorkspaceConfig::new(
         cwd.clone(),
-        home(),
+        zcode_kit::paths::home_dir()?,
         egress.runtime_env().vars().to_vec(),
     );
-    zcode_cli_tools::WorkspaceTools::new(cwd, artifacts, std::sync::Arc::new(config), egress)
+    Ok(zcode_cli_tools::WorkspaceTools::new(
+        cwd,
+        artifacts,
+        std::sync::Arc::new(config),
+        egress,
+    ))
 }

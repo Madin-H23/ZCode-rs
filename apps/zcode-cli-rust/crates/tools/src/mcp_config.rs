@@ -94,7 +94,11 @@ impl Server {
         Ok(Self {
             invalid: false,
             name: name.into(),
-            cwd: config::resolve(cwd, raw["cwd"].as_str().unwrap_or(".")),
+            cwd: config::resolve(
+                cwd,
+                raw["cwd"].as_str().unwrap_or("."),
+                &zcode_kit::paths::home_dir()?,
+            ),
             workspace: raw["isolation"] == "workspace",
             enabled: raw["enabled"] != false && raw["enable"] != false,
             raw,
@@ -165,7 +169,7 @@ pub(super) async fn configured(
             }
         }
         // App 同时发现 .agents；冷恢复也必须读取这条持久配置来源，不能依赖 UI 再次传参。
-        for base in [config::home(), cwd.to_owned()] {
+        for base in [zcode_kit::paths::home_dir()?, cwd.to_owned()] {
             let file = config::json_file(&base.join(".agents/mcp.json")).await?;
             if let Some(servers) = file["mcpServers"].as_object() {
                 for (name, server) in servers {
