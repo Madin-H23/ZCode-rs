@@ -109,6 +109,8 @@ const tests = [
   "packages/desktop/test/rustAppHostWiring.test.ts",
   // 启动状态中继：App 级 Host 退出后不向新页面回放上一代的失败；Node 窗口 Host 不变。
   "packages/desktop/test/databaseStartupRelayExit.test.ts",
+  // Node 路径 reload 回退期间同一窗口两个 Host：一个 Host 退出只清它自己的连接与 route。
+  "packages/desktop/test/desktopRemoteSessionsHostExit.test.ts",
   // U4 新增控制消息的严格校验（§4.1）。
   "packages/shared/test/rustU4ControlMessages.test.ts",
 ];
