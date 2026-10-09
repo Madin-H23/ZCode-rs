@@ -7,7 +7,9 @@ import {
   HOST_SETTING_WRITE_TIMEOUT_MS,
   HostSettingWriter,
   encodeSettingWritePatch,
+  settingSettleBudgetMs,
 } from "../src/main/hostSettingWriter.js";
+import { resolveAppShutdownPolicy } from "../src/main/appShutdownPolicy.js";
 import { createMainSettingsSync, diffAppSettings } from "../src/main/mainSettingsSync.js";
 import { resolveHostRequestWindow } from "../src/main/hostRequestWindowRouting.js";
 
@@ -46,6 +48,15 @@ function writerHarness(options: { ready?: boolean; hostRunning?: boolean } = {})
     becomeReady: (ready: boolean) => readiness?.(ready),
     fireTimers: () => {
       for (const timer of timers.splice(0)) if (!timer.cancelled) timer.fire();
+    },
+    /** 只触发某个时长的定时器（区分写入超时与退出等待）。 */
+    fireTimer: (ms: number) => {
+      const due = timers.filter((timer) => timer.ms === ms && !timer.cancelled);
+      for (const timer of due) {
+        timers.splice(timers.indexOf(timer), 1);
+        timer.fire();
+      }
+      return due.length;
     },
   };
 }
@@ -115,16 +126,45 @@ test("closing for dispose waits for in-flight results and rejects new writes", a
   await flush();
   assert.equal(posted.length, 1);
   let closed = false;
-  const closing = writer.closeAndSettle().then(() => {
+  const closing = writer.closeAndSettle(1_500).then((settled) => {
     closed = true;
+    return settled;
   });
   await flush();
   assert.equal(closed, false, "dispose waits for the in-flight result");
   await assert.rejects(writer.write({ desktopZoomLevel: 1 }), /shutting down/);
   writer.handleResult({ requestId: "w1", ok: true });
   await inFlight;
-  await closing;
+  assert.equal(await closing, true);
   assert.equal(closed, true);
+});
+
+test("closing for dispose waits no longer than the quit budget", async () => {
+  const { writer, fireTimer } = writerHarness({ ready: true });
+  const inFlight = writer.write({ desktopZoomLevel: 1 });
+  await flush();
+  const closing = writer.closeAndSettle(500);
+  await flush();
+  // 退出预算到了：不再等这次写入（它仍按 10 s 上限或 Host 退出得到结果）。
+  assert.equal(fireTimer(500), 1);
+  assert.equal(await closing, false);
+  writer.hostExited();
+  await assert.rejects(inFlight, /host exited/);
+  // 没有在途写入时立即返回，不设定时器。
+  assert.equal(await writer.closeAndSettle(500), true);
+  assert.equal(fireTimer(500), 0);
+});
+
+test("the settle budget leaves the dispose wait inside the quit budget", () => {
+  // Windows 普通退出 4.5 s 预算：强杀等待 4 s，写入最多等 0.5 s。
+  assert.equal(settingSettleBudgetMs(resolveAppShutdownPolicy("normal", "win32")), 500);
+  assert.equal(settingSettleBudgetMs(resolveAppShutdownPolicy("normal", "darwin")), 1_500);
+  assert.equal(settingSettleBudgetMs(resolveAppShutdownPolicy("update-install", "win32")), 1_500);
+  assert.equal(settingSettleBudgetMs({}), 0);
+  assert.equal(
+    settingSettleBudgetMs({ forceKillDelayMs: 0, waitTimeoutMs: 60_000 }),
+    HOST_SETTING_WRITE_TIMEOUT_MS,
+  );
 });
 
 test("an invalid patch is rejected before anything is sent", async () => {
@@ -168,6 +208,26 @@ test("the renderer stays the source on the Node path", () => {
   sync.acceptHostSnapshot(settings({ keepAwakeWhileRunning: true }));
   sync.acceptRendererPatch({ keepAwakeWhileRunning: true });
   assert.deepEqual(applied, [{ keepAwakeWhileRunning: true }]);
+});
+
+test("an empty shortcut table equals no shortcut overrides", () => {
+  // Main 的基线（TS 读取）与 Host 快照（Rust SettingStore）对“没有覆盖”的写法不同时，不能当成一次
+  // 快捷键修改去重建菜单并向所有窗口广播。
+  assert.deepEqual(
+    diffAppSettings(settings({}), settings({ shortcutBindings: {} })),
+    {},
+    "absent → {}",
+  );
+  assert.deepEqual(
+    diffAppSettings(settings({ shortcutBindings: {} }), settings({})),
+    {},
+    "{} → absent",
+  );
+  const applied: Array<Partial<AppSettings>> = [];
+  const sync = createMainSettingsSync({ source: "host", apply: (patch) => applied.push(patch) });
+  sync.setBaseline(settings({}));
+  sync.acceptHostSnapshot(settings({ shortcutBindings: {}, desktopZoomLevel: 1 }));
+  assert.deepEqual(applied, [{ desktopZoomLevel: 1 }]);
 });
 
 test("clearing all shortcut overrides still reports a shortcut change", () => {

@@ -24,6 +24,7 @@ Rust Host 从“每个窗口一个进程”改为“每个 App 一个进程”�
 - 拉起时机：App ready 后读完启动设置（数据目录已生效）就拉起，不等第一个窗口。灰度裁决（≤ 2 s）与登录 shell 环境（≤ 4.5 s）的等待规则与今天首个窗口 Host 相同，从拉起时开始计。
 - `init-local` 是 App 级的：`runtimeProcessEnvPatch` 是 App 启动时采集的环境，重启沿用；`agentWarmupTargets` 是上次会话的启动 workspace（Host 先于首窗口启动，命令行或 deep link 指定的 workspace 不预热，打开时懒启动）；不再携带 `hostId`（2.5）。`databaseStartupId` 由 Main 在每次拉起（含重启）时新生成，所有窗口共用，保证 Renderer 的同代准入不把上一代的状态与新一代的 endpoint 拼在一起。
 - “Host 就绪”指当前代的启动状态第一次进入 `ready`。endpoint 在每个启动尝试第一次 `ready` 时签发给所有还没拿到 endpoint 的窗口（rust-host-resilience.md §2.2 的规则不变）；签发期间窗口已 reload 或关闭的，结果丢弃。
+- 窗口级的“Host 已可用”动作（刷新 CUA PiP 焦点、为窗口补挂远端 workspace 的 attachment）在 endpoint 交给这个页面之后执行，不在 dom-ready 时执行：dom-ready 时 Host 可能还在启动或退避。原因记为 `renderer-ready`（窗口第一次加载）或 `renderer-reload`。
 - 窗口关闭时 Main 让 Host 释放这个窗口的远端 logical session（`dispose-remote-workspace-session`）、取消它等待中的连接，与今天“关窗即结束该窗口的远程连接”一致；Renderer 的 WebSocket 随页面关闭。
 - 没有窗口时 Host 照常工作：调度与本地 workspace 的 Bot 不依赖窗口。远端连接在 U5 之前随发起它的窗口（连接器在 Main 里按窗口持有，见上一条与第 3 节）。
 
@@ -114,11 +115,11 @@ Rust 开关下 Main 不再启动 scheduler 进程，也不再转发 `cron-run` /
 ```
 
 - Host 按到达顺序串行处理 `setting-write`（Main 先后两次写同一字段时后到的后写）；排队上限 64，满时直接回 `ok:false`。`patch` 的校验与 `setting` channel 的 `update` 相同，不合法时回 `ok:false` 和错误文案；没有 `requestId` 的请求无法应答，忽略。服务安装之前（`init-local` 后、`database-startup-state` 到 ready 之前）到达的 `setting-write` 立即回 `ok:false`（`Rust Host services are not initialized`），不让 Main 等满超时。
-- Host 启动之前的读取（数据目录、硬件加速、启动 workspace）仍然直接读文件：这些值决定 Host 怎么启动。Main 的其他读取也仍直接读文件（Host 原子写入、落盘后才回 `ok`）。
-- “Main 的设置缓存”指 Main 内存里由设置派生的状态（关闭到托盘、防休眠、更新渠道、菜单快捷键）。Rust 开关下它只由 `setting-changed` 更新：Main 与上一次快照逐字段比较，只应用变化的字段；Renderer 的 `SyncAppSettings` 被忽略。两个来源不并存，同一次修改的 IPC 通知与 Host 推送不会乱序覆盖。基线是 Main 启动时直接读到的设置。
+- Host 启动之前的读取（数据目录、硬件加速、启动 workspace）仍然直接读文件：这些值决定 Host 怎么启动。Main 的其他读取也仍直接读文件（Host 原子写入、落盘后才回 `ok`）。例外：Main 启动时（拉起 Host 之前）的那次读取用的是 TS `settingService.get()`，遇到缺迁移标记（`closeToTrayOnWindowsMigrationInitialized` 等）的文件会补写标记，这是 Rust 开关下 Main 唯一一次直接写 `setting.json`，此时 Host 还没有运行；标记写入后 Main 的读取不再写文件。
+- “Main 的设置缓存”指 Main 内存里由设置派生的状态（关闭到托盘、防休眠、更新渠道、菜单快捷键）。Rust 开关下它只由 `setting-changed` 更新：Main 与上一次快照逐字段比较，只应用变化的字段；Renderer 的 `SyncAppSettings` 被忽略。两个来源不并存，同一次修改的 IPC 通知与 Host 推送不会乱序覆盖。基线是 Main 启动时直接读到的设置。比较时“没有快捷键覆盖”（字段缺失）与空覆盖表 `{}` 等价：基线来自 TS 读取、快照来自 Rust `SettingStore`，两边写法不同不能被当成一次快捷键修改（重建菜单并向所有窗口广播 `SettingsChanged`）。
 - `patch` 里值为 `undefined` 的字段在线上写成 `null`（JSON 没有 undefined），表示清除。
 - Main 在当前代 Host 的启动状态进入 `ready` 之后才发 `setting-write`；Host 不可用时（启动中、重启中）写入请求等待就绪，超过 10 s 记 warn 并放弃这次写入，不回落到直接写文件。等待 `setting-write-result` 同样以 10 s 为上限；当前代 Host 退出时，在途写入失败（是否已落盘未知，由调用方按失败处理）。
-- App 退出与安装更新前的写入，先等结果再 `dispose` Host；此时仍在等 Host 就绪的写入直接放弃，之后的新写入被拒绝。
+- App 退出与安装更新前的写入，先等结果再 `dispose` Host；此时仍在等 Host 就绪的写入直接放弃，之后的新写入被拒绝。等结果的时间计入退出预算（`appShutdownPolicy.ts`）：最多等 `waitTimeoutMs − forceKillDelayMs`（Windows 普通退出 0.5 s，其余 1.5 s），到时照常 `dispose`，没等到结果的写入是否落盘未知；`dispose` 的等待用预算的剩余部分。
 
 ### 2.7 Bot 远端运行时
 
@@ -131,8 +132,10 @@ Rust 开关下 Main 不再启动 scheduler 进程，也不再转发 `cron-run` /
 - 重启策略是 App 级的：60 s 内最多 3 次，退避 500 ms / 2 s / 5 s（数值不变）。
 - 顺序：所有主窗口收到连接状态（断开）→ Main 重启 Host → Host 就绪后 Main reload 所有主窗口 → 每个窗口在 dom-ready 时重新接入。
 - 退避期间用户手动 reload 的窗口不提前触发重启，等计划中的重启；新一代就绪后它直接拿到 endpoint，不再被 reload。
-- 放弃重启后，所有主窗口显示启动失败页；任意一个窗口的 Retry（页面自身 reload）触发一次 App 级重启，不经过重启策略、没有退避；新一代就绪后 reload 其余仍停在失败页的窗口。Exit 退出 App。
-- 数据库启动状态（`database-startup-state`）向所有主窗口扇出；任意窗口的 retry / exit 控制都被接受，`snapshot` 只回给请求的窗口。每一代 Host 一份中继绑定，新一代替换旧一代，旧代的 `failed/transport_closed` 不会重放给新页面。
+- 放弃重启后，所有主窗口显示启动失败页；任意一个窗口的 Retry（失败页上的页面自身 reload）触发一次 App 级重启，不经过重启策略、没有退避，并清空重启计数（之后的意外退出重新从第 1 次自动重启计起）；新一代就绪后 reload 其余仍停在失败页的窗口。Exit 退出 App。
+- 只有失败页上的 Retry 触发重启。以下 dom-ready 不触发：放弃期间新打开的主窗口（例如从托盘或 Dock 重新打开）；新一代就绪后 Main 让旧页面 reload、reload 完成前这一代又崩溃并放弃时，这次 reload 的 dom-ready（不区分会让启动后很快崩溃的 Host 无人操作地无限重启）。Main 只给这些页面发 `failed`，它们显示同一失败页，它们的 Retry 才触发重启。
+- 拉起失败（准备 `init-local` 失败、拉起进程时同步抛错）按这一代的意外退出处理，进入同一重启策略；拉起中途已启动的进程先结束。
+- 数据库启动状态（`database-startup-state`）向所有主窗口扇出；任意窗口的 retry / exit 控制都被接受，`snapshot` 只回给请求的窗口。每一代 Host 一份中继绑定，新一代替换旧一代。Host 退出后这一代的绑定不再用 `snapshot` 回放 `failed/transport_closed`：退避期间（或放弃后、Retry 拉起下一代之前）加载或 reload 的页面属于下一代，停在“正在启动”；绑定仍接受 `exit`。
 
 ```mermaid
 sequenceDiagram
@@ -156,7 +159,7 @@ sequenceDiagram
 
 ### 2.9 多窗口的开发入口
 
-`ZCODE_DEV_EXTRA_MAIN_WINDOW=1` 且非打包构建时，Main 在第一个主窗口 dom-ready 后再创建一个主窗口（绕过主窗口复用）。只用于 E2E；Node 路径下第二个窗口照旧有自己的 Host。macOS 上点关闭只是隐藏窗口（今天的行为），E2E 要验证“关闭第二个窗口”需销毁它。
+`ZCODE_DEV_EXTRA_MAIN_WINDOW=1` 且非打包构建时，Main 在第一个主窗口（已登记的主窗口，不是更新状态窗等其他窗口）dom-ready 后再创建一个主窗口（绕过主窗口复用）。只用于 E2E；Node 路径下第二个窗口照旧有自己的 Host。macOS 上点关闭只是隐藏窗口（今天的行为），E2E 要验证“关闭第二个窗口”需销毁它：harness 以 `--inspect=<私有端口>` 启动 Electron，经 Main 的 inspector 调用 `BrowserWindow.destroy()`（`scripts/rust-host/e2e/main-process.mjs`），不为此增加产品开关。
 
 ## 3. 状态所有者
 
@@ -236,13 +239,14 @@ sequenceDiagram
   - 调度状态机：到期认领、misfire 跳过、一次性任务终结、失败退避与上限、手动运行、闲时任务的回收与退避；两个调度器同时认领时一个任务只派发一次。
   - 调度用到的 repo 操作（automation 的认领、台账、结算、释放，闲时任务的认领、释放、回收、计数、结算）与 TS repo 对拍：`scripts/rust-host/scheduler-fixtures.ts` 用真实 TS 实现生成 fixture，Rust 逐步复现返回值与表内容。
   - 没有任何连接时，到期的 automation 被派发并结算。
-- Main 单测（`packages/desktop/test/rustAppHostCore.test.ts`、`rustAppHostSettings.test.ts`，`packages/shared/test/rustU4ControlMessages.test.ts`）：App Host 状态机（拉起 → 就绪 → 多窗口接入 → 关窗不影响 Host → 意外退出 → 退避重启 → 放弃 → Retry）、按 `windowId` 路由、设置写入的等待 / 超时 / 退出收尾、`setting-changed` 的按序增量应用、4.1 消息的严格校验。
-- 桌面 E2E（Rust 开关）：
-  - 进程表中恰好一个 Host，没有 scheduler 进程，没有 CLI 子进程。
-  - 两个窗口（2.9）接入同一个 Host；一个窗口切换语言，另一个窗口跟随；关闭第二个窗口后第一个窗口继续正常对话。
-  - reload 前后 Host 的 pid 不变；杀掉 Host 后自动重启，窗口恢复；连续失败后出现失败页，Retry 可恢复。
-  - 定时的 automation 到点运行。
-  - Main 发起的设置写入（缩放）落盘，Renderer 读到新值。
+- Main 单测（`packages/desktop/test/rustAppHostCore.test.ts`、`rustAppHostSettings.test.ts`、`rustAppHostWiring.test.ts`、`databaseStartupRelayExit.test.ts`、`desktopRemoteSessionsHostExit.test.ts`，`packages/shared/test/rustU4ControlMessages.test.ts`）：App Host 状态机（拉起 → 就绪 → 多窗口接入 → 关窗不影响 Host → 意外退出 → 退避重启 → 放弃 → Retry 清空计数；放弃期间的新窗口只显示失败页；拉起失败按意外退出）、窗口级动作在 endpoint 交付之后、退出后中继不回放上一代的失败、按 `windowId` 路由、设置写入的等待 / 超时 / 退出预算内收尾、`setting-changed` 的按序增量应用（空快捷键表等价于没有覆盖）、4.1 消息的严格校验；Node 路径 reload 回退期间同一窗口两个 Host 时，一个 Host 退出只清它自己的等待中连接与 route。
+- 桌面 E2E（Rust 开关，`scripts/rust-host/e2e-desktop.mjs`）：
+  - 每个场景结束时断言进程表：Electron Main 下恰好一个 Host，没有 Node Host / scheduler 进程，嵌入式 runtime 下没有 CLI 子进程；随后正常退出（SIGTERM 只发给 Main），Host 经 `dispose` 退出，不留进程。
+  - `u4-multi-window`：两个窗口（2.9）接入同一个 Host，各自对话；一个窗口切换主题、另一个窗口切换语言，对方都跟随；销毁第二个窗口后第一个窗口继续正常对话；Host 的 pid 全程不变。
+  - `resilience-reload`：reload 前后 Host 的 pid 与 runtime 代次不变，页面重新 attach。`resilience-host-crash`（两个窗口）：杀掉 Host 后自动重启，两个窗口 reload 后可用；连续失败后两个窗口都出现失败页，在其中一个窗口 Retry，两个窗口都恢复。`resilience-startup`（两个窗口）：启动失败页出现在两个窗口，任一窗口 Exit 退出，另一窗口 Retry 后两个窗口都进入主界面。
+  - `u4-scheduler`：界面上创建“每 1 分钟”的 automation，不点立即运行，到点由 Host 内调度派发并结算；销毁所有主窗口后 Host 继续运行，下一次运行照样派发并结算；重新打开窗口接入同一个 Host。
+  - `u4-settings`：Main 发起的设置写入（缩放命令、窗口尺寸）落盘，页面缩放随之变化，冷启动后 Main 恢复缩放与尺寸；设置页打开“保持电脑运行”，Main 经 `setting-changed` 持有 powerSaveBlocker，关闭后释放。
+  - Node Host 路径（`--host node`，发布的组合：Node Host + TS CLI）跑 `core`、`u4-settings` 与正常退出，验证 Main 侧重构没有改变 Node 路径。
 - 现有 E2E 场景与 `pnpm test:rust-host` 全部通过；owner 相关错误码的现有测试不变。
 
 ## 7. 本期不做

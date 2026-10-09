@@ -9,7 +9,7 @@ type Effect =
   | { kind: "spawn"; generation: number }
   | { kind: "issue"; windowId: number; generation: number; pageToken: number }
   | { kind: "reload"; windowId: number }
-  | { kind: "notify"; payload: HostConnectionStatePayload };
+  | { kind: "notify"; payload: HostConnectionStatePayload; windowId?: number };
 
 function setup() {
   const effects: Effect[] = [];
@@ -20,7 +20,12 @@ function setup() {
     issueEndpoint: (windowId, generation, pageToken) =>
       effects.push({ kind: "issue", windowId, generation, pageToken }),
     reloadWindow: (windowId) => effects.push({ kind: "reload", windowId }),
-    notifyConnectionState: (payload) => effects.push({ kind: "notify", payload }),
+    notifyConnectionState: (payload, windowId) =>
+      effects.push(
+        windowId === undefined
+          ? { kind: "notify", payload }
+          : { kind: "notify", payload, windowId },
+      ),
     setTimer: (delayMs, fire) => {
       const timer = { at: now + delayMs, fire, cancelled: false };
       timers.push(timer);
@@ -276,4 +281,130 @@ test("dispose stops restarts and a disposed exit is not unexpected", () => {
   other.advance(500);
   assert.deepEqual(other.take(), []);
   assert.equal(other.core.shouldSpawn(2), false);
+});
+
+/** 连续崩溃到放弃：返回放弃时的代次。 */
+function crashUntilGaveUp(harness: ReturnType<typeof setup>, firstGeneration = 1): number {
+  let generation = firstGeneration;
+  for (const delayMs of [500, 2_000, 5_000]) {
+    harness.core.hostExited(generation, 1);
+    harness.advance(delayMs);
+    generation += 1;
+    harness.core.hostSpawned(generation);
+  }
+  harness.core.hostExited(generation, 1);
+  assert.equal(harness.core.snapshot().phase, "gave-up");
+  return generation;
+}
+
+test("after giving up a new window shows the failure page instead of restarting", () => {
+  const harness = setup();
+  const { core, take, bootReady } = harness;
+  core.start();
+  bootReady(1);
+  core.windowDomReady(1);
+  const last = crashUntilGaveUp(harness);
+  take();
+
+  // 放弃期间新打开的主窗口（例如托盘重新打开）：只给它发失败页，不拉起。
+  core.windowDomReady(7);
+  assert.deepEqual(take(), [
+    { kind: "notify", payload: { state: "failed", attempts: 3 }, windowId: 7 },
+  ]);
+  assert.equal(core.snapshot().phase, "gave-up");
+  assert.equal(core.snapshot().generation, last);
+
+  // 它的 Retry（失败页上的重新加载）才触发重启；就绪后 reload 仍停在失败页的窗口 1。
+  core.windowDomReady(7);
+  assert.deepEqual(take(), [{ kind: "spawn", generation: last + 1 }]);
+  bootReady(last + 1);
+  assert.deepEqual(
+    take().map((effect) => [effect.kind, "windowId" in effect ? effect.windowId : null]),
+    [
+      ["reload", 1],
+      ["issue", 7],
+    ],
+  );
+});
+
+test("a Retry after giving up starts a fresh restart budget", () => {
+  const harness = setup();
+  const { core, take, advance, bootReady } = harness;
+  core.start();
+  bootReady(1);
+  core.windowDomReady(1);
+  const last = crashUntilGaveUp(harness);
+  core.windowDomReady(1);
+  take();
+  bootReady(last + 1);
+  take();
+
+  // Retry 之后（仍在上一轮崩溃的 60 s 内）再崩溃：从第 1 次自动重启重新计起，而不是立即放弃。
+  advance(1_000);
+  core.hostExited(last + 1, 1);
+  assert.deepEqual(take(), [
+    {
+      kind: "notify",
+      payload: { state: "restarting", attempt: 1, maxAttempts: 3, delayMs: 500 },
+    },
+  ]);
+});
+
+test("a host that fails to spawn counts as an unexpected exit of that generation", () => {
+  const { core, take, advance, bootReady } = setup();
+  core.start();
+  core.windowDomReady(1);
+  take();
+  // 进程没起来（hostSpawned 之前就失败）：按意外退出进入退避重启，窗口继续等下一代。
+  core.hostExited(1, -1);
+  assert.deepEqual(take(), [
+    {
+      kind: "notify",
+      payload: { state: "restarting", attempt: 1, maxAttempts: 3, delayMs: 500 },
+    },
+  ]);
+  advance(500);
+  assert.deepEqual(take(), [{ kind: "spawn", generation: 2 }]);
+  bootReady(2);
+  assert.deepEqual(
+    take().map((effect) => [effect.kind, "windowId" in effect ? effect.windowId : null]),
+    [["reload", 1]],
+  );
+});
+
+test("a reload Main asked for that lands after giving up is not a Retry", () => {
+  const harness = setup();
+  const { core, take, advance, bootReady } = harness;
+  core.start();
+  bootReady(1);
+  core.windowDomReady(1);
+  core.windowDomReady(2);
+  // 前 3 次崩溃都在旧页面 reload 完成之后；第 4 代就绪、Main 让两个窗口 reload 之后立即崩溃。
+  let generation = 1;
+  for (const delayMs of [500, 2_000, 5_000]) {
+    core.hostExited(generation, 1);
+    advance(delayMs);
+    generation += 1;
+    bootReady(generation);
+    if (generation < 4) {
+      core.windowDomReady(1);
+      core.windowDomReady(2);
+    }
+  }
+  take();
+  core.hostExited(generation, 1);
+  assert.deepEqual(take(), [{ kind: "notify", payload: { state: "failed", attempts: 3 } }]);
+
+  // 这两次 dom-ready 是 Main 自己要的 reload：页面显示失败页，不自动拉起下一代。
+  core.windowDomReady(2);
+  core.windowDomReady(1);
+  assert.deepEqual(take(), [
+    { kind: "notify", payload: { state: "failed", attempts: 3 }, windowId: 2 },
+    { kind: "notify", payload: { state: "failed", attempts: 3 }, windowId: 1 },
+  ]);
+  assert.equal(core.snapshot().phase, "gave-up");
+
+  // 用户在失败页上点 Retry：这才拉起。
+  core.windowDomReady(1);
+  assert.deepEqual(take(), [{ kind: "spawn", generation: generation + 1 }]);
 });

@@ -105,10 +105,19 @@ const tests = [
   // 代次与重启、窗口接入、设置写入与 setting-changed 的应用、按 windowId 路由。
   "packages/desktop/test/rustAppHostCore.test.ts",
   "packages/desktop/test/rustAppHostSettings.test.ts",
+  // owner 的接线：拉起失败按意外退出处理、窗口级动作在 endpoint 交付之后（Electron 与进程层用 mock）。
+  "packages/desktop/test/rustAppHostWiring.test.ts",
+  // 启动状态中继：App 级 Host 退出后不向新页面回放上一代的失败；Node 窗口 Host 不变。
+  "packages/desktop/test/databaseStartupRelayExit.test.ts",
   // U4 新增控制消息的严格校验（§4.1）。
   "packages/shared/test/rustU4ControlMessages.test.ts",
 ];
-await run(process.execPath, ["--import", "tsx", "--test", ...tests], {
-  ...process.env,
-  ZCODE_RUST_HOST_BINARY: binary,
-});
+// 一部分 Main 单测需要替换 `electron` 等模块（node:test 的 mock.module）。
+await run(
+  process.execPath,
+  ["--import", "tsx", "--experimental-test-module-mocks", "--test", ...tests],
+  {
+    ...process.env,
+    ZCODE_RUST_HOST_BINARY: binary,
+  },
+);

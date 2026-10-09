@@ -35,6 +35,11 @@ interface DatabaseStartupRelayTargets {
   /** `snapshot` 控制的应答只发给请求方。 */
   reply(sender: Electron.WebContents, state: DatabaseStartupState): void;
   acceptsControlFrom(sender: Electron.WebContents): boolean;
+  /**
+   * Host 退出后是否还用 `snapshot` 回放这一代的最后状态（failed/transport_closed）。Node 窗口 Host 回放；
+   * App 级 Rust Host 不回放：退出后才加载的页面属于下一代，应停在“正在启动”等新一代的状态。
+   */
+  replayAfterExit: boolean;
 }
 
 interface DatabaseStartupRelayBinding {
@@ -79,7 +84,8 @@ function createDatabaseStartupRelayBinding(
       quit?.();
       return;
     }
-    if (result.data.action === "snapshot" && latest) targets.reply(event.sender, latest);
+    if (result.data.action === "snapshot" && latest && (!exited || targets.replayAfterExit))
+      targets.reply(event.sender, latest);
     if (!exited)
       child.postMessage({ type: HostMessageTypes.DatabaseStartupControl, control: result.data });
   };
@@ -141,6 +147,7 @@ export function bindDatabaseStartupRelay(
     deliver: forward,
     reply: (_sender, state) => forward(state),
     acceptsControlFrom: (sender) => sender === win.webContents,
+    replayAfterExit: true,
   });
   const dispose = () => {
     binding.dispose();
@@ -157,6 +164,11 @@ let appBinding: DatabaseStartupRelayBinding | undefined;
 /**
  * App 级 Rust Host（docs/specs/rust-u4-app-host.md §2.8）：每一代 Host 一个绑定，替换上一代；
  * 启动状态扇出到所有主窗口，任意主窗口的 retry / exit / snapshot 都被接受。
+ *
+ * 修复原因：重启退避期间（以及放弃后到 Retry 拉起下一代之前）上一代的绑定仍在，期间加载或 reload
+ * 的页面发 `snapshot` 会拿到上一代的 failed/transport_closed，一闪而过地显示启动失败页（旧的按窗口
+ * 重启在 reload 前释放绑定，U4 合并时丢了这一步）。现在退出之后不再回放；绑定仍接受 `exit`，
+ * 放弃重启后的失败页“退出”照常可用。
  */
 export function bindAppDatabaseStartupRelay(
   child: UtilityProcess,
@@ -176,6 +188,7 @@ export function bindAppDatabaseStartupRelay(
     },
     reply: sendStartupState,
     acceptsControlFrom: windows.isMainWindowSender,
+    replayAfterExit: false,
   });
   appBinding = binding;
   return { receive: binding.receive, startupId };
