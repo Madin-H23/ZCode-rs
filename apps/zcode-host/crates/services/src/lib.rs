@@ -15,6 +15,7 @@ pub use zcode_host_automation::conversation_share;
 pub use zcode_host_automation::cua_permission;
 pub use zcode_host_automation::integration;
 pub use zcode_host_automation::off_peak;
+pub use zcode_host_automation::scheduler;
 pub use zcode_host_base::broadcast;
 pub use zcode_host_base::environment;
 pub use zcode_host_base::main_bridge;
@@ -83,6 +84,8 @@ pub struct Installed {
     _controller: Arc<tasks::controller::Controller>,
     _syncer: tokio::task::JoinHandle<()>,
     automation: automation::AreaHandle,
+    /// 调度状态机（rust-u4-app-host.md §2.4）：install 结束时启动，Host 退出时最先收尾。
+    scheduler: scheduler::SchedulerHandle,
     remote: Arc<remote::RemoteWorkspaces>,
     /// 至少保留一个句柄，否则 tasks-index 线程与连接随之关闭。
     _storage: Storage,
@@ -91,6 +94,8 @@ pub struct Installed {
 impl Installed {
     /// Host 退出：回收终端与全部 CLI 进程树（有上限，不会无限等待）。
     pub async fn shutdown(&self) {
+        // 先停调度：等当前一轮结束、释放在途认领，此后不再向即将回收的 CLI 派发。
+        self.scheduler.dispose().await;
         self.workspace.shutdown();
         self.remote.shutdown().await;
         // Bot 通道运行时在 CLI 之前收尾：停长轮询 / 长连接并立即释放跨进程运行锁。
@@ -349,6 +354,12 @@ pub fn install(
         settings::data_dir::DataDirMove::new(settings, &context.environment),
     ));
 
+    // ── scheduler ──（docs/specs/rust-u4-app-host.md §2.4）
+    // 所有服务都已安装、tasks-index 已就绪：启动调度状态机（回收中断的闲时任务 → 第一轮）。
+    // U4 接线点：执行中的闲时任务数 → Host → Main 的 `off-peak-active-count`（Main 据此维持防休眠）。
+    // 控制消息由另一项改动定义并接在这里；在那之前上报为空操作。
+    let scheduler = automation.start_scheduler(Arc::new(|_active_count: u64| {}));
+
     agent::session::warm_up(
         agent.clone(),
         context
@@ -369,6 +380,7 @@ pub fn install(
         _controller: controller,
         _syncer: syncer,
         automation,
+        scheduler,
         remote,
         _storage: storage,
     }

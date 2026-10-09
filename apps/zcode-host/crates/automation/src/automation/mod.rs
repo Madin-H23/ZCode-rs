@@ -75,6 +75,8 @@ pub struct Area {
     pub account: Option<AccountLink>,
     /// Bot 远端运行时（[`Area::with_remote_bots`]，远端区域提供）；没有时远端上下文视为未连接。
     pub remote_bots: Arc<dyn crate::bots::RemoteBots>,
+    /// 调度器的唤醒信号：先于 Scheduler 创建，闲时任务翻为可派发时经它唤醒（rust-u4-app-host.md §2.4）。
+    pub scheduler_wake: crate::scheduler::WakeSignal,
 }
 
 impl Area {
@@ -107,6 +109,7 @@ impl Area {
             bot_delivery: OnceLock::new(),
             account: None,
             remote_bots: Arc::new(crate::bots::NoRemote),
+            scheduler_wake: crate::scheduler::WakeSignal::new(),
         }
     }
 
@@ -127,6 +130,11 @@ pub struct AreaHandle {
     _parts: Vec<Keepalive>,
     /// Host 退出时需要异步收尾的子模块（目前只有 bots）。
     bots: Option<Arc<crate::bots::service::Bots>>,
+    area: Arc<Area>,
+    service: Arc<service::AutomationService>,
+    cron: Arc<dispatch::Dispatcher>,
+    /// 闲时任务模块没能安装时为 None。
+    off_peak: Option<Arc<crate::off_peak::dispatch::OffPeakDispatcher>>,
 }
 
 impl AreaHandle {
@@ -142,6 +150,31 @@ impl AreaHandle {
             bots.shutdown().await;
         }
     }
+
+    /// 启动调度状态机（docs/specs/rust-u4-app-host.md §2.4）：派发直接调用本区域的派发器，不经 Main。
+    /// 须在全部服务安装完成（数据库已就绪）之后调用；Host 退出时由调用方 `dispose`。
+    pub fn start_scheduler(
+        &self,
+        active_count: crate::scheduler::ActiveCountPort,
+    ) -> crate::scheduler::SchedulerHandle {
+        let off_peak_dispatch: Arc<dyn crate::scheduler::OffPeakDispatch> = match &self.off_peak {
+            Some(dispatcher) => Arc::new(dispatcher.clone()),
+            None => Arc::new(crate::scheduler::OffPeakUnavailable),
+        };
+        crate::scheduler::Scheduler::start(
+            crate::scheduler::SchedulerDeps {
+                automations: self.service.clone(),
+                off_peak: crate::tasks_index::off_peak_repo::OffPeakRepo::new(
+                    self.area.tasks_index.clone(),
+                ),
+                cron: Arc::new(self.cron.clone()),
+                off_peak_dispatch,
+                active_count,
+                wake: self.area.scheduler_wake.clone(),
+            },
+            crate::scheduler::SchedulerOptions::default(),
+        )
+    }
 }
 
 pub fn install(
@@ -151,19 +184,29 @@ pub fn install(
 ) -> AreaHandle {
     let area = Arc::new(area);
     let mut parts: Vec<Keepalive> = vec![Box::new(area.clone())];
-    parts.push(install_automation(&area, router));
+    let (service, cron) = install_automation(&area, router);
     parts.extend(crate::cua_permission::install(&area, registry, router));
     parts.extend(crate::conversation_share::install(&area, registry, router));
     let bots = crate::bots::install(&area, registry, router);
-    parts.extend(crate::off_peak::install(&area, registry, router));
+    let off_peak = crate::off_peak::install(&area, registry, router).map(|installed| {
+        parts.push(installed.keepalive);
+        installed.dispatcher
+    });
     AreaHandle {
         _parts: parts,
         bots,
+        area,
+        service,
+        cron,
+        off_peak,
     }
 }
 
 /// automation 本体：服务、`zcode-agent` 成员、CLI 反向请求与 `cron-run` 派发。
-fn install_automation(area: &Arc<Area>, router: &mut ControlRouter) -> Keepalive {
+fn install_automation(
+    area: &Arc<Area>,
+    router: &mut ControlRouter,
+) -> (Arc<service::AutomationService>, Arc<dispatch::Dispatcher>) {
     let zone: Arc<dyn time::Zone> = Arc::new(time::local_zone());
     let clock: service::Clock = Arc::new(|| {
         std::time::SystemTime::now()
@@ -177,9 +220,10 @@ fn install_automation(area: &Arc<Area>, router: &mut ControlRouter) -> Keepalive
         dispatch::Dispatcher::start(area.clone(), service.clone(), area.driver.clone());
     members::register(&area.agent, service.clone(), dispatcher.clone());
     reverse::register(&area.agent, service.clone(), area.tasks_index.clone());
+    // Main 的 Node scheduler 经 Main 转发的派发；Rust 开关下 Main 停止拉起它之后不再有发送方，集成时删除。
     let cron = dispatcher.clone();
     router.on(dispatch::CRON_RUN, move |message| {
         cron.handle_cron_run(message)
     });
-    Box::new((service, dispatcher))
+    (service, dispatcher)
 }
