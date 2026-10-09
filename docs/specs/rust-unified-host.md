@@ -526,7 +526,7 @@ sequenceDiagram
 | 代码   | workspace 级 lints：`unwrap_used`、`expect_used` 先设为 warn，存量清零后改为 deny；`await_holding_lock`，以及 clippy.toml 的 `await-holding-invalid-types`；使用不会中毒的锁或明确的中毒策略，避免一次 panic 通过锁传染到所有 workspace                         |
 | 运行时 | `TaskScope` 边界处捕获 panic：run 任务 panic → 该会话 `Finished{error}`；Engine 循环 panic → 按 14.1 重建 Engine，进程、连接、远端链路和 Bot 不受影响；handler panic → `[202]` Fault；只有 HostCore 自身的不变量被破坏时才退出进程。必须保持 `panic = "unwind"` |
 | 资源   | CPU 密集的工作（搜索、diff、图片缩放）放到 `spawn_blocking` 或专用线程池；会话按 LRU 卸载（沿用 8 个 / 16 MiB）；Scope 按空闲淘汰；暴露 tokio 事件循环延迟指标                                                                                                  |
-| 进程   | 工具、MCP stdio 服务和 hooks 本来就是子进程；`zcode-proc` 保证 Host 崩溃时这些进程树一起回收（Linux PDEATHSIG、Windows Job Object `KILL_ON_JOB_CLOSE`）                                                                                                         |
+| 进程   | 工具、MCP stdio 服务和 hooks 本来就是子进程。runtime 所在的进程异常退出时，它们由账本加启动清扫回收，Linux 与 Windows 另有系统机制（D-U15，[rust-tool-process-reaping.md](rust-tool-process-reaping.md)）                                                       |
 | 恢复   | Main 自动重启（D2）；会话从库冷加载；客户端按 epoch 走快照恢复                                                                                                                                                                                                  |
 
 ### 10.2 已接受的输入要持久化
@@ -595,7 +595,7 @@ flowchart LR
 | U3   | A 期已完成：Host 进程内运行 runtime（每个 workspace 一个实例），进程内是缺省；合并 U4 之前 25 个桌面 E2E 场景通过；对比测量见 [报告](../reports/rust-u3-embedded-runtime.md)。B 期按 D-U13 修订：投递逻辑的抽取已完成；进行中：结构隔离、三种构建形态、单二进制多入口；原计划中让 Host 依赖 runtime 内部的步骤取消 | [rust-u3-single-process.md](rust-u3-single-process.md)、[rust-u3-stage-b.md](rust-u3-stage-b.md)、[rust-host-cli-boundary.md](rust-host-cli-boundary.md) |
 | U4   | 已完成并在 Electron 里验证（在合并 Gateway 之前的提交上）：一个 App 一个 Rust Host；28 个桌面 E2E 场景在进程内 runtime 下通过，包括多窗口、没有窗口时的调度、设置读写、崩溃重启；Node Host 路径 5 个场景通过。进行中：合并 Gateway 之后重跑全部 E2E                                                                | [rust-u4-app-host.md](rust-u4-app-host.md)                                                                                                               |
 
-待用户决定：Host 被强杀或崩溃时工具进程树的回收方式（10.1 的“进程”一行目前只覆盖 Linux 与 Windows，且尚未实现）；D-U12 是否改为同进程内每个 workspace 一个实例（测量显示每个实例约 2–4 MiB、冷启动约 17 ms）；D-U6 的外部调用方（rust-u3-stage-b.md 第 7 节）。
+用户已决定、尚未实现：工具进程的回收（D-U15）、一个 Engine（D-U12）、输入队列的映射（D-U6）。
 
 **不做中间发布（D-U8）。** U0–U7 都是开发里程碑，不是发布版本：
 
@@ -623,15 +623,16 @@ flowchart LR
 
 **已定**（2026-10-09，用户确认）
 
-| 编号  | 问题                        | 决定                                                                                                                                                                                         |
-| ----- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D-U1  | Host 进程归谁               | App 的子进程，每个 App 一个。HostCore 不区分启动方式，用户级 daemon 以后作为另一种启动方式补上                                                                                               |
-| D-U2  | 远端运行什么                | 完整 Host（同一个二进制 `zcode serve --stdio`），远端拥有会话。`Environment` 抽象保留，将来可以支持“只做远程执行”                                                                            |
-| D-U3  | SSH 怎么实现                | 系统 OpenSSH 加 askpass。复用用户的 `~/.ssh/config`、agent、ProxyJump、known_hosts；现有 ssh2 的配置项要迁移。替换 rust-host D8 的 TS 连接器                                                 |
-| D-U8  | 是否先发布中间形态          | 不先发布 R7，也不发布任何中间形态。按最终设计做，U8 一次切换；第 12 节的阶段只是开发里程碑                                                                                                   |
-| D-U12 | runtime 的 actor 粒度       | 一个 Engine 管所有 workspace（沿用进行中的 workspace-scope 工作）。会话级 actor 改造量大，暂不做。约束与兜底见 14.1                                                                          |
-| D-U13 | Host 与 CLI 的代码关系      | 结构上隔离，能分开编译：各自成 workspace，Host 只经一个 crate、只用 CLI 的公开入口；边界是 App 协议，进程内与子进程两种链路都保留。见 [rust-host-cli-boundary.md](rust-host-cli-boundary.md) |
-| D-U14 | 合并后的二进制怎么当 CLI 用 | 同一个二进制多入口：`cli` 子命令（或以 CLI 的名字运行）时与独立 CLI 行为完全相同。见 rust-host-cli-boundary.md 3.4                                                                           |
+| 编号  | 问题                          | 决定                                                                                                                                                                                                                          |
+| ----- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-U1  | Host 进程归谁                 | App 的子进程，每个 App 一个。HostCore 不区分启动方式，用户级 daemon 以后作为另一种启动方式补上                                                                                                                                |
+| D-U2  | 远端运行什么                  | 完整 Host（同一个二进制 `zcode serve --stdio`），远端拥有会话。`Environment` 抽象保留，将来可以支持“只做远程执行”                                                                                                             |
+| D-U3  | SSH 怎么实现                  | 系统 OpenSSH 加 askpass。复用用户的 `~/.ssh/config`、agent、ProxyJump、known_hosts；现有 ssh2 的配置项要迁移。替换 rust-host D8 的 TS 连接器                                                                                  |
+| D-U8  | 是否先发布中间形态            | 不先发布 R7，也不发布任何中间形态。按最终设计做，U8 一次切换；第 12 节的阶段只是开发里程碑                                                                                                                                    |
+| D-U12 | runtime 的 actor 粒度         | 一个 Engine 管所有本地 workspace（2026-10-10 再次确认）。会话库路径与网络策略只认用户级配置；Host 自己产生 workspace 的生命周期事件，Engine 增加“重置某个 workspace”的操作。见 [rust-u3-one-engine.md](rust-u3-one-engine.md) |
+| D-U13 | Host 与 CLI 的代码关系        | 结构上隔离，能分开编译：各自成 workspace，Host 只经一个 crate、只用 CLI 的公开入口；边界是 App 协议，进程内与子进程两种链路都保留。见 [rust-host-cli-boundary.md](rust-host-cli-boundary.md)                                  |
+| D-U14 | 合并后的二进制怎么当 CLI 用   | 同一个二进制多入口：`cli` 子命令（或以 CLI 的名字运行）时与独立 CLI 行为完全相同。见 rust-host-cli-boundary.md 3.4                                                                                                            |
+| D-U15 | Host 异常退出后工具进程的回收 | 账本加启动清扫，另加 Linux 的 PDEATHSIG 与 Windows 的 Job Object（2026-10-10）。见 [rust-tool-process-reaping.md](rust-tool-process-reaping.md)                                                                               |
 
 **按推荐执行**（2026-10-09 开始实施前已告知用户，未提出异议）
 
