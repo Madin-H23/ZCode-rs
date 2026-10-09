@@ -1,8 +1,8 @@
 //! Bot 远端运行时端到端（docs/specs/rust-host-remote.md §2.9）：拉起本仓库构建的真实
 //! `packages/server/dist/remote/zcode-server.cjs`（临时 HOME，远端 Agent 是本仓库的 Rust CLI），经控制
 //! 消息连上远端 workspace 并做 Provider Provisioning；本地 Bots 的 Telegram 长轮询从 127.0.0.1 上的
-//! Bot API mock 收到一条消息，上下文是这个远端 workspace：Bot 经 `RemoteBotRuntime` 问“Main”连接状态，
-//! 在远端建会话、订阅远端 V4 会话帧、经 zcode-task wrapper 发送（带 realtime lease 与镜像），远端 CLI
+//! Bot API mock 收到一条消息，上下文是这个远端 workspace：Bot 经 `RemoteBotRuntime` 读 Host 注册表判定
+//! 连接状态，在远端建会话、订阅远端 V4 会话帧、经 zcode-task wrapper 发送（不经 Main 中继），远端 CLI
 //! 调 127.0.0.1 上的 mock 模型，流式回复回到 Telegram mock 的 sendMessage。
 //!
 //! 所有出站 HTTP 只到 127.0.0.1（其余指向已关闭的端口），HOME、数据目录与凭据都在临时目录。
@@ -32,12 +32,10 @@ use zcode_host_services::bots::providers::{Endpoints, Providers};
 use zcode_host_services::bots::service::{Bots, BotsDeps};
 use zcode_host_services::bots::store::BotsRepo;
 use zcode_host_services::bots::{FinalReply, TaskPort};
-use zcode_host_services::main_bridge::MainBridge;
 use zcode_host_services::remote::provisioning::ProvisioningSource;
 use zcode_host_services::remote::transport::ProcessTransport;
 use zcode_host_services::remote::{RemoteConfig, install_with};
 use zcode_host_services::settings::SettingStore;
-use zcode_host_services::tasks::realtime::TaskRealtimeBridge;
 
 const REPLY: &str = "Hello from the remote mock model";
 const PROMPT: &str = "hello remote agent";
@@ -418,14 +416,10 @@ async fn telegram_message_runs_on_a_remote_workspace_agent() {
     .map(|(key, value)| (key.to_owned(), value))
     .collect();
 
-    // “Main”：回答 Bot 的连接状态查询与 realtime lease，其余消息记下来。
+    // “Main”：只把控制消息记下来；连接状态由 Host 注册表回答，sendPrompt 不经 Main 中继。
     let (sink, mut messages) = mpsc::unbounded_channel();
     let control: Arc<dyn ControlSink> = Arc::new(Control(sink));
     let mut router = ControlRouter::default();
-    let realtime =
-        TaskRealtimeBridge::for_host_init(Some("host-1"), None, MainBridge::new(control.clone()))
-            .unwrap();
-    realtime.register(&mut router);
     let credentials = CredentialStore::new(&local_config, "test-secret");
     let settings = SettingStore::new(&local_home);
     let remote = install_with(
@@ -444,38 +438,15 @@ async fn telegram_message_runs_on_a_remote_workspace_agent() {
             },
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),
-            realtime: Some(realtime),
         },
         &mut router,
     );
     let router = Arc::new(router);
     let log = Arc::new(Mutex::new(Vec::<Value>::new()));
     {
-        let (router, log) = (router.clone(), log.clone());
+        let log = log.clone();
         tokio::spawn(async move {
             while let Some(message) = messages.recv().await {
-                match message["type"].as_str() {
-                    Some("bot-remote-workspace-connection-status-request") => {
-                        let connected = log
-                            .lock()
-                            .unwrap()
-                            .iter()
-                            .any(|logged| logged["type"] == "remote-workspace-connected");
-                        router.dispatch(
-                            "bot-remote-workspace-connection-status-result",
-                            json!({"type": "bot-remote-workspace-connection-status-result",
-                                   "requestId": message["requestId"], "ok": true, "connected": connected}),
-                        );
-                    }
-                    Some("task-run-lease-acquire") => {
-                        router.dispatch(
-                            "task-run-lease-result",
-                            json!({"type": "task-run-lease-result", "result": {
-                                "leaseRequestId": message["request"]["leaseRequestId"], "acquired": true}}),
-                        );
-                    }
-                    _ => {}
-                }
                 log.lock().unwrap().push(message);
             }
         });
@@ -578,25 +549,18 @@ async fn telegram_message_runs_on_a_remote_workspace_agent() {
     let context = &state["bots"]["tg-1"];
     assert_eq!(context["workspaceIdentity"], identity, "{state}");
     assert_eq!(context["mode"], "task");
-    let task_id = context["activeTaskId"].as_str().unwrap().to_owned();
+    assert!(context["activeTaskId"].as_str().is_some(), "{state}");
 
-    // 远端 sendPrompt 期间持有 realtime lease，并把用户消息镜像给 Main。
-    let lease = wait_for("lease release", Duration::from_secs(10), || {
-        logged("task-run-lease-release").pop()
-    })
-    .await;
-    assert_eq!(lease["target"]["taskId"], task_id);
-    assert_eq!(lease["target"]["workspaceKey"], identity);
-    let user_message = logged("task-stream-op-publish")
-        .into_iter()
-        .find(|message| message["op"]["kind"] == "user_message")
-        .expect("user message mirrored");
-    assert_eq!(user_message["op"]["content"], PROMPT);
-    assert!(
-        logged("session-route-announce")
-            .iter()
-            .any(|message| message["route"]["sessionId"] == task_id.as_str())
-    );
+    // App 级 Host：连接状态、run lease、stream 镜像与 session route 都不经 Main（rust-u4-app-host.md §4.2）。
+    for relayed in [
+        "bot-remote-workspace-connection-status-request",
+        "task-run-lease-acquire",
+        "task-stream-op-publish",
+        "session-route-announce",
+        "session-message-send-requested",
+    ] {
+        assert!(logged(relayed).is_empty(), "{relayed}");
+    }
 
     bots.shutdown().await;
     remote.shutdown().await;

@@ -1,5 +1,6 @@
-//! Bot 远端运行时（rust-host-remote.md §2.9）：Main 往返、按 session 解析连接、初始化与偏好推送、
-//! realtime 镜像与远端 attachment 的 bots channel。远端由进程内的 [`FakeRemote`] 扮演。
+//! Bot 远端运行时（rust-host-remote.md §2.9）：连接判定读注册表、重连问 Main、按 session 解析连接、
+//! 初始化与偏好推送、sendPrompt 不经 Main 中继与远端 attachment 的 bots channel。远端由进程内的
+//! [`FakeRemote`] 扮演。
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -14,8 +15,6 @@ use super::transport::Connection;
 use super::{RemoteConfig, RemoteScope, RemoteWorkspaces, install_with};
 use crate::agent::WorkspaceTarget;
 use crate::bots::RemoteBots;
-use crate::main_bridge::MainBridge;
-use crate::tasks::realtime::TaskRealtimeBridge;
 
 const IDENTITY: &str = "remote:docker:c:/w";
 
@@ -33,17 +32,10 @@ struct Setup {
     messages: mpsc::UnboundedReceiver<Value>,
 }
 
-fn setup(home: &std::path::Path, connections: Vec<Connection>, realtime: bool) -> Setup {
+fn setup(home: &std::path::Path, connections: Vec<Connection>) -> Setup {
     let (sink, messages) = mpsc::unbounded_channel();
     let control: Arc<dyn ControlSink> = Arc::new(Control(sink));
     let mut router = ControlRouter::default();
-    let realtime = realtime.then(|| {
-        let bridge =
-            TaskRealtimeBridge::for_host_init(Some("h1"), None, MainBridge::new(control.clone()))
-                .unwrap();
-        bridge.register(&mut router);
-        bridge
-    });
     let workspaces = install_with(
         RemoteConfig {
             transport: Arc::new(FakeTransport(Mutex::new(connections))),
@@ -52,7 +44,6 @@ fn setup(home: &std::path::Path, connections: Vec<Connection>, realtime: bool) -
             provisioning: ProvisioningSource::for_test(home),
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),
-            realtime,
         },
         &mut router,
     );
@@ -137,8 +128,30 @@ fn same_port(
     std::ptr::addr_eq(Arc::as_ptr(left), Arc::as_ptr(right))
 }
 
+/// 控制通道上不能出现窗口级 Host 时代经 Main 中继的消息（rust-u4-app-host.md §4.2）。
+const RELAYED_THROUGH_MAIN: &[&str] = &[
+    "bot-remote-workspace-connection-status-request",
+    "task-run-lease-acquire",
+    "task-run-lease-release",
+    "task-stream-op-publish",
+    "task-realtime-publish",
+    "session-route-announce",
+    "session-message-send-requested",
+    "session-message-deliver-result",
+];
+
+impl Setup {
+    /// 排空已到达的控制消息，断言没有经 Main 中继的消息。
+    fn assert_no_main_relay(&mut self) {
+        while let Ok(message) = self.messages.try_recv() {
+            let kind = message["type"].as_str().unwrap_or_default();
+            assert!(!RELAYED_THROUGH_MAIN.contains(&kind), "{message}");
+        }
+    }
+}
+
 #[tokio::test]
-async fn bot_runtime_asks_main_for_status_and_reconnect() {
+async fn bot_runtime_reads_status_from_the_registry_and_asks_main_to_reconnect() {
     let home = tempfile::tempdir().unwrap();
     write_settings(
         home.path(),
@@ -153,9 +166,13 @@ async fn bot_runtime_asks_main_for_status_and_reconnect() {
             {"kind": "remote", "workspacePath": "/w", "workspaceIdentity": IDENTITY,
              "target": {"kind": "docker", "container": "c"},
              "lastOpenedAt": 1, "lastConnectionStatus": "connected"},
+            {"kind": "remote", "workspacePath": "/w", "workspaceIdentity": "remote:docker:other:/w",
+             "target": {"kind": "docker", "container": "other"},
+             "lastOpenedAt": 1, "lastConnectionStatus": "connected"},
         ]}),
     );
-    let mut setup = setup(home.path(), Vec::new(), false);
+    let (remote, client) = FakeRemote::start();
+    let mut setup = setup(home.path(), vec![remote.connection(client)]);
     setup
         .workspaces
         .provisioning
@@ -165,63 +182,40 @@ async fn bot_runtime_asks_main_for_status_and_reconnect() {
         .unwrap();
     let runtime = setup.workspaces.bots_runtime();
     assert!(runtime.available());
-    const STATUS: &str = "bot-remote-workspace-connection-status-request";
-    const STATUS_RESULT: &str = "bot-remote-workspace-connection-status-result";
 
-    // SSH：凭据键换成明文密码，展示用字段不进 Main 消息；没有存的口令不写。
-    let ssh = remote_target("/srv", "remote:ssh:u@h:2222:/srv");
-    let pending = tokio::spawn(runtime.is_connected(ssh.clone()));
-    let request = setup.expect(STATUS).await;
+    // 注册表里没有 session：未连接，不问 Main。
+    let docker = remote_target("/w", IDENTITY);
+    assert!(!runtime.is_connected(docker.clone()).await);
+    setup.connect("r1").await;
+    assert!(runtime.is_connected(docker.clone()).await);
+    // 按 workspaceKey（identity 优先）判定，同 Main 的 route 表：Bot 上下文的旧路径也算已连接。
+    assert!(runtime.is_connected(remote_target("/old", IDENTITY)).await);
+    // 同一路径、另一个容器：target 不同，未连接。
     assert!(
-        request["requestId"]
-            .as_str()
-            .unwrap()
-            .starts_with("bot-status-")
+        !runtime
+            .is_connected(remote_target("/w", "remote:docker:other:/w"))
+            .await
     );
-    assert_eq!(request["workspacePath"], "/srv");
-    assert_eq!(request["workspaceIdentity"], "remote:ssh:u@h:2222:/srv");
-    assert_eq!(
-        request["target"],
-        json!({"kind": "ssh", "host": "h", "port": 2222, "username": "u", "password": "s3cret"})
-    );
-    setup.reply(
-        STATUS_RESULT,
-        &request,
-        json!({"ok": true, "connected": true}),
-    );
-    assert!(pending.await.unwrap());
-    // Main 查询失败：用本地标记。
-    let pending = tokio::spawn(runtime.is_connected(ssh.clone()));
-    let request = setup.expect(STATUS).await;
-    setup.reply(STATUS_RESULT, &request, json!({"ok": false, "error": "x"}));
-    assert!(pending.await.unwrap());
-    // Main 说未连接：清掉标记，之后查询失败也视为未连接。
-    let pending = tokio::spawn(runtime.is_connected(ssh.clone()));
-    let request = setup.expect(STATUS).await;
-    setup.reply(
-        STATUS_RESULT,
-        &request,
-        json!({"ok": true, "connected": false}),
-    );
-    assert!(!pending.await.unwrap());
-    let pending = tokio::spawn(runtime.is_connected(ssh.clone()));
-    let request = setup.expect(STATUS).await;
-    setup.reply(STATUS_RESULT, &request, json!({"ok": false}));
-    assert!(!pending.await.unwrap());
+    // 断线后注册表即时反映。
+    remote.close(-1);
+    setup.expect("remote-workspace-closed").await;
+    assert!(!runtime.is_connected(docker.clone()).await);
 
-    // 没有连接信息：不问 Main。
-    let unknown = remote_target("/x", "remote:docker:other:/x");
+    // 没有连接信息：未连接，重连直接失败。
+    let unknown = remote_target("/x", "remote:docker:none:/x");
     assert!(!runtime.is_connected(unknown.clone()).await);
     assert_eq!(
         runtime.ensure_connected(unknown).await,
         Err("未找到该远端 workspace 的连接信息。".to_owned())
     );
+    setup.assert_no_main_relay();
 
-    // 重连：Docker target 原样；失败带 Main 的错误，成功后登记本地标记。
+    // 重连仍由 Main 执行：SSH 凭据键换成明文密码，展示用字段不进 Main 消息，没有存的口令不写；
+    // 发起方是 Bot 不是窗口，请求不带 windowId。
     const RECONNECT: &str = "bot-remote-workspace-reconnect-request";
     const RECONNECT_RESULT: &str = "bot-remote-workspace-reconnect-result";
-    let docker = remote_target("/w", IDENTITY);
-    let pending = tokio::spawn(runtime.ensure_connected(docker.clone()));
+    let ssh = remote_target("/srv", "remote:ssh:u@h:2222:/srv");
+    let pending = tokio::spawn(runtime.ensure_connected(ssh));
     let request = setup.expect(RECONNECT).await;
     assert!(
         request["requestId"]
@@ -229,32 +223,32 @@ async fn bot_runtime_asks_main_for_status_and_reconnect() {
             .unwrap()
             .starts_with("bot-reconnect-")
     );
+    assert_eq!(request["workspacePath"], "/srv");
+    assert_eq!(request["workspaceIdentity"], "remote:ssh:u@h:2222:/srv");
     assert_eq!(
         request["target"],
-        json!({"kind": "docker", "container": "c"})
+        json!({"kind": "ssh", "host": "h", "port": 2222, "username": "u", "password": "s3cret"})
     );
-    assert_eq!(request["workspaceIdentity"], IDENTITY);
+    assert!(request.get("windowId").is_none(), "{request}");
     setup.reply(
         RECONNECT_RESULT,
         &request,
         json!({"ok": false, "error": "boom"}),
     );
     assert_eq!(pending.await.unwrap(), Err("boom".to_owned()));
-    let pending = tokio::spawn(runtime.ensure_connected(docker.clone()));
+    let pending = tokio::spawn(runtime.ensure_connected(docker));
     let request = setup.expect(RECONNECT).await;
+    assert_eq!(
+        request["target"],
+        json!({"kind": "docker", "container": "c"})
+    );
     setup.reply(
         RECONNECT_RESULT,
         &request,
         json!({"ok": true, "sessionId": "s1"}),
     );
     assert_eq!(pending.await.unwrap(), Ok(()));
-    let pending = tokio::spawn(runtime.is_connected(docker));
-    let request = setup.expect(STATUS).await;
-    setup.reply(STATUS_RESULT, &request, json!({"ok": false}));
-    assert!(
-        pending.await.unwrap(),
-        "reconnect marked the workspace connected"
-    );
+    setup.assert_no_main_relay();
 }
 
 fn serve_runtime(remote: &FakeRemote, model: &'static str) {
@@ -288,7 +282,6 @@ async fn bot_runtime_uses_the_online_session_and_initializes_per_connection() {
             second.connection(second_client),
             first.connection(first_client),
         ],
-        false,
     );
     let runtime = setup.workspaces.bots_runtime();
     let target = remote_target("/w", IDENTITY);
@@ -335,9 +328,24 @@ async fn bot_runtime_uses_the_online_session_and_initializes_per_connection() {
                     "modelSelection": {"providerId": "p", "modelId": "m1"},
                     "mode": "yolo", "v4Create": true})]
     );
-    // 建会话的结果经 wrapper 登记 task meta（session route 同 Renderer 路径）。
-    let route = setup.expect("session-route-announce").await;
-    assert_eq!(route["route"]["sessionId"], "t1");
+    // 建会话的结果经 wrapper 登记 task meta（同 Renderer 路径），不再向 Main 宣告 session route。
+    assert_eq!(
+        setup
+            .workspaces
+            .registry()
+            .resolve_scoped(&RemoteScope {
+                remote_session_id: setup.workspaces.registry().list_sessions()[0]
+                    .remote_session_id
+                    .clone(),
+                workspace_path: "/w".into(),
+                workspace_identity: IDENTITY.into(),
+            })
+            .unwrap()
+            .tracker
+            .meta("t1"),
+        Some(("/w".to_owned(), Some(IDENTITY.to_owned())))
+    );
+    setup.assert_no_main_relay();
     assert!(same_port(&port, &runtime.tasks(&target).unwrap()));
     assert_eq!(
         port.list(IDENTITY.into()).await,
@@ -376,25 +384,20 @@ async fn bot_runtime_uses_the_online_session_and_initializes_per_connection() {
 }
 
 #[tokio::test]
-async fn remote_send_prompt_holds_a_realtime_lease_and_mirrors_the_stream() {
+async fn remote_send_prompt_and_session_messages_stay_inside_the_host() {
     let home = tempfile::tempdir().unwrap();
     let (remote, client) = FakeRemote::start();
     remote.on("zcode-task.createTask", |_, _| {
         Ok(json!({"taskId": "t1", "workspacePath": "/w", "workspaceIdentity": IDENTITY, "traceId": "r"}))
     });
-    // 远端在 ACK 之前推流事件（同一条连接按序到达）。
     remote.on("zcode-task.sendPrompt", |remote, _| {
         remote.fire(
             "zcode-task.onDynamicStreamEvent",
             json!({"type": "agent_message_chunk", "text": "hi"}),
         );
-        remote.fire(
-            "zcode-task.onDynamicStreamEvent",
-            json!({"type": "task_snapshot_updated"}),
-        );
         Ok(Value::Null)
     });
-    let mut setup = setup(home.path(), vec![remote.connection(client)], true);
+    let mut setup = setup(home.path(), vec![remote.connection(client)]);
     let scope = setup.connect("r1").await;
     let attachment = setup
         .workspaces
@@ -407,11 +410,7 @@ async fn remote_send_prompt_holds_a_realtime_lease_and_mirrors_the_stream() {
         .await
         .unwrap();
     let tasks = attachment.registry.get("zcode-task").unwrap();
-    let ui = CallContext {
-        connection: 1,
-        attachment_id: "a1".into(),
-        client_mode: ClientMode::DesktopContinuous,
-    };
+    let ui = CallContext::new(1, "a1", ClientMode::DesktopContinuous);
     tasks
         .call(
             &ui,
@@ -422,76 +421,35 @@ async fn remote_send_prompt_holds_a_realtime_lease_and_mirrors_the_stream() {
         )
         .await
         .unwrap();
-    let send = |trace: &str| {
-        let call = tasks.call(
+
+    // sendPrompt 直接转发远端：不申请 Main 的 run lease，不镜像用户消息与流事件。
+    tasks
+        .call(
             &ui,
             "sendPrompt",
             vec![RpcValue::Json(
-                json!({"taskId": "t1", "traceId": trace, "content": "hello"}),
+                json!({"taskId": "t1", "traceId": "tr1", "content": "hello"}),
             )],
-        );
-        tokio::spawn(call)
-    };
-
-    let pending = send("tr1");
-    let acquire = setup.expect("task-run-lease-acquire").await;
-    let request = &acquire["request"];
-    assert_eq!(request["workspacePath"], "/w");
-    assert_eq!(request["workspaceIdentity"], IDENTITY);
-    assert_eq!(request["workspaceKey"], IDENTITY);
-    assert_eq!(request["taskId"], "t1");
-    assert_eq!(request["runId"], "tr1");
-    assert_eq!(request["traceId"], "tr1");
-    assert!(
-        remote.calls("zcode-task.sendPrompt").is_empty(),
-        "waits for the lease"
-    );
-    assert!(setup.router.dispatch(
-        "task-run-lease-result",
-        json!({"type": "task-run-lease-result",
-               "result": {"leaseRequestId": request["leaseRequestId"], "acquired": true}}),
-    ));
-    let mut ops = Vec::new();
-    loop {
-        let message = tokio::time::timeout(Duration::from_secs(2), setup.messages.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        match message["type"].as_str() {
-            Some("task-stream-op-publish") => ops.push(message["op"].clone()),
-            Some("task-run-lease-release") => {
-                assert_eq!(message["target"]["taskId"], "t1");
-                break;
-            }
-            _ => {}
-        }
-    }
-    assert!(pending.await.unwrap().is_ok());
-    assert_eq!(ops.len(), 2, "{ops:?}");
-    assert_eq!(ops[0]["kind"], "user_message");
-    assert_eq!(ops[0]["messageId"], "user-tr1");
-    assert_eq!(ops[0]["content"], "hello");
-    assert!(ops[0]["timestamp"].is_u64());
-    assert!(ops[0].get("attachments").is_none());
+        )
+        .await
+        .unwrap();
     assert_eq!(
-        ops[1],
-        json!({"kind": "stream_event", "event": {"type": "agent_message_chunk", "text": "hi"}})
+        remote.calls("zcode-task.sendPrompt"),
+        vec![json!({"taskId": "t1", "traceId": "tr1", "content": "hello"})]
     );
+    // 运行中任务计数照常上报（WSL 释放屏障）。
+    let running = setup.expect("workspace-running-task-count-changed").await;
+    assert_eq!(running["runningTaskCount"], 1);
 
-    // 没拿到 lease：直接发送，不镜像。
-    let pending = send("tr2");
-    let acquire = setup.expect("task-run-lease-acquire").await;
-    assert!(setup.router.dispatch(
-        "task-run-lease-result",
-        json!({"type": "task-run-lease-result",
-               "result": {"leaseRequestId": acquire["request"]["leaseRequestId"], "acquired": false}}),
-    ));
-    assert!(pending.await.unwrap().is_ok());
-    assert_eq!(remote.calls("zcode-task.sendPrompt").len(), 2);
-    while let Ok(message) = setup.messages.try_recv() {
-        assert_ne!(message["type"], "task-stream-op-publish", "{message}");
-        assert_ne!(message["type"], "task-run-lease-release", "{message}");
-    }
+    // 远端 workspace 的会话消息请求在 Host 内应答（结果见 tasks::session_messages），不发给 Main。
+    remote.fire(
+        "zcode-task.onDynamicWorkspaceEvent",
+        json!({"type": "workspace_session_message_send_requested",
+               "request": {"messageId": "m", "requestId": "q", "fromSessionId": "t1",
+                           "toSessionId": "t2", "content": "x", "createdAt": 1}}),
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    setup.assert_no_main_relay();
 }
 
 #[tokio::test]
@@ -499,7 +457,7 @@ async fn remote_attachment_bots_channel_runs_on_the_connection() {
     let home = tempfile::tempdir().unwrap();
     let (remote, client) = FakeRemote::start();
     remote.on("zcode-task.listTasks", |_, _| Ok(json!([{"taskId": "t9"}])));
-    let mut setup = setup(home.path(), vec![remote.connection(client)], false);
+    let mut setup = setup(home.path(), vec![remote.connection(client)]);
     let scope = setup.connect("r1").await;
     let local = crate::bots::test_support::bots_with(
         home.path(),
@@ -520,6 +478,7 @@ async fn remote_attachment_bots_channel_runs_on_the_connection() {
         connection: 1,
         attachment_id: "a1".into(),
         client_mode: ClientMode::DesktopContinuous,
+        window_id: None,
     };
     // 配置与本地实例同一份存储。
     let config = reply_value(channel.call(&ui, "getConfig", Vec::new()).await.unwrap());

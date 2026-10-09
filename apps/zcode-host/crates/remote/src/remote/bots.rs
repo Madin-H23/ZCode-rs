@@ -1,12 +1,13 @@
 //! Bot 远端运行时（rust-host-remote.md §2.9）：Node `createBotRemoteWorkspaceService` 与 Main 的 Bot
 //! handler 在 Rust Host 里的对应。
 //!
-//! - [`RemoteBotRuntime`] 实现 `bots::RemoteBots`：连接判定与 `/reconnect` 问 Main（live route 表在
-//!   Main），任务能力在本窗口注册表里按 (path, identity) 找在线 session，用它的连接；
+//! - [`RemoteBotRuntime`] 实现 `bots::RemoteBots`：连接判定读 Host 自己的注册表（App 级，
+//!   rust-u4-app-host.md §2.7），`/reconnect` 仍请 Main 的远端会话管理器执行（它持有 SSH 连接器），
+//!   任务能力在注册表里按 (path, identity) 找在线 session，用它的连接；
 //! - [`RemotePort`] 是 Bot 的 `TaskPort` 在一条远端连接上的实现：zcode-task 走与 Renderer 相同的
-//!   wrapper（附件物化、运行中任务、realtime 镜像），会话读取用远端 V4 帧；
+//!   wrapper（附件物化、运行中任务），会话读取用远端 V4 帧；
 //! - [`connection_bots`]：远端 attachment 的 `bots` channel 背后的 Bots 实例（每条连接一个）。
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -35,11 +36,8 @@ use crate::bots::{FinalReply, NoRemote, RemoteBots, TaskPort, delivery};
 use crate::main_bridge::MainBridge;
 use crate::settings::SettingStore;
 
-const STATUS_REQUEST: &str = "bot-remote-workspace-connection-status-request";
-const STATUS_RESULT: &str = "bot-remote-workspace-connection-status-result";
 const RECONNECT_REQUEST: &str = "bot-remote-workspace-reconnect-request";
 const RECONNECT_RESULT: &str = "bot-remote-workspace-reconnect-result";
-const STATUS_TIMEOUT: Duration = Duration::from_secs(5);
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 const WIRE_PROTOCOL_VERSION: u64 = 3;
 
@@ -294,6 +292,7 @@ async fn subscribe(
             connection: NEXT_SCOPE.fetch_add(1, Ordering::SeqCst),
             attachment_id: inner.bot_id.clone(),
             client_mode: ClientMode::DesktopContinuous,
+            window_id: None,
         },
     };
     let agent = scope.agent.clone();
@@ -782,8 +781,6 @@ pub struct RemoteBotRuntime {
     credentials: CredentialStore,
     main: MainBridge,
     shared: Arc<Shared>,
-    /// Main 状态查询失败时的回落（Node `connectedWorkspaceKeys`）。
-    connected: Mutex<HashSet<String>>,
     /// workspaceKey → 该连接上的端口（连接换代后丢弃）。
     runtimes: Mutex<HashMap<String, Cached>>,
 }
@@ -804,27 +801,18 @@ impl RemoteBotRuntime {
                 settings,
                 preferences: Mutex::new(Preferences::default()),
             }),
-            connected: Mutex::new(HashSet::new()),
             runtimes: Mutex::new(HashMap::new()),
         })
     }
 
-    /// Main → Host 的两种结果按 requestId 回到等待者。
+    /// Main → Host 的重连结果按 requestId 回到等待者。
     pub(super) fn register(&self, router: &mut ControlRouter) {
-        for kind in [STATUS_RESULT, RECONNECT_RESULT] {
-            let main = self.main.clone();
-            router.on(kind, move |message| {
-                if let Some(request_id) = message["requestId"].as_str() {
-                    main.resolve(request_id, message.clone());
-                }
-            });
-        }
-    }
-
-    fn connected(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
-        self.connected
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        let main = self.main.clone();
+        router.on(RECONNECT_RESULT, move |message| {
+            if let Some(request_id) = message["requestId"].as_str() {
+                main.resolve(request_id, message.clone());
+            }
+        });
     }
 
     fn runtimes(&self) -> std::sync::MutexGuard<'_, HashMap<String, Cached>> {
@@ -913,7 +901,8 @@ impl RemoteBots for RemoteBotRuntime {
         true
     }
 
-    /// `isConnected`：每次问 Main 的 live session 表（UI 手动重连不经过 Bot）；查询失败用本地标记。
+    /// `isConnected`：每次读 Host 自己的注册表（UI 手动重连不经过 Bot，注册表是 live session 的所有者），
+    /// 不再问 Main（rust-u4-app-host.md §2.7）。
     fn is_connected(&self, target: WorkspaceTarget) -> BoxFuture<'static, bool> {
         let Some(runtime) = self.me.upgrade() else {
             return async { false }.boxed();
@@ -922,10 +911,7 @@ impl RemoteBots for RemoteBotRuntime {
             let key = target.key();
             let remote = match runtime.remote_target(&target).await {
                 Ok(Some(remote)) => remote,
-                Ok(None) => {
-                    runtime.connected().remove(&key);
-                    return false;
-                }
+                Ok(None) => return false,
                 Err(error) => {
                     log::warn(format!(
                         "bots remote target unavailable workspace={key}: {error}"
@@ -933,29 +919,17 @@ impl RemoteBots for RemoteBotRuntime {
                     return false;
                 }
             };
-            let request_id = format!("bot-status-{}", uuid_v4());
-            let message = runtime.request(STATUS_REQUEST, &request_id, &target, remote);
-            match runtime
-                .main
-                .request(request_id, message, STATUS_TIMEOUT, |_| {})
-                .await
-            {
-                Some(result) if result["ok"] == true => {
-                    let connected = result["connected"] == true;
-                    if connected {
-                        runtime.connected().insert(key);
-                    } else {
-                        runtime.connected().remove(&key);
-                    }
-                    connected
-                }
-                _ => runtime.connected().contains(&key),
-            }
+            runtime.remote.upgrade().is_some_and(|remote_workspaces| {
+                remote_workspaces
+                    .registry()
+                    .has_connected_session(&key, &remote)
+            })
         }
         .boxed()
     }
 
-    /// `ensureConnected`：Main 负责复用已有 route、合并在途重连或新建连接。
+    /// `ensureConnected`：Main 负责复用已有 route、合并在途重连或新建连接。请求不带 `windowId`：发起方是
+    /// Bot 而不是某个窗口，workspace route 属于哪个窗口由 Main 的 route 表决定（rust-u4-app-host.md §4.1）。
     fn ensure_connected(&self, target: WorkspaceTarget) -> BoxFuture<'static, Result<(), String>> {
         let Some(runtime) = self.me.upgrade() else {
             return async { Err("remote reconnect service unavailable".to_owned()) }.boxed();
@@ -972,7 +946,6 @@ impl RemoteBots for RemoteBotRuntime {
                 .await
                 .ok_or_else(|| "远端 workspace 重连超时。".to_owned())?;
             if result["ok"] == true {
-                runtime.connected().insert(target.key());
                 return Ok(());
             }
             Err(result["error"].as_str().unwrap_or("unknown").to_owned())
@@ -980,8 +953,7 @@ impl RemoteBots for RemoteBotRuntime {
         .boxed()
     }
 
-    /// `getZCodeTaskService`：本窗口注册表里 (path, identity) 精确匹配的在线 session 的连接；绝不按
-    /// 路径单独匹配。
+    /// `getZCodeTaskService`：注册表里 (path, identity) 精确匹配的在线 session 的连接；绝不按路径单独匹配。
     fn tasks(&self, target: &WorkspaceTarget) -> Option<Arc<dyn TaskPort>> {
         let remote = self.remote.upgrade()?;
         let identity = target

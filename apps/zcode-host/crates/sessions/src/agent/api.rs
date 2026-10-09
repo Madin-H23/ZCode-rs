@@ -678,7 +678,8 @@ impl AgentApi {
                 .as_str()
                 .unwrap_or("desktop-continuous");
             ambient = browser
-                .ambient_context(session_id, &target, client_mode)
+                // legacy 入口没有连接上下文，无法归属窗口：不带 windowId。
+                .ambient_context(session_id, &target, client_mode, None)
                 .await;
         }
         let mut full = Map::new();

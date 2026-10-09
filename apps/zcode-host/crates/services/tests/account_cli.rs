@@ -242,11 +242,7 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         providers.clone(),
     );
     account.attach_agent(&runtime, &context);
-    let (_broadcast, broadcaster) = {
-        let bridge = zcode_host_services::main_bridge::MainBridge::new(Arc::new(NullSink));
-        let mut router = zcode_host_control::ControlRouter::default();
-        zcode_host_services::broadcast::service_with_sender(bridge, &mut router)
-    };
+    let (_broadcast, broadcaster) = zcode_host_services::broadcast::service_with_sender();
     account.start(broadcaster);
 
     // 模型选择：个人 Coding Plan 与 Start Plan（只含余额白名单里的模型）。

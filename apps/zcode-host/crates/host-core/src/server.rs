@@ -243,6 +243,7 @@ mod tests {
             connection: 1,
             attachment_id: "a1".into(),
             client_mode: ClientMode::DesktopContinuous,
+            window_id: None,
         };
         let (flow, flow_rx) = watch::channel(FlowState::Drained);
         let telemetry = crate::rpc_telemetry::RpcTelemetry::new(Arc::new(NullSink));

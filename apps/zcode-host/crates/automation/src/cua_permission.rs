@@ -58,6 +58,7 @@ mod tests {
             connection: 1,
             attachment_id: "a".into(),
             client_mode: ClientMode::DesktopContinuous,
+            window_id: None,
         };
         let status = channel.call(&context, "getStatus", vec![]).await.unwrap();
         assert_eq!(

@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+futures-util.workspace = true
 getrandom.workspace = true
 reqwest.workspace = true
 rustls.workspace = true

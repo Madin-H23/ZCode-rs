@@ -102,6 +102,7 @@ impl HostCore {
                     attachment_id: request.attachment_id,
                     client_mode: request.client_mode,
                     scope: request.scope,
+                    window_id: request.window_id,
                 });
                 self.inner
                     .control
@@ -130,14 +131,35 @@ impl HostCore {
                 }
             }
             MainToHost::Other { kind, message } => {
-                if !self.lock_router().dispatch(&kind, message) {
-                    log::debug(format!(
-                        "control message not handled by the Rust Host yet: {kind}"
-                    ));
+                // 路由按值分发：先判断是否有处理者，没有时还要用原消息回失败。
+                if !self.lock_router().dispatch(&kind, message.clone()) {
+                    self.reject_unrouted(&kind, &message);
                 }
             }
         }
         ControlOutcome::Continue
+    }
+
+    /// 没有处理者的控制消息。服务安装之前到达的 `setting-write` 直接回失败：Main 应在 Host 就绪后才写
+    /// （rust-u4-app-host.md §2.6），万一早到也不能让它等满超时。
+    fn reject_unrouted(&self, kind: &str, message: &serde_json::Value) {
+        if kind == zcode_host_services::settings_control::SETTING_WRITE
+            && let Some(request_id) = message["requestId"].as_str()
+        {
+            log::warn(format!(
+                "setting-write before services are installed, requestId={request_id}"
+            ));
+            self.inner.control.send(HostToMain::Raw(serde_json::json!({
+                "type": zcode_host_services::settings_control::SETTING_WRITE_RESULT,
+                "requestId": request_id,
+                "ok": false,
+                "error": "Rust Host services are not initialized",
+            })));
+            return;
+        }
+        log::debug(format!(
+            "control message not handled by the Rust Host yet: {kind}"
+        ));
     }
 
     /// Host 退出前冲刷 RPC 遥测并回收子进程（CLI 进程树）；未初始化时只冲刷遥测。
@@ -352,6 +374,7 @@ impl HostCore {
             connection: NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed),
             attachment_id: meta.attachment_id.clone(),
             client_mode: meta.client_mode,
+            window_id: meta.window_id,
         };
         let (close_tx, close_rx) = watch::channel(false);
         {
@@ -502,6 +525,7 @@ mod remote_scope_tests {
             attachment_id: "a1".into(),
             client_mode,
             scope,
+            window_id: None,
         }
     }
 
@@ -521,6 +545,50 @@ mod remote_scope_tests {
             core.issue_endpoint(meta(AttachmentScope::Local, ClientMode::DesktopContinuous)),
             AttachmentEndpointResult::Issued { url, .. } if url == "ws://127.0.0.1:4242/rpc"
         ));
+    }
+
+    #[test]
+    fn issued_capability_carries_the_window_id() {
+        let (core, sink) = core();
+        let window_id = zcode_host_control::WindowId::new(2);
+        core.on_control(MainToHost::IssueAttachmentEndpoint(
+            zcode_host_control::IssueAttachmentEndpoint {
+                kind: "issue-attachment-endpoint".into(),
+                request_id: "r1".into(),
+                attachment_id: "a1".into(),
+                client_mode: ClientMode::DesktopContinuous,
+                scope: AttachmentScope::Local,
+                window_id,
+            },
+        ));
+        let capability = match sink.0.lock().unwrap().last() {
+            Some(HostToMain::AttachmentEndpointIssued {
+                result: AttachmentEndpointResult::Issued { capability, .. },
+                ..
+            }) => capability.clone(),
+            other => panic!("expected an issued endpoint, got {other:?}"),
+        };
+        let meta = core.redeem_capability(&capability).unwrap();
+        assert_eq!(meta.window_id, window_id);
+    }
+
+    #[test]
+    fn setting_writes_before_install_fail_instead_of_hanging() {
+        let (core, sink) = core();
+        core.on_control(MainToHost::Other {
+            kind: "setting-write".into(),
+            message: serde_json::json!({"type": "setting-write", "requestId": "w1", "patch": {}}),
+        });
+        let sent = sink.0.lock().unwrap().clone();
+        assert_eq!(
+            sent,
+            vec![HostToMain::Raw(serde_json::json!({
+                "type": "setting-write-result",
+                "requestId": "w1",
+                "ok": false,
+                "error": "Rust Host services are not initialized",
+            }))]
+        );
     }
 
     #[tokio::test]

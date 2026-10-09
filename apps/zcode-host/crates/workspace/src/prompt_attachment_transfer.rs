@@ -104,6 +104,7 @@ mod tests {
                         connection: 1,
                         attachment_id: "test".into(),
                         client_mode: zcode_host_control::ClientMode::DesktopContinuous,
+                        window_id: None,
                     },
                     "adopt",
                     vec![zcode_host_kit::RpcValue::String("op".into())]

@@ -66,6 +66,7 @@ fn context(connection: u64, mode: ClientMode) -> CallContext {
         connection,
         attachment_id: format!("attachment-{connection}"),
         client_mode: mode,
+        window_id: None,
     }
 }
 
@@ -171,7 +172,6 @@ async fn remote_workspace_against_a_real_zcode_server() {
             },
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),
-            realtime: None,
         },
         &mut router,
     );

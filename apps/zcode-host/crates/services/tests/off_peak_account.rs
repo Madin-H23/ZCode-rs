@@ -186,11 +186,7 @@ async fn logged_in_coding_plan_drives_off_peak_requests() {
         control: Arc::new(NullSink),
     };
     let account = AccountStack::new(&context, &settings, &providers);
-    let (_broadcast, broadcaster) = {
-        let bridge = zcode_host_services::main_bridge::MainBridge::new(Arc::new(NullSink));
-        let mut router = zcode_host_control::ControlRouter::default();
-        zcode_host_services::broadcast::service_with_sender(bridge, &mut router)
-    };
+    let (_broadcast, broadcaster) = zcode_host_services::broadcast::service_with_sender();
     account.start(broadcaster);
 
     let source = CredentialSource::new(

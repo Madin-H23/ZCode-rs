@@ -3,13 +3,15 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use zcode_host_control::{AttachmentScope, ClientMode};
+use zcode_host_control::{AttachmentScope, ClientMode, WindowId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentMeta {
     pub attachment_id: String,
     pub client_mode: ClientMode,
     pub scope: AttachmentScope,
+    /// 签发时 Main 给的主窗口 id；连接建立后进入 `CallContext.window_id`（rust-u4-app-host.md §2.2）。
+    pub window_id: Option<WindowId>,
 }
 
 struct Pending {
@@ -68,6 +70,7 @@ mod tests {
             attachment_id: "a1".into(),
             client_mode: ClientMode::DesktopContinuous,
             scope: AttachmentScope::Local,
+            window_id: WindowId::new(3),
         }
     }
 

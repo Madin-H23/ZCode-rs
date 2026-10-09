@@ -1,4 +1,5 @@
-//! 窗口级远端连接注册表（`packages/desktop/src/host/windowRemoteConnectionRegistry.ts`）。
+//! 远端连接注册表（`packages/desktop/src/host/windowRemoteConnectionRegistry.ts`）。U4 起 Host 是 App 级的，
+//! 注册表随之由所有窗口共用（rust-u4-app-host.md §3）。
 //!
 //! 连接 entry 与 logical session 的唯一所有者。规则见 rust-host-remote.md §2.3：
 //!
@@ -1167,6 +1168,26 @@ impl<H: RegistryHandle> RemoteRegistry<H> {
             .first()
             .map(|session| session.snapshot())
             .or_else(|| matches.first().map(|session| session.snapshot())))
+    }
+
+    /// Bot 远端运行时的连接判定（rust-host-remote.md §2.9.2）：存在同 workspaceKey、同 target、在线且
+    /// workspace 运行时就绪的 session。与 Main 原来按 route 表判定（attachable、同 target、同 workspaceKey）
+    /// 的条件对应；注册表是 App 级的，不再区分窗口。
+    pub fn has_connected_session(&self, key: &str, target: &Value) -> bool {
+        let state = self.lock();
+        state.sessions.values().any(|session| {
+            session.state == ConnState::Online
+                && session.online
+                && session.ready_state == ReadyState::Ready
+                && session.workspace_path.as_deref().is_some_and(|path| {
+                    workspace_key(path, session.workspace_identity.as_deref()) == key
+                })
+                && session.target.same_as(target)
+                && state
+                    .entries
+                    .get(&session.entry)
+                    .is_some_and(|entry| entry.handle.is_some())
+        })
     }
 
     pub fn stats(&self) -> (usize, usize) {

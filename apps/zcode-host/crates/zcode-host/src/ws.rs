@@ -19,8 +19,10 @@ use crate::flow::FlowGauge;
 
 pub const RPC_SUBPROTOCOL: &str = "zcode-rpc.v1";
 const CAPABILITY_PREFIX: &str = "zcode-cap.";
-/// 单窗口只有少量 attachment；上限防止本机其他进程开大量空连接占资源。
-const MAX_CONNECTIONS: usize = 32;
+/// App 级 Host（rust-u4-app-host.md）的连接上限，握手前的连接也占名额。每个主窗口一条本地 attachment，
+/// 加上每个已打开的远端 workspace 一条远端 scope attachment，reload 时新旧连接短暂并存；产品只有一个主窗口，
+/// 开发开关最多两个（§2.9）。64 给多窗口留出余量，同时仍限制本机其他进程开大量空连接占资源。
+const MAX_CONNECTIONS: usize = 64;
 
 pub struct Policy {
     host: String,

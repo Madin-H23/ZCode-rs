@@ -124,6 +124,41 @@ impl Host {
         self.issue_mode("desktop-continuous").await
     }
 
+    /// 签发一个本地 attachment；`window_id` 是 Main 给的主窗口 id（rust-u4-app-host.md §2.2）。
+    async fn issue_for_window(
+        &mut self,
+        attachment_id: &str,
+        window_id: Option<i64>,
+    ) -> (String, String) {
+        let mut request = json!({
+            "type": "issue-attachment-endpoint",
+            "requestId": format!("issue-{attachment_id}"),
+            "attachmentId": attachment_id,
+            "clientMode": "desktop-continuous",
+            "scope": {"kind": "local"},
+        });
+        if let Some(window_id) = window_id {
+            request["windowId"] = json!(window_id);
+        }
+        self.send(request).await;
+        let issued = self.recv_kind(&["attachment-endpoint-issued"]).await;
+        assert_eq!(issued["ok"], true, "{issued}");
+        (
+            issued["url"].as_str().unwrap().to_owned(),
+            issued["capability"].as_str().unwrap().to_owned(),
+        )
+    }
+
+    /// 下一条类型在 `kinds` 里的控制消息；其余（遥测等异步上报）跳过。
+    async fn recv_kind(&mut self, kinds: &[&str]) -> Value {
+        loop {
+            let message = self.recv().await;
+            if kinds.iter().any(|kind| message["type"] == *kind) {
+                return message;
+            }
+        }
+    }
+
     async fn issue_mode(&mut self, client_mode: &str) -> (String, String) {
         self.send(json!({
             "type": "issue-attachment-endpoint",
@@ -218,6 +253,203 @@ impl Rpc {
             .await
             .expect("rpc reply within timeout")
     }
+}
+
+impl Rpc {
+    /// 下一条 id 为 `id` 的应答（Promise 结果或事件），其余消息按到达顺序留给 `pending`。
+    async fn reply_to(
+        &mut self,
+        id: i64,
+        pending: &mut Vec<(Value, RpcValue)>,
+    ) -> (Value, RpcValue) {
+        if let Some(index) = pending.iter().position(|(header, _)| header[1] == id) {
+            return pending.remove(index);
+        }
+        loop {
+            let (header, body) = self.next().await;
+            if header[1] == id {
+                return (header, body);
+            }
+            pending.push((header, body));
+        }
+    }
+
+    /// 调用并等待结果；期间到达的事件留在 `pending`。
+    async fn call(
+        &mut self,
+        id: i64,
+        channel: &str,
+        method: &str,
+        args: Value,
+        pending: &mut Vec<(Value, RpcValue)>,
+    ) -> Value {
+        self.send(json!([100, id, channel, method]), Some(args))
+            .await;
+        let (header, body) = self.reply_to(id, pending).await;
+        assert_eq!(header, json!([201, id]), "{}", body.into_json());
+        body.into_json()
+    }
+}
+
+async fn open_window_rpc(host: &mut Host, attachment_id: &str, window_id: Option<i64>) -> Rpc {
+    let (url, capability) = host.issue_for_window(attachment_id, window_id).await;
+    let socket = connect(request(&url, &protocols(&capability), Some(DEV_ORIGIN)))
+        .await
+        .expect("handshake accepted");
+    let mut rpc = Rpc {
+        socket,
+        frames: FrameReader::default(),
+    };
+    assert_eq!(rpc.next().await.0, json!([200]));
+    rpc
+}
+
+/// 两个窗口与一条没有窗口身份的连接接入同一个 Host：`windowId` 经真实 WebSocket attach 进入调用上下文，
+/// 广播按窗口身份扇出，claim 跨窗口先到先得、连接关闭时回收（rust-u4-app-host.md §2.2、§2.3）。
+#[tokio::test]
+async fn windows_share_one_host_and_broadcasts_follow_window_identity() {
+    let mut host = Host::spawn().await;
+    host.init().await;
+    let mut window_1 = open_window_rpc(&mut host, "w1", Some(1)).await;
+    let mut window_2 = open_window_rpc(&mut host, "w2", Some(2)).await;
+    let mut windowless = open_window_rpc(&mut host, "phone", None).await;
+    let mut pending = [Vec::new(), Vec::new(), Vec::new()];
+    for (index, rpc) in [&mut window_1, &mut window_2, &mut windowless]
+        .into_iter()
+        .enumerate()
+    {
+        rpc.send(json!([102, 1, "broadcast", "onMessage"]), None)
+            .await;
+        // 同一连接按序处理：get 应答到达时订阅已经登记。
+        rpc.call(2, "setting", "get", json!([]), &mut pending[index])
+            .await;
+    }
+
+    let message = json!({"channel": "state:locale", "payload": "en-US"});
+    window_1
+        .call(3, "broadcast", "send", json!([message]), &mut pending[0])
+        .await;
+    let event = |reply: (Value, RpcValue)| {
+        assert_eq!(reply.0, json!([204, 1]));
+        reply.1.into_json()
+    };
+    assert_eq!(event(window_1.reply_to(1, &mut pending[0]).await), message);
+    let mut from_window_1 = message.clone();
+    from_window_1["sourceWindowId"] = json!(1);
+    assert_eq!(
+        event(window_2.reply_to(1, &mut pending[1]).await),
+        from_window_1
+    );
+    assert_eq!(
+        event(windowless.reply_to(1, &mut pending[2]).await),
+        from_window_1
+    );
+
+    let message = json!({"channel": "code-comment:remove", "payload": {"id": "c"}});
+    windowless
+        .call(3, "broadcast", "send", json!([message]), &mut pending[2])
+        .await;
+    assert_eq!(
+        event(windowless.reply_to(1, &mut pending[2]).await),
+        message
+    );
+    let mut from_windowless = message.clone();
+    from_windowless["sourceWindowId"] = json!(0);
+    assert_eq!(
+        event(window_1.reply_to(1, &mut pending[0]).await),
+        from_windowless
+    );
+    assert_eq!(
+        event(window_2.reply_to(1, &mut pending[1]).await),
+        from_windowless
+    );
+
+    // claim：窗口 1 先拿到，窗口 2 busy；窗口 1 的连接关闭后它的 reservation 被回收。
+    let acquired = window_1
+        .call(
+            4,
+            "broadcast",
+            "acquireClaim",
+            json!(["reset:week"]),
+            &mut pending[0],
+        )
+        .await;
+    assert_eq!(acquired["status"], "acquired", "{acquired}");
+    let busy = window_2
+        .call(
+            4,
+            "broadcast",
+            "acquireClaim",
+            json!(["reset:week"]),
+            &mut pending[1],
+        )
+        .await;
+    assert_eq!(busy["status"], "busy", "{busy}");
+    drop(window_1);
+    let deadline = Instant::now() + STEP_TIMEOUT;
+    let mut id = 5;
+    loop {
+        let result = window_2
+            .call(
+                id,
+                "broadcast",
+                "acquireClaim",
+                json!(["reset:week"]),
+                &mut pending[1],
+            )
+            .await;
+        if result["status"] == "acquired" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "reservation not released: {result}"
+        );
+        id += 1;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Main 的 `setting-write`：结果先于它引起的 `setting-changed`；Renderer 经 `setting` channel 的写入同样
+/// 推送完整设置（rust-u4-app-host.md §2.6）。
+#[tokio::test]
+async fn setting_writes_from_main_and_renderer_publish_setting_changed() {
+    let mut host = Host::spawn().await;
+    host.init().await;
+    const SETTING_MESSAGES: &[&str] = &["setting-write-result", "setting-changed"];
+    host.send(
+        json!({"type": "setting-write", "requestId": "zoom-1", "patch": {"desktopZoomLevel": 2}}),
+    )
+    .await;
+    assert_eq!(
+        host.recv_kind(SETTING_MESSAGES).await,
+        json!({"type": "setting-write-result", "requestId": "zoom-1", "ok": true})
+    );
+    let changed = host.recv_kind(SETTING_MESSAGES).await;
+    assert_eq!(changed["type"], "setting-changed");
+    assert_eq!(changed["setting"]["desktopZoomLevel"], 2);
+    let saved: Value = serde_json::from_str(
+        &std::fs::read_to_string(host._home.path().join(".zcode/v2/setting.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saved["desktopZoomLevel"], 2);
+
+    let mut rpc = open_window_rpc(&mut host, "w1", Some(1)).await;
+    let mut pending = Vec::new();
+    rpc.call(
+        1,
+        "setting",
+        "update",
+        json!([{"localePreference": "en-US"}]),
+        &mut pending,
+    )
+    .await;
+    let changed = host.recv_kind(SETTING_MESSAGES).await;
+    assert_eq!(changed["type"], "setting-changed");
+    assert_eq!(changed["setting"]["localePreference"], "en-US");
+    assert_eq!(changed["setting"]["desktopZoomLevel"], 2);
+    let current = rpc.call(2, "setting", "get", json!([]), &mut pending).await;
+    assert_eq!(changed["setting"], current);
 }
 
 async fn open_rpc(host: &mut Host) -> Rpc {
@@ -368,6 +600,25 @@ async fn invalid_and_unsupported_issue_requests_fail_explicitly() {
     let failed = host.recv().await;
     assert_eq!(failed["requestId"], "r-remote");
     assert_eq!(failed["ok"], false);
+    // windowId 必须是 ≥ 1 的整数（rust-u4-app-host.md §4.1）。
+    for (request_id, window_id) in [
+        ("r-zero", json!(0)),
+        ("r-float", json!(1.5)),
+        ("r-text", json!("1")),
+    ] {
+        host.send(json!({
+            "type": "issue-attachment-endpoint",
+            "requestId": request_id,
+            "attachmentId": "a",
+            "clientMode": "desktop-continuous",
+            "scope": {"kind": "local"},
+            "windowId": window_id,
+        }))
+        .await;
+        let failed = host.recv().await;
+        assert_eq!(failed["requestId"], request_id);
+        assert_eq!(failed["ok"], false);
+    }
 }
 
 /// web-remote-replayable 的本地 attachment：可签发，握手 hello 报告 replayable 投递与受限能力。

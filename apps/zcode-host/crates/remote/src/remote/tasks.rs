@@ -5,10 +5,9 @@
 //! - `sendPrompt`、`enqueueTaskCommand`（zcode-session 只有 `sendPrompt`）：本机附件先经连接器上传到
 //!   远端私有目录并改写路径，再转发；
 //! - `sendPrompt` 到 task ready 之间计入该 workspace 的运行中任务（WSL 释放屏障）；
-//! - `sendPrompt` 期间持有 task run lease，把用户消息与远端流事件镜像给 Main 的 realtime bus
-//!   （`mirrorRemotePrompt`，rust-host-remote.md §2.9.7）；
 //! - 列表写操作经 window-controller 投影解析唯一远端地址后写远端；
-//! - 返回的 task meta 登记 session route，并转发远端 workspace 的会话消息请求给 Main。
+//! - 返回的 task meta 登记下来，远端 workspace 的会话消息请求在 Host 内应答
+//!   （rust-u4-app-host.md §2.5：App 级 Host 不再经 Main 的 taskRealtimeBus，也不镜像 sendPrompt）。
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -18,11 +17,11 @@ use serde_json::{Map, Value, json};
 use tokio::task::AbortHandle;
 use zcode_host_control::{ControlSink, HostToMain};
 use zcode_host_kit::{
-    CallContext, CallFuture, EventHub, EventStream, Reply, RpcError, RpcValue, ServiceChannel, log,
+    CallContext, CallFuture, EventHub, EventStream, Reply, RpcError, RpcValue, ServiceChannel,
 };
 use zcode_host_rpc::RpcClient;
 
-use crate::tasks::realtime::TaskRealtimeBridge;
+use crate::tasks::session_messages;
 
 use super::registry::{RemoteScope, workspace_key};
 use super::scope::ForwardChannel;
@@ -46,7 +45,7 @@ struct TrackerState {
     workspaces: HashMap<String, AbortHandle>,
 }
 
-/// 每条远端连接一个：记住 task meta、跟踪运行中任务、转发会话消息请求。
+/// 每条远端连接一个：记住 task meta、跟踪运行中任务、应答会话消息请求。
 pub struct TaskTracker {
     client: RpcClient,
     control: Arc<dyn ControlSink>,
@@ -122,24 +121,16 @@ impl TaskTracker {
                 "onDynamicWorkspaceEvent",
                 RpcValue::Json(target_of(path, identity.as_deref())),
             );
-            let control = self.control.clone();
             let task = tokio::spawn(async move {
                 while let Some(event) = events.next().await {
                     let event = event.into_json();
                     if event["type"] == "workspace_session_message_send_requested" {
-                        control.send(HostToMain::Raw(json!({
-                            "type": "session-message-send-requested",
-                            "request": event["request"],
-                        })));
+                        session_messages::answer_send_request(&event["request"]);
                     }
                 }
             });
             self.lock().workspaces.insert(key, task.abort_handle());
         }
-        self.control.send(HostToMain::Raw(json!({
-            "type": "session-route-announce",
-            "route": {"sessionId": task_id},
-        })));
     }
 
     pub(crate) fn remember_from_result(self: &Arc<Self>, result: &Value) {
@@ -345,23 +336,13 @@ const REMEMBERED_RESULTS: &[&str] = &[
     "getTaskSnapshotWithEtag",
 ];
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or_default()
-}
-
 /// 远端 `zcode-task` 的 wrapper（`createRemotePromptAttachmentTaskService` 包
 /// `createReportingRemoteZCodeTaskService`）：每条远端连接一个，Renderer 的远端 attachment 与 Bot
-/// 远端运行时共用，保证两条入口的附件物化、运行中任务与 realtime 镜像是同一份实现。
+/// 远端运行时共用，保证两条入口的附件物化与运行中任务是同一份实现。
 pub struct RemoteTaskOps {
     client: RpcClient,
     backend: Option<RpcClient>,
     tracker: Arc<TaskTracker>,
-    /// InitLocal 带 hostId 时 tasks 区域建立的 bridge；没有时不做 lease 与镜像（同 Node 的
-    /// `activeSessionRealtimePort ?? undefined`）。
-    realtime: Option<Arc<TaskRealtimeBridge>>,
 }
 
 impl RemoteTaskOps {
@@ -369,13 +350,11 @@ impl RemoteTaskOps {
         client: RpcClient,
         backend: Option<RpcClient>,
         tracker: Arc<TaskTracker>,
-        realtime: Option<Arc<TaskRealtimeBridge>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             client,
             backend,
             tracker,
-            realtime,
         })
     }
 
@@ -426,7 +405,11 @@ impl RemoteTaskOps {
             .unwrap_or(Value::Null))
     }
 
-    /// `sendPrompt` / `enqueueTaskCommand`：附件物化 → 运行中任务跟踪 → （sendPrompt）realtime 镜像。
+    /// `sendPrompt` / `enqueueTaskCommand`：附件物化 → 运行中任务跟踪 → 转发远端。
+    ///
+    /// 窗口级 Host 时 sendPrompt 期间还向 Main 的 taskRealtimeBus 申请 run lease 并镜像用户消息与流事件
+    /// （`mirrorRemotePrompt`）。只有一个 App 级 Host 时 lease 总归它自己、镜像回到它自己也没有订阅者，
+    /// 且 lease 结果从不阻止发送，所以直接转发（rust-u4-app-host.md §2.5）。
     pub async fn send_prompt(&self, method: &str, params: Value) -> Result<Vec<u8>, RpcError> {
         let (task_id, trace_id) = (
             params_str(&params, "taskId"),
@@ -445,105 +428,16 @@ impl RemoteTaskOps {
             && params["taskId"]
                 .as_str()
                 .is_some_and(|task_id| self.tracker.begin(task_id));
-        let result = if method == "sendPrompt" {
-            self.mirrored(params.clone()).await
-        } else {
-            self.client
-                .call_encoded(TASK_CHANNEL, method, vec![RpcValue::Json(params.clone())])
-                .await
-        };
+        let result = self
+            .client
+            .call_encoded(TASK_CHANNEL, method, vec![RpcValue::Json(params.clone())])
+            .await;
         if result.is_err()
             && tracked
             && let Some(task_id) = params["taskId"].as_str()
         {
             self.tracker.finish(task_id);
         }
-        result
-    }
-
-    /// `mirrorRemotePrompt`：远端 zcode-server 没有 desktop realtime port，由窗口 Host 持有 lease，
-    /// 把用户消息与 ACK 前的远端流事件发给 Main 的 realtime bus，结束后释放 lease。
-    async fn mirrored(&self, params: Value) -> Result<Vec<u8>, RpcError> {
-        let send = |params: Value| {
-            self.client
-                .call_encoded(TASK_CHANNEL, "sendPrompt", vec![RpcValue::Json(params)])
-        };
-        let (Some(realtime), Some(task_id), Some(trace_id), true) = (
-            self.realtime.as_ref(),
-            params["taskId"].as_str().map(str::to_owned),
-            params["traceId"].as_str().map(str::to_owned),
-            params["content"].is_string(),
-        ) else {
-            return send(params).await;
-        };
-        let Some((path, identity)) = self.tracker.meta(&task_id) else {
-            return send(params).await;
-        };
-        let mut target = Map::new();
-        target.insert("workspacePath".into(), json!(path));
-        if let Some(identity) = &identity {
-            target.insert("workspaceIdentity".into(), json!(identity));
-        }
-        target.insert(
-            "workspaceKey".into(),
-            json!(workspace_key(&path, identity.as_deref())),
-        );
-        target.insert("taskId".into(), json!(task_id));
-        target.insert("runId".into(), json!(trace_id));
-        target.insert("traceId".into(), json!(trace_id));
-        let target = Value::Object(target);
-        let acquired = match realtime.acquire_task_run_lease(target.clone()).await {
-            Ok(result) => result["acquired"] == true,
-            Err(error) => {
-                log::warn(format!(
-                    "Bot remote runtime realtime lease failed: {}",
-                    error.message
-                ));
-                false
-            }
-        };
-        if !acquired {
-            return send(params).await;
-        }
-        let mut op = Map::new();
-        op.insert("kind".into(), json!("user_message"));
-        op.insert("messageId".into(), json!(format!("user-{trace_id}")));
-        op.insert("content".into(), params["content"].clone());
-        if !params["attachments"].is_null() {
-            op.insert("attachments".into(), params["attachments"].clone());
-        }
-        op.insert("timestamp".into(), json!(now_ms()));
-        realtime.publish_stream_op(target.clone(), Value::Object(op));
-        // 先挂监听再发送（同一条连接按序）；ACK 之前到达的事件先于结果处理，保持 Node 的到达顺序。
-        let mut events = self.client.listen(
-            TASK_CHANNEL,
-            "onDynamicStreamEvent",
-            RpcValue::String(task_id),
-        );
-        let call = send(params);
-        tokio::pin!(call);
-        let result = loop {
-            tokio::select! {
-                biased;
-                event = events.next() => match event {
-                    Some(event) => {
-                        let event = event.into_json();
-                        if event["type"] != "task_stream_mirror_batch"
-                            && event["type"] != "task_snapshot_updated"
-                        {
-                            realtime.publish_stream_op(
-                                target.clone(),
-                                json!({"kind": "stream_event", "event": event}),
-                            );
-                        }
-                    }
-                    None => break (&mut call).await,
-                },
-                result = &mut call => break result,
-            }
-        };
-        drop(events);
-        realtime.release_task_run_lease(target);
         result
     }
 }

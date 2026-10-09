@@ -159,6 +159,32 @@ impl RemoteTarget {
         }
     }
 
+    /// `isSameRemoteTarget`（desktopRemoteSessions.ts）：同一台机器上的同一身份，凭据不参与比较。
+    pub fn same_as(&self, other: &Value) -> bool {
+        let left = &self.raw;
+        match self.kind {
+            TargetKind::Ssh => {
+                text(other, "kind") == Some("ssh")
+                    && trimmed_text_of(left, "host").to_lowercase()
+                        == trimmed_text_of(other, "host").to_lowercase()
+                    && self.port() == other.get("port").and_then(Value::as_u64).unwrap_or(22)
+                    && trimmed_text_of(left, "username") == trimmed_text_of(other, "username")
+                    && text(left, "privateKeyPath").unwrap_or_default()
+                        == text(other, "privateKeyPath").unwrap_or_default()
+            }
+            TargetKind::Wsl => {
+                text(other, "kind") == Some("wsl")
+                    && trimmed(left, "distro").unwrap_or("default")
+                        == trimmed(other, "distro").unwrap_or("default")
+                    && trimmed_text_of(left, "user") == trimmed_text_of(other, "user")
+            }
+            TargetKind::Docker => {
+                text(other, "kind") == Some("docker")
+                    && text(left, "container") == text(other, "container")
+            }
+        }
+    }
+
     /// `buildRemoteWorkspaceIdentity`。
     pub fn workspace_identity(&self, workspace_path: &str) -> String {
         let path = normalize_identity_path(workspace_path);
@@ -185,6 +211,11 @@ impl RemoteTarget {
             ),
         }
     }
+}
+
+/// 去掉首尾空白的字符串字段；缺失为空串。
+fn trimmed_text_of<'a>(value: &'a Value, key: &str) -> &'a str {
+    text(value, key).map(str::trim).unwrap_or_default()
 }
 
 /// `normalizeWorkspacePathForIdentity`：分隔符归一、折叠重复斜杠、去首尾斜杠，恒以 "/" 开头。

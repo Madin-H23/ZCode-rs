@@ -192,6 +192,7 @@ async fn matches_typescript_services() {
         connection: 1,
         attachment_id: "parity".into(),
         client_mode: ClientMode::DesktopContinuous,
+        window_id: None,
     };
     let expected = fixture["expected"]["results"].as_array().unwrap();
     let mut raw: Vec<Value> = Vec::new();

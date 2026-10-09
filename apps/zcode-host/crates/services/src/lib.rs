@@ -39,6 +39,8 @@ pub use zcode_host_workspace::system;
 pub use zcode_host_workspace::terminal;
 pub use zcode_host_workspace::workspace;
 
+pub mod settings_control;
+
 pub use environment::{HostEnvironment, ServiceContext};
 use main_bridge::MainBridge;
 use support::env::ProcessEnv;
@@ -83,6 +85,8 @@ pub struct Installed {
     _observer: Arc<agent::sessions_index::SessionsIndexObserver>,
     _controller: Arc<tasks::controller::Controller>,
     _syncer: tokio::task::JoinHandle<()>,
+    /// Main 的 `setting-write` 串行写入任务。
+    _setting_writes: tokio::task::JoinHandle<()>,
     automation: automation::AreaHandle,
     /// 调度状态机（rust-u4-app-host.md §2.4）：install 结束时启动，Host 退出时最先收尾。
     scheduler: scheduler::SchedulerHandle,
@@ -116,8 +120,18 @@ pub fn install(
     router: &mut ControlRouter,
 ) -> Installed {
     let bridge = MainBridge::new(context.control.clone());
-    let settings = settings::SettingStore::new(&context.environment.home_dir);
-    let (broadcast_service, broadcaster) = broadcast::service_with_sender(bridge.clone(), router);
+    // setting.json 的唯一写入方（rust-u4-app-host.md §2.6）：每次成功写入都推 `setting-changed` 给 Main。
+    let settings = settings::SettingStore::with_change_sink(
+        &context.environment.home_dir,
+        settings_control::change_sink(context.control.clone()),
+    );
+    let setting_writes = settings_control::register_setting_writes(
+        router,
+        settings.clone(),
+        context.control.clone(),
+    );
+    // 广播扇出与 claim 的所有者（rust-u4-app-host.md §2.3），不经 Main。
+    let (broadcast_service, broadcaster) = broadcast::service_with_sender();
     registry.implement(broadcast_service);
     registry.implement(settings::service(settings.clone()));
 
@@ -205,19 +219,12 @@ pub fn install(
     // 生命周期、查询与事件成员；automation / off-peak / bots 也可直接用 TaskLifecycle 的 API。
     let task_lifecycle = tasks::lifecycle::TaskLifecycle::start(task_context.clone());
     registry.implement(tasks::lifecycle_service::service(task_lifecycle));
-    // task realtime bridge：与 Main taskRealtimeBus 的 lease / owner 命令；会话消息总是应答。
-    tasks::realtime::register_session_messages(router, MainBridge::new(context.control.clone()));
-    if let Some(realtime) = tasks::realtime::TaskRealtimeBridge::for_host_init(
-        context.init.host_id.as_deref(),
-        context.init.delivery_kind.as_deref(),
-        MainBridge::new(context.control.clone()),
-    ) {
-        realtime.register(router);
-        task_context.set_realtime(realtime);
-    }
+    // App 级 Host 不建立到 Main taskRealtimeBus 的实时桥（rust-u4-app-host.md §2.5）：run 的 owner 与
+    // stale run 判断在 TaskLifecycle 内；远端 workspace 的会话消息请求由 remote 区域在 Host 内应答。
+    // `init-local` 的 hostId / deliveryKind 仍可解析但不再使用。
     let syncer = tasks::syncer::start(&observer, agent.clone(), task_service.clone());
     let controller = tasks::controller::Controller::start(
-        Arc::new(task_context.clone()),
+        Arc::new(task_context),
         observer.clone(),
         workspace_events,
     );
@@ -282,7 +289,6 @@ pub fn install(
             providers: providers.clone(),
         },
         &controller,
-        task_context.realtime().cloned(),
         router,
     );
 
@@ -379,6 +385,7 @@ pub fn install(
         _observer: observer,
         _controller: controller,
         _syncer: syncer,
+        _setting_writes: setting_writes,
         automation,
         scheduler,
         remote,

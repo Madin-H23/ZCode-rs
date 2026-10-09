@@ -1,5 +1,5 @@
 //! scoped channel 表（`remoteWorkspaceServiceCollection.ts` + `exposeServicesOnMessagePort`）：
-//! 远端 attachment 上，工作区相关 channel 转发到远端 `zcode-server`，本机设置、账号与窗口级
+//! 远端 attachment 上，工作区相关 channel 转发到远端 `zcode-server`，本机设置、账号与 Host 级
 //! controller 用本地 Host 的同名 channel（rust-host-remote.md §2.5）。
 use std::sync::Arc;
 
@@ -30,7 +30,7 @@ pub const FORWARDED_CHANNELS: &[&str] = &[
     "hooks",
 ];
 
-/// 用本地 Host 同名 channel 的 channel：本机设置、凭据、账号、窗口级 controller。
+/// 用本地 Host 同名 channel 的 channel：本机设置、凭据、账号、Host 级 controller。
 pub const LOCAL_CHANNELS: &[&str] = &[
     "window-controller",
     "setting",

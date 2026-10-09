@@ -40,8 +40,10 @@ pub enum MainToHost {
 #[serde(rename_all = "camelCase")]
 pub struct InitLocal {
     pub database_startup_id: Option<String>,
+    /// 旧的窗口 Host 注册 task realtime bus 用的 id；App 级 Host 不再使用（rust-u4-app-host.md §2.5），
+    /// Main 的旧路径落地前仍可能携带，保留可解析。
     pub host_id: Option<String>,
-    /// task realtime bridge 的投递方式（`TaskRealtimeHostDeliveryKind`），缺省 desktop_window。
+    /// 同上：task realtime bridge 的投递方式（`TaskRealtimeHostDeliveryKind`），不再使用。
     pub delivery_kind: Option<String>,
     pub device_mid: Option<String>,
     pub workspace_path: Option<String>,
@@ -95,6 +97,42 @@ pub struct IssueAttachmentEndpoint {
     pub attachment_id: String,
     pub client_mode: ClientMode,
     pub scope: AttachmentScope,
+    /// 主窗口的窗口 id（docs/specs/rust-u4-app-host.md §2.2、§4.1）；不属于窗口的 attachment 省略。
+    /// 字段可省略但不可为 null，与 TS 的 `windowId?: number` 一致。
+    #[serde(default, deserialize_with = "present_window_id")]
+    pub window_id: Option<WindowId>,
+}
+
+/// 主窗口的窗口 id：整数，≥ 1（`0` 留给“来源不是窗口”，见 rust-u4-app-host.md §2.3）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
+pub struct WindowId(i64);
+
+impl WindowId {
+    pub fn new(id: i64) -> Option<Self> {
+        (id >= 1).then_some(Self(id))
+    }
+
+    pub fn get(self) -> i64 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for WindowId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // 只接受 JSON 整数：1.5、"1"、负数与 0 都按非法载荷处理。
+        let value = Value::deserialize(deserializer)?;
+        value
+            .as_i64()
+            .and_then(Self::new)
+            .ok_or_else(|| serde::de::Error::custom(format!("invalid windowId {value}")))
+    }
+}
+
+fn present_window_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<WindowId>, D::Error> {
+    WindowId::deserialize(deserializer).map(Some)
 }
 
 /// `databaseStartupControlSchema`（packages/shared/src/database-startup.ts），strict。
@@ -387,6 +425,39 @@ mod tests {
             r#"{"type":"database-startup-control","control":{"action":"other"}}"#,
         ] {
             assert!(parse_main_to_host(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn issue_request_window_id_is_optional_and_strict() {
+        let issue = |window: &str| {
+            parse_main_to_host(&format!(
+                r#"{{"type":"issue-attachment-endpoint","requestId":"r1","attachmentId":"a","clientMode":"desktop-continuous","scope":{{"kind":"local"}}{window}}}"#
+            ))
+            .unwrap()
+        };
+        let MainToHost::IssueAttachmentEndpoint(without) = issue("") else {
+            panic!("expected a valid request without windowId");
+        };
+        assert_eq!(without.window_id, None);
+        let MainToHost::IssueAttachmentEndpoint(with) = issue(r#","windowId":7"#) else {
+            panic!("expected a valid request with windowId");
+        };
+        assert_eq!(with.window_id.map(WindowId::get), Some(7));
+        for invalid in [
+            r#","windowId":0"#,
+            r#","windowId":-1"#,
+            r#","windowId":1.5"#,
+            r#","windowId":"1""#,
+            r#","windowId":null"#,
+        ] {
+            assert!(
+                matches!(
+                    issue(invalid),
+                    MainToHost::InvalidIssueAttachmentEndpoint { ref request_id, .. } if request_id == "r1"
+                ),
+                "{invalid}"
+            );
         }
     }
 

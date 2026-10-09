@@ -184,6 +184,7 @@ impl GrayOverlay {
             connection: 0,
             attachment_id: "host-off-peak".into(),
             client_mode: zcode_host_control::ClientMode::DesktopContinuous,
+            window_id: None,
         };
         match inner
             .call(&context, "getOffPeakClientConfig", vec![])

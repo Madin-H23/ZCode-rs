@@ -7,20 +7,20 @@
 R6 首版只做了飞书 / Lark 长连接、20 个成员和终态摘要回推。本规格把 `bots` channel 补齐到与 Node Host（`packages/services/src/bots/**`）一致：
 
 | 部分                     | Node 来源                                                                        | Rust 模块（`apps/zcode-host/crates/automation/src/bots/`） |
-| ------------------------ | -------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| 微信扫码注册（2 个成员） | `providers/weixinRegistration.ts`                                                | `weixin.rs`                                              |
-| Telegram                 | `providers/telegramProvider.ts`、`telegramChannelRuntime.ts`                     | `telegram.rs`、`channel.rs`                              |
-| Webhook                  | `providers/webhookProvider.ts`                                                   | `webhook.rs`                                             |
-| 微信 iLink               | `providers/weixinProvider.ts`、`weixinChannelRuntime.ts`                         | `weixin.rs`、`channel.rs`                                |
-| 通道适配与重试           | `providers/types.ts`、`providerRequest.ts`、`channelRuntime.ts`                  | `providers.rs`、`channel.rs`、`runtime_lock.rs`          |
-| 飞书卡片                 | `feishuProvider.ts`（交互卡片、流式卡片、分段、typing reaction、card/update）    | `feishu/cards.rs`、`feishu/provider.rs`、`feishu/api.rs` |
-| 回复流水线               | `botsService.ts` `watchTaskStream`、`replyFormatter.ts`、`statusFormatting.ts`   | `watch.rs`、`reply.rs`、`status.rs`                      |
-| 会话读取                 | `getTaskSnapshot`、`onDynamicTaskEvent`（legacy）                                | `stream.rs`（V4 帧适配，见第 4 节）                      |
-| 选择命令                 | `botsService.ts` `handleInboundMessage` 的 workspace/model/mode/think/task/reply | `selection.rs`                                           |
-| 问答与权限               | `botsService.ts` elicitation / permission 分支、飞书问答卡片                     | `interaction.rs`、`feishu/cards.rs`                      |
-| 入站、授权、上下文、附件 | `botsService.ts` `processProviderCallback`、`withAuthorizedContext` 等           | `inbound.rs`、`aes.rs`（微信 CDN 解密）                  |
+| ------------------------ | -------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| 微信扫码注册（2 个成员） | `providers/weixinRegistration.ts`                                                | `weixin.rs`                                                |
+| Telegram                 | `providers/telegramProvider.ts`、`telegramChannelRuntime.ts`                     | `telegram.rs`、`channel.rs`                                |
+| Webhook                  | `providers/webhookProvider.ts`                                                   | `webhook.rs`                                               |
+| 微信 iLink               | `providers/weixinProvider.ts`、`weixinChannelRuntime.ts`                         | `weixin.rs`、`channel.rs`                                  |
+| 通道适配与重试           | `providers/types.ts`、`providerRequest.ts`、`channelRuntime.ts`                  | `providers.rs`、`channel.rs`、`runtime_lock.rs`            |
+| 飞书卡片                 | `feishuProvider.ts`（交互卡片、流式卡片、分段、typing reaction、card/update）    | `feishu/cards.rs`、`feishu/provider.rs`、`feishu/api.rs`   |
+| 回复流水线               | `botsService.ts` `watchTaskStream`、`replyFormatter.ts`、`statusFormatting.ts`   | `watch.rs`、`reply.rs`、`status.rs`                        |
+| 会话读取                 | `getTaskSnapshot`、`onDynamicTaskEvent`（legacy）                                | `stream.rs`（V4 帧适配，见第 4 节）                        |
+| 选择命令                 | `botsService.ts` `handleInboundMessage` 的 workspace/model/mode/think/task/reply | `selection.rs`                                             |
+| 问答与权限               | `botsService.ts` elicitation / permission 分支、飞书问答卡片                     | `interaction.rs`、`feishu/cards.rs`                        |
+| 入站、授权、上下文、附件 | `botsService.ts` `processProviderCallback`、`withAuthorizedContext` 等           | `inbound.rs`、`aes.rs`（微信 CDN 解密）                    |
 
-远端 workspace 的 Bot 运行时（连接判定、`/reconnect` 实连、远端任务能力、realtime 镜像）由远端区域实现，规则见 [rust-host-remote.md](rust-host-remote.md) §2.9；本规格第 7 节只写 Bot 侧的接缝与去重。
+远端 workspace 的 Bot 运行时（连接判定、`/reconnect` 实连、远端任务能力）由远端区域实现，规则见 [rust-host-remote.md](rust-host-remote.md) §2.9；本规格第 7 节只写 Bot 侧的接缝与去重。
 
 ## 2. 产品规则
 
@@ -230,13 +230,13 @@ Host 退出 ◄── Main 3.5 s 后强杀兜底
   ─► 登记投递键
   ─► 命令键有在途重连？── 是 ─► 等它结束 ─► 不回复
   ─► 命令键 3 s 内刚重连过？── 是 ─► 不回复
-  ─► RemoteBots.is_connected ─► Main 状态查询 ── 已连接 ─► /status
+  ─► RemoteBots.is_connected ─► 读 Host 远端注册表 ── 已连接 ─► /status
   ─► 在途登记(命令键) ─► 通道：“正在重连” ─► RemoteBots.ensure_connected ─► Main 重连（route 复用 / 在途合并 / 新建）
   ◄─ ok：刷新草稿 ─► /status          ◄─ 失败：remoteReconnectFailed
   ─► 记录命令键完成时间 ─► 移除在途登记
 普通消息（已连接）
   ─► RemoteBots.tasks(target) ─► 远端 RemotePort ─► 与第 5 节相同的建会话 / watch / 发送 / 投影
-     （远端调用与 realtime 镜像见 rust-host-remote.md §2.9）
+     （远端调用见 rust-host-remote.md §2.9）
 ```
 
 远端 Bot 路径与 Main、远端 server 之间的完整事件顺序见 rust-host-remote.md §2.9 的图；Bot 侧（入站、投影、回复）与第 5 节相同。
