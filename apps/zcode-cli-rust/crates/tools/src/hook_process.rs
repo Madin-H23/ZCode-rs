@@ -174,7 +174,9 @@ async fn execute(
         }
     };
     let pid = child.id().context("Missing hook pid")?;
-    let tree = super::tool_process::ProcessTree::contain(&child, pid);
+    // hooks 不加入 Job：hook 正常结束时 Job 被 drop 会连带结束它留下的后台进程，而 Windows 原来
+    // 和 Unix 都不会这样；Windows 上仍用 taskkill，只在取消、超时等路径结束进程树。
+    let tree = super::tool_process::ProcessTree::uncontained(pid);
     let mut pipe = child.stdin.take().context("Missing hook stdin")?;
     let writer = tokio::spawn(async move {
         let written = pipe.write_all(stdin.as_bytes()).await;

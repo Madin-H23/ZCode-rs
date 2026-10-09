@@ -140,15 +140,15 @@ pub mod job {
 
 - CLI `tools/src/process_tree.rs` 整体移入 `zcode-proc::tree`。
 - CLI 的 Bash 工具、hooks、MCP stdio、git、PDF 渲染、进程遥测，以及 Host 的 CLI 进程、git、终端 profile 探测：所有 `Command::new` 改为 `zcode_proc::command` / `std_command`。
-- Bash 工具与 hooks 的子进程在 Unix 上改用 `group::isolate`（取代 `process_group(0)`），在 Windows 上加入 `Job`，结束时调用 `Job::terminate`；只有在加入 Job 失败时，才退回原来的 `taskkill /T /F`。三者的结束方式收在 `tools/src/tool_process.rs` 的 `ProcessTree` 中。
+- Bash 工具与 hooks 的子进程在 Unix 上改用 `group::isolate`（取代 `process_group(0)`）。Windows 上只有 Bash 工具加入 `Job`，结束时调用 `Job::terminate`，加入 Job 失败时退回原来的 `taskkill /T /F`；hooks 仍用 `taskkill`（见下文）。Bash、hooks、MCP 的结束方式收在 `tools/src/tool_process.rs` 的 `ProcessTree` 中。
 - MCP stdio 本期不变：Unix 仍是 `process_group(0)` + `tree::terminate`，Windows 仍是 `taskkill /T /F`（`ProcessTree::uncontained`）。
 - 各平台的结束时机不变：Bash 工具在 Unix 上命令完成且根进程组已不存在时直接返回，否则 `Immediate` 清理残留；Windows 上每条命令结束后都结束整棵树。hooks 只在取消、超时或根进程退出 1 s 后管道仍未关闭时结束进程树。
 
 Windows 上的行为变化（CI 的 Windows job 验证 `zcode-proc` 本身；应用 crate 的这部分代码只有 clippy 覆盖）：
 
 - Bash 工具：根进程退出后，`taskkill /PID <根> /T` 已找不到根进程，后台后代会遗留；Job 不依赖父子关系，现在一起结束，与 Unix 一致。
-- hooks：Job 在本次 hook 运行结束时被 drop。hook 完成后仍在运行、且不持有输出管道的后代（如 `start /b` 启动并重定向了输出的进程）现在随之结束，原来会继续运行。Unix 不变。
-- runtime 进程崩溃时，系统关闭 Job 句柄，正在运行的 Bash 工具与 hook 进程树一起结束。
+- hooks 不加入 Job：Job 在 hook 运行结束时被 drop，会连带结束 hook 留下的后台进程（如 `start /b` 启动并重定向了输出的进程），而原来的 Windows 行为和 Unix 都不会这样。为不引入这个行为变化，hooks 继续用 `taskkill /T /F`。
+- runtime 进程崩溃时，系统关闭 Job 句柄，正在运行的 Bash 工具进程树一起结束。
 
 ### 3.5 唯一入口规则（本期启用）
 

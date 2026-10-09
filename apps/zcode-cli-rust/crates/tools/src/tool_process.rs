@@ -199,9 +199,9 @@ pub(super) async fn read_head(path: &Path, limit: usize) -> Result<String> {
 
 /// 一棵子进程树的所有权与结束方式。
 ///
-/// Unix：按身份追踪整棵树（`zcode_proc::tree`），根进程须自成进程组。Windows：Bash 工具与 hooks
-/// 的子进程在 spawn 后立即加入 Job，结束时 `Job::terminate`，Job 被 drop 时其中残留的进程也一起
-/// 结束；没有 Job（MCP，或加入 Job 失败）时退回 `taskkill /T /F`。
+/// Unix：按身份追踪整棵树（`zcode_proc::tree`），根进程须自成进程组。Windows：Bash 工具的子进程
+/// 在 spawn 后立即加入 Job，结束时 `Job::terminate`，Job 被 drop 时其中残留的进程也一起结束；
+/// 没有 Job（MCP、hooks，或加入 Job 失败）时退回 `taskkill /T /F`。
 pub(super) struct ProcessTree {
     pid: u32,
     #[cfg(windows)]
@@ -209,7 +209,7 @@ pub(super) struct ProcessTree {
 }
 
 impl ProcessTree {
-    /// 不加入 Job 的子进程（MCP stdio）：Windows 上用 taskkill 结束。
+    /// 不加入 Job 的子进程（MCP stdio、hooks）：Windows 上用 taskkill 结束。
     pub(super) fn uncontained(pid: u32) -> Self {
         Self {
             pid,
@@ -218,7 +218,7 @@ impl ProcessTree {
         }
     }
 
-    /// Bash 工具与 hooks 的子进程：Windows 上紧接 spawn 加入 Job，加入失败时退回 taskkill。
+    /// Bash 工具的子进程：Windows 上紧接 spawn 加入 Job，加入失败时退回 taskkill。
     pub(super) fn contain(child: &Child, pid: u32) -> Self {
         #[cfg(windows)]
         {
