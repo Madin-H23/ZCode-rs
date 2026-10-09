@@ -6,7 +6,7 @@
 //! - `setting.get`：只在 Host 内处理；
 //! - `zcode-agent.queryConversationCommandsV4{clock:true}`：经 Host 到正在流式的 CLI 再返回。
 //!
-//! CLI 可执行文件取 `ZCODE_TEST_CLI_RUST_BINARY`，否则用工作区内的 release 构建；都不存在时跳过。
+//! 缺省用进程内的嵌入式 runtime；设置 `ZCODE_TEST_CLI_RUST_BINARY` 时走子进程链路作差分对照。
 //! 数字用 `cargo test --release -p zcode-host --test control_latency -- --nocapture` 查看。
 #![expect(
     clippy::disallowed_methods,
@@ -34,14 +34,25 @@ const CHUNK_GAP: Duration = Duration::from_millis(20);
 const SAMPLES: usize = 150;
 const P95_BUDGET: Duration = Duration::from_millis(20);
 
-fn cli_binary() -> Option<PathBuf> {
-    let path = std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../zcode-cli-rust/target/release/zcode-cli-rust")
-        });
-    path.is_file().then_some(path)
+/// runtime 的选择：缺省嵌入式；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
+fn runtime_env() -> Vec<(&'static str, String)> {
+    match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
+        Some(cli) => {
+            assert!(
+                cli.is_file(),
+                "ZCODE_TEST_CLI_RUST_BINARY is not a file: {}",
+                cli.display()
+            );
+            vec![
+                (
+                    "ZCODE_AGENT_SERVER_COMMAND",
+                    cli.to_string_lossy().into_owned(),
+                ),
+                ("ZCODE_AGENT_SERVER_RUNTIME", "zcode-cli-rust".to_owned()),
+            ]
+        }
+        None => vec![("ZCODE_AGENT_SERVER_RUNTIME", "embedded".to_owned())],
+    }
 }
 
 fn sse(delta: Value, finish: Value) -> String {
@@ -256,10 +267,6 @@ fn write_provider_config(home: &Path, port: u16) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn control_rpc_p95_while_four_workspaces_stream() {
-    let Some(cli) = cli_binary() else {
-        eprintln!("skipped: Rust CLI release binary not found");
-        return;
-    };
     let home = tempfile::tempdir().unwrap();
     let workspaces: Vec<tempfile::TempDir> = (0..WORKSPACES)
         .map(|_| tempfile::tempdir().unwrap())
@@ -281,8 +288,7 @@ async fn control_rpc_p95_while_four_workspaces_stream() {
         .env("ZCODE_DESKTOP_HOME_DIR", home.path())
         .env("ZCODE_DATA_BASE_DIR", home.path())
         .env("NO_PROXY", "127.0.0.1,localhost")
-        .env("ZCODE_AGENT_SERVER_COMMAND", &cli)
-        .env("ZCODE_AGENT_SERVER_RUNTIME", "zcode-cli-rust")
+        .envs(runtime_env())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

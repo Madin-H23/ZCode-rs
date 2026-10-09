@@ -20,7 +20,13 @@ pub struct AgentCommand {
     /// TS bundle 的存储专用入口（Node `storagePreparationEntry`）；原生 CLI 为 None，
     /// 以同一命令加 `--prepare-storage` 准备会话库（`storagePreparationMode: "process"`）。
     pub storage_entry: Option<PathBuf>,
+    /// runtime 作为库运行在 Host 进程内（docs/specs/rust-u3-single-process.md §2.2）：不启动
+    /// 子进程，`program` 与 `args` 只用于日志。
+    pub embedded: bool,
 }
+
+/// 嵌入式 runtime 在日志与生命周期事件里的名字。
+const EMBEDDED_PROGRAM: &str = "zcode-runtime (embedded)";
 
 fn non_empty<'a>(vars: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
     vars.get(key)
@@ -65,6 +71,20 @@ pub fn resolve(
     search_roots: &[PathBuf],
     workspace_path: &Path,
 ) -> Result<Option<AgentCommand>> {
+    if non_empty(vars, "ZCODE_AGENT_SERVER_RUNTIME") == Some("embedded") {
+        if non_empty(vars, "ZCODE_AGENT_SERVER_COMMAND").is_some() {
+            bail!("ZCODE_AGENT_SERVER_COMMAND is not used by the embedded runtime");
+        }
+        return Ok(Some(AgentCommand {
+            program: PathBuf::from(EMBEDDED_PROGRAM),
+            args: Vec::new(),
+            cwd: None,
+            env: BTreeMap::new(),
+            supports_storage_startup: true,
+            storage_entry: None,
+            embedded: true,
+        }));
+    }
     let command = if let Some(program) = non_empty(vars, "ZCODE_AGENT_SERVER_COMMAND") {
         let runtime = non_empty(vars, "ZCODE_AGENT_SERVER_RUNTIME");
         if runtime.is_some_and(|runtime| runtime != "zcode-cli-rust") {
@@ -101,6 +121,7 @@ pub fn resolve(
             env: BTreeMap::new(),
             supports_storage_startup: rust,
             storage_entry: None,
+            embedded: false,
         })
     } else {
         let node = non_empty(vars, "ZCODE_HOST_NODE_EXEC_PATH").map(PathBuf::from);
@@ -127,6 +148,7 @@ pub fn resolve(
                     } else {
                         bundle
                     }),
+                    embedded: false,
                     // 以纯 Node 模式运行 Electron，否则子进程会被当成 Chromium 进程卡在 GPU 初始化。
                     env: BTreeMap::from([("ELECTRON_RUN_AS_NODE".to_owned(), "1".to_owned())]),
                     supports_storage_startup: true,
@@ -139,6 +161,7 @@ pub fn resolve(
                 env: BTreeMap::new(),
                 supports_storage_startup: false,
                 storage_entry: None,
+                embedded: false,
             }),
         }
     };

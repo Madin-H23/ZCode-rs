@@ -1,34 +1,41 @@
 //! 启动期的会话库准备（docs/specs/rust-host-agent.md §2.11）：拉起真实的 zcode-host，
 //! 以 Rust CLI 的 `--prepare-storage` 准备 warmup workspace 的会话库，启动状态必须经过
-//! `preparing_session_storage` 再进入 `ready`。CLI 取 `ZCODE_TEST_CLI_RUST_BINARY`，
-//! 否则用工作区内的 release 构建；都不存在时跳过。
+//! `preparing_session_storage` 再进入 `ready`。runtime 缺省为嵌入式；设置
+//! `ZCODE_TEST_CLI_RUST_BINARY` 时走子进程链路作差分对照。
 #![expect(
     clippy::disallowed_methods,
     reason = "集成测试从进程环境取被测二进制与 PATH"
 )]
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-fn cli_binary() -> Option<PathBuf> {
-    let path = std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../zcode-cli-rust/target/release/zcode-cli-rust")
-        });
-    path.is_file().then_some(path)
+/// runtime 的选择：缺省嵌入式；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
+fn runtime_env() -> Vec<(&'static str, String)> {
+    match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
+        Some(cli) => {
+            assert!(
+                cli.is_file(),
+                "ZCODE_TEST_CLI_RUST_BINARY is not a file: {}",
+                cli.display()
+            );
+            vec![
+                (
+                    "ZCODE_AGENT_SERVER_COMMAND",
+                    cli.to_string_lossy().into_owned(),
+                ),
+                ("ZCODE_AGENT_SERVER_RUNTIME", "zcode-cli-rust".to_owned()),
+            ]
+        }
+        None => vec![("ZCODE_AGENT_SERVER_RUNTIME", "embedded".to_owned())],
+    }
 }
 
 #[tokio::test]
 async fn startup_prepares_session_storage_with_the_cli() {
-    let Some(cli) = cli_binary() else {
-        eprintln!("skipped: Rust CLI release binary not found");
-        return;
-    };
     // 测试 Host 的 home 与数据根：绝不能读写开发机真实的 ~/.zcode。
     let home = tempfile::tempdir().unwrap();
     let workspace = tempfile::tempdir().unwrap();
@@ -40,8 +47,7 @@ async fn startup_prepares_session_storage_with_the_cli() {
         .env("USERPROFILE", home.path())
         .env("ZCODE_DESKTOP_HOME_DIR", home.path())
         .env("ZCODE_DATA_BASE_DIR", home.path())
-        .env("ZCODE_AGENT_SERVER_COMMAND", &cli)
-        .env("ZCODE_AGENT_SERVER_RUNTIME", "zcode-cli-rust")
+        .envs(runtime_env())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

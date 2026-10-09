@@ -27,7 +27,6 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use serde_json::{Map, Value, json};
-use tokio::process::Child;
 use tokio::task::JoinHandle;
 use zcode_host_kit::{EventHub, RpcError, log};
 
@@ -885,8 +884,20 @@ impl AgentRuntime {
         let key = target.key();
         let instance_id = format!("agent-{}", super::service::uuid_v4());
         let program = command.program.display().to_string();
-        let spawned = match process::spawn(&command, &cwd, &env) {
-            Ok(spawned) => spawned,
+        // 嵌入式 runtime 不启动子进程：实例运行在 Host 进程内，经内存管道说同一协议。
+        let started = if command.embedded {
+            super::embedded::start(super::embedded::Start {
+                workspace,
+                identity: trimmed(&target.workspace_identity),
+                cwd: &cwd,
+                env: &env,
+                prepare_storage: false,
+            })
+        } else {
+            process::spawn(&command, &cwd, &env).map(process::Link::from)
+        };
+        let link = match started {
+            Ok(link) => link,
             Err(error) => {
                 let generation = self.next_generation(&key);
                 let mut message = Map::new();
@@ -922,12 +933,12 @@ impl AgentRuntime {
         };
         log::info(format!(
             "{label} started pid={} storageGate={}",
-            spawned.pid.map(|pid| pid.to_string()).unwrap_or_default(),
+            link.pid.map(|pid| pid.to_string()).unwrap_or_default(),
             command.supports_storage_startup
         ));
-        let diagnostic_sink = self.diagnostic_sink(target, generation, spawned.pid, &instance_id);
+        let diagnostic_sink = self.diagnostic_sink(target, generation, link.pid, &instance_id);
         let (tail, stderr_done) =
-            process::drain_stderr(spawned.stderr, label.clone(), diagnostic_sink);
+            process::drain_stderr(link.stderr, label.clone(), diagnostic_sink);
         let handler = Arc::new(Handler {
             key: key.clone(),
             target: target.clone(),
@@ -938,8 +949,8 @@ impl AgentRuntime {
             frames: self.inner.frames.clone(),
         });
         let client = ProtocolClient::start(
-            spawned.stdout,
-            spawned.stdin,
+            link.reader,
+            link.writer,
             command.supports_storage_startup,
             handler,
         );
@@ -947,7 +958,7 @@ impl AgentRuntime {
             target: target.clone(),
             key,
             generation,
-            pid: spawned.pid,
+            pid: link.pid,
             client,
             capabilities: tokio::sync::OnceCell::new(),
             lane: self.inner.lane,
@@ -981,7 +992,7 @@ impl AgentRuntime {
         }
         let monitor = tokio::spawn(monitor(
             self.clone(),
-            spawned.child,
+            link.exit,
             process.clone(),
             tail,
             stderr_done,
@@ -1301,19 +1312,18 @@ fn termination(reason: &str) -> (&'static str, &'static str) {
 
 async fn monitor(
     runtime: AgentRuntime,
-    mut child: Child,
+    mut exit: process::Exit,
     process: Arc<AgentProcess>,
     tail: StderrTail,
     stderr_done: process::StderrDone,
     label: String,
 ) {
     let reason = tokio::select! {
-        status = child.wait() => {
-            let status = status.map(|status| status.to_string()).unwrap_or_else(|error| error.to_string());
-            // 进程先退出时给 stdout 里剩下的行一点时间被读完。
+        outcome = exit.wait() => {
+            // runtime 先结束时给输出里剩下的行一点时间被读完。
             let reason = tokio::time::timeout(EXIT_FLUSH_WAIT, process.client.closed())
                 .await
-                .unwrap_or_else(|_| format!("process_exit: {status}"));
+                .unwrap_or(outcome.reason);
             process.client.close(&reason);
             reason
         }
@@ -1334,10 +1344,10 @@ async fn monitor(
         log::info(format!("{label} closed: {reason}"));
     }
     process.client.close_input().await;
-    process::terminate(&mut child, process.pid).await;
+    exit.terminate(process.pid).await;
     // 退出先于 stderr EOF 时收齐最后的诊断行（上限 1 s）。
     let _ = tokio::time::timeout(EXIT_FLUSH_WAIT, stderr_done).await;
-    let status = child.try_wait().ok().flatten();
+    let status = exit.exit_status();
     if let Some(mut message) = process.lifecycle_base() {
         let ended_at = now_ms();
         message.insert("type".into(), json!("agent-process-exited"));

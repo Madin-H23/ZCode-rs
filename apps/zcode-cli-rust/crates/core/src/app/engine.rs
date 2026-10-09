@@ -95,6 +95,8 @@ pub struct Engine {
     pub(super) hooks: super::workspace_trust::HookState,
     /// Generated session titles (Node enables them for protocol sessions only).
     pub(super) titles: bool,
+    #[cfg(debug_assertions)]
+    pub(super) fault: super::engine_fault::Fault,
 }
 impl Engine {
     /// An engine whose default workspace is `workspace` (a plain path is local).
@@ -157,6 +159,8 @@ impl Engine {
             event_rx,
             hooks: Default::default(),
             titles: false,
+            #[cfg(debug_assertions)]
+            fault: Default::default(),
         })
     }
     pub async fn serve(
@@ -198,82 +202,14 @@ impl Engine {
             }
             Ok::<_, anyhow::Error>(())
         };
-        let mut result =
-            tokio::select! {biased; _=cancel.cancelled()=>Ok(()), result=serving=>result};
-        let mut storage_failed = result
-            .as_ref()
-            .err()
-            .is_some_and(anyhow::Error::is::<StorageCommitFailure>);
-        if result.is_err() {
-            self.child_updates.clear();
-        }
-        for active in self.active.values() {
-            active.cancel.cancel();
-        }
-        for job in self.auxiliary.values() {
-            job.cancel.cancel();
-        }
-        self.auxiliary.clear();
-        for session in self.sessions.values_mut() {
-            if let Some(goal) = &mut session.goal {
-                goal.finish_run(self.clock.now(), false, Some("paused"));
-            }
-            session.auto_drain = false;
-            session.queued_now = None;
-        }
-        self.waiters.clear();
-        for id in self.sessions.keys() {
-            self.tools.cancel_session(id, None).await?;
-        }
-        // 必须等待拥有的工具 task 收口后再释放 runtime；只 drop Tokio task 会漏掉 Shell 后代。
-        // 清理期限由工具 adapter 的 TERM/KILL 生命周期拥有；不能在 1200ms
-        // 提前 drop 仍处于 1500ms 宽限期的前台任务，留下工作进程或丢失终态。
-        while !self.active.is_empty()
-            || (!storage_failed
-                && self
-                    .sessions
-                    .values()
-                    .any(|s| s.background.values().any(|t| t.status == "running")))
-        {
-            match self.event_rx.recv().await {
-                Some(event) => {
-                    // 事务失败后的内存事实不可再提交；否则一次失败的 ACK/工具结果会被收口路径复活。
-                    if storage_failed {
-                        if matches!(event.event, Event::Finished { .. })
-                            && self
-                                .active
-                                .get(&event.session_id)
-                                .is_some_and(|active| active.run_id == event.run_id)
-                        {
-                            self.active.remove(&event.session_id);
-                        }
-                    } else if let Err(error) = self.apply_event(event).await {
-                        storage_failed = true;
-                        self.child_updates.clear();
-                        result = Err(error);
-                    }
-                    self.outbox.clear();
-                }
-                _ => break,
-            }
-        }
-        self.event_rx.close();
-        self.tools.shutdown().await?;
-        // EOF 后持久化中断态，再结束 actor；不等待挂起权限或再次启动队列。
-        for session in self.sessions.values_mut() {
-            if (session.running() || session.background.values().any(|t| t.status == "running"))
-                && !storage_failed
-            {
-                session.recover(self.clock.id(), self.clock.now());
-                let workspace = session.workspace.clone();
-                self.store
-                    .commit_receipt(&workspace, Some(session), None)
-                    .await?;
-            }
-        }
-        result
+        // Engine 循环 panic 时只结束循环本身：转成错误后照常收口（取消 run、回收工具进程树），
+        // 否则 run 任务与它们的子进程会留在嵌入方的进程里（spec rust-u3-single-process §2.5）。
+        let result = tokio::select! {biased; _=cancel.cancelled()=>Ok(()), result=zcode_async::catch_panic(serving)=>result.unwrap_or_else(|panicked| Err(super::panicked("engine", panicked)))};
+        self.wind_down(result).await
     }
     async fn request(&mut self, call: Call, output: &RuntimeOutput) -> Result<()> {
+        #[cfg(debug_assertions)]
+        self.fault.check(&call.params);
         self.outbox.clear();
         let token = call.token;
         // 这些请求在后台完成，稍后以同一 token 回复；这里只回复启动失败。

@@ -414,22 +414,34 @@ pub async fn prepare_directory(
     let mut env = env.clone();
     env.extend(prep.env.clone());
     let spawn_cwd = prep.cwd.clone().unwrap_or_else(|| cwd.to_owned());
-    let spawned =
-        process::spawn(&prep, &spawn_cwd, &env).map_err(|error| PrepareError::io(&error))?;
-    let process::Spawned {
-        mut child,
+    // 嵌入式 runtime 以 prepare_storage 启动一个进程内实例，握手内容与子进程相同。
+    let started = if prep.embedded {
+        super::embedded::start(super::embedded::Start {
+            workspace: cwd,
+            identity: None,
+            cwd: &spawn_cwd,
+            env: &env,
+            prepare_storage: true,
+        })
+    } else {
+        process::spawn(&prep, &spawn_cwd, &env).map(process::Link::from)
+    };
+    let process::Link {
+        reader,
+        writer,
         pid,
-        stdin,
-        stdout,
-        mut stderr,
-    } = spawned;
+        stderr,
+        mut exit,
+    } = started.map_err(|error| PrepareError::io(&error))?;
     // stderr 只排空，不上报（可能含本地路径）。
-    tokio::spawn(async move {
-        let mut sink = Vec::new();
-        let _ = stderr.read_to_end(&mut sink).await;
-    });
-    let mut stdin = Some(stdin);
-    let mut reader = BufReader::new(stdout);
+    if let Some(mut stderr) = stderr {
+        tokio::spawn(async move {
+            let mut sink = Vec::new();
+            let _ = stderr.read_to_end(&mut sink).await;
+        });
+    }
+    let mut stdin = Some(writer);
+    let mut reader = BufReader::new(reader);
     let mut failure: Option<PrepareError> = None;
     let mut path_received = false;
     let mut prepared_flag = false;
@@ -535,22 +547,22 @@ pub async fn prepare_directory(
         }
     }
     drop(stdin.take());
-    let status = if failure.is_some() {
-        process::terminate(&mut child, pid).await;
-        child.try_wait().ok().flatten()
+    let succeeded = if failure.is_some() {
+        exit.terminate(pid).await;
+        false
     } else {
-        match tokio::time::timeout(Duration::from_secs(10), child.wait()).await {
-            Ok(status) => status.ok(),
+        match tokio::time::timeout(Duration::from_secs(10), exit.wait()).await {
+            Ok(outcome) => outcome.success,
             Err(_) => {
-                process::terminate(&mut child, pid).await;
-                None
+                exit.terminate(pid).await;
+                false
             }
         }
     };
     if let Some(failure) = failure {
         return Err(failure);
     }
-    if status.is_some_and(|status| status.success()) && prepared_flag {
+    if succeeded && prepared_flag {
         if let Some(path) = prepared_path {
             prepared.insert(path);
         }

@@ -1,7 +1,8 @@
 //! 用真实的 Rust CLI 走一遍核心对话链路：握手 → createSession（带首条输入）→ 订阅会话 →
 //! 收到模型流式回复。模型是本地 mock 的 OpenAI 兼容端点，不需要任何真实凭据。
 //!
-//! CLI 可执行文件取 `ZCODE_TEST_CLI_RUST_BINARY`，否则用工作区内的 release 构建；都不存在时跳过。
+//! 缺省用进程内的嵌入式 runtime（docs/specs/rust-u3-single-process.md），不需要预先构建 CLI；设置
+//! `ZCODE_TEST_CLI_RUST_BINARY` 时改用该可执行文件走子进程链路，作为差分对照。
 #![expect(
     clippy::disallowed_methods,
     reason = "集成测试从进程环境取被测二进制与 PATH"
@@ -27,14 +28,31 @@ use zcode_host_services::settings::SettingStore;
 
 const MOCK_REPLY: &str = "Hello from the mock model";
 
-fn cli_binary() -> Option<PathBuf> {
-    let path = std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../zcode-cli-rust/target/release/zcode-cli-rust")
-        });
-    path.is_file().then_some(path)
+/// runtime 的选择：缺省嵌入式；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
+fn runtime_vars() -> BTreeMap<String, String> {
+    match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
+        Some(cli) => {
+            assert!(
+                cli.is_file(),
+                "ZCODE_TEST_CLI_RUST_BINARY is not a file: {}",
+                cli.display()
+            );
+            BTreeMap::from([
+                (
+                    "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
+                    cli.to_string_lossy().into_owned(),
+                ),
+                (
+                    "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
+                    "zcode-cli-rust".to_owned(),
+                ),
+            ])
+        }
+        None => BTreeMap::from([(
+            "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
+            "embedded".to_owned(),
+        )]),
+    }
 }
 
 /// 每个请求都回同一段 SSE 流（含标题生成等附带请求）。
@@ -128,12 +146,71 @@ async fn call(channel: &AgentChannel, context: &CallContext, method: &str, value
     }
 }
 
+/// 个人 provider 配置：一个指向本地 mock 的 OpenAI 兼容 provider。返回配置文件路径。
+fn provider_config(home: &Path, port: u16) -> PathBuf {
+    let config_dir = home.join(".zcode/v2");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    let personal = config_dir.join("provider_config.json");
+    std::fs::write(
+        &personal,
+        json!({"schemaVersion": 1, "config": {
+            "providerOrder": ["new-provider"],
+            "providerConfigRules": {"providerRules": [{
+                "providerId": "new-provider", "providerName": "Mock",
+                "config": {
+                    "group": "standard-personal",
+                    "access": {"type": "api-key", "apiKey": "sk-test"},
+                    "api": {"type": "openai-chat-completions", "baseUrl": format!("http://127.0.0.1:{port}/v1")},
+                    "personalModelIds": ["my-model"], "modelOrder": ["my-model"],
+                },
+            }]},
+            "modelConfigRules": {
+                "providerModelRules": [{"providerId": "new-provider", "modelId": "my-model", "config": {"enabled": true}}],
+                "manualProviderModelRules": [],
+            },
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    personal
+}
+
+fn builtin_providers() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../config/provider/zcode-builtin.json")
+}
+
+fn base_env(home: &Path) -> BTreeMap<String, String> {
+    let home = home.to_string_lossy().into_owned();
+    BTreeMap::from([
+        ("HOME".to_owned(), home.clone()),
+        ("USERPROFILE".to_owned(), home.clone()),
+        ("ZCODE_DATA_BASE_DIR".to_owned(), home),
+        ("PATH".to_owned(), std::env::var("PATH").unwrap_or_default()),
+        ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
+    ])
+}
+
+fn create_session(workspace: &str, command: u32, text: &str) -> Value {
+    json!({"workspacePath": workspace, "envelope": {
+        "commandId": format!("0190a000-0000-7000-8000-{command:012}"),
+        "clientId": "client-test",
+        "sessionId": null,
+        "type": "createSession",
+        "payload": {
+            "workspaceId": workspace,
+            "firstInput": {
+                "text": text,
+                "modelSelection": {"providerId": "new-provider", "modelId": "my-model"},
+                "mode": "build",
+                "planEnabled": false,
+            },
+        },
+        "issuedAt": 1,
+    }})
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn core_chat_flow_against_rust_cli() {
-    let Some(cli) = cli_binary() else {
-        eprintln!("skipped: Rust CLI release binary not found");
-        return;
-    };
+async fn core_chat_flow_against_the_runtime() {
     let home = tempfile::tempdir().unwrap();
     let workspace = tempfile::tempdir().unwrap();
     let workspace_path = workspace.path().to_string_lossy().into_owned();
@@ -162,51 +239,10 @@ async fn core_chat_flow_against_rust_cli() {
     )
     .unwrap();
 
-    let config_dir = home.path().join(".zcode/v2");
-    std::fs::create_dir_all(&config_dir).unwrap();
-    let personal = config_dir.join("provider_config.json");
-    std::fs::write(
-        &personal,
-        json!({"schemaVersion": 1, "config": {
-            "providerOrder": ["new-provider"],
-            "providerConfigRules": {"providerRules": [{
-                "providerId": "new-provider", "providerName": "Mock",
-                "config": {
-                    "group": "standard-personal",
-                    "access": {"type": "api-key", "apiKey": "sk-test"},
-                    "api": {"type": "openai-chat-completions", "baseUrl": format!("http://127.0.0.1:{port}/v1")},
-                    "personalModelIds": ["my-model"], "modelOrder": ["my-model"],
-                },
-            }]},
-            "modelConfigRules": {
-                "providerModelRules": [{"providerId": "new-provider", "modelId": "my-model", "config": {"enabled": true}}],
-                "manualProviderModelRules": [],
-            },
-        }})
-        .to_string(),
-    )
-    .unwrap();
-    let builtin = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../config/provider/zcode-builtin.json");
-
-    let home_text = home.path().to_string_lossy().into_owned();
-    let base_env = BTreeMap::from([
-        ("HOME".to_owned(), home_text.clone()),
-        ("USERPROFILE".to_owned(), home_text.clone()),
-        ("ZCODE_DATA_BASE_DIR".to_owned(), home_text.clone()),
-        ("PATH".to_owned(), std::env::var("PATH").unwrap_or_default()),
-        ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
-    ]);
-    let command_vars = BTreeMap::from([
-        (
-            "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
-            cli.to_string_lossy().into_owned(),
-        ),
-        (
-            "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
-            "zcode-cli-rust".to_owned(),
-        ),
-    ]);
+    let personal = provider_config(home.path(), port);
+    let builtin = builtin_providers();
+    let base_env = base_env(home.path());
+    let command_vars = runtime_vars();
     let providers = ProviderRuntime::new(Some(builtin), personal);
     let runtime = AgentRuntime::new(
         AgentRuntimeConfig {
@@ -565,4 +601,98 @@ async fn core_chat_flow_against_rust_cli() {
         .unwrap()
         .unwrap();
     assert_eq!(unavailable["state"], "unavailable");
+}
+
+/// 一个嵌入式 runtime 实例崩溃（调试构建的故障注入让它的 Engine 循环 panic）只影响它自己的
+/// workspace：另一个 workspace 的实例原样存活；崩溃的 workspace 在下一次请求时重启，代次加一
+/// （docs/specs/rust-u3-single-process.md §3）。
+#[tokio::test(flavor = "multi_thread")]
+async fn an_embedded_runtime_panic_only_restarts_its_own_workspace() {
+    if std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").is_some() {
+        // 子进程链路的崩溃由进程退出路径覆盖；故障注入只在进程内的调试构建里生效。
+        return;
+    }
+    const FAULT: &str = "fault-marker-91be";
+    let home = tempfile::tempdir().unwrap();
+    let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let path = |dir: &tempfile::TempDir| dir.path().to_string_lossy().into_owned();
+    let (first_path, second_path) = (path(&first), path(&second));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(serve_mock_model(listener));
+    let personal = provider_config(home.path(), port);
+    let mut env = base_env(home.path());
+    env.insert("ZCODE_RUNTIME_FAULT_MARKER".to_owned(), FAULT.to_owned());
+    let runtime = AgentRuntime::new(
+        AgentRuntimeConfig {
+            base_env: env,
+            command_vars: runtime_vars(),
+            search_roots: Vec::new(),
+            fallback_cwd: None,
+        },
+        SettingStore::new(home.path()),
+        ProviderRuntime::new(Some(builtin_providers()), personal),
+    );
+    let events = AgentEvents::start(runtime.extensions(), None);
+    let api = AgentApi::new(runtime.clone(), home.path(), events, None);
+    let members = zcode_host_services::agent::members::agent_service(&api).build(None);
+    let channel = AgentChannel::new(api.clone(), Some(members));
+    let context = CallContext {
+        connection: 1,
+        attachment_id: "test".into(),
+        client_mode: ClientMode::DesktopContinuous,
+    };
+    call(&channel, &context, "helloConversationV4", Value::Null).await;
+    call(
+        &channel,
+        &context,
+        "initializeConversationV4",
+        json!({"kind": "clientHello", "protocolVersion": 3, "clientId": "client-test", "clientKind": "desktop", "appVersion": "unknown"}),
+    )
+    .await;
+    let send = |workspace: &str, command: u32, text: &str| {
+        let arguments = args(create_session(workspace, command, text));
+        let (channel, context) = (&channel, &context);
+        async move {
+            tokio::time::timeout(
+                Duration::from_secs(60),
+                channel.call(context, "sendConversationCommandV4", arguments),
+            )
+            .await
+            .expect("sendConversationCommandV4 timed out")
+        }
+    };
+    for (workspace, command) in [(&first_path, 1), (&second_path, 2)] {
+        send(workspace, command, "say hello").await.unwrap();
+    }
+    let (first_target, second_target) = (
+        WorkspaceTarget::local(first_path.clone()),
+        WorkspaceTarget::local(second_path.clone()),
+    );
+    let before = runtime.existing(&second_target).await.unwrap();
+    assert_eq!(runtime.existing(&first_target).await.unwrap().generation, 1);
+
+    // 带标记的请求让第一个 workspace 的 Engine 循环 panic：这次调用失败，实例结束。
+    send(&first_path, 3, FAULT).await.unwrap_err();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while runtime.existing(&first_target).await.is_some() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the panicked runtime was not released");
+
+    // 另一个 workspace 的实例没有重启，仍能处理请求。
+    send(&second_path, 4, "say hello again").await.unwrap();
+    let after = runtime.existing(&second_target).await.unwrap();
+    assert_eq!(after.generation, before.generation);
+    assert!(std::sync::Arc::ptr_eq(&before, &after));
+
+    // 崩溃的 workspace 在下一次请求时重启。
+    send(&first_path, 5, "say hello after the crash")
+        .await
+        .unwrap();
+    assert_eq!(runtime.existing(&first_target).await.unwrap().generation, 2);
+    channel.connection_closed(&context);
+    runtime.dispose_all().await;
 }

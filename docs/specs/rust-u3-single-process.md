@@ -53,7 +53,8 @@ impl Exit {
 - **存储准备**：`--prepare-storage` 握手改为以 `prepare_storage: true` 启动一个嵌入式实例，经同一条管道完成，握手内容不变。
 - **日志**：runtime 用 `tracing`。Host 在启动时安装 runtime 的日志 subscriber（写同一个 `zcode-rust-<date>.jsonl`），否则进程内 runtime 的日志无处可去。
 - **结束原因**：任务正常结束为 `runtime_exit: ok`；返回错误为 `runtime_exit: <error>`；panic 为 `runtime_panicked: <message>`。后两者按“意外退出”处理，与子进程异常退出走同一条路径（生命周期 `unavailable`、下次请求时惰性重启、代次加一）。
-- **没有 pid 的后果**：`agent-process-*` 生命周期事件中 `pid` 为 `null`；按 pid 采样的资源统计不再覆盖 runtime（它已经是 Host 进程的一部分），由 Host 进程自身的采样体现。
+- **没有 pid 的后果**：不发 `agent-process-*` 事件（它们描述的是进程，Main 的校验要求数字 pid）；runtime 实例的启动与结束写 Host 日志，异常结束记 warn。按 pid 采样的资源统计不再覆盖 runtime（它已经是 Host 进程的一部分），由 Host 进程自身的采样体现。稳定性遥测里的“agent 进程退出”因此没有嵌入式对应项，U8 接入遥测时补一条不带 pid 的事件。
+- **子进程归属**：runtime 启动的 MCP 与工具进程现在是 Host 的子进程。`collectLocalRuntimeChildProcesses` 仍按 workspace 与 lane 列出它们，条目里的 `pid` 是 Host 进程自己的 pid。
 
 ### 2.3 状态所有者（A 期）
 
@@ -87,6 +88,17 @@ sequenceDiagram
     R--xAR: 任务结束（错误或 panic）
     AR->>AR: 实例标记 unavailable，发 agent-process-exited；下次请求时重启，代次加一
 ```
+
+### 2.5 实例异常结束时的收口
+
+runtime 是独立进程时，它崩溃后操作系统回收一切，Host 再按进程组清理残留的子进程。runtime 在 Host 进程内时没有这层保障，所以：
+
+- **Engine 循环 panic**：panic 被转成错误，Engine 照常执行停止流程——取消运行中的 run、取消各会话的工具、等工具进程树结束——然后 runtime 任务以错误结束。此时内存里的会话事实可能只改了一半，所以按“存储提交失败”处理：停止流程不再提交任何东西。库里仍标记为运行中的会话，由下一个实例按“上一个进程崩溃”的现有规则恢复。
+- **run 任务 panic**：只让这一轮失败（U0 的 B1），实例不受影响。
+- **实例结束后**：Host 取消该实例的取消令牌（实例内仍在等待它的派生任务随之结束），标记实例不可用，下一次请求时惰性重启，代次加一。其他 workspace 的实例不受影响。
+- **以进程内标记的锁 owner**（插件事务、hook 信任存储、设备 id）：实例结束时注销，新实例把残留记录当作无主并立即恢复（U1 L6）。
+
+**故障注入（只在调试构建中编译）**：runtime 环境里有 `ZCODE_RUNTIME_FAULT_MARKER=<标记>` 时，Engine 循环在处理参数中含该标记的请求时 panic。用于测试上面的规则，以及桌面 E2E 中取代“杀掉 CLI 进程”的场景。发布构建不含这段代码。
 
 ## 3. 验收（A 期）
 

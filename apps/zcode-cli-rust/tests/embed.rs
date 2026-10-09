@@ -6,6 +6,8 @@
 )]
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, ReadHalf, WriteHalf};
 use zcode_cli_rust::{embed, runtime::RuntimeOptions, serve::AppServerOptions};
@@ -23,6 +25,11 @@ fn sse(delta: Value, finish: Option<&str>) -> String {
     }
     out
 }
+
+/// 让假模型一直不回复的输入；用来保持一个 run 处于运行中。
+const HANG: &str = "hang until cancelled";
+/// 只出现在注入环境里的故障标记（`ZCODE_RUNTIME_FAULT_MARKER`）。
+const FAULT: &str = "fault-marker-6c1d";
 
 /// Chat Completions 假模型：标题请求回标题；最后一条消息不是工具结果时调用 Write，否则回文本并结束。
 fn respond(body: &str) -> String {
@@ -75,15 +82,32 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Option<String> {
     Some(String::from_utf8_lossy(&bytes[header_end..header_end + length]).into_owned())
 }
 
-async fn mock_model() -> String {
+struct Mock {
+    url: String,
+    /// 收到后一直不回复、对端也还没断开的模型请求数。
+    hanging: Arc<AtomicUsize>,
+}
+
+async fn mock_model() -> Mock {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
+    let hanging = Arc::new(AtomicUsize::new(0));
+    let counter = hanging.clone();
     tokio::spawn(async move {
         while let Ok((mut socket, _)) = listener.accept().await {
+            let hanging = counter.clone();
             tokio::spawn(async move {
                 let Some(body) = read_request(&mut socket).await else {
                     return;
                 };
+                if body.contains(HANG) && !body.contains("Generate a concise title") {
+                    // 不回复，等对端断开：run 被取消时 HTTP 请求随之关闭。
+                    hanging.fetch_add(1, Ordering::SeqCst);
+                    let mut rest = [0u8; 64];
+                    while matches!(socket.read(&mut rest).await, Ok(read) if read > 0) {}
+                    hanging.fetch_sub(1, Ordering::SeqCst);
+                    return;
+                }
                 let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
                 let _ = socket.write_all(head.as_bytes()).await;
                 let _ = socket.write_all(respond(&body).as_bytes()).await;
@@ -91,7 +115,10 @@ async fn mock_model() -> String {
             });
         }
     });
-    format!("http://{address}/v1")
+    Mock {
+        url: format!("http://{address}/v1"),
+        hanging,
+    }
 }
 
 struct Client {
@@ -149,13 +176,13 @@ impl Client {
         reply["result"].clone()
     }
 
-    async fn create_session(&mut self, workspace: &Path) {
+    async fn create_session(&mut self, workspace: &Path, text: &str) {
         let ack = self
             .request(
                 "v4/command",
                 json!({"commandId": format!("create-{}", self.next_id), "clientId": "embed-test",
                     "sessionId": null, "type": "createSession", "issuedAt": 1000,
-                    "payload": {"workspaceId": workspace, "firstInput": {"text": "write"}}}),
+                    "payload": {"workspaceId": workspace, "firstInput": {"text": text}}}),
             )
             .await;
         assert_eq!(ack["status"], "accepted", "{ack}");
@@ -190,6 +217,7 @@ fn options(root: &Path, workspace: &Path, model: &Path) -> AppServerOptions {
                     "ZCODE_SESSION_DB_PATH".into(),
                     text(root.join("sessions.sqlite")),
                 ),
+                ("ZCODE_RUNTIME_FAULT_MARKER".into(), FAULT.into()),
             ],
             argv: vec!["zcode-cli-rust".into()],
             cwd: workspace.to_owned(),
@@ -204,10 +232,18 @@ fn options(root: &Path, workspace: &Path, model: &Path) -> AppServerOptions {
     }
 }
 
-#[tokio::test]
-async fn embedded_runtime_uses_its_options_serves_two_workspaces_and_restarts() {
-    let root = tempfile::tempdir().unwrap();
-    let root = tokio::fs::canonicalize(root.path()).await.unwrap();
+struct Fixture {
+    _dir: tempfile::TempDir,
+    root: PathBuf,
+    first: PathBuf,
+    second: PathBuf,
+    model: PathBuf,
+    mock: Mock,
+}
+
+async fn fixture() -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let root = tokio::fs::canonicalize(dir.path()).await.unwrap();
     let (first, second) = (root.join("workspace-a"), root.join("workspace-b"));
     for directory in [&first, &second, &root.join(".zcode/cli")] {
         tokio::fs::create_dir_all(directory).await.unwrap();
@@ -219,16 +255,47 @@ async fn embedded_runtime_uses_its_options_serves_two_workspaces_and_restarts() 
     )
     .await
     .unwrap();
+    let mock = mock_model().await;
     let model = root.join("model.json");
     tokio::fs::write(
         &model,
         json!({"providerId": "fixture", "modelId": "core-model", "reasoningLevel": "none",
-            "reasoningParameters": {"reasoning_effort": "none"}, "baseUrl": mock_model().await,
-            "requestTimeoutSeconds": 5})
+            "reasoningParameters": {"reasoning_effort": "none"}, "baseUrl": mock.url,
+            "requestTimeoutSeconds": 60})
         .to_string(),
     )
     .await
     .unwrap();
+    Fixture {
+        _dir: dir,
+        root,
+        first,
+        second,
+        model,
+        mock,
+    }
+}
+
+async fn until(what: &str, check: impl Fn() -> bool) {
+    tokio::time::timeout(LIMIT, async {
+        while !check() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+}
+
+#[tokio::test]
+async fn embedded_runtime_uses_its_options_serves_two_workspaces_and_restarts() {
+    let Fixture {
+        _dir,
+        root,
+        first,
+        second,
+        model,
+        ..
+    } = fixture().await;
     let process_cwd = std::env::current_dir().unwrap();
     assert!(!process_cwd.join("result.txt").exists());
 
@@ -236,8 +303,8 @@ async fn embedded_runtime_uses_its_options_serves_two_workspaces_and_restarts() 
     let mut client = Client::new(runtime.io);
     client.ready().await;
     // 同一个 runtime 里的两个 workspace：缺省的和请求里另给的；相对路径各自落在自己的目录下。
-    client.create_session(&first).await;
-    client.create_session(&second).await;
+    client.create_session(&first, "write").await;
+    client.create_session(&second, "write").await;
     for workspace in [&first, &second] {
         assert_eq!(
             wait_for_file(&workspace.join("result.txt")).await,
@@ -263,6 +330,59 @@ async fn embedded_runtime_uses_its_options_serves_two_workspaces_and_restarts() 
         .unwrap();
 
     // 同一进程内再启动一个 runtime：进程级状态不会让它卡住。
+    let again = embed::spawn(options(&root, &first, &model));
+    let mut client = Client::new(again.io);
+    client.ready().await;
+    client.request("runtime/capabilities", json!({})).await;
+    client.writer.shutdown().await.unwrap();
+    tokio::time::timeout(LIMIT, again.task)
+        .await
+        .expect("the restarted runtime did not stop after EOF")
+        .unwrap()
+        .unwrap();
+}
+
+/// Engine 循环 panic（调试构建的故障注入）：runtime 任务以错误结束，但先收口——运行中的 run 被
+/// 取消，它的模型请求随之关闭；之后同一进程可以再启动一个 runtime。
+#[tokio::test]
+async fn an_engine_panic_cancels_its_runs_before_the_runtime_ends() {
+    let Fixture {
+        _dir,
+        root,
+        first,
+        model,
+        mock,
+        ..
+    } = fixture().await;
+    let runtime = embed::spawn(options(&root, &first, &model));
+    let mut client = Client::new(runtime.io);
+    client.ready().await;
+    client.create_session(&first, HANG).await;
+    let hanging = mock.hanging.clone();
+    until("the model request of the run", || {
+        hanging.load(Ordering::SeqCst) == 1
+    })
+    .await;
+
+    let line = format!(
+        "{}\n",
+        json!({"id": 99, "method": "runtime/capabilities", "params": {"note": FAULT}})
+    );
+    client.writer.write_all(line.as_bytes()).await.unwrap();
+    let ended = tokio::time::timeout(LIMIT, runtime.task)
+        .await
+        .expect("the runtime did not end after the engine panicked")
+        .expect("the panic must not escape the runtime task");
+    let error = format!(
+        "{:#}",
+        ended.expect_err("an engine panic is a runtime failure")
+    );
+    assert!(error.contains("fault injection"), "{error}");
+    until("the run's model request to be closed", || {
+        hanging.load(Ordering::SeqCst) == 0
+    })
+    .await;
+
     let again = embed::spawn(options(&root, &first, &model));
     let mut client = Client::new(again.io);
     client.ready().await;

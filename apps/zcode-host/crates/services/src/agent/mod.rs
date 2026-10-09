@@ -1,9 +1,11 @@
-//! Agent 子系统：每个 workspace 一个 CLI 进程，经 stdio NDJSON 通信（docs/specs/rust-host.md R2）。
+//! Agent 子系统：每个 workspace 一个 runtime 实例（CLI 子进程，或进程内的嵌入式 runtime），经
+//! NDJSON 行通信（docs/specs/rust-host.md R2、rust-u3-single-process.md）。
 pub mod api;
 pub mod api_plugins;
 pub mod browser;
 pub mod client;
 pub mod command;
+pub mod embedded;
 pub mod extensions;
 mod flow;
 pub mod members;

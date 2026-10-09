@@ -30,14 +30,31 @@ impl ControlSink for NullSink {
     fn send(&self, _message: HostToMain) {}
 }
 
-fn cli_binary() -> Option<PathBuf> {
-    let path = std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../zcode-cli-rust/target/release/zcode-cli-rust")
-        });
-    path.is_file().then_some(path)
+/// runtime 的选择：缺省嵌入式；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
+fn runtime_vars() -> BTreeMap<String, String> {
+    match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
+        Some(cli) => {
+            assert!(
+                cli.is_file(),
+                "ZCODE_TEST_CLI_RUST_BINARY is not a file: {}",
+                cli.display()
+            );
+            BTreeMap::from([
+                (
+                    "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
+                    cli.to_string_lossy().into_owned(),
+                ),
+                (
+                    "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
+                    "zcode-cli-rust".to_owned(),
+                ),
+            ])
+        }
+        None => BTreeMap::from([(
+            "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
+            "embedded".to_owned(),
+        )]),
+    }
 }
 
 fn jwt(exp: i64) -> String {
@@ -213,17 +230,7 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         control: Arc::new(NullSink),
     };
     let account = AccountStack::new(&context, &settings, &providers);
-    let cli = cli_binary();
-    if let Some(cli) = &cli {
-        vars.insert(
-            "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
-            cli.to_string_lossy().into_owned(),
-        );
-        vars.insert(
-            "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
-            "zcode-cli-rust".to_owned(),
-        );
-    }
+    vars.extend(runtime_vars());
     let runtime = AgentRuntime::new(
         AgentRuntimeConfig {
             base_env: vars.clone(),
@@ -436,10 +443,6 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         ReverseReply::Result(json!({"ok": false, "reason": "official_mcp_origin_untrusted"}))
     );
 
-    let Some(_) = cli else {
-        eprintln!("skipped CLI part: Rust CLI release binary not found");
-        return;
-    };
     // Account Config 同步到真实 CLI：使用前钩子发送 provider/updateAccountConfig，CLI 回执 revision。
     let process = runtime
         .get_client(&target, RuntimePolicy::StartIfNeeded)

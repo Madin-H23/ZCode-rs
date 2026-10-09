@@ -249,6 +249,14 @@ impl Context {
             &self.startup_config.user_path,
         )
         .with_registry(registry);
+        #[cfg(debug_assertions)]
+        let engine = engine.with_fault_marker(
+            self.runtime_env
+                .vars()
+                .iter()
+                .find(|(name, _)| name == "ZCODE_RUNTIME_FAULT_MARKER")
+                .map(|(_, value)| value.clone()),
+        );
         Ok(match trust_store {
             Some(store) => engine.with_workspace_trust(
                 store,

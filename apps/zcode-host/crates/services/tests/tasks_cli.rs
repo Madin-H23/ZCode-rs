@@ -3,7 +3,8 @@
 //! onDynamicTaskTerminalOutcome / Ready → 配置读写 → host command 队列 drain → resume → close。
 //! 模型是本地 mock 的 OpenAI 兼容端点；HOME 与数据目录都是临时目录，不读写开发者的 `~/.zcode`。
 //!
-//! CLI 可执行文件取 `ZCODE_TEST_CLI_RUST_BINARY`，否则用工作区内的 release 构建；都不存在时跳过。
+//! 缺省用进程内的嵌入式 runtime（docs/specs/rust-u3-single-process.md），不需要预先构建 CLI；设置
+//! `ZCODE_TEST_CLI_RUST_BINARY` 时改用该可执行文件走子进程链路，作为差分对照。
 #![expect(
     clippy::disallowed_methods,
     reason = "集成测试从进程环境取被测二进制与 PATH"
@@ -27,14 +28,22 @@ use zcode_host_services::tasks::service::TaskService;
 use zcode_host_services::tasks::{WorkspaceEvents, syncer};
 use zcode_host_services::tasks_index::TasksIndex;
 
-fn cli_binary() -> Option<PathBuf> {
-    let path = std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../zcode-cli-rust/target/release/zcode-cli-rust")
-        });
-    path.is_file().then_some(path)
+/// runtime 的选择：缺省嵌入式；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
+fn runtime_vars() -> BTreeMap<String, String> {
+    match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
+        Some(cli) => {
+            assert!(
+                cli.is_file(),
+                "ZCODE_TEST_CLI_RUST_BINARY is not a file: {}",
+                cli.display()
+            );
+            runtime_vars()
+        }
+        None => BTreeMap::from([(
+            "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
+            "embedded".to_owned(),
+        )]),
+    }
 }
 
 /// 每个请求都回同一段 SSE 流（含标题生成等附带请求）。
@@ -146,10 +155,6 @@ async fn next_matching<T: Clone>(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn task_lifecycle_against_rust_cli() {
-    let Some(cli) = cli_binary() else {
-        eprintln!("skipped: Rust CLI release binary not found");
-        return;
-    };
     let home = tempfile::tempdir().unwrap();
     let workspace = tempfile::tempdir().unwrap();
     let workspace_path = workspace.path().to_string_lossy().into_owned();
@@ -167,16 +172,7 @@ async fn task_lifecycle_against_rust_cli() {
         ("PATH".to_owned(), std::env::var("PATH").unwrap_or_default()),
         ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
     ]);
-    let command_vars = BTreeMap::from([
-        (
-            "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
-            cli.to_string_lossy().into_owned(),
-        ),
-        (
-            "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
-            "zcode-cli-rust".to_owned(),
-        ),
-    ]);
+    let command_vars = runtime_vars();
     let settings = SettingStore::new(home.path());
     let runtime = AgentRuntime::new(
         AgentRuntimeConfig {
@@ -322,10 +318,6 @@ async fn task_lifecycle_against_rust_cli() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn claude_import_against_rust_cli() {
-    let Some(cli) = cli_binary() else {
-        eprintln!("skipped: Rust CLI release binary not found");
-        return;
-    };
     let home = tempfile::tempdir().unwrap();
     let workspace = tempfile::tempdir().unwrap();
     let workspace_path = workspace.path().to_string_lossy().into_owned();
@@ -344,16 +336,7 @@ async fn claude_import_against_rust_cli() {
                 ("PATH".to_owned(), std::env::var("PATH").unwrap_or_default()),
                 ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
             ]),
-            command_vars: BTreeMap::from([
-                (
-                    "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
-                    cli.to_string_lossy().into_owned(),
-                ),
-                (
-                    "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
-                    "zcode-cli-rust".to_owned(),
-                ),
-            ]),
+            command_vars: runtime_vars(),
             search_roots: Vec::new(),
             fallback_cwd: None,
         },

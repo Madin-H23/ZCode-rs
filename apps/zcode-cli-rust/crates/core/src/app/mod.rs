@@ -2,6 +2,9 @@ mod auxiliary;
 mod commands;
 mod engine;
 mod engine_builders;
+#[cfg(debug_assertions)]
+mod engine_fault;
+mod engine_shutdown;
 mod event_projection;
 mod model_config;
 mod queries;

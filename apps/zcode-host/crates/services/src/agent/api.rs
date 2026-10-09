@@ -815,7 +815,7 @@ impl AgentApi {
             .all_live_processes()
             .await
             .into_iter()
-            .filter(|process| !process.client.storage_waiting() && process.pid.is_some())
+            .filter(|process| !process.client.storage_waiting())
             .collect();
         let entries = futures_util::future::join_all(processes.iter().map(|process| async move {
             let children = process
@@ -829,7 +829,11 @@ impl AgentApi {
                 .and_then(|result| result["processes"].as_array().cloned())
                 .unwrap_or_default();
             let mut entry = Map::new();
-            entry.insert("pid".into(), json!(process.pid));
+            // 嵌入式 runtime 没有自己的进程：它的子进程（MCP、工具）就是 Host 的子进程，pid 报 Host 自己。
+            entry.insert(
+                "pid".into(),
+                json!(process.pid.unwrap_or_else(std::process::id)),
+            );
             entry.insert("provider".into(), json!(AGENT_PROVIDER));
             entry.insert("workspacePath".into(), json!(process.target.workspace_path));
             if let Some(lane) = process.lane().identity_label() {

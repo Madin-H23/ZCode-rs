@@ -260,10 +260,11 @@ async fn connect_via_connector(
         env: BTreeMap::new(),
         supports_storage_startup: false,
         storage_entry: None,
+        embedded: false,
     };
     let spawned = process::spawn(&command, &config.cwd, &env)
         .map_err(|error| format!("无法启动远程连接器：{error}"))?;
-    let (stderr, _) = process::drain_stderr(spawned.stderr, "remote-connector".into(), None);
+    let (stderr, _) = process::drain_stderr(Some(spawned.stderr), "remote-connector".into(), None);
     let child = ChildHandle::watch(spawned.child, spawned.pid);
     let writer = spawn_writer(spawned.stdin);
 
@@ -529,10 +530,11 @@ async fn connect_process(
         env: BTreeMap::new(),
         supports_storage_startup: false,
         storage_entry: None,
+        embedded: false,
     };
     let spawned = process::spawn(&command, &config.cwd, &config.env)
         .map_err(|error| format!("无法启动远端 server：{error}"))?;
-    let (stderr, _) = process::drain_stderr(spawned.stderr, "remote-server".into(), None);
+    let (stderr, _) = process::drain_stderr(Some(spawned.stderr), "remote-server".into(), None);
     let child = ChildHandle::watch(spawned.child, spawned.pid);
     let writer = spawn_writer(spawned.stdin);
     let mut stdout = spawned.stdout;

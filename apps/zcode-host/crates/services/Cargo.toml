@@ -32,12 +32,14 @@ sha2.workspace = true
 # bots：飞书长连接（wss，系统根证书）。
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tokio.workspace = true
+tokio-util.workspace = true
 # settings-sync 导入 Codex `config.toml` 的 MCP 条目要按文档顺序（同 smol-toml）。
 toml = { workspace = true, features = ["preserve_order"] }
 url.workspace = true
 yaml-rust2.workspace = true
 zip.workspace = true
 zcode-cli-domain.workspace = true
+zcode-cli-rust.workspace = true
 zcode-host-control.workspace = true
 zcode-host-kit.workspace = true
 zcode-host-rpc.workspace = true

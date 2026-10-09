@@ -92,6 +92,11 @@ fn capture_environment() -> Result<HostEnvironment> {
 
 async fn run(args: Args) -> Result<()> {
     let environment = capture_environment()?;
+    // 进程内 runtime 的日志（docs/specs/rust-u3-single-process.md §2.2）；guard 存活到进程退出。
+    let _runtime_logs = zcode_host_services::agent::embedded::init_logging(
+        &environment.user_home,
+        &environment.vars,
+    );
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await
         .context("bind 127.0.0.1")?;

@@ -34,4 +34,11 @@ impl Engine {
         self.titles = enabled;
         self
     }
+    /// Debug builds only: panic in the engine loop when a request contains `marker`
+    /// (`ZCODE_RUNTIME_FAULT_MARKER`, spec rust-u3-single-process §2.5).
+    #[cfg(debug_assertions)]
+    pub fn with_fault_marker(mut self, marker: Option<String>) -> Self {
+        self.fault = super::engine_fault::Fault::new(marker);
+        self
+    }
 }

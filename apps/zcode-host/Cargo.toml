@@ -82,6 +82,7 @@ sha2 = "0.10"
 serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.28"
+tokio-util = "0.7"
 toml = "1"
 yaml-rust2 = "0.10"
 # 反馈诊断日志归档（Node yazl）：只启用 deflate。
@@ -93,6 +94,8 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_Threading",
 ] }
 zcode-cli-domain = { path = "../zcode-cli-rust/crates/domain" }
+# 进程内 runtime（docs/specs/rust-u3-single-process.md）：Host 把 CLI 的 runtime 当库链接，不再只是独立进程。
+zcode-cli-rust = { path = "../zcode-cli-rust" }
 zcode-host-control = { path = "crates/control" }
 zcode-host-core = { path = "crates/host-core" }
 zcode-host-kit = { path = "crates/kit" }

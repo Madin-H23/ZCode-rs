@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use regex::Regex;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 use zcode_host_kit::log;
 
@@ -29,6 +29,82 @@ pub struct Spawned {
     pub stdin: ChildStdin,
     pub stdout: ChildStdout,
     pub stderr: ChildStderr,
+}
+
+/// 一条到 runtime 的协议链路：子进程的 stdio，或进程内 runtime 的内存管道
+/// （docs/specs/rust-u3-single-process.md §2.2）。
+pub struct Link {
+    pub reader: Box<dyn AsyncRead + Send + Unpin>,
+    pub writer: Box<dyn AsyncWrite + Send + Unpin>,
+    /// 子进程才有；嵌入式链路没有 pid，也没有 stderr。
+    pub pid: Option<u32>,
+    pub stderr: Option<ChildStderr>,
+    pub exit: Exit,
+}
+
+impl From<Spawned> for Link {
+    fn from(spawned: Spawned) -> Self {
+        Self {
+            reader: Box::new(spawned.stdout),
+            writer: Box::new(spawned.stdin),
+            pid: spawned.pid,
+            stderr: Some(spawned.stderr),
+            exit: Exit::Process(spawned.child),
+        }
+    }
+}
+
+/// runtime 结束时的事实。
+#[derive(Clone)]
+pub struct Outcome {
+    /// 进入日志与关闭原因的文本。
+    pub reason: String,
+    pub success: bool,
+    /// 子进程才有退出状态。
+    pub status: Option<std::process::ExitStatus>,
+}
+
+/// runtime 的生命期句柄：子进程，或进程内的任务。
+pub enum Exit {
+    Process(Child),
+    Embedded(super::embedded::Running),
+}
+
+impl Exit {
+    /// 等 runtime 结束。
+    pub async fn wait(&mut self) -> Outcome {
+        match self {
+            Self::Process(child) => match child.wait().await {
+                Ok(status) => Outcome {
+                    reason: format!("process_exit: {status}"),
+                    success: status.success(),
+                    status: Some(status),
+                },
+                Err(error) => Outcome {
+                    reason: format!("process_exit: {error}"),
+                    success: false,
+                    status: None,
+                },
+            },
+            Self::Embedded(running) => running.wait().await,
+        }
+    }
+
+    /// 回收：子进程按文件头的顺序升级信号；嵌入式实例先取消，再等任务结束。
+    pub async fn terminate(&mut self, pid: Option<u32>) {
+        match self {
+            Self::Process(child) => terminate(child, pid).await,
+            Self::Embedded(running) => running.terminate().await,
+        }
+    }
+
+    /// 已结束的子进程的退出状态；仍在运行或嵌入式实例为 None。
+    pub fn exit_status(&mut self) -> Option<std::process::ExitStatus> {
+        match self {
+            Self::Process(child) => child.try_wait().ok().flatten(),
+            Self::Embedded(_) => None,
+        }
+    }
 }
 
 pub fn spawn(
@@ -296,13 +372,18 @@ pub type StderrDone = tokio::sync::oneshot::Receiver<()>;
 
 /// 一直读到 EOF，避免管道写满后子进程阻塞。进程诊断行交给 `on_diagnostic`，不进 tail。
 pub fn drain_stderr(
-    stderr: ChildStderr,
+    stderr: Option<ChildStderr>,
     label: String,
     on_diagnostic: Option<DiagnosticSink>,
 ) -> (StderrTail, StderrDone) {
     let tail = StderrTail::default();
     let collected = tail.clone();
     let (done, done_rx) = tokio::sync::oneshot::channel();
+    // 嵌入式 runtime 没有 stderr（它的日志走 tracing）：tail 为空，完成信号立即发出。
+    let Some(stderr) = stderr else {
+        let _ = done.send(());
+        return (tail, done_rx);
+    };
     tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
@@ -426,6 +507,7 @@ mod tests {
             env: BTreeMap::new(),
             supports_storage_startup: false,
             storage_entry: None,
+            embedded: false,
         };
         let env = BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]);
         let mut spawned = spawn(&command, Path::new("/"), &env).unwrap();

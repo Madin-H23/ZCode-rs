@@ -10,6 +10,7 @@ fn script_command(script: &str) -> AgentCommand {
         env: BTreeMap::new(),
         supports_storage_startup: true,
         storage_entry: None,
+        embedded: false,
     }
 }
 
