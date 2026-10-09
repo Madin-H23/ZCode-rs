@@ -87,8 +87,12 @@ async function walk(directory) {
       /\bzcode_cli_(?:state|model|tools|host|delivery|app_server|headless|tui)\s*::/.test(code)
     )
       failures.push(`${file}: core imports an adapter or frontend`);
-    // 投递 crate 由前端与 Host 共用（docs/specs/rust-u3-stage-b.md §3.2）：只经传输契约与领域模型工作。
-    if (crate === "delivery" && /\bzcode_cli_(?!core_api\b|domain\b|protocol\b)\w+\s*::/.test(code))
+    // 投递 crate 由前端与 Host 共用（docs/specs/rust-u3-stage-b.md §3.2）：只经传输契约与领域模型工作
+    // （它自己的集成测试经公开名 zcode_cli_delivery 引用它）。
+    if (
+      crate === "delivery" &&
+      /\bzcode_cli_(?!core_api\b|domain\b|protocol\b|delivery\b)\w+\s*::/.test(code)
+    )
       failures.push(`${file}: delivery imports a crate other than core-api, domain or protocol`);
     // 前端只经传输契约（core-api/protocol/domain）与 runtime 交互，不能持有 core 内部状态。
     if (
