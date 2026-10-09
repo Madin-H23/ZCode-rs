@@ -27,7 +27,7 @@ use zcode_host_services::settings::SettingStore;
 const FIRST_REPLY: &str = "Hello from the mock model";
 const TOOL_REPLY: &str = "The tool said hi";
 
-/// runtime 的选择：缺省嵌入式；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
+/// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
 fn runtime_vars() -> BTreeMap<String, String> {
     match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
         Some(cli) => {
@@ -36,6 +36,8 @@ fn runtime_vars() -> BTreeMap<String, String> {
                 "ZCODE_TEST_CLI_RUST_BINARY is not a file: {}",
                 cli.display()
             );
+            // 缺陷修复：这里原来递归调用 runtime_vars() 自己，设置该变量时栈溢出，子进程链路的差分
+            // 对照从未真正跑过；改为与 agent_cli.rs 相同的显式命令与 runtime 种类。
             BTreeMap::from([
                 (
                     "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
@@ -47,10 +49,8 @@ fn runtime_vars() -> BTreeMap<String, String> {
                 ),
             ])
         }
-        None => BTreeMap::from([(
-            "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
-            "embedded".to_owned(),
-        )]),
+        // 不设置任何选择变量：走 Host 的缺省链路（嵌入式）。
+        None => BTreeMap::new(),
     }
 }
 
@@ -264,7 +264,6 @@ async fn bots_read_real_cli_conversations_through_v4_frames() {
                 ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
             ]),
             command_vars: runtime_vars(),
-            search_roots: Vec::new(),
             fallback_cwd: None,
         },
         SettingStore::new(home.path()),

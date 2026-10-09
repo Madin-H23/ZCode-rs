@@ -8,6 +8,12 @@
 //!
 //! 缺省用进程内的嵌入式 runtime；设置 `ZCODE_TEST_CLI_RUST_BINARY` 时走子进程链路作差分对照。
 //! 数字用 `cargo test --release -p zcode-host --test control_latency -- --nocapture` 查看。
+//!
+//! `runtime_link_comparison`（`#[ignore]`）是 U3 的对照测量（docs/reports/rust-u3-embedded-runtime.md）：
+//! N（`ZCODE_PERF_WORKSPACES`，缺省 4）个 workspace 同时流式时的控制 RPC 延迟、Host 进程（子进程链路另加
+//! 各 CLI 进程）的 RSS 与 CPU，以及 workspace runtime 的冷启动就绪时间；结果以一行 `runtime_link_perf
+//! {json}` 打印。用发布构建运行：
+//! `cargo test --release -p zcode-host --test control_latency runtime_link_comparison -- --ignored --nocapture`。
 #![expect(
     clippy::disallowed_methods,
     reason = "集成测试从进程环境取被测二进制与 PATH"
@@ -36,7 +42,7 @@ const CHUNK_GAP: Duration = Duration::from_millis(20);
 const SAMPLES: usize = 150;
 const P95_BUDGET: Duration = Duration::from_millis(20);
 
-/// runtime 的选择：缺省嵌入式；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
+/// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
 fn runtime_env() -> Vec<(&'static str, String)> {
     match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
         Some(cli) => {
@@ -53,7 +59,8 @@ fn runtime_env() -> Vec<(&'static str, String)> {
                 ("ZCODE_AGENT_SERVER_RUNTIME", "zcode-cli-rust".to_owned()),
             ]
         }
-        None => vec![("ZCODE_AGENT_SERVER_RUNTIME", "embedded".to_owned())],
+        // 不设置任何选择变量：走 Host 的缺省链路（嵌入式）。
+        None => Vec::new(),
     }
 }
 
@@ -65,8 +72,8 @@ fn sse(delta: Value, finish: Value) -> String {
     format!("data: {chunk}\n\n")
 }
 
-/// 主对话请求（带 tools）持续流式约 12 s；标题生成等附带请求立即结束。
-async fn serve_mock_model(listener: TcpListener) {
+/// 主对话请求（带 tools）每 20 ms 出一段，共 `chunks` 段；标题生成等附带请求立即结束。
+async fn serve_mock_model(listener: TcpListener, chunks: usize) {
     while let Ok((mut stream, _)) = listener.accept().await {
         tokio::spawn(async move {
             let mut buffer = Vec::new();
@@ -102,7 +109,7 @@ async fn serve_mock_model(listener: TcpListener) {
                 .write_all(sse(json!({"role": "assistant", "content": ""}), Value::Null).as_bytes())
                 .await;
             if main {
-                for index in 0..STREAM_CHUNKS {
+                for index in 0..chunks {
                     let text = format!("token-{index} lorem ipsum dolor sit amet. ");
                     if stream
                         .write_all(sse(json!({"content": text}), Value::Null).as_bytes())
@@ -270,28 +277,24 @@ fn write_provider_config(home: &Path, port: u16) {
     .unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn control_rpc_p95_while_four_workspaces_stream() {
-    let home = tempfile::tempdir().unwrap();
-    let workspaces: Vec<tempfile::TempDir> = (0..WORKSPACES)
-        .map(|_| tempfile::tempdir().unwrap())
-        .collect();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    tokio::spawn(serve_mock_model(listener));
-    write_provider_config(home.path(), port);
+/// 一个已就绪的 Host：控制通道与 desktop-continuous 的 RPC 连接（握手已完成）。
+struct Host {
+    control: Control,
+    rpc: Rpc,
+}
+
+async fn start_host(home: &Path) -> Host {
     let builtin = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../config/provider/zcode-builtin.json");
-
     let mut child = zcode_proc::command(env!("CARGO_BIN_EXE_zcode-host"))
         .args(["--allowed-origin", "file://"])
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         .env("TMPDIR", std::env::temp_dir())
-        .env("HOME", home.path())
-        .env("USERPROFILE", home.path())
-        .env("ZCODE_DESKTOP_HOME_DIR", home.path())
-        .env("ZCODE_DATA_BASE_DIR", home.path())
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("ZCODE_DESKTOP_HOME_DIR", home)
+        .env("ZCODE_DATA_BASE_DIR", home)
         .env("NO_PROXY", "127.0.0.1,localhost")
         .envs(runtime_env())
         .stdin(Stdio::piped())
@@ -354,46 +357,48 @@ async fn control_rpc_p95_while_four_workspaces_stream() {
             "clientKind": "desktop", "appVersion": "unknown"}]),
     )
     .await;
+    Host { control, rpc }
+}
 
-    let mut streams = Vec::new();
-    for (index, workspace) in workspaces.iter().enumerate() {
-        let path = workspace.path().to_string_lossy().into_owned();
-        let listen = rpc
-            .listen(
-                "zcode-agent",
-                "onDynamicConversationFrame",
-                json!({"workspacePath": path}),
-            )
-            .await;
-        let envelope = json!({
-            "commandId": format!("0190a000-0000-7000-8000-00000000000{index}"),
-            "clientId": "perf-client", "sessionId": null, "type": "createSession",
-            "payload": {"workspaceId": path, "firstInput": {
-                "text": "stream a long answer",
-                "modelSelection": {"providerId": "mock-provider", "modelId": "mock-model"},
-                "mode": "build", "planEnabled": false,
-            }},
-            "issuedAt": 1,
-        });
-        let ack = rpc
-            .call(
-                "zcode-agent",
-                "sendConversationCommandV4",
-                json!([{"workspacePath": path, "envelope": envelope}]),
-            )
-            .await;
-        assert_eq!(ack["status"], "accepted", "{ack}");
-        let session = ack["result"]["sessionId"].as_str().unwrap().to_owned();
-        rpc.call(
+/// 在 workspace 里建会话并订阅；返回帧监听的 id。
+async fn start_stream(rpc: &mut Rpc, index: usize, path: &str) -> i64 {
+    let listen = rpc
+        .listen(
             "zcode-agent",
-            "subscribeConversationV4",
-            json!([{"workspacePath": path, "sessionId": session}]),
+            "onDynamicConversationFrame",
+            json!({"workspacePath": path}),
         )
         .await;
-        streams.push((listen, path));
-    }
+    let envelope = json!({
+        "commandId": format!("0190a000-0000-7000-8000-{index:012}"),
+        "clientId": "perf-client", "sessionId": null, "type": "createSession",
+        "payload": {"workspaceId": path, "firstInput": {
+            "text": "stream a long answer",
+            "modelSelection": {"providerId": "mock-provider", "modelId": "mock-model"},
+            "mode": "build", "planEnabled": false,
+        }},
+        "issuedAt": 1,
+    });
+    let ack = rpc
+        .call(
+            "zcode-agent",
+            "sendConversationCommandV4",
+            json!([{"workspacePath": path, "envelope": envelope}]),
+        )
+        .await;
+    assert_eq!(ack["status"], "accepted", "{ack}");
+    let session = ack["result"]["sessionId"].as_str().unwrap().to_owned();
+    rpc.call(
+        "zcode-agent",
+        "subscribeConversationV4",
+        json!([{"workspacePath": path, "sessionId": session}]),
+    )
+    .await;
+    listen
+}
 
-    // 等 4 路都开始出帧，再在流式进行中采样。
+/// 等所有流都开始出帧（每路至少 5 帧）。
+async fn wait_streaming(rpc: &mut Rpc, streams: &[(i64, String)]) {
     let warm = Instant::now();
     while streams
         .iter()
@@ -406,11 +411,17 @@ async fn control_rpc_p95_while_four_workspaces_stream() {
         rpc.call("setting", "get", json!([])).await;
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+/// 流式进行中交替采样两类控制 RPC；返回两组延迟与窗口内每路新到的帧数。
+async fn sample_control_rpcs(
+    rpc: &mut Rpc,
+    streams: &[(i64, String)],
+) -> (Vec<Duration>, Vec<Duration>, Vec<usize>, Duration) {
     let before: Vec<usize> = streams
         .iter()
         .map(|(listen, _)| rpc.events[listen])
         .collect();
-
     let (mut local, mut agent) = (Vec::new(), Vec::new());
     let started = Instant::now();
     for index in 0..SAMPLES {
@@ -418,7 +429,7 @@ async fn control_rpc_p95_while_four_workspaces_stream() {
         rpc.call("setting", "get", json!([])).await;
         local.push(sent.elapsed());
         let sent = Instant::now();
-        let target = &streams[index % WORKSPACES].1;
+        let target = &streams[index % streams.len()].1;
         rpc.call(
             "zcode-agent",
             "queryConversationCommandsV4",
@@ -429,11 +440,37 @@ async fn control_rpc_p95_while_four_workspaces_stream() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     let window = started.elapsed();
-    let during: Vec<usize> = streams
+    let during = streams
         .iter()
         .zip(&before)
         .map(|((listen, _), before)| rpc.events[listen] - before)
         .collect();
+    (local, agent, during, window)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn control_rpc_p95_while_four_workspaces_stream() {
+    let home = tempfile::tempdir().unwrap();
+    let workspaces: Vec<tempfile::TempDir> = (0..WORKSPACES)
+        .map(|_| tempfile::tempdir().unwrap())
+        .collect();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(serve_mock_model(listener, STREAM_CHUNKS));
+    write_provider_config(home.path(), port);
+    let Host {
+        control: _control,
+        mut rpc,
+    } = start_host(home.path()).await;
+
+    let mut streams = Vec::new();
+    for (index, workspace) in workspaces.iter().enumerate() {
+        let path = workspace.path().to_string_lossy().into_owned();
+        streams.push((start_stream(&mut rpc, index, &path).await, path));
+    }
+    // 等 4 路都开始出帧，再在流式进行中采样。
+    wait_streaming(&mut rpc, &streams).await;
+    let (local, agent, during, window) = sample_control_rpcs(&mut rpc, &streams).await;
     eprintln!(
         "control_latency: {WORKSPACES} workspaces streaming; frames during the {:.1}s window per workspace: {during:?}",
         window.as_secs_f64()
@@ -447,4 +484,242 @@ async fn control_rpc_p95_while_four_workspaces_stream() {
         agent_p95 <= P95_BUDGET,
         "queryConversationCommandsV4 p95 {agent_p95:?}"
     );
+}
+
+/// 一个进程在某一时刻的 RSS（KiB）与累计 CPU 时间。
+#[derive(Clone, Copy)]
+struct Usage {
+    pid: u32,
+    rss_kib: u64,
+    cpu: Duration,
+}
+
+/// `ps` 的 `time` 列：`[[时:]分:]秒.百分秒`。
+fn parse_cpu_time(text: &str) -> Duration {
+    let mut seconds = 0.0;
+    for part in text.split(':') {
+        seconds = seconds * 60.0 + part.parse::<f64>().unwrap_or(0.0);
+    }
+    Duration::from_secs_f64(seconds)
+}
+
+/// Host 进程与它的 runtime 子进程（CLI；嵌入式链路没有）各自的用量。
+async fn usage_of(host: u32) -> (Usage, Vec<Usage>) {
+    let output = zcode_proc::command("ps")
+        .args(["-axo", "pid=,ppid=,rss=,time=,command="])
+        .output()
+        .await
+        .unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut host_usage = Usage {
+        pid: host,
+        rss_kib: 0,
+        cpu: Duration::ZERO,
+    };
+    let mut children = Vec::new();
+    for line in text.lines() {
+        let mut fields = line.split_whitespace();
+        let (Some(pid), Some(ppid), Some(rss), Some(time)) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        let command = fields.collect::<Vec<_>>().join(" ");
+        let usage = Usage {
+            pid: pid.parse().unwrap_or(0),
+            rss_kib: rss.parse().unwrap_or(0),
+            cpu: parse_cpu_time(time),
+        };
+        if pid.parse::<u32>().ok() == Some(host) {
+            host_usage = usage;
+        } else if ppid.parse::<u32>().ok() == Some(host) && command.contains("zcode-cli-rust") {
+            children.push(usage);
+        }
+    }
+    (host_usage, children)
+}
+
+/// macOS `footprint`（活动监视器的内存值，不含分配器已释放的页；`ps` 的 RSS 含这些页）；其他平台为 None。
+async fn footprint_kib(pid: u32) -> Option<u64> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let output = zcode_proc::command("footprint")
+        .args(["-p", &pid.to_string()])
+        .output()
+        .await
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let rest = text.split("Footprint:").nth(1)?;
+    let mut parts = rest.split_whitespace();
+    let value: f64 = parts.next()?.parse().ok()?;
+    let scale = match parts.next()? {
+        "B" => 1.0 / 1024.0,
+        "KB" => 1.0,
+        "MB" => 1024.0,
+        "GB" => 1024.0 * 1024.0,
+        _ => return None,
+    };
+    Some((value * scale).round() as u64)
+}
+
+fn millis(duration: Duration) -> f64 {
+    (duration.as_secs_f64() * 1e5).round() / 1e2
+}
+
+fn latency_json(mut samples: Vec<Duration>) -> Value {
+    samples.sort();
+    json!({
+        "p50": millis(percentile(&samples, 0.5)),
+        "p95": millis(percentile(&samples, 0.95)),
+        "p99": millis(percentile(&samples, 0.99)),
+        "max": millis(*samples.last().unwrap()),
+    })
+}
+
+/// U3 对照测量（见文件头）：嵌入式链路与子进程链路各跑一次，比较打印出来的 JSON。
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "measurement; run in release with --ignored --nocapture"]
+async fn runtime_link_comparison() {
+    let workspaces_count: usize = std::env::var("ZCODE_PERF_WORKSPACES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(4);
+    // 流式要覆盖冷启动、采样窗口与负载下的冷启动：约 40 s。
+    const CHUNKS: usize = 2000;
+    let home = tempfile::tempdir().unwrap();
+    let workspaces: Vec<tempfile::TempDir> = (0..=workspaces_count)
+        .map(|_| tempfile::tempdir().unwrap())
+        .collect();
+    let paths: Vec<String> = workspaces
+        .iter()
+        .map(|dir| dir.path().to_string_lossy().into_owned())
+        .collect();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(serve_mock_model(listener, CHUNKS));
+    write_provider_config(home.path(), port);
+    let Host { control, mut rpc } = start_host(home.path()).await;
+    let host_pid = control._child.id().unwrap();
+    let (idle, _) = usage_of(host_pid).await;
+
+    // 冷启动就绪：`zcode-agent.initialize` 拉起 runtime 并等到它可用（存储就绪、偏好推送完成）。
+    let mut cold = Vec::new();
+    for path in &paths[..workspaces_count] {
+        let started = Instant::now();
+        let result = rpc
+            .call(
+                "zcode-agent",
+                "initialize",
+                json!([{"workspacePath": path}]),
+            )
+            .await;
+        cold.push(started.elapsed());
+        assert_eq!(result["available"], true, "{result}");
+    }
+    let (ready, ready_children) = usage_of(host_pid).await;
+
+    let mut streams = Vec::new();
+    for (index, path) in paths[..workspaces_count].iter().enumerate() {
+        streams.push((start_stream(&mut rpc, index, path).await, path.clone()));
+    }
+    wait_streaming(&mut rpc, &streams).await;
+
+    // 采样窗口：控制 RPC 与进程用量（每 200 ms 一次 RSS；CPU 取窗口首尾的累计时间之差）。
+    let (start_host_usage, start_children) = usage_of(host_pid).await;
+    let window_started = Instant::now();
+    let (stop, mut stopped) = tokio::sync::watch::channel(false);
+    let sampling = tokio::spawn(async move {
+        let mut samples = Vec::new();
+        loop {
+            let (host, children) = usage_of(host_pid).await;
+            samples.push((
+                host.rss_kib,
+                children.iter().map(|c| c.rss_kib).sum::<u64>(),
+            ));
+            tokio::select! {
+                _ = stopped.changed() => return samples,
+                () = tokio::time::sleep(Duration::from_millis(200)) => {}
+            }
+        }
+    });
+    let (local, agent, during, _) = sample_control_rpcs(&mut rpc, &streams).await;
+    let window = window_started.elapsed();
+    let (end_host_usage, end_children) = usage_of(host_pid).await;
+    let host_footprint = footprint_kib(host_pid).await;
+    let mut children_footprint = Some(0);
+    for child in &end_children {
+        children_footprint = match (children_footprint, footprint_kib(child.pid).await) {
+            (Some(sum), Some(value)) => Some(sum + value),
+            _ => None,
+        };
+    }
+    stop.send_replace(true);
+    let rss = sampling.await.unwrap();
+    assert!(during.iter().all(|count| *count >= 10), "{during:?}");
+    let cpu_percent = |start: Duration, end: Duration| {
+        (end.saturating_sub(start).as_secs_f64() / window.as_secs_f64() * 1000.0).round() / 10.0
+    };
+    let children_cpu = |usages: &[Usage]| usages.iter().map(|usage| usage.cpu).sum::<Duration>();
+
+    // 负载下的冷启动：N 路仍在流式时再拉起一个 workspace 的 runtime。
+    let started = Instant::now();
+    let result = rpc
+        .call(
+            "zcode-agent",
+            "initialize",
+            json!([{"workspacePath": paths[workspaces_count]}]),
+        )
+        .await;
+    let cold_under_load = started.elapsed();
+    assert_eq!(result["available"], true, "{result}");
+    let still_streaming = streams
+        .iter()
+        .all(|(listen, _)| rpc.events[listen] < CHUNKS);
+    assert!(still_streaming, "streams ended before the last measurement");
+
+    let link = if std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").is_some() {
+        "child"
+    } else {
+        "embedded"
+    };
+    // 机器负载（其他进程同时编译时数字偏高；报告里注明）。
+    let load = zcode_proc::command("sysctl")
+        .args(["-n", "vm.loadavg"])
+        .output()
+        .await
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .unwrap_or_default();
+    let report = json!({
+        "link": link,
+        "loadAvg": load,
+        "workspaces": workspaces_count,
+        "coldReadyMs": cold.iter().map(|d| millis(*d)).collect::<Vec<_>>(),
+        "coldReadyUnderLoadMs": millis(cold_under_load),
+        "settingGetMs": latency_json(local),
+        "agentQueryMs": latency_json(agent),
+        "framesPerWorkspaceInWindow": during,
+        "windowS": (window.as_secs_f64() * 10.0).round() / 10.0,
+        "hostRssKiB": {
+            "idle": idle.rss_kib,
+            "afterColdStarts": ready.rss_kib,
+            "streamingMean": rss.iter().map(|(host, _)| host).sum::<u64>() / rss.len() as u64,
+            "streamingMax": rss.iter().map(|(host, _)| *host).max().unwrap_or(0),
+        },
+        "childrenRssKiB": {
+            "afterColdStarts": ready_children.iter().map(|c| c.rss_kib).sum::<u64>(),
+            "streamingMean": rss.iter().map(|(_, children)| children).sum::<u64>() / rss.len() as u64,
+            "streamingMax": rss.iter().map(|(_, children)| *children).max().unwrap_or(0),
+        },
+        "footprintKiBEndOfWindow": {
+            "host": host_footprint,
+            "children": children_footprint,
+        },
+        "cpuPercent": {
+            "host": cpu_percent(start_host_usage.cpu, end_host_usage.cpu),
+            "children": cpu_percent(children_cpu(&start_children), children_cpu(&end_children)),
+        },
+        "childProcesses": end_children.len(),
+    });
+    eprintln!("runtime_link_perf {report}");
 }

@@ -336,7 +336,6 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
         crate::agent::AgentRuntimeConfig {
             base_env: Default::default(),
             command_vars: Default::default(),
-            search_roots: Vec::new(),
             fallback_cwd: None,
         },
         crate::settings::SettingStore::new(home.path()),

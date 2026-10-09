@@ -355,7 +355,6 @@ async fn bot_initiated_resume_carries_session_tool_flags() {
         AgentRuntimeConfig {
             base_env: Default::default(),
             command_vars: Default::default(),
-            search_roots: Vec::new(),
             fallback_cwd: None,
         },
         crate::settings::SettingStore::new(dir.path()),

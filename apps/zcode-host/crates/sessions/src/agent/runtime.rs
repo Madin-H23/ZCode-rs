@@ -460,10 +460,8 @@ impl AgentProcess {
 pub struct AgentRuntimeConfig {
     /// 清洗后的 Host 环境 + Main 的登录 shell 补丁（support::env::ProcessEnv::for_children）。
     pub base_env: BTreeMap<String, String>,
-    /// 命令解析读取的变量（`ZCODE_AGENT_SERVER_*` 等），即 Host 自身环境。
+    /// 链路选择读取的变量（`ZCODE_AGENT_SERVER_*`），即 Host 自身环境。
     pub command_vars: BTreeMap<String, String>,
-    /// 向上查找开发态 `zcode.cjs` 的起点。
-    pub search_roots: Vec<PathBuf>,
     pub fallback_cwd: Option<PathBuf>,
 }
 
@@ -785,11 +783,7 @@ impl AgentRuntime {
         }
     }
 
-    async fn spawn_env(
-        &self,
-        target: &WorkspaceTarget,
-        command: &AgentCommand,
-    ) -> BTreeMap<String, String> {
+    async fn spawn_env(&self, target: &WorkspaceTarget) -> BTreeMap<String, String> {
         let config = &self.inner.config;
         let mut env = config.base_env.clone();
         let runtime_env = config
@@ -814,17 +808,15 @@ impl AgentRuntime {
             "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE".into(),
             self.inner.providers.personal_file().display().to_string(),
         );
-        env.extend(command.env.clone());
         if let Some(identity) = trimmed(&target.workspace_identity) {
             env.insert("ZCODE_WORKSPACE_IDENTITY".into(), identity.to_owned());
         }
         env
     }
 
-    /// 解析 CLI 命令（会话库准备与 spawn 共用）。
-    pub fn resolve_command(&self, workspace: &Path) -> Result<Option<AgentCommand>, RpcError> {
-        let config = &self.inner.config;
-        command::resolve(&config.command_vars, &config.search_roots, workspace)
+    /// 选择 runtime 链路（会话库准备与启动共用）。
+    fn resolve_command(&self, workspace: &Path) -> Result<AgentCommand, RpcError> {
+        command::resolve(&self.inner.config.command_vars, workspace)
             .map_err(|error| RpcError::new("Error", format!("{error:#}")))
     }
 
@@ -867,14 +859,8 @@ impl AgentRuntime {
     async fn start(&self, target: &WorkspaceTarget) -> Result<Arc<AgentProcess>, RpcError> {
         let config = &self.inner.config;
         let workspace = Path::new(&target.workspace_path);
-        let command = self.resolve_command(workspace)?.ok_or_else(|| {
-            RpcError::new(
-                "Error",
-                "ZCode agent runtime command could not be resolved.",
-            )
-            .with_code(RUNTIME_UNAVAILABLE_CODE)
-        })?;
-        let env = self.spawn_env(target, &command).await;
+        let command = self.resolve_command(workspace)?;
+        let env = self.spawn_env(target).await;
         let cwd = spawn_cwd(
             command.cwd.as_deref(),
             workspace,
@@ -1334,12 +1320,29 @@ async fn monitor(
         .inner
         .lifecycle
         .emit(lifecycle_event(&process, "unavailable"));
+    // 缺陷修复：输出流关闭（stdout_closed）只是 runtime 自己结束的结果，读循环往往先于任务结果看到它，
+    // 原来这里一律记成 stdout_closed。嵌入式 runtime 没有 stderr，它返回的错误（例如 workspace
+    // 不可用）或 panic 只在任务结果里，于是原因整个丢失。改为：输出流先关闭时，再等一下结束结果
+    // （与上面冲刷输出的等待相同），runtime 没有正常结束就记它给出的原因。
+    let reason = if reason == "stdout_closed" {
+        match tokio::time::timeout(EXIT_FLUSH_WAIT, exit.wait()).await {
+            Ok(outcome) if !outcome.success => outcome.reason,
+            _ => reason,
+        }
+    } else {
+        reason
+    };
     let (kind, termination_reason) = termination(&reason);
     if kind == "unexpected" {
-        log::warn(format!(
-            "{label} closed: {reason}; stderr tail:\n{}",
-            tail.lines().join("\n")
-        ));
+        let lines = tail.lines();
+        if lines.is_empty() {
+            log::warn(format!("{label} closed: {reason}"));
+        } else {
+            log::warn(format!(
+                "{label} closed: {reason}; stderr tail:\n{}",
+                lines.join("\n")
+            ));
+        }
     } else {
         log::info(format!("{label} closed: {reason}"));
     }

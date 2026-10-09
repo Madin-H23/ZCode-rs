@@ -28,7 +28,7 @@ use zcode_host_services::settings::SettingStore;
 
 const MOCK_REPLY: &str = "Hello from the mock model";
 
-/// runtime 的选择：缺省嵌入式；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
+/// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
 fn runtime_vars() -> BTreeMap<String, String> {
     match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
         Some(cli) => {
@@ -48,10 +48,8 @@ fn runtime_vars() -> BTreeMap<String, String> {
                 ),
             ])
         }
-        None => BTreeMap::from([(
-            "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
-            "embedded".to_owned(),
-        )]),
+        // 不设置任何选择变量：走 Host 的缺省链路（嵌入式）。
+        None => BTreeMap::new(),
     }
 }
 
@@ -248,7 +246,6 @@ async fn core_chat_flow_against_the_runtime() {
         AgentRuntimeConfig {
             base_env,
             command_vars,
-            search_roots: Vec::new(),
             fallback_cwd: None,
         },
         SettingStore::new(home.path()),
@@ -628,7 +625,6 @@ async fn an_embedded_runtime_panic_only_restarts_its_own_workspace() {
         AgentRuntimeConfig {
             base_env: env,
             command_vars: runtime_vars(),
-            search_roots: Vec::new(),
             fallback_cwd: None,
         },
         SettingStore::new(home.path()),
@@ -696,5 +692,188 @@ async fn an_embedded_runtime_panic_only_restarts_its_own_workspace() {
         .unwrap();
     assert_eq!(runtime.existing(&first_target).await.unwrap().generation, 2);
     channel.connection_closed(&context);
+    runtime.dispose_all().await;
+}
+
+/// 嵌入式 runtime 没有 stderr：实例自己结束时（启动失败、返回错误、Engine panic），结束原因只在
+/// 任务的结果里，输出管道随之关闭只是结果。Host 日志必须记下 runtime 给出的原因
+/// （docs/specs/rust-u3-single-process.md §2.2“结束原因”），不能只记 `stdout_closed`。
+#[tokio::test(flavor = "multi_thread")]
+async fn an_embedded_runtime_that_ends_on_its_own_logs_why() {
+    if std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").is_some() {
+        // 子进程链路的错误在 stderr 尾巴里，由同一行日志带出。
+        return;
+    }
+    struct Capture(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+    impl zcode_host_kit::log::LogSink for Capture {
+        fn log(&self, _level: zcode_host_control::LogLevel, message: String) {
+            self.0.lock().unwrap().push(message);
+        }
+    }
+    let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    zcode_host_kit::log::set_sink(Box::new(Capture(lines.clone())));
+    let home = tempfile::tempdir().unwrap();
+    // workspace 目录不存在且没有回退目录：runtime 在准备阶段以错误结束。
+    let missing = home.path().join("no-such-workspace");
+    let runtime = AgentRuntime::new(
+        AgentRuntimeConfig {
+            base_env: base_env(home.path()),
+            command_vars: runtime_vars(),
+            fallback_cwd: None,
+        },
+        SettingStore::new(home.path()),
+        ProviderRuntime::new(
+            Some(builtin_providers()),
+            home.path().join("provider_config.json"),
+        ),
+    );
+    let target = WorkspaceTarget::local(missing.to_string_lossy().into_owned());
+    runtime
+        .acquire(
+            &target,
+            zcode_host_services::agent::RuntimePolicy::StartIfNeeded,
+        )
+        .await
+        .unwrap();
+    let label = format!("agent[{}#1]", target.key());
+    let closed = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let found = lines
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|line| line.starts_with(&format!("{label} closed:")))
+                .cloned();
+            if let Some(line) = found {
+                return line;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the runtime instance did not end");
+    assert!(
+        closed.contains("runtime_exit: Workspace unavailable"),
+        "{closed}"
+    );
+    runtime.dispose_all().await;
+}
+
+/// web-remote-replayable（手机远控的恢复链路）在 runtime 之上同样成立：replayable 连接建会话、
+/// 收到流式回复；断开后另一条 replayable 连接重新订阅，快照里有完整的回复（恢复靠 runtime 持有的
+/// 会话事实，不靠连接）。与 `core_chat_flow_against_the_runtime` 的 desktop-continuous 互为对照
+/// （docs/specs/rust-u3-single-process.md §3）。
+#[tokio::test(flavor = "multi_thread")]
+async fn a_replayable_attachment_streams_and_recovers_against_the_runtime() {
+    let home = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let workspace_path = workspace.path().to_string_lossy().into_owned();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(serve_mock_model(listener));
+    let personal = provider_config(home.path(), port);
+    let runtime = AgentRuntime::new(
+        AgentRuntimeConfig {
+            base_env: base_env(home.path()),
+            command_vars: runtime_vars(),
+            fallback_cwd: None,
+        },
+        SettingStore::new(home.path()),
+        ProviderRuntime::new(Some(builtin_providers()), personal),
+    );
+    let events = AgentEvents::start(runtime.extensions(), None);
+    let api = AgentApi::new(runtime.clone(), home.path(), events, None);
+    let members = zcode_host_services::agent::members::agent_service(&api).build(None);
+    let channel = AgentChannel::new(api.clone(), Some(members));
+    let target = json!({"workspacePath": workspace_path});
+    let connect = |connection: u64| {
+        let channel = &channel;
+        async move {
+            let context = CallContext {
+                connection,
+                attachment_id: format!("remote-{connection}"),
+                client_mode: ClientMode::WebRemoteReplayable,
+                window_id: None,
+            };
+            let hello = call(channel, &context, "helloConversationV4", Value::Null).await;
+            assert_eq!(hello["deliveryProfile"], "replayable");
+            assert_eq!(hello["capabilities"]["localTerminal"], false);
+            call(
+                channel,
+                &context,
+                "initializeConversationV4",
+                json!({"kind": "clientHello", "protocolVersion": 3, "clientId": "client-test", "clientKind": "mobileRemote", "appVersion": "unknown"}),
+            )
+            .await;
+            context
+        }
+    };
+    // 订阅一个会话，等到快照或增量里出现 mock 的回复。
+    let read_reply = |context: CallContext, session_id: String| {
+        let (channel, target, workspace_path) = (&channel, target.clone(), workspace_path.clone());
+        async move {
+            let mut frames = channel
+                .listen(
+                    &context,
+                    "onDynamicConversationFrame",
+                    RpcValue::Json(target),
+                )
+                .unwrap();
+            let subscribed = call(
+                channel,
+                &context,
+                "subscribeConversationV4",
+                json!({"workspacePath": workspace_path, "sessionId": session_id}),
+            )
+            .await;
+            let subscription = subscribed["ack"]["subscriptionId"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            tokio::time::timeout(Duration::from_secs(60), async {
+                while let Some(Reply::RawJson(raw)) = frames.next().await {
+                    let frame: Value = serde_json::from_str(&raw).unwrap();
+                    assert_eq!(frame["subscriptionId"], subscription.as_str());
+                    if raw.contains(MOCK_REPLY) {
+                        return;
+                    }
+                }
+                panic!("the frame stream ended");
+            })
+            .await
+            .expect("the reply never reached the replayable connection");
+            context
+        }
+    };
+
+    let first = connect(1).await;
+    let ack = tokio::time::timeout(
+        Duration::from_secs(60),
+        call(
+            &channel,
+            &first,
+            "sendConversationCommandV4",
+            create_session(&workspace_path, 1, "say hello"),
+        ),
+    )
+    .await
+    .expect("createSession timed out");
+    assert_eq!(ack["status"], "accepted", "ack: {ack}");
+    let session_id = ack["result"]["sessionId"].as_str().unwrap().to_owned();
+    let first = read_reply(first, session_id.clone()).await;
+    let before = runtime
+        .existing(&WorkspaceTarget::local(workspace_path.clone()))
+        .await
+        .unwrap();
+
+    // 手机断线重连：新的 replayable 连接从快照恢复，runtime 实例不变。
+    channel.connection_closed(&first);
+    let second = read_reply(connect(2).await, session_id).await;
+    let after = runtime
+        .existing(&WorkspaceTarget::local(workspace_path.clone()))
+        .await
+        .unwrap();
+    assert!(std::sync::Arc::ptr_eq(&before, &after));
+    channel.connection_closed(&second);
     runtime.dispose_all().await;
 }

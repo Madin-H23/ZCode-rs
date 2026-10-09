@@ -47,12 +47,25 @@ impl Exit {
 }
 ```
 
-- **选择方式**：`ZCODE_AGENT_SERVER_RUNTIME=embedded` 时使用嵌入式链路，不需要 `ZCODE_AGENT_SERVER_COMMAND`。A 期验证通过后，嵌入式成为 Rust Host 的缺省；子进程链路只保留作差分对照，B 期结束时删除（rust-unified-host.md D-U9：Rust Host 内只运行 Rust runtime）。
+- **选择方式**：嵌入式链路是 Rust Host 的缺省（A 期已验证，见 [rust-u3-embedded-runtime.md](../reports/rust-u3-embedded-runtime.md)）。子进程链路只在显式给出命令时使用，只作差分对照，B 期结束时删除（rust-unified-host.md D-U9：Rust Host 内只运行 Rust runtime）。命令解析（`agent/command.rs`）只读 Host 环境里的两个变量，规则如下：
+
+  | `ZCODE_AGENT_SERVER_COMMAND` | `ZCODE_AGENT_SERVER_RUNTIME`  | 结果                                                                                                                                                                                 |
+  | ---------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | 未设置（或为空）             | 未设置或 `embedded`           | 嵌入式链路                                                                                                                                                                           |
+  | 未设置                       | 其他值（含 `zcode-cli-rust`） | 解析失败：子进程链路必须给出命令，不回退到嵌入式                                                                                                                                     |
+  | 已设置                       | `zcode-cli-rust`              | Rust CLI 子进程：参数取 `ZCODE_AGENT_SERVER_ARGS_JSON`（缺省 `app-server --stdio`），Host 追加 `--cwd <workspacePath>`；等 `startup/storageState`；会话库以 `--prepare-storage` 准备 |
+  | 已设置                       | 未设置                        | 协议替身：按命令原样启动，不等存储就绪，会话库准备报 `unsupported_runtime`。只用于 Host 测试里的脚本替身                                                                             |
+  | 已设置                       | `embedded` 或其他值           | 解析失败                                                                                                                                                                             |
+
+  子进程命令最后一律去掉已有的 `--surface` 参数，再追加 `--surface desktop`。解析失败时，请求以错误返回，会话库准备以 `unsupported_runtime` 失败。
+
+  Rust Host 不再查找其他 runtime：开发态 `zcode.cjs`（`ZCODE_HOST_NODE_EXEC_PATH` 加向上查找、`ZCODE_AGENT_BUNDLE_PATH`、`ZCODE_DESKTOP_AGENT_BYTECODE`）和已部署的二进制（`GLM_BINARY_PATH`）都已删除。Main 给 Node Host 准备的环境里带着 `GLM_BINARY_PATH`，Rust Host 忽略它；`ZCODE_HOST_NODE_EXEC_PATH` 仍由 Main 传入，只给远端连接器用（rust-host-remote.md）。
+
 - **环境**：嵌入式 runtime 的 `RuntimeOptions.env` 就是今天传给子进程的那份环境（`spawn_env`：基础环境、网络设置、provider 配置文件路径、各服务贡献的变量、workspace 身份）。runtime 只读这份环境（U1 L4），不读 Host 进程的环境。
 - **路径**：`cwd` 是 Host 提交的原始 workspace 路径；`base_dir` 是今天子进程的 cwd；数据目录取环境中的 `ZCODE_CLI_RUST_DATA_DIR`，缺省 `<home>/.zcode/rust`。
 - **存储准备**：`--prepare-storage` 握手改为以 `prepare_storage: true` 启动一个嵌入式实例，经同一条管道完成，握手内容不变。
 - **日志**：runtime 用 `tracing`。Host 在启动时安装 runtime 的日志 subscriber（写同一个 `zcode-rust-<date>.jsonl`），否则进程内 runtime 的日志无处可去。
-- **结束原因**：任务正常结束为 `runtime_exit: ok`；返回错误为 `runtime_exit: <error>`；panic 为 `runtime_panicked: <message>`。后两者按“意外退出”处理，与子进程异常退出走同一条路径（生命周期 `unavailable`、下次请求时惰性重启、代次加一）。
+- **结束原因**：任务正常结束为 `runtime_exit: ok`；返回错误为 `runtime_exit: <error>`；panic 为 `runtime_panicked: <message>`。后两者按“意外退出”处理，与子进程异常退出走同一条路径（生命周期 `unavailable`、下次请求时惰性重启、代次加一）。Engine 循环里的 panic 由 Engine 转成错误（§2.5），所以表现为 `runtime_exit: task panicked: …`。Host 日志中实例结束的那一行（`agent[<key>#<代次>] closed: <原因>`）记的是这个原因：runtime 结束时输出管道随之关闭，读循环往往先看到 `stdout_closed`；这时 Host 再等结束结果（至多 1 s），runtime 没有正常结束就记它给出的原因。嵌入式 runtime 没有 stderr，不这样做原因就会整个丢失。挂起的请求仍以 `ZCode agent transport closed: stdout_closed` 失败，界面显示“发送失败”并把输入退回输入框，与子进程链路相同。
 - **没有 pid 的后果**：不发 `agent-process-*` 事件（它们描述的是进程，Main 的校验要求数字 pid）；runtime 实例的启动与结束写 Host 日志，异常结束记 warn。按 pid 采样的资源统计不再覆盖 runtime（它已经是 Host 进程的一部分），由 Host 进程自身的采样体现。稳定性遥测里的“agent 进程退出”因此没有嵌入式对应项，U8 接入遥测时补一条不带 pid 的事件。
 - **子进程归属**：runtime 启动的 MCP 与工具进程现在是 Host 的子进程。`collectLocalRuntimeChildProcesses` 仍按 workspace 与 lane 列出它们，条目里的 `pid` 是 Host 进程自己的 pid。
 
@@ -107,5 +120,8 @@ runtime 是独立进程时，它崩溃后操作系统回收一切，Host 再按�
 - `cargo nextest`：Host 中驱动真实 CLI 的测试（`crates/services/tests/agent_cli.rs` 等）增加嵌入式变体，全部通过；嵌入式变体不需要预先构建 CLI 二进制。
 - 一个 runtime 实例 panic：只有它的 workspace 收到不可用与退出事件，其他 workspace 的会话继续流式；下一次请求时重启成功。
 - `pnpm test:rust-host` 通过。
-- 桌面 E2E（`scripts/rust-host/e2e`）在 `ZCODE_AGENT_SERVER_RUNTIME=embedded` 下全部通过，`desktop-continuous` 与 `web-remote-replayable` 两种语义都覆盖；进程表中没有 CLI 子进程。
-- 对照测量：N 个 workspace 同时流式时的控制 RPC p95、Host 进程 RSS 与 CPU，和子进程链路对比，写入 `docs/reports/`。
+- 桌面 E2E（`scripts/rust-host/e2e`）缺省走嵌入式链路，全部场景通过；`--runtime child` 走子进程链路作差分对照。每个场景结束时 harness 断言链路：嵌入式下 Host 日志里没有带 pid 的 runtime 启动，Electron Main 的进程树里没有 CLI 进程；子进程模式下至少有一个带 pid 的启动。
+  - `resilience-cli-crash`：子进程模式杀 CLI 进程；嵌入式模式以 `ZCODE_RUNTIME_FAULT_MARKER` 让该 workspace 的 Engine 循环 panic。两种模式都要求：界面给出“发送失败”且输入退回输入框、Host pid 不变、下一条消息由新一代 runtime 处理、同一会话继续；嵌入式另要求 Host 日志记下 runtime 给出的结束原因。
+  - `resilience-reload`：reload 前后 Host pid 不变，runtime 实例不变（子进程比较 CLI pid，嵌入式比较 Host 日志里的 runtime 代次）。
+  - `desktop-continuous` 由桌面 E2E 覆盖。`web-remote-replayable` 没有桌面 E2E 场景（手机远控需要外部 relay），由 `crates/services/tests/agent_cli.rs` 的 replayable 测试（在 runtime 上建会话、流式、断线后另一条 replayable 连接从快照恢复）与 `pnpm test:rust-host` 中的 `rustHostPortBridge.test.ts` 覆盖。
+- 对照测量：N 个 workspace 同时流式时的控制 RPC p95、Host 进程 RSS 与 CPU，和子进程链路对比，写入 [docs/reports/rust-u3-embedded-runtime.md](../reports/rust-u3-embedded-runtime.md)（测量用 `crates/zcode-host/tests/control_latency.rs` 的 `runtime_link_comparison`）。

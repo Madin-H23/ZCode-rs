@@ -55,11 +55,24 @@ export async function composer(page) {
   throw new Error("composer not found");
 }
 
+/**
+ * 提交 composer 里已经输入的内容。发送键可用之前，Enter 在 LexicalChatInput 里只会换行
+ * （submitDisabled：runtime 还没报告执行能力、模型选择未就绪等），消息留在输入框里。先等发送键
+ * 可点——用户看到的同一个信号——再按 Enter；runtime 越慢（例如调试构建），这段窗口越长。
+ */
+export async function submitComposer(page) {
+  await page
+    .locator('[data-testid="v4-composer-send"]:visible')
+    .first()
+    .click({ trial: true, timeout: 60_000 });
+  await page.keyboard.press("Enter");
+}
+
 export async function sendMessage(page, text) {
   const input = await composer(page);
   await input.click();
   await page.keyboard.type(text);
-  await page.keyboard.press("Enter");
+  await submitComposer(page);
 }
 
 /** 只读打开隔离 HOME 里的 tasks-index.sqlite（WAL 下读者不阻塞 Host 的写入）。 */

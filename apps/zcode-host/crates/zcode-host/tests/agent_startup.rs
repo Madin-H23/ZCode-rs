@@ -13,7 +13,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-/// runtime 的选择：缺省嵌入式；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
+/// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
 fn runtime_env() -> Vec<(&'static str, String)> {
     match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
         Some(cli) => {
@@ -30,7 +30,8 @@ fn runtime_env() -> Vec<(&'static str, String)> {
                 ("ZCODE_AGENT_SERVER_RUNTIME", "zcode-cli-rust".to_owned()),
             ]
         }
-        None => vec![("ZCODE_AGENT_SERVER_RUNTIME", "embedded".to_owned())],
+        // 不设置任何选择变量：走 Host 的缺省链路（嵌入式）。
+        None => Vec::new(),
     }
 }
 

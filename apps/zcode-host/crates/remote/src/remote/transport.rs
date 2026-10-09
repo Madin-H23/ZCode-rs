@@ -257,9 +257,7 @@ async fn connect_via_connector(
         program: config.node_exec.clone(),
         args: config.args.clone(),
         cwd: None,
-        env: BTreeMap::new(),
         supports_storage_startup: false,
-        storage_entry: None,
         embedded: false,
     };
     let spawned = process::spawn(&command, &config.cwd, &env)
@@ -527,9 +525,7 @@ async fn connect_process(
         program: config.program.clone(),
         args: config.args.clone(),
         cwd: None,
-        env: BTreeMap::new(),
         supports_storage_startup: false,
-        storage_entry: None,
         embedded: false,
     };
     let spawned = process::spawn(&command, &config.cwd, &config.env)

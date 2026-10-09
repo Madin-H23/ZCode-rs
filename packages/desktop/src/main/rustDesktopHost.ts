@@ -25,7 +25,10 @@ import { bridgeMessagePortToRustHost, type RustHostPortBridge } from "./rustHost
 
 export const RUST_DESKTOP_HOST_ENV = "ZCODE_DESKTOP_HOST";
 export const RUST_HOST_BINARY_ENV = "ZCODE_RUST_HOST_BINARY";
-/** 给 Rust Host 的 Electron 可执行文件路径，用来以 Node 模式运行开发态 CLI bundle。 */
+/**
+ * 给 Rust Host 的 Electron 可执行文件路径，只用来以 Node 模式运行远端连接器。Rust Host 的 agent runtime
+ * 缺省在 Host 进程内运行，不再借 Electron 运行 CLI bundle（docs/specs/rust-u3-single-process.md §2.2）。
+ */
 const RUST_HOST_NODE_EXEC_PATH_ENV = "ZCODE_HOST_NODE_EXEC_PATH";
 /** 远端 workspace 的连接器脚本（docs/specs/rust-host-remote.md §2.1）。 */
 const RUST_HOST_REMOTE_CONNECTOR_PATH_ENV = "ZCODE_REMOTE_CONNECTOR_PATH";
@@ -255,9 +258,9 @@ export function spawnRustHostProcess(
     ["--control", "stdio", "--allowed-origin", resolveAllowedRendererOrigin()],
     {
       ...env,
-      // Rust Host 不是 Node：开发态 CLI bundle（zcode.cjs）要借 Electron 以 ELECTRON_RUN_AS_NODE 运行。
+      // 远端 workspace 的探测、部署与启动仍用 TS 实现，由连接器进程承担（与 host/index.js 同一产物目录）；
+      // Rust Host 不是 Node，连接器借 Electron 以 ELECTRON_RUN_AS_NODE 运行。
       [RUST_HOST_NODE_EXEC_PATH_ENV]: process.execPath,
-      // 远端 workspace 的探测、部署与启动仍用 TS 实现，由连接器进程承担（与 host/index.js 同一产物目录）。
       [RUST_HOST_REMOTE_CONNECTOR_PATH_ENV]: resolve(
         import.meta.dirname,
         "../host/remoteConnector.js",

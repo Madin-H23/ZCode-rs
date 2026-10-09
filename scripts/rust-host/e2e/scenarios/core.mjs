@@ -9,6 +9,7 @@ import {
   sseChunk,
   sseText,
   sseToolCall,
+  submitComposer,
 } from "../helpers.mjs";
 
 export const MOCK_REPLY = "Hello from the Rust Host mock model";
@@ -62,7 +63,7 @@ async function chatFlow({ page, shots, model, workspace, home }) {
   await page.screenshot({ path: join(shots, "01-ready.png") });
   await input.click();
   await page.keyboard.type("say hello");
-  await page.keyboard.press("Enter");
+  await submitComposer(page);
   try {
     await page.getByText(mockReply).first().waitFor({ state: "visible", timeout: 60_000 });
   } finally {

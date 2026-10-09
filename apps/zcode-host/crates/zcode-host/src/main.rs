@@ -74,20 +74,13 @@ async fn write_control(mut messages: mpsc::UnboundedReceiver<HostToMain>) {
     }
 }
 
-#[expect(clippy::disallowed_methods, reason = "存量，U3 改为显式传入")]
+/// 二进制入口是唯一读取进程环境的地方：之后各服务与进程内 runtime 只用这份快照。
+#[expect(
+    clippy::disallowed_methods,
+    reason = "二进制入口捕获一次 Host 环境（rust-u1-runtime-library L4）"
+)]
 fn capture_environment() -> Result<HostEnvironment> {
-    let mut environment =
-        HostEnvironment::capture(std::env::vars()).context("capture host environment")?;
-    environment.search_roots = [
-        std::env::current_dir().ok(),
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(Into::into)),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    Ok(environment)
+    HostEnvironment::capture(std::env::vars()).context("capture host environment")
 }
 
 async fn run(args: Args) -> Result<()> {

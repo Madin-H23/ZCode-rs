@@ -159,7 +159,6 @@ async fn due_automation_is_dispatched_and_settled_without_any_connection() {
                 "embedded".to_owned(),
             ),
         ]),
-        search_roots: Vec::new(),
     };
     write_provider_config(&environment.app_config_dir(), port);
     let storage = prepare_storage(&environment, |_| {}).await.unwrap();

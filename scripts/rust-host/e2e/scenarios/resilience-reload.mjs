@@ -1,8 +1,10 @@
 // Renderer reload → 重新 attach（rust-host-r0.md §5）：流式进行中 reload，reload 之后的输出继续显示。
+// reload 只重建 Renderer：Rust Host 与这个 workspace 的 runtime 实例都不能重启——child 模式比较 CLI pid，
+// embedded 模式（没有 pid）比较 Host 日志里的 runtime 代次。
 import { join } from "node:path";
 
 import { sendMessage, sseChunk, sseText } from "../helpers.mjs";
-import { findRunProcesses, waitUsable } from "../resilience-helpers.mjs";
+import { findRunProcesses, runtimeGenerations, waitUsable } from "../resilience-helpers.mjs";
 
 const TICKS = 80;
 
@@ -31,11 +33,13 @@ export const mockRules = [
 const bodyHas = (page, text, timeout) =>
   page.waitForFunction((needle) => document.body.innerText.includes(needle), text, { timeout });
 
-export async function run({ page, shots, workspace }) {
+export async function run(context) {
+  const { page, shots, home, workspace } = context;
   await waitUsable(page);
   await sendMessage(page, "please count slowly");
   await bodyHas(page, "tick-3 ", 60_000);
-  const before = await findRunProcesses(workspace);
+  const before = await findRunProcesses(context);
+  const generationsBefore = await runtimeGenerations(home, workspace);
   await page.reload();
   await waitUsable(page);
   // reload 后由恢复的标签页重新打开会话；没有自动打开时从侧栏点开。
@@ -47,8 +51,15 @@ export async function run({ page, shots, workspace }) {
   await bodyHas(page, `tick-${TICKS - 20} `, 30_000);
   await page.screenshot({ path: join(shots, "01-streaming-after-reload.png") });
   await bodyHas(page, "done-counting", 30_000);
-  const after = await findRunProcesses(workspace);
+  const after = await findRunProcesses(context);
+  const generationsAfter = await runtimeGenerations(home, workspace);
   if (after.host !== before.host || after.cli !== before.cli)
     throw new Error("reload must reattach to the same Host and CLI");
-  console.info("[e2e] reload reattached to the same Host; streaming continued to the end");
+  if (generationsBefore.length === 0 || generationsAfter.join() !== generationsBefore.join())
+    throw new Error(
+      `reload must keep the runtime instance: generations ${generationsBefore} -> ${generationsAfter}`,
+    );
+  console.info(
+    `[e2e] reload reattached to the same Host and runtime (generation ${generationsAfter.at(-1)}); streaming continued to the end`,
+  );
 }

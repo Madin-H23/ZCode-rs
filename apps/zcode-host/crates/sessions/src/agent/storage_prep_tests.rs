@@ -7,9 +7,7 @@ fn script_command(script: &str) -> AgentCommand {
         program: "/bin/sh".into(),
         args: vec!["-c".into(), script.into(), "sh".into()],
         cwd: None,
-        env: BTreeMap::new(),
         supports_storage_startup: true,
-        storage_entry: None,
         embedded: false,
     }
 }

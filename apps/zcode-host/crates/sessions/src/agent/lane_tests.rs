@@ -58,10 +58,9 @@ fn fixture() -> Fixture {
         AgentRuntimeConfig {
             base_env: BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]),
             command_vars: BTreeMap::from([(
-                "GLM_BINARY_PATH".to_owned(),
+                "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
                 cli.display().to_string(),
             )]),
-            search_roots: Vec::new(),
             fallback_cwd: None,
         },
         SettingStore::new(dir.path()),

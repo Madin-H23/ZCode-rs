@@ -599,7 +599,6 @@ mod tests {
             crate::agent::AgentRuntimeConfig {
                 base_env: Default::default(),
                 command_vars: Default::default(),
-                search_roots: Vec::new(),
                 fallback_cwd: None,
             },
             crate::settings::SettingStore::new(std::path::Path::new("/nonexistent")),

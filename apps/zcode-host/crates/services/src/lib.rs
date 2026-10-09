@@ -176,7 +176,6 @@ pub fn install(
         agent::AgentRuntimeConfig {
             base_env: child_env.vars().clone(),
             command_vars: environment.vars.clone(),
-            search_roots: environment.search_roots.clone(),
             fallback_cwd: context
                 .init
                 .agent_spawn_fallback_cwd

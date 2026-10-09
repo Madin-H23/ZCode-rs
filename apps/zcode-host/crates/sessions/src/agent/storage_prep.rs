@@ -188,27 +188,14 @@ pub async fn candidate_directories(
     directories
 }
 
-/// 准备进程的命令：原生 CLI 加 `--prepare-storage`；TS bundle 以存储入口运行
-/// `app-server --stdio --prepare-storage --cwd <dir>`（Node 在 Worker 里跑同一入口）。
+/// 准备用的命令：同一命令加 `--prepare-storage`（嵌入式 runtime 以 `prepare_storage` 启动）。
 fn preparation_command(command: &AgentCommand, cwd: &Path) -> Option<AgentCommand> {
     if !command.supports_storage_startup {
         return None;
     }
     let mut prep = command.clone();
     prep.cwd = Some(command.cwd.clone().unwrap_or_else(|| cwd.to_owned()));
-    match &command.storage_entry {
-        Some(entry) => {
-            prep.args = vec![
-                entry.display().to_string(),
-                "app-server".into(),
-                "--stdio".into(),
-                "--prepare-storage".into(),
-                "--cwd".into(),
-                cwd.display().to_string(),
-            ];
-        }
-        None => prep.args.push("--prepare-storage".into()),
-    }
+    prep.args.push("--prepare-storage".into());
     Some(prep)
 }
 
@@ -411,8 +398,6 @@ pub async fn prepare_directory(
     let Some(prep) = preparation_command(command, cwd) else {
         return Err(PrepareError::status("unsupported_runtime", None));
     };
-    let mut env = env.clone();
-    env.extend(prep.env.clone());
     let spawn_cwd = prep.cwd.clone().unwrap_or_else(|| cwd.to_owned());
     // 嵌入式 runtime 以 prepare_storage 启动一个进程内实例，握手内容与子进程相同。
     let started = if prep.embedded {
@@ -420,11 +405,11 @@ pub async fn prepare_directory(
             workspace: cwd,
             identity: None,
             cwd: &spawn_cwd,
-            env: &env,
+            env,
             prepare_storage: true,
         })
     } else {
-        process::spawn(&prep, &spawn_cwd, &env).map(process::Link::from)
+        process::spawn(&prep, &spawn_cwd, env).map(process::Link::from)
     };
     let process::Link {
         reader,
@@ -572,11 +557,9 @@ pub async fn prepare_directory(
 }
 
 /// hostDatabaseStartup 的会话库阶段：每个候选目录先报 checking，再准备。
-/// 解析不到 CLI 命令时跳过（见规格第 5 节），返回 Ok。
-#[allow(clippy::too_many_arguments)]
+/// 链路选择失败（配置不一致）时以 `unsupported_runtime` 失败。
 pub async fn prepare_session_storage(
     command_vars: &BTreeMap<String, String>,
-    search_roots: &[PathBuf],
     child_env: &BTreeMap<String, String>,
     warmup: &[String],
     workspace_path: Option<&str>,
@@ -587,12 +570,8 @@ pub async fn prepare_session_storage(
     let mut prepared = HashSet::new();
     let count = directories.len();
     for (index, cwd) in directories.iter().enumerate() {
-        let command = match command::resolve(command_vars, search_roots, cwd) {
-            Ok(Some(command)) => command,
-            Ok(None) => {
-                log::warn("session storage preparation skipped: no ZCode agent command");
-                return Ok(());
-            }
+        let command = match command::resolve(command_vars, cwd) {
+            Ok(command) => command,
             Err(error) => {
                 log::warn(format!("session storage preparation: {error:#}"));
                 return Err(PrepareError::status("unsupported_runtime", None));
@@ -721,7 +700,6 @@ pub async fn prepare_for_init(
         .unwrap_or_else(|| PathBuf::from("."));
     prepare_session_storage(
         &environment.vars,
-        &environment.search_roots,
         child_env.vars(),
         &warmup,
         init.workspace_path.as_deref(),
