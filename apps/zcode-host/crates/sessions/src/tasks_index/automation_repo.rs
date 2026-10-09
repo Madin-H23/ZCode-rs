@@ -3,13 +3,20 @@
 //! 与 Node Host 和 Main 的 scheduler（Node）共用 tasks-index.sqlite，Rust 是完全兼容的写者：
 //! SQL 原样移植，读改写都在 `BEGIN IMMEDIATE` 内。行到 JSON 的映射（`rowToAutomation` /
 //! `rowToRun`）保持 TS 对象字面量的键序，可空列为 NULL 时省略字段。
-//! 只移植 Host 用到的方法；`claimDue` 等调度状态机方法只由 scheduler 调用。
+//! 只移植 Host 用到的方法；U4 起调度状态机（`claimDue` 等）也在 Host 内，见 automation_repo_scheduling.rs。
 use anyhow::{Context as _, anyhow, bail};
 use rusqlite::{Connection, OptionalExtension, Row, named_params};
 use serde_json::{Map, Value, json};
 
 use super::TasksIndex;
 use crate::agent::service::uuid_v4;
+
+#[path = "automation_repo_scheduling.rs"]
+mod scheduling;
+pub use scheduling::{
+    DISPATCH_MAX_ATTEMPTS, DISPATCH_RETRY_BASE_MS, DISPATCH_RETRY_CAP_MS, DispatchFailed,
+    FailureKind, SkippedRun, compute_retry_at,
+};
 
 pub const AUTOMATION_CREATE_LIMIT: i64 = 20;
 pub const AUTOMATION_CREATE_LIMIT_ERROR_CODE: &str = "AUTOMATION_CREATE_LIMIT_REACHED";
