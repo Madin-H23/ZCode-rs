@@ -119,12 +119,30 @@ Rust 开关下 Main 不再启动 scheduler 进程，也不再转发 `cron-run` /
 
 ## 4. 控制消息
 
-| 变化                               | 消息                                                                                                                                                                                                                                                                                          |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 新增                               | `issue-attachment-endpoint.windowId`；`setting-write` / `setting-write-result` / `setting-changed`；`off-peak-active-count`；`browser-execute-request.windowId`；Bot 重连请求的 `windowId`                                                                                                    |
-| 不再使用（Rust Host 删除处理代码） | `broadcast`（双向）、`broadcast-claim-*`、`task-realtime-*`、`task-stream-op-publish`、`task-run-lease-*`、`task-owner-command-*`、`session-message-*`、`session-route-announce`、`cron-run` / `off-peak-run` 及其结果、两条 `*-scheduler-wake-request`、`bot-remote-workspace-runtime-port*` |
+### 4.1 新增与扩展（线上格式）
 
-协议定义（`packages/shared`）中这些消息保留到 U8，因为 Node Host 仍在使用。
+字段名是 JSON 里的名字；`?` 表示可省略。未列出的字段不变。
+
+| 方向        | `type`                                   | 字段                                                 | 说明                                                                                                      |
+| ----------- | ---------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Main → Host | `issue-attachment-endpoint`              | `+ windowId?: number`（整数，≥ 1）                   | 主窗口的窗口 id；不属于窗口的 attachment 省略                                                             |
+| Main → Host | `setting-write`                          | `requestId: string`，`patch: object`                 | `patch` 与 `setting` channel 的 `update` 参数相同（`AppSettings` 的部分字段；值为 `null` 表示清除该字段） |
+| Host → Main | `setting-write-result`                   | `requestId: string`，`ok: boolean`，`error?: string` | 写入落盘后才回 `ok: true`                                                                                 |
+| Host → Main | `setting-changed`                        | `setting: object`                                    | 写入后的完整设置（与 `setting` channel 的 `get` 返回值相同）；每次成功写入后发一次，不论写入方是谁        |
+| Host → Main | `off-peak-active-count`                  | `count: number`（整数，≥ 0）                         | 只在数值变化时发                                                                                          |
+| Host → Main | `browser-execute-request`                | `+ windowId?: number`                                | 发起调用的连接的窗口 id；没有窗口身份时省略，Main 用任意一个主窗口                                        |
+| Host → Main | `bot-remote-workspace-reconnect-request` | `+ windowId?: number`                                | 发起连接的窗口；省略时 Main 用持有该 workspace route 的窗口                                               |
+
+`init-local` 不新增字段：App 级 Host 的 `init-local` 不带 `hostId` 与 `deliveryKind`，其余字段的含义见 2.1。
+
+### 4.2 Rust 开关下不再使用
+
+| 方向        | 消息                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Main → Host | `broadcast`、`broadcast-claim-result`、`task-realtime-deliver`、`task-run-lease-result`、`task-owner-command-deliver`、`task-owner-command-result`、`session-message-deliver`、`session-message-delivery-result`、`cron-run`、`off-peak-run`、`bot-remote-workspace-runtime-port`、`bot-remote-workspace-connection-status-result`                                                                                                                                                                           |
+| Host → Main | `broadcast`、`broadcast-claim-request` / `-commit` / `-release`、`task-realtime-publish`、`task-stream-op-publish`、`task-run-lease-acquire` / `-release`、`task-owner-command-request` / `-result`、`session-message-send-requested`、`session-route-announce`、`session-message-deliver-result`、`cron-run-result`、`off-peak-run-result`、`cron-scheduler-wake-request`、`off-peak-scheduler-wake-request`、`bot-remote-workspace-runtime-port-request`、`bot-remote-workspace-connection-status-request` |
+
+Rust Host 删除这些消息的收发代码。协议定义（`packages/shared`）中它们保留到 U8，因为 Node Host 仍在使用。
 
 ## 5. 事件顺序
 
