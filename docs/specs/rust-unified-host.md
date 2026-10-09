@@ -587,13 +587,13 @@ flowchart LR
 
 **进度（2026-10-09）**：集成分支 `feat/rust-unified-host`。“已完成”指已合并并通过对应的 Rust / TS 测试；桌面 E2E 的结果单独标出。
 
-| 阶段 | 状态                                                                                                                                                                                                                                         | 子规格                                                                                                                                           |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| U0   | 第 1、2 步已完成：护栏（工具链、lints、nextest、cargo-deny、cargo-shear、PR CI），基础 crate `zcode-kit` / `zcode-async` / `zcode-proc`，缺陷 B1–B7。其余未开始：应用 crate 迁入 `rust/`，net / sqlite / git / observe 的抽取，测试 harness  | [rust-u0-foundation.md](rust-u0-foundation.md)                                                                                                   |
-| U1   | 已完成本期范围：嵌入入口、显式环境、同进程重启与多实例。规划中 U1 的其余项（类型化链路、`Environment` 端口、Engine 循环里的慢操作）移到 U3 B 期或之后                                                                                        | [rust-u1-runtime-library.md](rust-u1-runtime-library.md)                                                                                         |
-| U2   | 已完成：`services` 拆成 9 个分层 crate（分层由脚本检查）；`TaskScope`；runtime 的任务全部有归属。进行中：Gateway（连接、调用顺序、出站队列）。未开始：Host 各 service 的任务归属、有界通道、拆环与显式组装                                   | [rust-u2-host-structure.md](rust-u2-host-structure.md)、[rust-u2-task-scope.md](rust-u2-task-scope.md)、[rust-u2-gateway.md](rust-u2-gateway.md) |
-| U3   | A 期已完成：Host 进程内运行 runtime（每个 workspace 一个实例），嵌入式是缺省；合并 U4 之前 25 个桌面 E2E 场景在嵌入式下通过；对比测量见 [报告](../reports/rust-u3-embedded-runtime.md)。B 期：投递逻辑的抽取进行中，其余步骤未开始           | [rust-u3-single-process.md](rust-u3-single-process.md)、[rust-u3-stage-b.md](rust-u3-stage-b.md)                                                 |
-| U4   | 三部分已合并（Host 内的调度状态机；Host 侧的窗口身份、广播与 claim、设置写入；Main 侧每个 App 一个 Host），Rust 与 TS 测试通过。进行中：合并后的桌面 E2E（多窗口、无窗口调度、崩溃重启、设置）与 Node 路径的冒烟。**尚未在 Electron 里验证** | [rust-u4-app-host.md](rust-u4-app-host.md)                                                                                                       |
+| 阶段 | 状态                                                                                                                                                                                                                                                                                                               | 子规格                                                                                                                                                   |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| U0   | 第 1、2 步已完成：护栏（工具链、lints、nextest、cargo-deny、cargo-shear、PR CI），基础 crate `zcode-kit` / `zcode-async` / `zcode-proc`，缺陷 B1–B7。应用 crate 不再迁入 `rust/`（D-U11 修订）。其余未开始：两边共用的 net / sqlite / git / observe 的抽取，测试 harness                                           | [rust-u0-foundation.md](rust-u0-foundation.md)                                                                                                           |
+| U1   | 已完成本期范围：嵌入入口、显式环境、同进程重启与多实例。规划中 U1 的其余项（类型化链路、`Environment` 端口、Engine 循环里的慢操作）移到 U3 B 期或之后                                                                                                                                                              | [rust-u1-runtime-library.md](rust-u1-runtime-library.md)                                                                                                 |
+| U2   | 已完成：`services` 拆成 9 个分层 crate（分层由脚本检查）；`TaskScope`；runtime 的任务全部有归属；Gateway（连接注册表、同键调用按到达顺序、有上限的出站队列、连接任务归属）。未开始：Host 各 service 的任务归属、有界通道、拆环与显式组装                                                                           | [rust-u2-host-structure.md](rust-u2-host-structure.md)、[rust-u2-task-scope.md](rust-u2-task-scope.md)、[rust-u2-gateway.md](rust-u2-gateway.md)         |
+| U3   | A 期已完成：Host 进程内运行 runtime（每个 workspace 一个实例），进程内是缺省；合并 U4 之前 25 个桌面 E2E 场景通过；对比测量见 [报告](../reports/rust-u3-embedded-runtime.md)。B 期按 D-U13 修订：投递逻辑的抽取已完成；进行中：结构隔离、三种构建形态、单二进制多入口；原计划中让 Host 依赖 runtime 内部的步骤取消 | [rust-u3-single-process.md](rust-u3-single-process.md)、[rust-u3-stage-b.md](rust-u3-stage-b.md)、[rust-host-cli-boundary.md](rust-host-cli-boundary.md) |
+| U4   | 三部分已合并（Host 内的调度状态机；Host 侧的窗口身份、广播与 claim、设置写入；Main 侧每个 App 一个 Host），Rust 与 TS 测试通过。进行中：合并后的桌面 E2E（多窗口、无窗口调度、崩溃重启、设置）与 Node 路径的冒烟。**尚未在 Electron 里验证**                                                                       | [rust-u4-app-host.md](rust-u4-app-host.md)                                                                                                               |
 
 待用户决定：Host 被强杀或崩溃时工具进程树的回收方式（10.1 的“进程”一行目前只覆盖 Linux 与 Windows，且尚未实现）；D-U12 是否改为同进程内每个 workspace 一个实例（测量显示每个实例约 2–4 MiB、冷启动约 17 ms）；D-U6 的外部调用方（rust-u3-stage-b.md 第 7 节）。
 
@@ -623,23 +623,25 @@ flowchart LR
 
 **已定**（2026-10-09，用户确认）
 
-| 编号  | 问题                  | 决定                                                                                                                                         |
-| ----- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| D-U1  | Host 进程归谁         | App 的子进程，每个 App 一个。HostCore 不区分启动方式，用户级 daemon 以后作为另一种启动方式补上                                               |
-| D-U2  | 远端运行什么          | 完整 Host（同一个二进制 `zcode serve --stdio`），远端拥有会话。`Environment` 抽象保留，将来可以支持“只做远程执行”                            |
-| D-U3  | SSH 怎么实现          | 系统 OpenSSH 加 askpass。复用用户的 `~/.ssh/config`、agent、ProxyJump、known_hosts；现有 ssh2 的配置项要迁移。替换 rust-host D8 的 TS 连接器 |
-| D-U8  | 是否先发布中间形态    | 不先发布 R7，也不发布任何中间形态。按最终设计做，U8 一次切换；第 12 节的阶段只是开发里程碑                                                   |
-| D-U12 | runtime 的 actor 粒度 | 一个 Engine 管所有 workspace（沿用进行中的 workspace-scope 工作）。会话级 actor 改造量大，暂不做。约束与兜底见 14.1                          |
+| 编号  | 问题                        | 决定                                                                                                                                                                                         |
+| ----- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-U1  | Host 进程归谁               | App 的子进程，每个 App 一个。HostCore 不区分启动方式，用户级 daemon 以后作为另一种启动方式补上                                                                                               |
+| D-U2  | 远端运行什么                | 完整 Host（同一个二进制 `zcode serve --stdio`），远端拥有会话。`Environment` 抽象保留，将来可以支持“只做远程执行”                                                                            |
+| D-U3  | SSH 怎么实现                | 系统 OpenSSH 加 askpass。复用用户的 `~/.ssh/config`、agent、ProxyJump、known_hosts；现有 ssh2 的配置项要迁移。替换 rust-host D8 的 TS 连接器                                                 |
+| D-U8  | 是否先发布中间形态          | 不先发布 R7，也不发布任何中间形态。按最终设计做，U8 一次切换；第 12 节的阶段只是开发里程碑                                                                                                   |
+| D-U12 | runtime 的 actor 粒度       | 一个 Engine 管所有 workspace（沿用进行中的 workspace-scope 工作）。会话级 actor 改造量大，暂不做。约束与兜底见 14.1                                                                          |
+| D-U13 | Host 与 CLI 的代码关系      | 结构上隔离，能分开编译：各自成 workspace，Host 只经一个 crate、只用 CLI 的公开入口；边界是 App 协议，进程内与子进程两种链路都保留。见 [rust-host-cli-boundary.md](rust-host-cli-boundary.md) |
+| D-U14 | 合并后的二进制怎么当 CLI 用 | 同一个二进制多入口：`cli` 子命令（或以 CLI 的名字运行）时与独立 CLI 行为完全相同。见 rust-host-cli-boundary.md 3.4                                                                           |
 
 **按推荐执行**（2026-10-09 开始实施前已告知用户，未提出异议）
 
-| 编号  | 问题                              | 执行的选项                                                                                                                                      |
-| ----- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| D-U6  | replayable 模式的输入队列         | 并入 runtime `CommandInbox`，只有一个队列所有者（U3 B 期）                                                                                      |
-| D-U7  | Main 的业务职责是否收回           | 收回 setting 写入、scheduler、BroadcastHub、`taskRealtimeBus`（U4）                                                                             |
-| D-U9  | Rust runtime 何时成为唯一 runtime | Rust Host 内只运行 Rust runtime（U3 起，开发开关下）。[rust-parity-remaining.md](rust-parity-remaining.md) 的剩余项清零仍是 U8 切换默认前的门槛 |
-| D-U10 | 是否接受单进程的爆炸半径          | 接受，用第 10 节的措施兜底。A 期每个 workspace 一个实例，一个实例的 panic 不影响其他 workspace                                                  |
-| D-U11 | 代码放在哪里、怎么命名            | 单一 Cargo workspace `rust/`，crate 前缀 `zcode-`（U0 其余部分落地；Host 拆分出的 crate 暂用 `zcode-host-*`）                                   |
+| 编号  | 问题                              | 执行的选项                                                                                                                                                                                               |
+| ----- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-U6  | replayable 模式的输入队列         | 并入 runtime `CommandInbox`，只有一个队列所有者（U3 B 期）                                                                                                                                               |
+| D-U7  | Main 的业务职责是否收回           | 收回 setting 写入、scheduler、BroadcastHub、`taskRealtimeBus`（U4）                                                                                                                                      |
+| D-U9  | Rust runtime 何时成为唯一 runtime | Rust Host 只运行 Rust runtime，缺省在进程内（U3 起，开发开关下）。子进程链路保留为第二种传输（D-U13），不删除。[rust-parity-remaining.md](rust-parity-remaining.md) 的剩余项清零仍是 U8 切换默认前的门槛 |
+| D-U10 | 是否接受单进程的爆炸半径          | 接受，用第 10 节的措施兜底。A 期每个 workspace 一个实例，一个实例的 panic 不影响其他 workspace                                                                                                           |
+| D-U11 | 代码放在哪里、怎么命名            | 三个 Cargo workspace 保留：`apps/zcode-cli-rust`（CLI）、`apps/zcode-host`（Host）、`rust/`（共用 crate）。不合并成一个 workspace（按 D-U13 修订）；两边共用的代码进 `rust/`                             |
 
 **待定**
 
