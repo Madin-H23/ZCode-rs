@@ -38,7 +38,7 @@
 - 手写替代：`manual_map`、`manual_filter`、`manual_find`、`manual_flatten`、`manual_retain`、`manual_strip`、`manual_ok_or`、`manual_unwrap_or`、`manual_range_contains`、`manual_clamp`；
 - 其他：`uninlined_format_args`、`trivially_copy_pass_by_ref`、`disallowed_methods`。
 
-**先 warn，清零后再 deny**：`unwrap_used`、`expect_used`（E14）。`clippy.toml` 中设置 `allow-unwrap-in-tests = true` 和 `allow-expect-in-tests = true`，让测试不受影响。
+**按 crate 清零后 deny**：`unwrap_used`、`expect_used`（E14）。CI 以 `-D warnings` 运行 clippy，warn 级别等同于报错，所以不能在 workspace 上先开 warn；做法是某个 crate 的非测试代码清零后，在它的 crate 根加 `#![deny(clippy::unwrap_used, clippy::expect_used)]`。`rust/` 下的新 crate 从第一天起在 workspace 级别 deny。`clippy.toml` 中设置 `allow-unwrap-in-tests = true` 和 `allow-expect-in-tests = true`，让测试不受影响。U0 第 1 步已对 CLI 的 core-api、headless、host、net、state、tui 与 Host 的 control、rpc、kit、host-core 开启。
 
 ### 2.2 `clippy.toml`（E3）
 
