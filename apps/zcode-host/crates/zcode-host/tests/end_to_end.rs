@@ -410,6 +410,48 @@ async fn windows_share_one_host_and_broadcasts_follow_window_identity() {
     }
 }
 
+/// Main 的 `setting-write`：结果先于它引起的 `setting-changed`；Renderer 经 `setting` channel 的写入同样
+/// 推送完整设置（rust-u4-app-host.md §2.6）。
+#[tokio::test]
+async fn setting_writes_from_main_and_renderer_publish_setting_changed() {
+    let mut host = Host::spawn().await;
+    host.init().await;
+    const SETTING_MESSAGES: &[&str] = &["setting-write-result", "setting-changed"];
+    host.send(
+        json!({"type": "setting-write", "requestId": "zoom-1", "patch": {"desktopZoomLevel": 2}}),
+    )
+    .await;
+    assert_eq!(
+        host.recv_kind(SETTING_MESSAGES).await,
+        json!({"type": "setting-write-result", "requestId": "zoom-1", "ok": true})
+    );
+    let changed = host.recv_kind(SETTING_MESSAGES).await;
+    assert_eq!(changed["type"], "setting-changed");
+    assert_eq!(changed["setting"]["desktopZoomLevel"], 2);
+    let saved: Value = serde_json::from_str(
+        &std::fs::read_to_string(host._home.path().join(".zcode/v2/setting.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saved["desktopZoomLevel"], 2);
+
+    let mut rpc = open_window_rpc(&mut host, "w1", Some(1)).await;
+    let mut pending = Vec::new();
+    rpc.call(
+        1,
+        "setting",
+        "update",
+        json!([{"localePreference": "en-US"}]),
+        &mut pending,
+    )
+    .await;
+    let changed = host.recv_kind(SETTING_MESSAGES).await;
+    assert_eq!(changed["type"], "setting-changed");
+    assert_eq!(changed["setting"]["localePreference"], "en-US");
+    assert_eq!(changed["setting"]["desktopZoomLevel"], 2);
+    let current = rpc.call(2, "setting", "get", json!([]), &mut pending).await;
+    assert_eq!(changed["setting"], current);
+}
+
 async fn open_rpc(host: &mut Host) -> Rpc {
     let (url, capability) = host.issue().await;
     let socket = connect(request(&url, &protocols(&capability), Some(DEV_ORIGIN)))

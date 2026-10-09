@@ -131,14 +131,35 @@ impl HostCore {
                 }
             }
             MainToHost::Other { kind, message } => {
-                if !self.lock_router().dispatch(&kind, message) {
-                    log::debug(format!(
-                        "control message not handled by the Rust Host yet: {kind}"
-                    ));
+                // 路由按值分发：先判断是否有处理者，没有时还要用原消息回失败。
+                if !self.lock_router().dispatch(&kind, message.clone()) {
+                    self.reject_unrouted(&kind, &message);
                 }
             }
         }
         ControlOutcome::Continue
+    }
+
+    /// 没有处理者的控制消息。服务安装之前到达的 `setting-write` 直接回失败：Main 应在 Host 就绪后才写
+    /// （rust-u4-app-host.md §2.6），万一早到也不能让它等满超时。
+    fn reject_unrouted(&self, kind: &str, message: &serde_json::Value) {
+        if kind == zcode_host_services::settings_control::SETTING_WRITE
+            && let Some(request_id) = message["requestId"].as_str()
+        {
+            log::warn(format!(
+                "setting-write before services are installed, requestId={request_id}"
+            ));
+            self.inner.control.send(HostToMain::Raw(serde_json::json!({
+                "type": zcode_host_services::settings_control::SETTING_WRITE_RESULT,
+                "requestId": request_id,
+                "ok": false,
+                "error": "Rust Host services are not initialized",
+            })));
+            return;
+        }
+        log::debug(format!(
+            "control message not handled by the Rust Host yet: {kind}"
+        ));
     }
 
     /// Host 退出前冲刷 RPC 遥测并回收子进程（CLI 进程树）；未初始化时只冲刷遥测。
@@ -549,6 +570,25 @@ mod remote_scope_tests {
         };
         let meta = core.redeem_capability(&capability).unwrap();
         assert_eq!(meta.window_id, window_id);
+    }
+
+    #[test]
+    fn setting_writes_before_install_fail_instead_of_hanging() {
+        let (core, sink) = core();
+        core.on_control(MainToHost::Other {
+            kind: "setting-write".into(),
+            message: serde_json::json!({"type": "setting-write", "requestId": "w1", "patch": {}}),
+        });
+        let sent = sink.0.lock().unwrap().clone();
+        assert_eq!(
+            sent,
+            vec![HostToMain::Raw(serde_json::json!({
+                "type": "setting-write-result",
+                "requestId": "w1",
+                "ok": false,
+                "error": "Rust Host services are not initialized",
+            }))]
+        );
     }
 
     #[tokio::test]

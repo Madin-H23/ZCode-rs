@@ -1,8 +1,17 @@
 //! `setting` channel（packages/services/src/setting/settingService.ts）。
 //!
-//! 文件固定在 `<home>/.zcode/v2/setting.json`（home 取 `ZCODE_DESKTOP_HOME_DIR`，否则 HOME），
-//! 与 Main 的 setting service 共享。读改写全程持跨进程锁（S0 修复后的语义），进程内另有写队列
-//! 保证 `get` 不会越过已入队的写入。
+//! 文件固定在 `<home>/.zcode/v2/setting.json`（home 取 `ZCODE_DESKTOP_HOME_DIR`，否则 HOME）。
+//! 读改写全程持跨进程锁（S0 修复后的语义），进程内另有写队列保证 `get` 不会越过已入队的写入。
+//!
+//! App 级 Host 下 `SettingStore` 是 `setting.json` 的唯一写入方（docs/specs/rust-u4-app-host.md §2.6）：
+//! 每次成功写入（`setting` channel、Main 的 `setting-write`、Host 内部写入方、读取时补写迁移标记）
+//! 都在写队列内把写入后的完整设置交给变更出口；composition root 把它转成 `setting-changed` 发给 Main。
+//!
+//! ```text
+//! 写入方 ─update_reporting─► 写队列 ─► 文件锁内：读 → 合并 → 原子写 → 重读完整设置
+//!                                    └► 仍在写队列内：report(结果) → 变更出口(完整设置) → onDidUpdate 键
+//! ```
+//! 结果先于它引起的变更通知；变更通知按写入顺序发出（同一写队列）。
 pub mod data_dir;
 pub mod schema;
 
@@ -28,6 +37,10 @@ struct ReadResult {
     needs_persist: bool,
 }
 
+/// 成功写入后的变更出口，参数是写入后的完整设置（与 `get` 返回值相同）。在写队列内同步调用，
+/// 实现只能入队（例如交给控制通道），不能阻塞或回调本 store。
+pub type ChangeSink = Arc<dyn Fn(&Value) + Send + Sync>;
+
 /// 设置文件的唯一读写入口；Host 内部的其他 service 也通过它读取。
 #[derive(Clone)]
 pub struct SettingStore {
@@ -41,6 +54,7 @@ struct Inner {
     queue: Mutex<()>,
     /// Host 内部监听（相当于 observableSettingService.onDidUpdate），携带 patch 的键。
     updated: EventHub<Vec<String>>,
+    changed: Option<ChangeSink>,
 }
 
 fn quarantine_name(file: &Path) -> PathBuf {
@@ -80,13 +94,24 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 }
 
 impl SettingStore {
+    /// 没有变更出口的 store（测试与不需要通知 Main 的场景）。
     pub fn new(home: &Path) -> Self {
+        Self::build(home, None)
+    }
+
+    /// composition root 用：每次成功写入后把完整设置交给 `changed`。
+    pub fn with_change_sink(home: &Path, changed: ChangeSink) -> Self {
+        Self::build(home, Some(changed))
+    }
+
+    fn build(home: &Path, changed: Option<ChangeSink>) -> Self {
         Self {
             inner: Arc::new(Inner {
                 file: home.join(".zcode").join("v2").join("setting.json"),
                 home: home.to_owned(),
                 queue: Mutex::new(()),
                 updated: EventHub::new(),
+                changed,
             }),
         }
     }
@@ -152,14 +177,29 @@ impl SettingStore {
         }
     }
 
-    /// 在进程内队列和跨进程锁内执行一次读改写。
+    /// 在进程内队列和跨进程锁内执行一次读改写；`settle` 在释放文件锁之后、仍持有写队列时同步执行，
+    /// 写入结果与变更通知因此按写入顺序发出。
     #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn locked<T>(
         &self,
         operation: impl AsyncFnOnce() -> anyhow::Result<T>,
+        settle: impl FnOnce(&anyhow::Result<T>),
     ) -> anyhow::Result<T> {
         let _queue = self.inner.queue.lock().await;
-        with_file_lock(&self.inner.file, &LockOptions::default(), operation).await
+        let result = with_file_lock(&self.inner.file, &LockOptions::default(), operation).await;
+        settle(&result);
+        result
+    }
+
+    /// 写入后的完整设置（与 `get` 读到的相同）；在文件锁内调用。
+    async fn written_snapshot(&self) -> Value {
+        self.read().await.settings
+    }
+
+    fn publish_change(&self, setting: &Value) {
+        if let Some(changed) = &self.inner.changed {
+            changed(setting);
+        }
     }
 
     async fn write(
@@ -190,13 +230,21 @@ impl SettingStore {
             return result.settings;
         }
         let persisted = self
-            .locked(async || {
-                let latest = self.read().await;
-                if latest.needs_persist {
+            .locked(
+                async || {
+                    let latest = self.read().await;
+                    if !latest.needs_persist {
+                        return Ok(None);
+                    }
                     self.write(&latest.settings, &latest.raw, true).await?;
-                }
-                Ok(())
-            })
+                    Ok(Some(self.written_snapshot().await))
+                },
+                |result| {
+                    if let Ok(Some(setting)) = result {
+                        self.publish_change(setting);
+                    }
+                },
+            )
             .await;
         if let Err(error) = persisted {
             log::warn(format!("setting migration persist failed: {error:#}"));
@@ -205,67 +253,75 @@ impl SettingStore {
     }
 
     pub async fn update(&self, patch: &Patch, expected: Option<&Patch>) -> Result<(), RpcError> {
+        self.update_reporting(patch, expected, |_| {}).await
+    }
+
+    /// 同 [`Self::update`]；`report` 在写队列内、变更通知之前收到结果（Main 的 `setting-write` 用它保证
+    /// `setting-write-result` 先于它引起的 `setting-changed`）。
+    pub async fn update_reporting(
+        &self,
+        patch: &Patch,
+        expected: Option<&Patch>,
+        report: impl FnOnce(&Result<(), RpcError>),
+    ) -> Result<(), RpcError> {
         let has_selections = patch
             .iter()
             .any(|(key, _)| key == "providerFamilyConnectionSelections");
-        let result = self
-            .locked(async || {
-                let current = self.read().await;
-                if let Some(expected) = expected {
-                    let expected_value = |key: &str| {
-                        expected
-                            .iter()
-                            .find(|(name, _)| name == key)
-                            .and_then(|(_, value)| value.clone())
-                    };
-                    let domain_matches = current.settings.get("providerFamilyDomain").cloned()
-                        == expected_value("providerFamilyDomain");
-                    let selections = |value: Option<Value>| {
-                        value
-                            .unwrap_or_else(|| Value::Object(Map::new()))
-                            .to_string()
-                    };
-                    let selections_match =
-                        selections(
-                            current
-                                .settings
-                                .get("providerFamilyConnectionSelections")
-                                .cloned(),
-                        ) == selections(expected_value("providerFamilyConnectionSelections"));
-                    if !domain_matches || !selections_match {
-                        anyhow::bail!("Account connection settings changed");
+        let written = self
+            .locked(
+                async || {
+                    let current = self.read().await;
+                    if let Some(expected) = expected {
+                        let expected_value = |key: &str| {
+                            expected
+                                .iter()
+                                .find(|(name, _)| name == key)
+                                .and_then(|(_, value)| value.clone())
+                        };
+                        let domain_matches = current.settings.get("providerFamilyDomain").cloned()
+                            == expected_value("providerFamilyDomain");
+                        let selections = |value: Option<Value>| {
+                            value
+                                .unwrap_or_else(|| Value::Object(Map::new()))
+                                .to_string()
+                        };
+                        let selections_match =
+                            selections(
+                                current
+                                    .settings
+                                    .get("providerFamilyConnectionSelections")
+                                    .cloned(),
+                            ) == selections(expected_value("providerFamilyConnectionSelections"));
+                        if !domain_matches || !selections_match {
+                            anyhow::bail!("Account connection settings changed");
+                        }
                     }
-                }
-                let mut merged = schema::merge(&current.settings, patch)
-                    .ok_or_else(|| anyhow::anyhow!("ZodError: merged settings are invalid"))?;
-                if let Some(recent) = merged
-                    .get_mut("recentProjects")
-                    .and_then(Value::as_array_mut)
-                {
-                    let mut seen = std::collections::HashSet::new();
-                    recent.retain(|item| seen.insert(item.to_string()));
-                    recent.truncate(MAX_RECENT_PROJECTS);
-                }
-                self.write(&merged, &current.raw, has_selections).await
-            })
+                    let mut merged = schema::merge(&current.settings, patch)
+                        .ok_or_else(|| anyhow::anyhow!("ZodError: merged settings are invalid"))?;
+                    if let Some(recent) = merged
+                        .get_mut("recentProjects")
+                        .and_then(Value::as_array_mut)
+                    {
+                        let mut seen = std::collections::HashSet::new();
+                        recent.retain(|item| seen.insert(item.to_string()));
+                        recent.truncate(MAX_RECENT_PROJECTS);
+                    }
+                    self.write(&merged, &current.raw, has_selections).await?;
+                    Ok(self.written_snapshot().await)
+                },
+                |result| {
+                    let reported = result.as_ref().map(|_| ()).map_err(write_error);
+                    report(&reported);
+                    if let Ok(setting) = result {
+                        self.publish_change(setting);
+                        self.inner
+                            .updated
+                            .emit(patch.iter().map(|(key, _)| key.clone()).collect());
+                    }
+                },
+            )
             .await;
-        match result {
-            Ok(()) => {
-                self.inner
-                    .updated
-                    .emit(patch.iter().map(|(key, _)| key.clone()).collect());
-                Ok(())
-            }
-            Err(error) => {
-                let message = format!("{error:#}");
-                let name = if message.starts_with("ZodError") {
-                    "ZodError"
-                } else {
-                    "Error"
-                };
-                Err(RpcError::new(name, message))
-            }
-        }
+        written.map(|_| ()).map_err(|error| write_error(&error))
     }
 
     /// `ensureDefaultProject`：`<homedir>/ZCodeProject`，mkdir -p。
@@ -282,7 +338,18 @@ impl SettingStore {
     }
 }
 
-fn parse_patch_arg(value: &Value) -> Result<Patch, RpcError> {
+fn write_error(error: &anyhow::Error) -> RpcError {
+    let message = format!("{error:#}");
+    let name = if message.starts_with("ZodError") {
+        "ZodError"
+    } else {
+        "Error"
+    };
+    RpcError::new(name, message)
+}
+
+/// `setting` channel `update` 的 patch 校验；Main 的 `setting-write` 用同一份（rust-u4-app-host.md §4.1）。
+pub fn parse_update_patch(value: &Value) -> Result<Patch, RpcError> {
     schema::parse_patch(value).map_err(|message| RpcError::new("ZodError", message))
 }
 
@@ -297,10 +364,10 @@ pub fn service(store: SettingStore) -> ServiceBuilder {
             let store = update_store.clone();
             let patch = args
                 .get::<Value>(0, "patch")
-                .and_then(|value| parse_patch_arg(&value));
+                .and_then(|value| parse_update_patch(&value));
             let expected = args
                 .opt::<Value>(1, "expectedAccountSettings")
-                .and_then(|value| value.map(|value| parse_patch_arg(&value)).transpose());
+                .and_then(|value| value.map(|value| parse_update_patch(&value)).transpose());
             async move {
                 let (patch, expected) = (patch?, expected?);
                 store.update(&patch, expected.as_ref()).await?;
@@ -374,6 +441,89 @@ mod tests {
             names
                 .iter()
                 .any(|name| name.starts_with("setting.json.corrupt-"))
+        );
+    }
+
+    /// 记录变更通知与写入结果的到达顺序（同一条出口，相当于 Main 的控制通道）。
+    fn recorded(home: &Path) -> (SettingStore, Arc<std::sync::Mutex<Vec<Value>>>) {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let store = SettingStore::with_change_sink(
+            home,
+            Arc::new(move |setting: &Value| {
+                sink.lock()
+                    .unwrap()
+                    .push(json!({"changed": setting.clone()}))
+            }),
+        );
+        (store, seen)
+    }
+
+    #[tokio::test]
+    async fn every_successful_write_publishes_the_complete_settings() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, seen) = recorded(home.path());
+        let patch = schema::parse_patch(&json!({"recentProjects": ["/a"]})).unwrap();
+        store.update(&patch, None).await.unwrap();
+        let current = store.get().await;
+        assert_eq!(*seen.lock().unwrap(), vec![json!({"changed": current})]);
+
+        // 失败的写入不通知。
+        let guarded = schema::parse_patch(&json!({"providerFamilyDomain": "zai"})).unwrap();
+        let expected = schema::parse_patch(&json!({"providerFamilyDomain": "bigmodel"})).unwrap();
+        assert!(store.update(&guarded, Some(&expected)).await.is_err());
+        assert_eq!(seen.lock().unwrap().len(), 1);
+
+        // 读取时补写迁移标记也是一次写入。
+        std::fs::write(store.file(), r#"{"locale":"en-US"}"#).unwrap();
+        let migrated = store.get().await;
+        let last = seen.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(last, json!({"changed": migrated}));
+    }
+
+    #[tokio::test]
+    async fn the_write_result_precedes_the_change_it_caused() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, seen) = recorded(home.path());
+        let patch = schema::parse_patch(&json!({"desktopZoomLevel": 1})).unwrap();
+        let reporter = seen.clone();
+        store
+            .update_reporting(&patch, None, move |result| {
+                reporter
+                    .lock()
+                    .unwrap()
+                    .push(json!({"result": result.is_ok()}))
+            })
+            .await
+            .unwrap();
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert_eq!(seen[0], json!({"result": true}));
+        assert_eq!(seen[1]["changed"]["desktopZoomLevel"], 1);
+    }
+
+    #[tokio::test]
+    async fn change_notifications_follow_the_write_order() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, seen) = recorded(home.path());
+        let writes = (0..8).map(|index| {
+            let store = store.clone();
+            tokio::spawn(async move {
+                let patch = schema::parse_patch(&json!({"recentProjects": [format!("/p{index}")]}))
+                    .unwrap();
+                store.update(&patch, None).await.unwrap();
+            })
+        });
+        for write in futures_util::future::join_all(writes).await {
+            write.unwrap();
+        }
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 8);
+        // 最后一条通知就是落盘的最终结果：通知与写入在同一个写队列里按序发生。
+        assert_eq!(
+            seen.last().unwrap()["changed"],
+            store.get().await,
+            "{seen:?}"
         );
     }
 

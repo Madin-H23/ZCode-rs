@@ -38,6 +38,8 @@ pub use zcode_host_workspace::system;
 pub use zcode_host_workspace::terminal;
 pub use zcode_host_workspace::workspace;
 
+pub mod settings_control;
+
 pub use environment::{HostEnvironment, ServiceContext};
 use main_bridge::MainBridge;
 use support::env::ProcessEnv;
@@ -82,6 +84,8 @@ pub struct Installed {
     _observer: Arc<agent::sessions_index::SessionsIndexObserver>,
     _controller: Arc<tasks::controller::Controller>,
     _syncer: tokio::task::JoinHandle<()>,
+    /// Main 的 `setting-write` 串行写入任务。
+    _setting_writes: tokio::task::JoinHandle<()>,
     automation: automation::AreaHandle,
     remote: Arc<remote::RemoteWorkspaces>,
     /// 至少保留一个句柄，否则 tasks-index 线程与连接随之关闭。
@@ -111,7 +115,16 @@ pub fn install(
     router: &mut ControlRouter,
 ) -> Installed {
     let bridge = MainBridge::new(context.control.clone());
-    let settings = settings::SettingStore::new(&context.environment.home_dir);
+    // setting.json 的唯一写入方（rust-u4-app-host.md §2.6）：每次成功写入都推 `setting-changed` 给 Main。
+    let settings = settings::SettingStore::with_change_sink(
+        &context.environment.home_dir,
+        settings_control::change_sink(context.control.clone()),
+    );
+    let setting_writes = settings_control::register_setting_writes(
+        router,
+        settings.clone(),
+        context.control.clone(),
+    );
     // 广播扇出与 claim 的所有者（rust-u4-app-host.md §2.3），不经 Main。
     let (broadcast_service, broadcaster) = broadcast::service_with_sender();
     registry.implement(broadcast_service);
@@ -369,6 +382,7 @@ pub fn install(
         _observer: observer,
         _controller: controller,
         _syncer: syncer,
+        _setting_writes: setting_writes,
         automation,
         remote,
         _storage: storage,
