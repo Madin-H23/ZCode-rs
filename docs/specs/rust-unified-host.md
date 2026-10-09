@@ -595,7 +595,7 @@ flowchart LR
 | U3   | A 期已完成：Host 进程内运行 runtime（每个 workspace 一个实例，D-U12 的最终形态），进程内是缺省。B 期按 D-U13 修订后：投递逻辑的抽取、结构隔离、三种构建形态、合并二进制的 `cli` 入口已完成。进行中：输入队列的映射（D-U6）、工具进程的回收（D-U15）。未开始：已接受输入在实例重启后的结算测试、投递 crate 的订阅竞争缺陷 | [rust-u3-single-process.md](rust-u3-single-process.md)、[rust-u3-stage-b.md](rust-u3-stage-b.md)、[rust-host-cli-boundary.md](rust-host-cli-boundary.md) |
 | U4   | 已完成并在 Electron 里验证（在合并 Gateway 之前的提交上）：一个 App 一个 Rust Host；28 个桌面 E2E 场景在进程内 runtime 下通过，包括多窗口、没有窗口时的调度、设置读写、崩溃重启；Node Host 路径 5 个场景通过。进行中：合并 Gateway 之后重跑全部 E2E                                                                      | [rust-u4-app-host.md](rust-u4-app-host.md)                                                                                                               |
 
-用户已决定、正在实现：输入队列的映射（D-U6）。工具进程的回收（D-U15）：账本与清扫、Windows Job 已实现；Linux `PR_SET_PDEATHSIG` 未启用，待定项见 [rust-tool-process-reaping.md](rust-tool-process-reaping.md) 第 6 节。
+用户已决定、正在实现：输入队列的映射（D-U6）。工具进程的回收（D-U15）已完成：账本与清扫、中止时结束整个进程组、Windows Job；Linux 不启用 `PR_SET_PDEATHSIG`（用户决定）。
 
 **不做中间发布（D-U8）。** U0–U7 都是开发里程碑，不是发布版本：
 
@@ -632,7 +632,7 @@ flowchart LR
 | D-U12 | runtime 的 actor 粒度         | 每个本地 workspace 一个 runtime 实例，都在 Host 进程内（2026-10-10 最终决定）。此前定过“一个 Engine 管所有 workspace”，核算改动量与实测后改回，理由见 14.1                                   |
 | D-U13 | Host 与 CLI 的代码关系        | 结构上隔离，能分开编译：各自成 workspace，Host 只经一个 crate、只用 CLI 的公开入口；边界是 App 协议，进程内与子进程两种链路都保留。见 [rust-host-cli-boundary.md](rust-host-cli-boundary.md) |
 | D-U14 | 合并后的二进制怎么当 CLI 用   | 同一个二进制多入口：`cli` 子命令（或以 CLI 的名字运行）时与独立 CLI 行为完全相同。见 rust-host-cli-boundary.md 3.4                                                                           |
-| D-U15 | Host 异常退出后工具进程的回收 | 账本加启动清扫，另加 Linux 的 PDEATHSIG 与 Windows 的 Job Object（2026-10-10）。见 [rust-tool-process-reaping.md](rust-tool-process-reaping.md)                                              |
+| D-U15 | Host 异常退出后工具进程的回收 | 账本加启动清扫，另加 Windows 的 Job Object；Linux 不启用 PDEATHSIG（2026-10-10）。见 [rust-tool-process-reaping.md](rust-tool-process-reaping.md)                                            |
 
 **按推荐执行**（2026-10-09 开始实施前已告知用户，未提出异议）
 
