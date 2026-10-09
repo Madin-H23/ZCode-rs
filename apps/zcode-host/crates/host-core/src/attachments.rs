@@ -3,16 +3,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use zcode_host_control::{AttachmentScope, ClientMode, WindowId};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AttachmentMeta {
-    pub attachment_id: String,
-    pub client_mode: ClientMode,
-    pub scope: AttachmentScope,
-    /// 签发时 Main 给的主窗口 id；连接建立后进入 `CallContext.window_id`（rust-u4-app-host.md §2.2）。
-    pub window_id: Option<WindowId>,
-}
+/// 元数据的类型属于 Gateway 的连接注册表；这里只负责签发与兑换。
+pub use zcode_host_gateway::AttachmentMeta;
 
 struct Pending {
     meta: AttachmentMeta,
@@ -64,6 +56,7 @@ impl AttachmentRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zcode_host_control::{AttachmentScope, ClientMode, WindowId};
 
     fn meta() -> AttachmentMeta {
         AttachmentMeta {

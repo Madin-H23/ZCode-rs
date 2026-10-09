@@ -1,14 +1,16 @@
 //! RPC 网络遥测（`@zcode/rpc` 的 `NetworkTelemetryChannelServer` 与 desktop
 //! `hostNetworkTelemetry.ts`；docs/specs/rust-host-integration.md §2.3）。
 //!
-//! 分发层在每次 `call` 完成时记一条 `channel.command` 级观测；[`RpcTelemetry`] 是观测缓冲的唯一
-//! 所有者：每 30 s 或累计 200 条发一批 `network-telemetry-batch` 给 Main，Host 退出前冲刷一次。
-//! 上报端点由 Main 决定，Host 不出网。
+//! Gateway 在每次 `call` 完成时记一条 `channel.command` 级观测（[`CallObserver`]）；[`RpcTelemetry`]
+//! 是观测缓冲的唯一所有者：每 30 s 或累计 200 条发一批 `network-telemetry-batch` 给 Main，Host 退出前
+//! 冲刷一次。上报端点由 Main 决定，Host 不出网。
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
+use zcode_async::Spawner;
 use zcode_host_control::{ControlSink, HostToMain};
+use zcode_host_gateway::CallObserver;
 use zcode_host_kit::NOT_IMPLEMENTED_CODE;
 use zcode_host_rpc::RpcError;
 
@@ -73,13 +75,19 @@ struct State {
 pub struct RpcTelemetry {
     control: Arc<dyn ControlSink>,
     state: Mutex<State>,
+    /// 定时冲刷任务所在的作用域（Host 的根作用域）。
+    spawner: Spawner,
+    /// 定时任务只持有弱引用，遥测释放后随之结束。
+    this: Weak<Self>,
 }
 
 impl RpcTelemetry {
-    pub fn new(control: Arc<dyn ControlSink>) -> Arc<Self> {
-        Arc::new(Self {
+    pub fn new(control: Arc<dyn ControlSink>, spawner: Spawner) -> Arc<Self> {
+        Arc::new_cyclic(|this| Self {
             control,
             state: Mutex::new(State::default()),
+            spawner,
+            this: this.clone(),
         })
     }
 
@@ -91,7 +99,7 @@ impl RpcTelemetry {
 
     /// 记录一次已完成的调用；累计满一批时立即发出。
     pub fn record(
-        self: &Arc<Self>,
+        &self,
         channel: &str,
         command: &str,
         duration: Duration,
@@ -119,12 +127,9 @@ impl RpcTelemetry {
         }
     }
 
-    fn start_timer(self: &Arc<Self>) {
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-            return;
-        };
-        let weak: Weak<Self> = Arc::downgrade(self);
-        runtime.spawn(async move {
+    fn start_timer(&self) {
+        let weak = self.this.clone();
+        drop(self.spawner.spawn("rpc-telemetry-flush", async move {
             let mut interval = tokio::time::interval(FLUSH_INTERVAL);
             interval.tick().await;
             loop {
@@ -137,7 +142,7 @@ impl RpcTelemetry {
                 }
                 telemetry.flush();
             }
-        });
+        }));
     }
 
     /// `flushHostNetworkTelemetryBatch`：一次最多发 200 条；发送失败不影响 Host 主流程。
@@ -163,9 +168,22 @@ impl RpcTelemetry {
     }
 }
 
+impl CallObserver for RpcTelemetry {
+    fn call_finished(
+        &self,
+        channel: &str,
+        method: &str,
+        elapsed: Duration,
+        error: Option<&RpcError>,
+    ) {
+        self.record(channel, method, elapsed, error);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zcode_async::TaskScope;
 
     #[derive(Default)]
     struct Recorder(Mutex<Vec<Value>>);
@@ -204,7 +222,8 @@ mod tests {
     #[tokio::test]
     async fn batches_flush_at_200_and_on_shutdown_and_skip_stub_replies() {
         let recorder = Arc::new(Recorder::default());
-        let telemetry = RpcTelemetry::new(recorder.clone());
+        let scope = TaskScope::root("test", |_| {});
+        let telemetry = RpcTelemetry::new(recorder.clone(), scope.spawner());
         let stub = RpcError::new("NotImplemented", "x").with_code(NOT_IMPLEMENTED_CODE);
         telemetry.record("a", "stub", Duration::ZERO, Some(&stub));
         for index in 0..201 {

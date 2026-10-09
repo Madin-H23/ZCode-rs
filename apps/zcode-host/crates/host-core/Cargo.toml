@@ -10,11 +10,12 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-futures-util.workspace = true
 getrandom.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+zcode-async.workspace = true
 zcode-host-control.workspace = true
+zcode-host-gateway.workspace = true
 zcode-host-kit.workspace = true
 zcode-host-rpc.workspace = true
 zcode-host-services.workspace = true

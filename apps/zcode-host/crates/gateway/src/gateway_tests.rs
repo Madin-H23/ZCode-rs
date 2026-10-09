@@ -1,0 +1,491 @@
+//! Gateway 的行为测试（docs/specs/rust-u2-gateway.md §3）：进程内连接，不经 socket。
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use serde_json::{Value, json};
+use tokio::sync::watch;
+use zcode_async::{TaskPanic, TaskScope};
+use zcode_host_control::{AttachmentScope, ClientMode};
+use zcode_host_kit::contract::{ChannelContract, Contract, Member, MemberKind};
+use zcode_host_kit::{
+    CallContext, CallFuture, ChannelRegistry, EventStream, FlowState, Reply, RpcError, RpcValue,
+    ServiceChannel,
+};
+use zcode_host_rpc::{Reader, codec};
+
+use super::*;
+
+const WAIT: Duration = Duration::from_secs(10);
+
+struct NoTelemetry;
+
+impl CallObserver for NoTelemetry {
+    fn call_finished(&self, _: &str, _: &str, _: Duration, _: Option<&RpcError>) {}
+}
+
+struct Host {
+    gateway: Gateway,
+    panics: Arc<Mutex<Vec<TaskPanic>>>,
+    _scope: TaskScope,
+}
+
+fn host(limits: OutboundLimits) -> Host {
+    let panics = Arc::new(Mutex::new(Vec::new()));
+    let reported = panics.clone();
+    let scope = TaskScope::root("host", move |panic| {
+        reported.lock().unwrap().push(panic.clone());
+    });
+    let gateway = Gateway::new(scope.spawner(), Arc::new(NoTelemetry), limits);
+    Host {
+        gateway,
+        panics,
+        _scope: scope,
+    }
+}
+
+fn meta(attachment_id: &str) -> AttachmentMeta {
+    AttachmentMeta {
+        attachment_id: attachment_id.into(),
+        client_mode: ClientMode::DesktopContinuous,
+        scope: AttachmentScope::Local,
+        window_id: None,
+    }
+}
+
+fn ready(registry: &Arc<ChannelRegistry>) -> ChannelSource {
+    let registry = registry.clone();
+    Box::pin(async move {
+        Some(Channels {
+            registry,
+            closed: None,
+        })
+    })
+}
+
+fn request(header: Value, body: Option<Value>) -> Vec<u8> {
+    let mut out = Vec::new();
+    codec::write_value(&mut out, &header);
+    match body {
+        Some(body) => codec::write_value(&mut out, &body),
+        None => codec::write_undefined(&mut out),
+    }
+    out
+}
+
+/// 测试里的客户端：像 transport 一样写入请求、取出应答并报告已写出。
+struct Client(Connection);
+
+impl Client {
+    async fn send(&self, header: Value, body: Option<Value>) {
+        self.0.inbound.send(request(header, body)).await.unwrap();
+    }
+
+    async fn call(&self, id: i32, method: &str, params: Value) {
+        self.send(json!([100, id, "probe", method]), Some(json!([params])))
+            .await;
+    }
+
+    async fn next(&self) -> (Value, RpcValue) {
+        let message = tokio::time::timeout(WAIT, self.0.outbound.next())
+            .await
+            .expect("answered in time")
+            .expect("connection still open");
+        self.0.outbound.written(message.len());
+        let mut reader = Reader::new(&message);
+        let header = reader.value().unwrap().into_json();
+        (header, reader.value().unwrap())
+    }
+
+    async fn ended(&self) -> bool {
+        tokio::time::timeout(WAIT, self.0.outbound.next())
+            .await
+            .expect("closed in time")
+            .is_none()
+    }
+}
+
+/// 可观测的 channel：参数 `{n, gate?, panic?, bytes?}`。
+#[derive(Default)]
+struct Probe {
+    log: Mutex<Vec<String>>,
+    gates: Mutex<HashMap<String, watch::Sender<bool>>>,
+    flows: Mutex<Vec<(u64, FlowState)>>,
+}
+
+impl Probe {
+    fn record(&self, entry: String) {
+        self.log.lock().unwrap().push(entry);
+    }
+
+    fn log(&self) -> Vec<String> {
+        self.log.lock().unwrap().clone()
+    }
+
+    fn gate(&self, name: &str) -> watch::Receiver<bool> {
+        self.gates
+            .lock()
+            .unwrap()
+            .entry(name.to_owned())
+            .or_insert_with(|| watch::Sender::new(false))
+            .subscribe()
+    }
+
+    async fn wait_for(&self, entry: &str) {
+        tokio::time::timeout(WAIT, async {
+            while !self.log().iter().any(|seen| seen == entry) {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{entry} within {WAIT:?}; log: {:?}", self.log()));
+    }
+}
+
+/// 调用 future 被释放而没有完成时记一笔：用来确认任务确实已经结束。
+struct DropLog(Arc<Probe>, i64, bool);
+
+impl Drop for DropLog {
+    fn drop(&mut self) {
+        if !self.2 {
+            self.0.record(format!("dropped:{}", self.1));
+        }
+    }
+}
+
+struct ProbeChannel(Arc<Probe>);
+
+fn params(args: &[RpcValue]) -> Option<&Value> {
+    match args.first() {
+        Some(RpcValue::Json(value)) => Some(value),
+        _ => None,
+    }
+}
+
+impl ServiceChannel for ProbeChannel {
+    fn call(&self, _: &CallContext, _: &str, args: Vec<RpcValue>) -> CallFuture {
+        let params = params(&args).cloned().unwrap_or_default();
+        let probe = self.0.clone();
+        let gate = params["gate"].as_str().map(|name| probe.gate(name));
+        Box::pin(async move {
+            let n = params["n"].as_i64().unwrap_or(-1);
+            probe.record(format!("start:{n}"));
+            let mut guard = DropLog(probe.clone(), n, false);
+            if let Some(mut gate) = gate {
+                let _ = gate.wait_for(|open| *open).await;
+            }
+            if params["panic"] == json!(true) {
+                panic!("probe panic {n}");
+            }
+            guard.2 = true;
+            probe.record(format!("end:{n}"));
+            match params["bytes"].as_u64() {
+                Some(bytes) => Ok(Reply::Bytes(vec![0; bytes as usize])),
+                None => Ok(Reply::Value(json!(n))),
+            }
+        })
+    }
+
+    fn listen(&self, _: &CallContext, _: &str, _: RpcValue) -> Result<EventStream, RpcError> {
+        Ok(Box::pin(futures_util::stream::pending()))
+    }
+
+    fn connection_closed(&self, context: &CallContext) {
+        self.0.record(format!("closed:{}", context.connection));
+    }
+
+    fn connection_flow(&self, context: &CallContext, state: FlowState) {
+        self.0
+            .flows
+            .lock()
+            .unwrap()
+            .push((context.connection, state));
+    }
+}
+
+fn probe_registry() -> (Arc<Probe>, Arc<ChannelRegistry>) {
+    let probe = Arc::new(Probe::default());
+    let mut registry = ChannelRegistry::from_contract(contract());
+    registry.register("probe", Arc::new(ProbeChannel(probe.clone())));
+    (probe, Arc::new(registry))
+}
+
+fn contract() -> Contract {
+    let member = |name: &str, kind| Member {
+        name: name.into(),
+        kind,
+    };
+    Contract {
+        channels: vec![
+            ChannelContract {
+                channel: "setting".into(),
+                members: vec![
+                    member("get", MemberKind::Method),
+                    member("onDidUpdate", MemberKind::Event),
+                ],
+            },
+            ChannelContract {
+                channel: "settings-sync".into(),
+                members: vec![member("getFirstRunPromptState", MemberKind::Method)],
+            },
+        ],
+    }
+}
+
+/// 等异步的收尾（释放通道、上报 panic）完成。
+async fn eventually(what: &str, check: impl Fn() -> bool) {
+    tokio::time::timeout(WAIT, async {
+        while !check() {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{what} within {WAIT:?}"));
+}
+
+/// 建一条连接并读掉 `[200]`。
+async fn connected(host: &Host, attachment_id: &str, registry: &Arc<ChannelRegistry>) -> Client {
+    let client = Client(host.gateway.connect(meta(attachment_id), ready(registry)));
+    assert_eq!(client.next().await.0, json!([200]));
+    client
+}
+
+#[tokio::test]
+async fn initialize_waits_for_the_channel_table() {
+    let host = host(OutboundLimits::default());
+    let (set, mut table) = watch::channel::<Option<Arc<ChannelRegistry>>>(None);
+    let source: ChannelSource = Box::pin(async move {
+        let registry = table.wait_for(Option::is_some).await.ok()?.clone()?;
+        Some(Channels {
+            registry,
+            closed: None,
+        })
+    });
+    let client = Client(host.gateway.connect(meta("a1"), source));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), client.0.outbound.next())
+            .await
+            .is_err()
+    );
+    set.send_replace(Some(Arc::new(ChannelRegistry::from_contract(contract()))));
+    assert_eq!(client.next().await.0, json!([200]));
+}
+
+#[tokio::test]
+async fn stub_methods_and_unknown_channels_answer_immediately() {
+    let host = host(OutboundLimits::default());
+    let registry = Arc::new(ChannelRegistry::from_contract(contract()));
+    let client = connected(&host, "a1", &registry).await;
+
+    client
+        .send(json!([100, 1, "setting", "get"]), Some(json!([])))
+        .await;
+    let (header, body) = client.next().await;
+    assert_eq!(header, json!([202, 1]));
+    let body = body.into_json();
+    assert_eq!(body["name"], "NotImplemented");
+    assert_eq!(body["code"], "fault.host.notImplemented");
+
+    client
+        .send(
+            json!([100, 2, "settings-sync", "getFirstRunPromptState"]),
+            Some(json!([])),
+        )
+        .await;
+    let (header, body) = client.next().await;
+    assert_eq!(header, json!([201, 2]));
+    assert_eq!(body.into_json(), json!({"handled": true}));
+
+    client
+        .send(json!([100, 3, "nope", "x"]), Some(json!([])))
+        .await;
+    let (header, body) = client.next().await;
+    assert_eq!(header, json!([202, 3]));
+    assert_eq!(body.into_json()["name"], "Unknown channel");
+
+    client
+        .send(json!([100, 4, "setting", "missing"]), Some(json!([])))
+        .await;
+    let (header, body) = client.next().await;
+    assert_eq!(header, json!([202, 4]));
+    assert_eq!(body.into_json()["message"], "Method not found: missing");
+}
+
+#[tokio::test]
+async fn listen_is_accepted_without_reply() {
+    let host = host(OutboundLimits::default());
+    let registry = Arc::new(ChannelRegistry::from_contract(contract()));
+    let client = connected(&host, "a1", &registry).await;
+    client
+        .send(json!([102, 5, "setting", "onDidUpdate"]), None)
+        .await;
+    client.send(json!([103, 5]), None).await;
+    // 订阅没有应答；之后的调用照常应答，说明连接没有被订阅卡住。
+    client
+        .send(json!([100, 6, "setting", "get"]), Some(json!([])))
+        .await;
+    assert_eq!(client.next().await.0, json!([202, 6]));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn connection_closed_runs_once_after_the_connection_tasks_ended() {
+    let host = host(OutboundLimits::default());
+    let (probe, registry) = probe_registry();
+    let client = connected(&host, "a1", &registry).await;
+    client.call(1, "x", json!({"n": 1, "gate": "g"})).await;
+    client.call(2, "x", json!({"n": 2, "gate": "g"})).await;
+    client.send(json!([102, 4, "probe", "onEvent"]), None).await;
+    probe.wait_for("start:1").await;
+    probe.wait_for("start:2").await;
+    // 两条关闭路径同时到达：detach 与 transport 停止读取。
+    assert_eq!(host.gateway.close_attachment("a1"), 1);
+    let Client(Connection { id, inbound, .. }) = client;
+    drop(inbound);
+    probe.wait_for(&format!("closed:{id}")).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let log = probe.log();
+    let closed_at = log
+        .iter()
+        .position(|entry| *entry == format!("closed:{id}"))
+        .unwrap();
+    assert_eq!(
+        log.iter()
+            .filter(|entry| entry.starts_with("closed:"))
+            .count(),
+        1,
+        "{log:?}"
+    );
+    for dropped in ["dropped:1", "dropped:2"] {
+        let at = log.iter().position(|entry| entry == dropped);
+        assert!(at.is_some_and(|at| at < closed_at), "{log:?}");
+    }
+    assert!(host.gateway.connections().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn flow_edges_reach_channels_with_the_connection_context() {
+    let host = host(OutboundLimits {
+        high_water: 100,
+        low_water: 25,
+        hard_limit: 1 << 20,
+    });
+    let (probe, registry) = probe_registry();
+    let client = Client(host.gateway.connect(meta("a1"), ready(&registry)));
+    // 不读：`[200]` 与 200 字节的应答一起越过高水位。
+    client.call(1, "x", json!({"n": 1, "bytes": 200})).await;
+    tokio::time::timeout(WAIT, async {
+        while probe.flows.lock().unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(client.next().await.0, json!([200]));
+    assert_eq!(client.next().await.0, json!([201, 1]));
+    // 读完后积压回到 0，越过低水位发 drained；之后的请求照常应答。
+    client.call(2, "x", json!({"n": 2})).await;
+    assert_eq!(client.next().await.0, json!([201, 2]));
+    assert_eq!(
+        *probe.flows.lock().unwrap(),
+        [
+            (client.0.id, FlowState::Saturated),
+            (client.0.id, FlowState::Drained)
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exceeding_the_hard_limit_closes_only_that_connection() {
+    let host = host(OutboundLimits {
+        high_water: 100,
+        low_water: 25,
+        hard_limit: 1000,
+    });
+    let (probe, registry) = probe_registry();
+    let stalled = Client(host.gateway.connect(meta("a1"), ready(&registry)));
+    let healthy = connected(&host, "a2", &registry).await;
+    stalled.call(1, "x", json!({"n": 1, "bytes": 600})).await;
+    stalled.call(2, "x", json!({"n": 2, "bytes": 600})).await;
+    probe.wait_for(&format!("closed:{}", stalled.0.id)).await;
+    assert!(stalled.ended().await);
+    healthy.call(3, "x", json!({"n": 3})).await;
+    assert_eq!(healthy.next().await.0, json!([201, 3]));
+    let open: Vec<u64> = host
+        .gateway
+        .connections()
+        .iter()
+        .map(|info| info.id)
+        .collect();
+    assert_eq!(open, [healthy.0.id]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_panicking_handler_answers_with_an_error_and_is_reported() {
+    let host = host(OutboundLimits::default());
+    let (_, registry) = probe_registry();
+    let client = connected(&host, "a1", &registry).await;
+    client.call(1, "x", json!({"n": 1, "panic": true})).await;
+    let (header, body) = client.next().await;
+    assert_eq!(header, json!([202, 1]));
+    assert_eq!(
+        body.into_json()["message"],
+        "probe.x failed: internal error in the Rust Host"
+    );
+    // 连接继续工作。
+    client.call(2, "x", json!({"n": 2})).await;
+    assert_eq!(client.next().await.0, json!([201, 2]));
+    eventually("the panic is reported", || {
+        !host.panics.lock().unwrap().is_empty()
+    })
+    .await;
+    assert_eq!(
+        *host.panics.lock().unwrap(),
+        [TaskPanic {
+            scope: format!("host/connection:{}", client.0.id),
+            task: "call",
+            message: "probe panic 1".into(),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn close_attachment_closes_every_connection_of_the_attachment() {
+    let host = host(OutboundLimits::default());
+    let (_, registry) = probe_registry();
+    let first = connected(&host, "a1", &registry).await;
+    let second = connected(&host, "a1", &registry).await;
+    let other = connected(&host, "a2", &registry).await;
+    assert_eq!(host.gateway.close_attachment("a1"), 2);
+    assert!(first.ended().await);
+    assert!(second.ended().await);
+    other.call(1, "x", json!({"n": 1})).await;
+    assert_eq!(other.next().await.0, json!([201, 1]));
+}
+
+#[tokio::test]
+async fn the_channel_table_can_end_the_connection() {
+    let host = host(OutboundLimits::default());
+    let (probe, registry) = probe_registry();
+    let (end, ended) = watch::channel(false);
+    let source: ChannelSource = Box::pin(async move {
+        Some(Channels {
+            registry,
+            closed: Some(ended),
+        })
+    });
+    let client = Client(host.gateway.connect(meta("a1"), source));
+    assert_eq!(client.next().await.0, json!([200]));
+    end.send_replace(true);
+    assert!(client.ended().await);
+    probe.wait_for(&format!("closed:{}", client.0.id)).await;
+}
+
+#[tokio::test]
+async fn a_connection_without_a_channel_table_closes_without_initialize() {
+    let host = host(OutboundLimits::default());
+    let client = Client(host.gateway.connect(meta("a1"), Box::pin(async { None })));
+    assert!(client.ended().await);
+    tokio::time::timeout(WAIT, client.0.inbound.closed())
+        .await
+        .unwrap();
+}

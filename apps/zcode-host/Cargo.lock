@@ -3067,8 +3067,10 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+ "zcode-async",
  "zcode-host-control",
  "zcode-host-core",
+ "zcode-host-gateway",
  "zcode-host-kit",
  "zcode-host-rpc",
  "zcode-host-services",
@@ -3169,11 +3171,12 @@ dependencies = [
 name = "zcode-host-core"
 version = "0.1.0"
 dependencies = [
- "futures-util",
  "getrandom 0.3.4",
  "serde_json",
  "tokio",
+ "zcode-async",
  "zcode-host-control",
+ "zcode-host-gateway",
  "zcode-host-kit",
  "zcode-host-rpc",
  "zcode-host-services",
@@ -3200,6 +3203,19 @@ dependencies = [
  "zcode-host-kit",
  "zcode-host-sessions",
  "zcode-host-settings",
+]
+
+[[package]]
+name = "zcode-host-gateway"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "serde_json",
+ "tokio",
+ "zcode-async",
+ "zcode-host-control",
+ "zcode-host-kit",
+ "zcode-host-rpc",
 ]
 
 [[package]]

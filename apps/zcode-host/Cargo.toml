@@ -5,6 +5,7 @@ members = [
   "crates/rpc",
   "crates/control",
   "crates/kit",
+  "crates/gateway",
   "crates/base",
   "crates/settings",
   "crates/providers",
@@ -107,6 +108,7 @@ zcode-cli-domain = { path = "../zcode-cli-rust/crates/domain" }
 zcode-cli-rust = { path = "../zcode-cli-rust" }
 zcode-host-control = { path = "crates/control" }
 zcode-host-core = { path = "crates/host-core" }
+zcode-host-gateway = { path = "crates/gateway" }
 zcode-host-kit = { path = "crates/kit" }
 zcode-host-base = { path = "crates/base" }
 zcode-host-settings = { path = "crates/settings" }
@@ -120,6 +122,7 @@ zcode-host-remote = { path = "crates/remote" }
 zcode-host-services = { path = "crates/services" }
 zcode-host-rpc = { path = "crates/rpc" }
 # 基础 crate（rust/，docs/specs/rust-u0-foundation.md §3）。
+zcode-async = { path = "../../rust/crates/async" }
 zcode-kit = { path = "../../rust/crates/kit" }
 zcode-proc = { path = "../../rust/crates/proc" }
 
