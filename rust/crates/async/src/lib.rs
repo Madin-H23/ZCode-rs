@@ -5,7 +5,8 @@
 //! 让这类任务在任何情况下都能走到发送终态的那一步。
 //!
 //! [`TaskScope`] 给任务一个归属（docs/specs/rust-u2-task-scope.md）：所有者释放作用域时任务被
-//! 中止，panic 被上报，关闭时能列出还在运行的任务。
+//! 中止，panic 被上报，关闭时能列出还在运行的任务。在同一个函数里启动并等待的结构化任务由
+//! 句柄拥有（[`owned`]），阻塞调用用 [`blocking`]。
 
 use std::any::Any;
 use std::fmt;
@@ -14,8 +15,10 @@ use std::panic::AssertUnwindSafe;
 
 use futures_util::FutureExt;
 
+mod owned;
 mod scope;
 
+pub use owned::{OwnedTask, blocking, owned};
 pub use scope::{Spawner, Task, TaskError, TaskPanic, TaskScope};
 
 /// 运行 `future`；它 panic 时返回 [`Panicked`]，不再向外传播。
@@ -61,3 +64,7 @@ mod tests;
 #[cfg(test)]
 #[path = "scope_tests.rs"]
 mod scope_tests;
+
+#[cfg(test)]
+#[path = "owned_tests.rs"]
+mod owned_tests;
