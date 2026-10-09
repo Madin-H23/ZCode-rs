@@ -113,6 +113,7 @@ impl Engine {
         header["state"] = "running".into();
         header["startedAt"] = now.into();
         header["sourceCommandId"] = c.command_id.clone().into();
+        super::input_queue::copy_external_id(&c.payload, &mut header);
         if goal_set {
             header["executionKind"] = "controlOnly".into();
             header["state"] = "completedSuccess".into();

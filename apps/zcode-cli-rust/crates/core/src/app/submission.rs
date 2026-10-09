@@ -11,7 +11,8 @@ const OFF_PEAK_PREFIX: &str = "offpeak-";
 const AUTOMATION_TOOLS: [&str; 3] = ["CronCreate", "CronUpdate", "CronDelete"];
 // 与 Node 一致：闲时轮额外隐藏会在本轮 modelExecution 之外重启子 Agent 的工具。
 const OFF_PEAK_TOOLS: [&str; 3] = ["OffPeakCreate", "SendMessage", "Workflow"];
-const TRANSIENT: [&str; 6] = [
+const TRANSIENT: [&str; 7] = [
+    "externalId",
     "modelExecution",
     "browserAmbientContext",
     "toolDisallowlist",

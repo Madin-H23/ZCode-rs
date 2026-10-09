@@ -31,6 +31,7 @@ mod compaction;
 mod context;
 mod context_projection;
 mod create_session;
+mod input_queue;
 mod maintenance;
 mod queue_control;
 

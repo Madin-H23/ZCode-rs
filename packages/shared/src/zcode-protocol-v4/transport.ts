@@ -15,7 +15,7 @@ import { conversationDeltaSchema } from "./delta.js";
 import { conversationRowSchema, toolCallRowSchema } from "./rows.js";
 import { sessionsIndexDeltaSchema, sessionsIndexSnapshotSchema } from "./sessions-index.js";
 import { WORKFLOW_RUN_STOP_REASONS } from "./workflow-observation-display.js";
-import { conversationSnapshotSchema } from "./snapshot.js";
+import { conversationSnapshotSchema, queueItemSchema } from "./snapshot.js";
 import { workspaceConfigDeltaSchema, workspaceConfigSnapshotSchema } from "./workspace-config.js";
 import { createTopicWireFrameSchema, topicWireFrameCandidateSchema } from "./wire.js";
 
@@ -365,6 +365,8 @@ export const V4_METHODS = {
   // 故收敛为 v4 query 而非 host 直连；旧词 usage/stats、session/usage 就此消费清零。
   usageStats: "v4/usage/stats",
   conversationUsage: "v4/conversation/usage",
+  // 输入队列与正在运行的输入（Host 的 task 命令映射用）：只读、无状态、超时重发安全。
+  conversationInputQueue: "v4/conversation/inputQueue",
   // 附件事务：禁止 full-data RPC。每个 chunk 的 decoded bytes <=512KiB，
   // renderer->host Channel 与 host->CLI NDJSON 都必须逐 request 证明 <=1MiB。
   attachmentBegin: "v4/attachment/begin",
@@ -383,6 +385,33 @@ export const V4_METHODS = {
   command: "v4/command",
 } as const;
 export type V4Method = (typeof V4_METHODS)[keyof typeof V4_METHODS];
+
+export const v4ConversationInputQueueParamsSchema = z.strictObject({
+  sessionId: z.string().min(1),
+});
+export type V4ConversationInputQueueParams = z.infer<typeof v4ConversationInputQueueParamsSchema>;
+
+// 运行中的输入：轮头的 sourceCommandId / externalId / startedAt 与该轮第一条 userInput 行的文本。
+export const v4ConversationActiveInputSchema = z.strictObject({
+  inputId: z.string().min(1),
+  externalId: z.string().min(1).optional(),
+  text: z.string().optional(),
+  startedAt: z.number().optional(),
+});
+export type V4ConversationActiveInput = z.infer<typeof v4ConversationActiveInputSchema>;
+
+// queue.items 是整个 CommandInbox 队列，含快照不显示的 startNow 预留项。
+export const v4ConversationInputQueueResultSchema = z.strictObject({
+  revision: z.number().int().nonnegative(),
+  // 有 run 在跑（包括没有来源命令、因而没有 activeInput 的目标续跑轮）。
+  running: z.boolean(),
+  queue: z.strictObject({
+    items: z.array(queueItemSchema),
+    autoDrain: z.boolean(),
+  }),
+  activeInput: v4ConversationActiveInputSchema.optional(),
+});
+export type V4ConversationInputQueueResult = z.infer<typeof v4ConversationInputQueueResultSchema>;
 
 /** 按任务授权的有界输出查询，不接受任意路径或调用方扩大的读取预算。 */
 export const v4BackgroundBashOutputParamsSchema = z.strictObject({

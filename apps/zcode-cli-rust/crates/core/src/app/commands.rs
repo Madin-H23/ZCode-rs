@@ -372,5 +372,6 @@ pub(super) fn queue_item(c: &Command, s: &Session, now: u64) -> Value {
     if let Some(refs) = c.payload.get("context_refs") {
         item["sharedContextRefs"] = refs.clone();
     }
+    super::input_queue::copy_external_id(&c.payload, &mut item);
     item
 }

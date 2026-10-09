@@ -211,6 +211,8 @@ export const queueItemSchema = conversationInputIntentSchema.extend({
     state: z.enum(["queued", "reserved", "promoting"]),
   }),
   toolDisallowlist: z.array(z.string().min(1)).optional(),
+  // sendText.externalId：提交方给这条输入的名字（只在内存，随队列不持久化）。
+  externalId: z.string().min(1).optional(),
 });
 export type QueueItem = z.infer<typeof queueItemSchema>;
 
