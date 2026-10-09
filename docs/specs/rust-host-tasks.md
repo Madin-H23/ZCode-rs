@@ -63,9 +63,9 @@ Node 经 IZCodeAgentService 的 legacy 方法转发，Rust 直接请求 CLI（`t
    - `v4Create`（Bot）：V4 `createSession`，从 ACK 的 `result.sessionId` 读快照；缺失时报 `v4 createSession accepted without sessionId result`。
    - 其余（automation、闲时）：`session/create`；automation 或 `deferPersistenceUntilFirstPrompt` 时 `persistence: "deferred"`，automation 关闭标题生成。
    - 之后：写索引（带 cronAutomationId / offPeakTaskId）→ grouped 顶层最前 → `workspace_config_options_update` → 带 meta 的 `task_created`。返回 meta 加 `initialSlashCommands`。
-3. **sendPrompt**：target 取登记表（见第 3 节），记下 active input = traceId。有附件走 `session/send`，否则 V4 `sendText`（`heldQueueDisposition: keepQueueAndSend`，`toolDenylist` 改名为 `toolDisallowlist`）。automation 轮追加 Cron 写工具黑名单，闲时轮追加 `OffPeakCreate`。失败时清除 active input。
-4. **host command 队列**：enqueue / promote / cancel 只改内存队列；带 `ownerRunId` 时校验 active input（`NO_ACTIVE_TASK_OWNER`、`STALE_TASK_OWNER_COMMAND`），promote 找不到命令报 `OWNER_COMMAND_FAILED`。drain 每个 taskKey 串行：有 active input 或 running 命令时不发，否则取第一条 accepted 改为 running 并发送；发送失败记 failed。cancel 移除命令时在 `onDynamicTaskEvent` / `onDynamicStreamEvent` 上发 `task_snapshot_updated`。
-5. **终态与 ready**：syncer 观察到非终态 → 终态时先发会话信号，再写库。lifecycle 收到信号后：发 `onDynamicTaskTerminalOutcome {taskId, inputId?, outcome}`（inputId 取此刻的 active input）→ 收口 running 命令、清 active input → 发 `onDynamicTaskReady {taskId, reason}` → drain 下一条。
+3. **sendPrompt**：target 取登记表（见第 3 节）。有附件走 `session/send`，否则 V4 `sendText`（commandId 是 traceId，`heldQueueDisposition: keepQueueAndSend`，`toolDenylist` 改名为 `toolDisallowlist`）。automation 轮追加 Cron 写工具黑名单，闲时轮追加 `OffPeakCreate`。
+4. **task 命令（enqueue / promote / cancel）**：Host 没有自己的队列，三个成员映射到 runtime 的 `CommandInbox`（[rust-u3-stage-b.md](rust-u3-stage-b.md) 3.4）。带 `ownerRunId` 时与 runtime 给出的正在运行的输入比较（`NO_ACTIVE_TASK_OWNER`、`STALE_TASK_OWNER_COMMAND`），promote 找不到命令报 `OWNER_COMMAND_FAILED`。cancel 移除队列项时在 `onDynamicTaskEvent` / `onDynamicStreamEvent` 上发 `task_snapshot_updated`。
+5. **终态与 ready**：syncer 观察到非终态 → 终态时先发会话信号（带上一份摘要的 `activeInputId`），再写库。lifecycle 收到信号后：发 `onDynamicTaskTerminalOutcome {taskId, inputId?, outcome}`（inputId 取信号里的 `activeInputId`）→ 发 `onDynamicTaskReady {taskId, reason}`。下一条排队的输入由 runtime 开跑。
 6. **resumeTask**：缺少显式 thoughtLevel 时从索引行取 hint；`session/resume`（模型 hint 不上线，同 Node）→ `workspace_config_options_update` → 写索引（automation / 闲时再补写归属）。不广播列表事件。
 7. **closeTask**：`session/close` → 写删除墓碑（行缺失时先从 CLI 回源）→ 不带 meta 的 `task_meta_changed`。
 8. **配置**：getTaskConfigOptions 经 `session/resume` 读 settings 投影成旧 configOptions。setModel 走 `session/setModel`；思考档位与 automation 配置走 V4 `switchModelConfig`（CAS）；模式走 V4 `switchCollaborationMode`，`auto` 例外走 `session/setMode`。写入后都以 resume 快照收口并写索引。未绑定模型时设置思考档位报 `请先选择模型，再设置思考档位`。
@@ -106,7 +106,8 @@ Node 经 IZCodeAgentService 的 legacy 方法转发，Rust 直接请求 CLI（`t
 | 分组、成员、grouped 顶层顺序、bootstrap 标记、任务行 | tasks-index.sqlite（`TasksIndex` 线程；跨进程靠写锁） |
 | 会话、命令幂等、V4 revision、模型与模式              | CLI                                                   |
 | task target 登记（taskId → workspace）               | `TaskContext`（内存；未登记时按 taskId 查索引兜底）   |
-| active input、host command 队列、drain 串行门        | `TaskLifecycle`（内存，Host 重启清空，同 Node）       |
+| 输入队列、正在运行的输入                             | runtime（`CommandInbox`；Host 经 App 协议读取）       |
+| owner / stale 判定                                   | `TaskLifecycle`（只有规则，不存状态）                 |
 | 终态信号                                             | syncer（sessions-index 的 phase 迁移）                |
 | 跨窗口 owner / lease、owner 命令路由、会话消息路由   | Main `taskRealtimeBus`（不变）                        |
 | attachment 的 clientMode / scope                     | host-core 签发 capability 时登记；UI 自报的值一律忽略 |
@@ -115,14 +116,12 @@ Node 经 IZCodeAgentService 的 legacy 方法转发，Rust 直接请求 CLI（`t
 ## 4. 事件顺序
 
 ```text
-sendPrompt / drain                syncer（sessions-index）              TaskLifecycle
- │ active input = traceId          │
+sendPrompt / enqueue              syncer（sessions-index）              TaskLifecycle
  │ V4 sendText ─────► CLI          │
- │                                 │ phase running → completedSuccess
- │                                 │ SessionSignal ─────────────────────► terminal {taskId, inputId, outcome}
- │                                 │ patch 状态 → task_status_changed     收口 running 命令、清 active input
- │                                 │ 回源 session/read → 写索引           ready {taskId, reason}
- │                                 │                                      drain：取下一条 accepted → running → 发送
+ │                                 │ phase running(activeInputId) → completedSuccess
+ │                                 │ SessionSignal(inputId) ────────────► terminal {taskId, inputId, outcome}
+ │                                 │ patch 状态 → task_status_changed     ready {taskId, reason}
+ │                                 │ 回源 session/read → 写索引           （排队的下一条由 CLI 开跑）
 
 UI（mutation）              zcode-task                     tasks-index              window-controller
  │ deleteArchivedTasks ─────► 去重，逐项 IMMEDIATE ──────► 墓碑 + 清分组引用
@@ -160,7 +159,8 @@ Main                          RustHostProcess（Main）                Rust Host
 - `pnpm exec tsx scripts/rust-host/tasks-index-groups-fixtures.ts [--check]`：用真实 TS `TaskIndexRepo` 在固定时钟下生成 `tasks_index/fixtures/parity-groups.json`（分组 CRUD、grouped 结构与排序、搜索与摘要、自动归档、归档删除；每步返回值或错误文案，以及最终表内容）。`cargo test -p zcode-host-services tasks_index::groups_tests` 逐项复现。`scripts/rust-host/test.mjs` 先跑 `--check`。
 - `cargo test -p zcode-host-services --lib tasks::`：搜索 / 归档删除 / 分组事件与 controller 全文搜索、自动归档、V4 信封与 ACK、configOptions 与模型选择字符串、轨迹解析、Claude 解析规则、会话消息在 Host 内应答（`tasks::session_messages`）。
 - `ZCODE_TEST_CLI_RUST_BINARY=… cargo test -p zcode-host-services --test tasks_cli`：真实 Rust CLI + 本地 mock 模型：
-  - initialize → createTask（legacy）→ sendPrompt → terminal 带 inputId、ready → configOptions、切换权限模式（V4 CAS）、读模型、token 用量 → enqueue 在 ready 边界 drain → resume → close；
+  - initialize → createTask（legacy）→ sendPrompt → terminal 带 inputId、ready → configOptions、切换权限模式（V4 CAS）、读模型、token 用量 → 空闲时 enqueue 立即开跑 → resume → close；
+  - task 命令映射到 runtime 队列（`--test task_queue_cli`，[rust-u3-stage-b.md](rust-u3-stage-b.md) 3.4.8）；
   - Claude 扫描（侧链、subagents 目录被排除）→ 导入（去重、缺失记 skipped）→ 广播 → 全文搜索命中 → resume。
 - `cargo test -p zcode-host --test end_to_end`：replayable 本地 attachment 可签发，hello 报告 replayable 与受限能力。
 - `ZCODE_RUST_HOST_BINARY=… node --import tsx --test packages/desktop/test/rustHostPortBridge.test.ts`：MessagePort 经 Main 的桥连到真实 Rust Host 的 replayable attachment，关闭端口即关闭连接。
