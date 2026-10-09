@@ -206,7 +206,7 @@ fn command_env(base: &ProcessEnv) -> ProcessEnv {
 }
 
 fn command(program: &str, env: &ProcessEnv) -> Command {
-    let mut command = Command::new(program);
+    let mut command = zcode_proc::command(program);
     command.env_clear().envs(env.vars()).stdin(Stdio::null());
     #[cfg(windows)]
     {

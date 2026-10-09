@@ -72,7 +72,7 @@ fn shell_command(command: &str, shell: &Shell) -> Command {
         Shell::Path(path) => path.as_str(),
         _ => "/bin/sh",
     };
-    let mut c = Command::new(program);
+    let mut c = zcode_proc::command(program);
     c.args(["-c", command]);
     c
 }
@@ -83,10 +83,10 @@ fn shell_command(command: &str, shell: &Shell) -> Command {
         Shell::Path(path) => path.clone(),
         _ => std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".into()),
     };
-    let mut c = Command::new(&program);
+    let mut c = zcode_proc::command(&program);
     let lower = program.to_ascii_lowercase();
     if lower.ends_with("cmd.exe") || lower == "cmd" {
-        c.raw_arg(format!("/d /s /c \"{command}\""));
+        c.raw_arg(zcode_proc::shell::cmd_exe_arguments(command));
     } else {
         c.args(["-c", command]);
     }
@@ -97,7 +97,7 @@ fn command(program: &Program) -> Command {
     match program {
         Program::Command { command, shell, .. } => shell_command(command, shell),
         Program::Process { command, args } => {
-            let mut c = Command::new(command);
+            let mut c = zcode_proc::command(command);
             c.args(args);
             c
         }
@@ -160,8 +160,8 @@ async fn execute(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    #[cfg(unix)]
-    command.process_group(0);
+    // 与 Bash 工具相同（B7）：新会话，不继承控制终端；Windows 上 spawn 后加入 Job。
+    zcode_proc::group::isolate(&mut command);
     #[cfg(windows)]
     command.creation_flags(0x0800_0000);
     let mut child = match command.spawn() {
@@ -174,6 +174,7 @@ async fn execute(
         }
     };
     let pid = child.id().context("Missing hook pid")?;
+    let tree = super::tool_process::ProcessTree::contain(&child, pid);
     let mut pipe = child.stdin.take().context("Missing hook stdin")?;
     let writer = tokio::spawn(async move {
         let written = pipe.write_all(stdin.as_bytes()).await;
@@ -205,7 +206,8 @@ async fn execute(
                 return Ok(result);
             }
         }
-        super::tool_process::terminate(&mut child, pid, true).await?;
+        tree.terminate(&mut child, super::tool_process::Shutdown::Graceful)
+            .await?;
         tokio::time::timeout(Duration::from_secs(1), &mut streams)
             .await
             .context("Hook descendants still hold output after termination")

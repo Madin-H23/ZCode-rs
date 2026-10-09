@@ -97,24 +97,42 @@ pub fn command(program: impl AsRef<OsStr>) -> tokio::process::Command;
 pub fn std_command(program: impl AsRef<OsStr>) -> std::process::Command;
 
 pub mod shell {
-    /// 跑一段 shell 文本：Unix `/bin/bash -c`；Windows `cmd.exe` 用 raw_arg `/d /s /c "<text>"`，
+    /// 跑一段 shell 文本：Unix `/bin/bash -c`；Windows `cmd.exe` 用 raw_arg 传入 `cmd_exe_arguments(text)`，
     /// 不经过 CRT 引号转义。
     pub fn script(text: &str) -> tokio::process::Command;
+    /// cmd.exe 的完整参数 `/d /s /c "<text>"`（纯函数，全平台可测）；hooks 选用 cmd.exe 时也用它。
+    pub fn cmd_exe_arguments(text: &str) -> String;
 }
 pub mod group {
     /// 让子进程成为新会话与新进程组的首进程（Unix `setsid`，EPERM 时退回 `setpgid(0, 0)`），
-    /// 与 Node `spawn({detached: true})` 一致。Windows 无操作（由 Job 负责）。
+    /// 与 Node `spawn({detached: true})` 一致。不与 `process_group(..)` 同用。Windows 无操作（由 Job 负责）。
     pub fn isolate(command: &mut tokio::process::Command);
 }
 pub mod tree {
-    /// Unix：按身份（pid + 启动时间）追踪进程树，TERM → 宽限 → KILL。
-    /// 进程表快照失败时退回 killpg(根进程组)，不能一个信号都不发。
-    pub async fn terminate(child: &mut Child, graceful: bool) -> anyhow::Result<()>;
+    /// 两个平台都可用；Windows 上两种方式相同（Job / taskkill 没有 TERM 阶段）。
+    pub enum Shutdown {
+        /// TERM → 宽限 1.5 s → KILL。取消、超时、主动关闭。
+        Graceful,
+        /// 根进程已自行退出：根进程组已不存在时直接返回，否则不发 TERM，直接 KILL 残留成员。
+        Immediate,
+    }
+    /// Unix：按身份（pid + 启动时间）追踪进程树并回收 child。进程表快照失败时退回 killpg(根进程组)，
+    /// 不能一个信号都不发（4.1）。`pid` 单独传入：child 已被 wait 回收后 `Child::id()` 为 None，
+    /// 残留的后代仍要清理。返回错误表示无法确认回收，调用方沿用 ProcessCleanupFailure。
+    #[cfg(unix)]
+    pub async fn terminate(child: &mut Child, pid: u32, shutdown: Shutdown) -> anyhow::Result<()>;
 }
 #[cfg(windows)]
 pub mod job {
-    /// Job Object：KILL_ON_JOB_CLOSE；terminate() 结束整棵树；Job 句柄关闭（含进程崩溃）时整棵树一起结束。
+    /// Job Object：KILL_ON_JOB_CLOSE；terminate() 结束整棵树（退出码 1，与 taskkill /F 相同）；
+    /// Job 被 drop（含本进程崩溃，句柄由系统关闭）时其中仍在运行的进程一起结束。
     pub struct Job;
+    impl Job {
+        pub fn new() -> io::Result<Self>;
+        /// 紧接 spawn 调用：加入不是追溯的，之前已创建的后代不在 Job 中。child 已回收时报错。
+        pub fn assign(&self, child: &Child) -> io::Result<()>;
+        pub fn terminate(&self) -> io::Result<()>;
+    }
 }
 ```
 
@@ -122,7 +140,15 @@ pub mod job {
 
 - CLI `tools/src/process_tree.rs` 整体移入 `zcode-proc::tree`。
 - CLI 的 Bash 工具、hooks、MCP stdio、git、PDF 渲染、进程遥测，以及 Host 的 CLI 进程、git、终端 profile 探测：所有 `Command::new` 改为 `zcode_proc::command` / `std_command`。
-- Bash 工具与 hooks 的子进程在 Unix 上改用 `group::isolate`（取代 `process_group(0)`），在 Windows 上加入 `Job`，结束时调用 `Job::terminate`；只有在加入 Job 失败时，才退回原来的 `taskkill /T /F`。
+- Bash 工具与 hooks 的子进程在 Unix 上改用 `group::isolate`（取代 `process_group(0)`），在 Windows 上加入 `Job`，结束时调用 `Job::terminate`；只有在加入 Job 失败时，才退回原来的 `taskkill /T /F`。三者的结束方式收在 `tools/src/tool_process.rs` 的 `ProcessTree` 中。
+- MCP stdio 本期不变：Unix 仍是 `process_group(0)` + `tree::terminate`，Windows 仍是 `taskkill /T /F`（`ProcessTree::uncontained`）。
+- 各平台的结束时机不变：Bash 工具在 Unix 上命令完成且根进程组已不存在时直接返回，否则 `Immediate` 清理残留；Windows 上每条命令结束后都结束整棵树。hooks 只在取消、超时或根进程退出 1 s 后管道仍未关闭时结束进程树。
+
+Windows 上的行为变化（CI 的 Windows job 验证 `zcode-proc` 本身；应用 crate 的这部分代码只有 clippy 覆盖）：
+
+- Bash 工具：根进程退出后，`taskkill /PID <根> /T` 已找不到根进程，后台后代会遗留；Job 不依赖父子关系，现在一起结束，与 Unix 一致。
+- hooks：Job 在本次 hook 运行结束时被 drop。hook 完成后仍在运行、且不持有输出管道的后代（如 `start /b` 启动并重定向了输出的进程）现在随之结束，原来会继续运行。Unix 不变。
+- runtime 进程崩溃时，系统关闭 Job 句柄，正在运行的 Bash 工具与 hook 进程树一起结束。
 
 ### 3.5 唯一入口规则（本期启用）
 
@@ -131,6 +157,8 @@ pub mod job {
 | 被禁止的调用                                                 | 唯一允许的位置 |
 | ------------------------------------------------------------ | -------------- |
 | `std::process::Command::new`、`tokio::process::Command::new` | `zcode-proc`   |
+
+测试代码同样适用：测试经 `zcode-proc`（dev-dependency）创建子进程，不另加 `#[expect]` 豁免；`zcode-proc` 内两个构造函数是仅有的 `#[expect(clippy::disallowed_methods)]`。
 
 原子写暂不加禁令：`std::fs::rename` 还有移动文件等正当用途，按调用逐个判断的成本高于收益；改由评审规则保证。
 
@@ -152,15 +180,28 @@ pub mod job {
 
 ```mermaid
 flowchart TB
-    A["terminate(child, graceful)"] --> S{"进程表快照成功？"}
-    S -- "是" --> T["按身份追踪树：TERM 组与成员 → 宽限 1.5 s → 循环快照 + KILL，直到没有存活成员"]
-    S -- "否" --> G["killpg(根组, TERM) → 宽限 1.5 s → killpg(根组, KILL)"]
-    T --> W["回收 child（wait）"]
-    G --> W
+    A["terminate(child, pid, shutdown)"] --> I{"Immediate 且根组已不存在？"}
+    I -- "是" --> OK["返回成功"]
+    I -- "否" --> S{"进程表快照成功？"}
+    S -- "是" --> T["按身份追踪树；Graceful 时 TERM 组与成员 → 宽限 1.5 s"]
+    T --> K{"KILL 循环：本轮快照成功？"}
+    K -- "是" --> L["没有存活成员则结束循环；否则 KILL 组与成员，1 s 期限"]
+    L --> K
+    K -- "否" --> F2["退回：killpg(根组, KILL)（TERM 阶段已过）"]
+    S -- "否" --> F1["退回：Graceful 时 killpg(根组, TERM) → 宽限 1.5 s；然后 killpg(根组, KILL)"]
+    L -- "循环结束" --> W["回收 child（wait）"]
+    F1 --> P["轮询 1 s：child 已回收且根组已不存在"]
+    F2 --> P
+    P --> W
     W --> R["返回：成功；或报告仍无法确认回收（沿用 ProcessCleanupFailure）"]
 ```
 
-退回 killpg 是安全的：只要进程组里还有成员，它的 ID 就不会被系统分配给新进程（Linux、macOS 都如此）；组已不存在时，killpg 返回 ESRCH，按已结束处理。
+- 退回 killpg 是安全的：只要进程组里还有成员，它的 ID 就不会被系统分配给新进程（Linux、macOS 都如此）；组已不存在时，killpg 返回 ESRCH，按已结束处理。
+- child 尚未回收时，退回路径同时直接对根 pid 发同一信号：此时 pid 仍属于本进程、不会被复用，根进程不是组长时也不会漏掉它。
+- 退回路径上发信号失败不立即报错（macOS 上组内有无权发信号的成员时 killpg 返回 EPERM，其余成员仍会收到），以随后的轮询结果为准；期限内未结束则报告无法确认回收。
+- 退回时记一条 warn（`tracing`），带快照失败的原因。
+- 已离开根进程组的后代（自建会话或进程组）在退回路径上无法追踪，这是没有进程表时的已知限制。
+- KILL 循环内为确认“发信号失败的拥有者已退出”而取的快照（原有逻辑）失败时，仍按原样返回错误。
 
 ### 4.2 B5 的语义
 

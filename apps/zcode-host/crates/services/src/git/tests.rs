@@ -1,7 +1,6 @@
 //! 用真实 git 仓库（临时目录）验证 `git` channel 的返回形态与边界。
 //! git 的全局配置指向临时文件，测试不读开发者的 ~/.gitconfig，也不写任何真实目录。
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -50,7 +49,7 @@ impl Fixture {
     }
 
     fn sh(&self, cwd: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
+        let output = zcode_proc::std_command("git")
             .args(args)
             .current_dir(cwd)
             .env_clear()

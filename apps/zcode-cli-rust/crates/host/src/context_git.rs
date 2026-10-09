@@ -1,6 +1,6 @@
 use crate::domain::prompt::GitSnapshot;
 use std::{path::Path, process::Stdio, time::Duration};
-use tokio::{io::AsyncReadExt, process::Command};
+use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 
 // 只用于环境探测，输出与进程时间都有界；drop 也回收探测进程组，避免 Stop 留下 fsmonitor 等子进程。
@@ -28,7 +28,7 @@ async fn command(
     if cancel.is_cancelled() {
         return None;
     }
-    let mut command = Command::new(program);
+    let mut command = zcode_proc::command(program);
     command
         .args(args)
         .current_dir(at.cwd)
@@ -64,7 +64,7 @@ async fn command(
     if child.try_wait().ok().flatten().is_none() {
         let _ = tokio::time::timeout(
             Duration::from_secs(2),
-            Command::new("taskkill")
+            zcode_proc::command("taskkill")
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

@@ -17,7 +17,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -267,7 +267,7 @@ async fn control_rpc_p95_while_four_workspaces_stream() {
     let builtin = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../config/provider/zcode-builtin.json");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zcode-host"))
+    let mut child = zcode_proc::command(env!("CARGO_BIN_EXE_zcode-host"))
         .args(["--allowed-origin", "file://"])
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())

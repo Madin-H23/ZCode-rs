@@ -398,7 +398,7 @@ async fn read_plist(path: &Path, env: &ProcessEnv) -> Option<Map<String, Value>>
     if !cfg!(target_os = "macos") || tokio::fs::metadata(path).await.is_err() {
         return None;
     }
-    let mut command = tokio::process::Command::new("plutil");
+    let mut command = zcode_proc::command("plutil");
     command
         .args(["-convert", "json", "-o", "-"])
         .arg(path)

@@ -281,7 +281,7 @@ async fn stale_device_lock_from_a_dead_process_is_taken_over() {
         .unwrap();
     let lock = file.with_file_name("telemetry-state.lock");
     // 取一个已退出进程的 pid：锁未超时但持有者已死，应被接管。
-    let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" });
+    let mut child = zcode_proc::std_command(if cfg!(windows) { "cmd" } else { "true" });
     if cfg!(windows) {
         child.args(["/C", "exit"]);
     }

@@ -126,7 +126,7 @@ mod copy_cases {
                 )
                 .unwrap(),
                 _ => {
-                    let status = std::process::Command::new("mkfifo")
+                    let status = zcode_proc::std_command("mkfifo")
                         .arg(&target)
                         .status()
                         .unwrap();

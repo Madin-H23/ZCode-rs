@@ -25,7 +25,7 @@ fn node_available() -> bool {
         eprintln!("skip: tsx is not installed (run pnpm install)");
         return false;
     }
-    let ok = std::process::Command::new("node")
+    let ok = zcode_proc::std_command("node")
         .arg("--version")
         .stdout(Stdio::null())
         .status()
@@ -37,7 +37,7 @@ fn node_available() -> bool {
 }
 
 fn interop(args: &[&str], home: &Path) -> tokio::process::Command {
-    let mut command = tokio::process::Command::new("node");
+    let mut command = zcode_proc::command("node");
     command
         .current_dir(repo_root())
         .arg("--import")

@@ -2432,6 +2432,7 @@ dependencies = [
  "zcode-host-kit",
  "zcode-host-rpc",
  "zcode-host-services",
+ "zcode-proc",
 ]
 
 [[package]]
@@ -2514,7 +2515,19 @@ dependencies = [
  "zcode-host-control",
  "zcode-host-kit",
  "zcode-host-rpc",
+ "zcode-proc",
  "zip",
+]
+
+[[package]]
+name = "zcode-proc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "tokio",
+ "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

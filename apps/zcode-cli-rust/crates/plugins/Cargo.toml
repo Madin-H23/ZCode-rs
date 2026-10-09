@@ -22,6 +22,7 @@ url.workspace = true
 uuid.workspace = true
 zcode-cli-domain.workspace = true
 zip.workspace = true
+zcode-proc.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

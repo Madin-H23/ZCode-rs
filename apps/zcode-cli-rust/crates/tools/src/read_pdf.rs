@@ -50,7 +50,7 @@ async fn run(
     timeout_ms: u64,
     cancel: &CancellationToken,
 ) -> Result<std::result::Result<Run, bool>> {
-    let mut command = tokio::process::Command::new(program);
+    let mut command = zcode_proc::command(program);
     command
         .args(args)
         .env_clear()

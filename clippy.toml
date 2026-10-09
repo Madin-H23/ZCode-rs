@@ -14,3 +14,10 @@ await-holding-invalid-types = [
   "tokio::sync::RwLockReadGuard",
   "tokio::sync::RwLockWriteGuard",
 ]
+
+# 子进程的唯一入口（docs/specs/rust-u0-foundation.md §3.5）：只有 zcode-proc 可以直接创建 Command，
+# U1 起在那里注入运行时环境。测试同样经 zcode-proc 创建子进程。
+disallowed-methods = [
+  { path = "std::process::Command::new", reason = "use zcode_proc::std_command (rust/crates/proc, spec rust-u0-foundation §3.5)" },
+  { path = "tokio::process::Command::new", reason = "use zcode_proc::command (rust/crates/proc, spec rust-u0-foundation §3.5)" },
+]

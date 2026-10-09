@@ -162,3 +162,31 @@ async fn normal_leader_exit_reaps_workers_that_hold_output_pipes() {
     stopped(leader).await;
     stopped(child).await;
 }
+
+#[tokio::test]
+async fn bash_commands_lead_a_new_session_without_the_runtime_terminal() {
+    let root = tempfile::tempdir().unwrap();
+    let tools = Arc::new(zcode_cli_rust::workspace_tools(
+        root.path().into(),
+        root.path().join("artifacts"),
+    ));
+    let job = tokio::spawn({
+        let tools = tools.clone();
+        async move {
+            tools.call("s", "Bash", &json!({"command":"echo $$ > root.pid; while [ ! -e go ]; do sleep 0.05; done"}), &CancellationToken::new()).await
+        }
+    });
+    let leader = pid(&root.path().join("root.pid")).await;
+    let _cleanup = Cleanup(vec![leader]);
+    // SAFETY: getsid / getpgid 只读取进程信息；leader 是本测试启动且仍在运行的进程。
+    let (session, group) = unsafe { (libc::getsid(leader), libc::getpgid(leader)) };
+    tokio::fs::write(root.path().join("go"), "").await.unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(3), job)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.data["status"], "completed");
+    // 新会话的首进程没有控制终端：/dev/tty 提示（ssh、sudo、git 凭据）立即失败，不会挂到超时。
+    assert_eq!((session, group), (leader, leader));
+}

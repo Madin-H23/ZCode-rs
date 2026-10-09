@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::process::Command;
 
 const TOKEN: &str = "shutdown-test-token";
 const STEP_TIMEOUT: Duration = Duration::from_secs(20);
@@ -122,7 +121,7 @@ async fn dispose_releases_bot_runtime_locks_immediately() {
     let locks = seed(home.path());
     let calls = Arc::new(Mutex::new(Vec::new()));
     let telegram = telegram_mock(calls.clone()).await;
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zcode-host"))
+    let mut child = zcode_proc::command(env!("CARGO_BIN_EXE_zcode-host"))
         .env("HOME", home.path())
         .env("USERPROFILE", home.path())
         .env("ZCODE_DESKTOP_HOME_DIR", home.path())

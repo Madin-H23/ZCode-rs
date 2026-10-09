@@ -1,7 +1,7 @@
 use std::process::Command;
 
 fn binary() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_zcode-cli-rust"))
+    zcode_proc::std_command(env!("CARGO_BIN_EXE_zcode-cli-rust"))
 }
 
 #[test]

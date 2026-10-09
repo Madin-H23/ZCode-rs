@@ -7,7 +7,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::net::TcpStream;
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::Request;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -30,7 +30,7 @@ struct Host {
 impl Host {
     async fn spawn() -> Self {
         let home = tempfile::tempdir().expect("temp home");
-        let mut child = Command::new(env!("CARGO_BIN_EXE_zcode-host"))
+        let mut child = zcode_proc::command(env!("CARGO_BIN_EXE_zcode-host"))
             .args([
                 "--allowed-origin",
                 DEV_ORIGIN,
