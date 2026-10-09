@@ -7,10 +7,11 @@ use serde_json::Value;
 use zcode_host_rpc::{RpcError, RpcValue};
 
 use crate::args::Args;
-use crate::channel::{CallContext, CallFuture, EventStream, Reply, ServiceChannel};
+use crate::channel::{CallContext, CallFuture, EventStream, FlowState, Reply, ServiceChannel};
 
 type MethodFn = Arc<dyn Fn(CallContext, Args) -> CallFuture + Send + Sync>;
 type ClosedFn = Arc<dyn Fn(&CallContext) + Send + Sync>;
+type FlowFn = Arc<dyn Fn(&CallContext, FlowState) + Send + Sync>;
 type ListenFn = Arc<dyn Fn(&CallContext, Value) -> Result<EventStream, RpcError> + Send + Sync>;
 
 pub struct ServiceBuilder {
@@ -18,6 +19,7 @@ pub struct ServiceBuilder {
     methods: HashMap<String, MethodFn>,
     events: HashMap<String, ListenFn>,
     closed: Option<ClosedFn>,
+    flow: Option<FlowFn>,
 }
 
 impl ServiceBuilder {
@@ -27,6 +29,7 @@ impl ServiceBuilder {
             methods: HashMap::new(),
             events: HashMap::new(),
             closed: None,
+            flow: None,
         }
     }
 
@@ -35,6 +38,15 @@ impl ServiceBuilder {
         handler: impl Fn(&CallContext) + Send + Sync + 'static,
     ) -> Self {
         self.closed = Some(Arc::new(handler));
+        self
+    }
+
+    /// 连接出站积压的水位边沿（docs/specs/rust-u2-gateway.md §2.3）。在连接循环里同步调用，不能阻塞。
+    pub fn on_connection_flow(
+        mut self,
+        handler: impl Fn(&CallContext, FlowState) + Send + Sync + 'static,
+    ) -> Self {
+        self.flow = Some(Arc::new(handler));
         self
     }
 
@@ -69,6 +81,7 @@ impl ServiceBuilder {
             methods: self.methods,
             events: self.events,
             closed: self.closed,
+            flow: self.flow,
             fallback,
         })
     }
@@ -79,6 +92,7 @@ struct BuiltService {
     methods: HashMap<String, MethodFn>,
     events: HashMap<String, ListenFn>,
     closed: Option<ClosedFn>,
+    flow: Option<FlowFn>,
     fallback: Option<Arc<dyn ServiceChannel>>,
 }
 
@@ -124,8 +138,11 @@ impl ServiceChannel for BuiltService {
         }
     }
 
-    /// builder 自身不持有下游订阅；流控交给被覆盖的原 channel（例如包在 zcode-agent 外的成员）。
-    fn connection_flow(&self, context: &CallContext, state: crate::FlowState) {
+    /// 先交给自己登记的处理（例如终端暂停读 PTY），再交给被覆盖的原 channel（例如包在 zcode-agent 外的成员）。
+    fn connection_flow(&self, context: &CallContext, state: FlowState) {
+        if let Some(flow) = &self.flow {
+            flow(context, state);
+        }
         if let Some(fallback) = &self.fallback {
             fallback.connection_flow(context, state);
         }

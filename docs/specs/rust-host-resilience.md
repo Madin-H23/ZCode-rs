@@ -45,6 +45,7 @@
    - 同一连接的 `saturated`、`drained`、`closed` 串行、按发生顺序发送；`closed` 之后不再发其他状态。
    - 每个 workspace 只在状态变化时发送；连接处于 `saturated` 时新用到的 workspace 立即补发 `saturated`。
 4. CLI 收到 `saturated` 后暂停向该连接投递帧（合并缓冲），`drained` 后刷新，必要时走快照恢复（`app-server/src/routes.rs` `flow`）。
+5. 终端输出同样按连接流控：读某个终端的连接 `saturated` 时 Host 暂停读它的 PTY，`drained` 后恢复（[rust-u2-gateway.md](rust-u2-gateway.md) §2.3）。
 
 ### 2.4 reload 后的 provider 启动门禁
 

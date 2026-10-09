@@ -1,11 +1,12 @@
 //! PTY 子进程与读写（替代 node-pty）。
 //!
-//! 输出按读到的块原样转发（不合并、不节流），UTF-8 用流式解码，多字节字符不会被拆开。
+//! 输出按读到的块原样转发（不合并、不节流），UTF-8 用流式解码，多字节字符不会被拆开。读之前先等
+//! 流控的门打开（`flow.rs`：读这个终端的连接积压过高时暂停读）。
 //! POSIX 上 master 的读写走 tokio `AsyncFd`，关闭时能真正关掉 fd（node-pty 在退出 200 ms 后
 //! 会销毁 socket，残留的后台进程随之收到挂断）；Windows ConPTY 用阻塞线程读写，关闭伪控制台后
 //! 读线程自然结束。
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::support::env::ProcessEnv;
 
@@ -157,10 +158,15 @@ mod unix_io {
         Ok(())
     }
 
-    /// 读到 EOF / EIO（slave 全部关闭）为止。
-    pub async fn read(fd: Arc<AsyncFd<File>>, mut on_chunk: impl FnMut(&[u8])) {
+    /// 读到 EOF / EIO（slave 全部关闭）为止；每次读之前等流控的门打开。
+    pub async fn read(
+        fd: Arc<AsyncFd<File>>,
+        mut paused: tokio::sync::watch::Receiver<bool>,
+        mut on_chunk: impl FnMut(&[u8]),
+    ) {
         let mut buffer = vec![0u8; 64 * 1024];
         loop {
+            super::super::flow::wait_open(&mut paused).await;
             let Ok(mut guard) = fd.readable().await else {
                 return;
             };
@@ -201,10 +207,11 @@ mod unix_io {
     }
 }
 
-/// 启动读写；每块输出解码后交给 `on_data`（可能在任意线程调用）。
+/// 启动读写；每块输出解码后交给 `on_data`（可能在任意线程调用）。`paused` 为 true 时不读（流控的门）。
 #[cfg(unix)]
 pub fn start(
     master: &dyn MasterPty,
+    paused: watch::Receiver<bool>,
     on_data: impl Fn(String) + Send + Sync + 'static,
 ) -> std::io::Result<PtyIo> {
     let raw = master
@@ -217,7 +224,7 @@ pub fn start(
         let fd = fd.clone();
         async move {
             let mut decoder = Utf8Stream::default();
-            unix_io::read(fd, |chunk| {
+            unix_io::read(fd, paused, |chunk| {
                 let text = decoder.push(chunk);
                 if !text.is_empty() {
                     on_data(text);
@@ -242,6 +249,7 @@ pub fn start(
 #[cfg(windows)]
 pub fn start(
     master: &dyn MasterPty,
+    mut paused: watch::Receiver<bool>,
     on_data: impl Fn(String) + Send + Sync + 'static,
 ) -> std::io::Result<PtyIo> {
     use std::io::{Read, Write};
@@ -251,10 +259,16 @@ pub fn start(
     let mut writer = master.take_writer().map_err(to_io)?;
     let (input, mut receiver) = mpsc::unbounded_channel::<String>();
     let (done, reader_done) = oneshot::channel();
+    // 读线程是阻塞线程：经运行时句柄等流控的门。
+    let runtime = tokio::runtime::Handle::current();
     std::thread::spawn(move || {
         let mut decoder = Utf8Stream::default();
         let mut buffer = vec![0u8; 64 * 1024];
-        while let Ok(read) = reader.read(&mut buffer) {
+        loop {
+            runtime.block_on(super::flow::wait_open(&mut paused));
+            let Ok(read) = reader.read(&mut buffer) else {
+                break;
+            };
             if read == 0 {
                 break;
             }

@@ -3,6 +3,8 @@
 //! 与 TS 相同：id 从 "0" 递增；输出块原样逐帧转发，没有缓冲与重放（订阅前的输出丢失，Renderer
 //! 创建后立即 resize，shell 收到 SIGWINCH 会重绘提示符）；dispose 后不再发 exit；未知 id 的
 //! write / resize 报 `Terminal not found`，dispose 静默忽略。实例属于整个 Host，不随连接清理。
+//! 与 TS 不同：读输出的连接积压过高时暂停读 PTY（`flow.rs`，docs/specs/rust-u2-gateway.md §2.3）。
+mod flow;
 pub mod launch;
 pub mod profile;
 pub mod pty;
@@ -12,11 +14,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use portable_pty::{Child, ChildKiller, MasterPty};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
-use zcode_host_kit::{EventHub, Reply, RpcError, ServiceBuilder, log, replies};
+use zcode_host_kit::{EventHub, EventStream, Reply, RpcError, ServiceBuilder, log, replies};
 
 use crate::settings::SettingStore;
 use crate::support::env::ProcessEnv;
@@ -99,6 +102,7 @@ struct Inner {
     settings: SettingStore,
     next_id: AtomicU64,
     terminals: Mutex<HashMap<String, Arc<Terminal>>>,
+    flow: Arc<flow::Flow>,
 }
 
 impl Terminals {
@@ -109,6 +113,7 @@ impl Terminals {
                 settings,
                 next_id: AtomicU64::new(0),
                 terminals: Mutex::new(HashMap::new()),
+                flow: Arc::default(),
             }),
         }
     }
@@ -160,11 +165,13 @@ impl Terminals {
         let data = EventHub::new();
         let exit = EventHub::new();
         let emitter = data.clone();
-        let io = match pty::start(master.as_ref(), move |text| {
+        let paused = self.inner.flow.open(&id);
+        let io = match pty::start(master.as_ref(), paused, move |text| {
             emitter.emit(Value::String(text))
         }) {
             Ok(io) => io,
             Err(error) => {
+                self.inner.flow.close(&id);
                 let _ = killer.kill();
                 return Err(failed(error.to_string()));
             }
@@ -236,6 +243,8 @@ impl Terminals {
         };
         terminal.data.close();
         terminal.exit.close();
+        // 没有人再读它的输出：不再暂停（Windows 关闭伪控制台要等输出排空）。
+        self.inner.flow.close(id);
         if let Err(error) = lock(&terminal.killer).kill() {
             log::debug(format!("terminal {id} kill failed: {error}"));
         }
@@ -250,6 +259,19 @@ impl Terminals {
         for id in ids {
             self.dispose(&id);
         }
+    }
+
+    /// `connection` 订阅终端 `id` 的输出；订阅流结束时撤销它在流控里的登记。
+    fn output(&self, id: &str, connection: u64) -> Result<EventStream, RpcError> {
+        let events = Box::pin(self.events(id, false)?.subscribe());
+        let reader = self.inner.flow.reader(id, connection);
+        Ok(replies(futures_util::stream::unfold(
+            (events, reader),
+            |(mut events, reader)| async move {
+                let value = events.next().await?;
+                Some((value, (events, reader)))
+            },
+        )))
     }
 
     fn events(&self, id: &str, exit: bool) -> Result<EventHub<Value>, RpcError> {
@@ -271,6 +293,10 @@ async fn supervise(
     mut io: PtyIo,
 ) {
     let status = tokio::task::spawn_blocking(move || child.wait()).await;
+    // 子进程已退出：剩余输出有限（PTY 缓冲），不再按流控暂停，照常读完。
+    if let Some(inner) = owner.upgrade() {
+        inner.flow.close(&id);
+    }
     let code = match status {
         // node-pty 只转发 exitCode；被信号终止时它是 0（信号值单独放在被丢弃的 signal 里）。
         Ok(Ok(status)) if status.signal().is_none() => status.exit_code(),
@@ -344,7 +370,12 @@ pub fn service(terminals: Terminals) -> ServiceBuilder {
         terminals.clone(),
         terminals.clone(),
     );
-    let (data, exit) = (terminals.clone(), terminals);
+    let (data, exit, flow, closed) = (
+        terminals.clone(),
+        terminals.clone(),
+        terminals.inner.flow.clone(),
+        terminals.inner.flow.clone(),
+    );
     let event_id = |arg: &Value| match arg {
         Value::String(id) => id.clone(),
         other => other.to_string(),
@@ -384,20 +415,21 @@ pub fn service(terminals: Terminals) -> ServiceBuilder {
             async move { result.map(|()| Reply::Undefined) }
         })
         // 未知 id：TS 在订阅处理里抛错（不应答）；这里同样拒绝订阅，Host 只记日志。
-        .event("onDynamicData", move |_, arg| {
-            Ok(replies(data.events(&event_id(&arg), false)?.subscribe()))
+        .event("onDynamicData", move |context, arg| {
+            data.output(&event_id(&arg), context.connection)
         })
         .event("onDynamicExit", move |_, arg| {
             Ok(replies(exit.events(&event_id(&arg), true)?.subscribe()))
         })
+        .on_connection_flow(move |context, state| flow.set_state(context.connection, state))
+        .on_connection_closed(move |context| closed.connection_closed(context.connection))
 }
 
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::testing::{call, channel, listen, reply_value};
-    use futures_util::StreamExt;
-    use zcode_host_kit::EventStream;
+    use zcode_host_kit::{CallContext, FlowState, RpcValue};
 
     fn terminals(home: &std::path::Path) -> Terminals {
         let env = ProcessEnv::new(
@@ -493,6 +525,114 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.message, "Terminal not found: 0");
+    }
+
+    fn on_connection(connection: u64) -> CallContext {
+        CallContext {
+            connection,
+            attachment_id: format!("connection-{connection}"),
+            client_mode: zcode_host_control::ClientMode::DesktopContinuous,
+            window_id: None,
+        }
+    }
+
+    /// 读到输出停下来（`quiet` 内没有新输出）为止，返回读到的字节数；结束标记出现时返回 None。
+    async fn read_until_quiet(
+        events: &mut EventStream,
+        quiet: Duration,
+        end: &str,
+    ) -> Option<usize> {
+        let mut bytes = 0;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match tokio::time::timeout(quiet, events.next()).await {
+                Ok(Some(reply)) => {
+                    let text = reply_value(reply);
+                    let text = text.as_str().unwrap();
+                    if text.contains(end) {
+                        return None;
+                    }
+                    bytes += text.len();
+                    assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "output kept flowing while the reading connection was saturated ({bytes} bytes)"
+                    );
+                }
+                Ok(None) => panic!("terminal output ended"),
+                Err(_) => return Some(bytes),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn output_pauses_while_a_reading_connection_is_saturated() {
+        let home = tempfile::tempdir().unwrap();
+        let terminal = channel(service(terminals(home.path())));
+        let created = call(&terminal, "create", json!({"cols": 80, "rows": 24}))
+            .await
+            .unwrap();
+        let id = created["id"].as_str().unwrap().to_owned();
+        let reader = on_connection(1);
+        let mut data = terminal
+            .listen(&reader, "onDynamicData", RpcValue::String(id.clone()))
+            .unwrap();
+
+        // 不读这个终端的连接 saturated：输出照常。
+        terminal.connection_flow(&on_connection(2), FlowState::Saturated);
+        call(
+            &terminal,
+            "write",
+            json!({"id": id, "data": "echo READY-$((40+2))\n"}),
+        )
+        .await
+        .unwrap();
+        read_until(&mut data, "READY-42").await;
+
+        // 远多于 PTY 与读缓冲能容纳的输出；结束标记由 shell 计算，回显的命令行里没有它。
+        call(
+            &terminal,
+            "write",
+            json!({"id": id, "data": "head -c 20000000 /dev/zero | tr '\\0' x; echo; echo FLOOD-$((6*7))\n"}),
+        )
+        .await
+        .unwrap();
+        read_until(&mut data, "xxxx").await;
+        terminal.connection_flow(&reader, FlowState::Saturated);
+        // 已经读出的块还会到达；之后 PTY 不再被读，输出停止。
+        let delivered = read_until_quiet(&mut data, Duration::from_millis(500), "FLOOD-42")
+            .await
+            .expect("the flood finished while the reading connection was saturated");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(800), data.next())
+                .await
+                .is_err(),
+            "output resumed while saturated (after {delivered} bytes)"
+        );
+
+        // drained：输出继续到结束。
+        terminal.connection_flow(&reader, FlowState::Drained);
+        read_until_quiet(&mut data, Duration::from_secs(10), "FLOOD-42").await;
+
+        // saturated 的连接关闭（订阅随之结束）后，不再暂停这个终端。
+        terminal.connection_flow(&reader, FlowState::Saturated);
+        drop(data);
+        terminal.connection_closed(&reader);
+        let mut next = terminal
+            .listen(
+                &on_connection(3),
+                "onDynamicData",
+                RpcValue::String(id.clone()),
+            )
+            .unwrap();
+        call(
+            &terminal,
+            "write",
+            json!({"id": id, "data": "echo AFTER-$((50+5))\n"}),
+        )
+        .await
+        .unwrap();
+        read_until(&mut next, "AFTER-55").await;
+        call(&terminal, "dispose", json!({"id": id})).await.unwrap();
     }
 
     #[tokio::test]

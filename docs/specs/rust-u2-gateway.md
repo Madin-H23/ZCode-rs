@@ -101,17 +101,21 @@ pub trait CallObserver: Send + Sync { fn call_finished(&self, channel: &str, met
 
 每条连接一个出站队列，按字节计数，由 Gateway 持有。
 
-| 阈值           | 行为                                                                                                                        |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| 高水位 1 MiB   | 边沿通知各 channel `saturated`（不变）：`zcode-agent` 暂停该连接的流式投递并标记需要重新同步（rust-host-resilience.md 2.3） |
-| 低水位 256 KiB | 边沿通知 `drained`（不变）                                                                                                  |
-| 上限 256 MiB   | 关闭这条连接并记 warn。此时客户端已长时间不读（界面进程挂起）；继续缓存只会拖垮 Host。窗口重新加载后重新接入                |
+| 阈值           | 行为                                                                                                                                                           |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 高水位 1 MiB   | 边沿通知各 channel `saturated`：`zcode-agent` 暂停该连接的流式投递并标记需要重新同步（rust-host-resilience.md 2.3）；`terminal` 暂停读该连接订阅的终端（见下） |
+| 低水位 256 KiB | 边沿通知 `drained`：`zcode-agent` 刷新、必要时快照恢复；`terminal` 恢复读                                                                                      |
+| 上限 256 MiB   | 关闭这条连接并记 warn。此时客户端已长时间不读（界面进程挂起）；继续缓存只会拖垮 Host。正常使用不应到达，见下面的终端流控                                       |
 
 - 队列顺序即发送顺序。回复与事件走同一个队列，保持它们之间的先后。
 - 一条连接的积压不影响其他连接。
 - 积压是已入队、还没写完的字节数（含 transport 已取出、正在写的那一条）。边沿经连接循环交给各 channel，与请求在同一个循环里处理。
 - 连接关闭（任何原因）时，还没发送的消息随连接一起丢弃。越过上限时记 `connection <id> outbound backlog exceeded <limit> bytes; closing the connection`。
 - 生产者入队不等待：调用任务、订阅转发与连接循环都不会因为对端读得慢而挂起；约束来自上限，而不是阻塞生产者。
+- **终端输出按连接流控**（`crates/workspace/src/terminal/flow.rs`）：读某个终端输出（`onDynamicData`）的连接里只要有一条处于 saturated，Host 就暂停读这个终端的 PTY；这些连接都 drained（或关闭、取消订阅）后恢复。PTY 缓冲写满后 shell 里的进程写阻塞，与真实终端相同；Ctrl+C 走输入方向，不受影响。连接先 saturated、后订阅时立即暂停。子进程退出后不再暂停，剩余输出照常读完。
+  - 原因（2026-10-10 桌面 E2E）：PTY 读多快就入队多快，而 Renderer 渲染终端输出只有每秒几 MB。终端里运行 `yes`，积压每秒涨约 40–50 MB，8–11 s 越过上限，Gateway 关闭窗口的连接（调试与发布构建都会）；Gateway 之前的 Host 不关闭，但内存无界增长（24 s 到 1.2 GB）。
+  - 其余事件源（文件监听等）仍不受约束，由上限兜底。
+- 上限关闭之后：Renderer 把连上之后的任何关闭都当成 Host 退出，显示“正在重连”并等待 Main 重启 Host；而 Host 仍在运行，Main 不会重启，窗口停在这一页，只能退出（`packages/desktop/src/renderer/src/hostConnectionLost.tsx`）。这是已知缺口，见 §4。
 
 ### 2.4 连接关闭
 
@@ -131,14 +135,15 @@ pub trait CallObserver: Send + Sync { fn call_finished(&self, channel: &str, met
 
 ### 2.5 状态所有者
 
-| 状态                           | 所有者              |
-| ------------------------------ | ------------------- |
-| 根作用域 `host`                | `HostCore`          |
-| 连接表、连接作用域             | Gateway             |
-| 出站队列与水位                 | Gateway（每连接）   |
-| 串行键的队列                   | Gateway（Host 级）  |
-| capability 签发与兑换          | `host-core`（不变） |
-| channel 表（本地与远端 scope） | `host-core`（不变） |
+| 状态                                     | 所有者                                           |
+| ---------------------------------------- | ------------------------------------------------ |
+| 根作用域 `host`                          | `HostCore`                                       |
+| 连接表、连接作用域                       | Gateway                                          |
+| 出站队列与水位                           | Gateway（每连接）                                |
+| 终端输出的暂停（哪些连接在读、是否暂停） | `workspace` 的 `terminal` 服务（每个终端一个门） |
+| 串行键的队列                             | Gateway（Host 级）                               |
+| capability 签发与兑换                    | `host-core`（不变）                              |
+| channel 表（本地与远端 scope）           | `host-core`（不变）                              |
 
 ```mermaid
 sequenceDiagram
@@ -165,13 +170,16 @@ sequenceDiagram
   - 排队中的调用被取消后不执行；连接关闭后它排队的调用不执行，其他连接同一键的调用继续。
   - 水位边沿与今天相同；越过上限时只关闭这一条连接。
   - `connection_closed` 恰好一次，且晚于该连接所有调用任务的结束。
+- 测试（`zcode-host-workspace` 的 `terminal`）：读终端输出的连接 saturated 时 PTY 不再被读（输出停止、写端阻塞），drained 后输出继续到结束；其他连接 saturated 不影响它；saturated 的连接关闭后恢复。
+- 桌面 E2E `gateway-backlog`：终端里运行 `yes` 一段时间，窗口的连接不被关闭，Ctrl+C 之后终端与对话都可用；Renderer 卡住数秒期间的多轮大输出完整显示。`gateway-ordering`：忙碌会话里连续发送的两条消息按发送顺序排队、按顺序执行；另一个会话流式输出期间应答权限与提问。`gateway-detach`：流式中途销毁窗口，Host 上它的连接被收口，run 继续，另一个窗口跟到结束；`resilience-reload` 另查 reload 后旧页面的连接被收口。每个场景结束时 harness 断言 Host 日志没有任务 panic 与越过上限的关闭。
 - `tokio::spawn` 不出现在 `zcode-host-gateway`、`host-core` 与 `zcode-host` 中（任务都在作用域里）：`scripts/rust/check-host-spawns.mjs`（`pnpm check:rust` 的一步）扫描这三个 crate 的非测试代码，也禁止取运行时句柄自行 spawn。其余 crate 迁移后加入它的列表。
 - 现有测试、`pnpm test:rust-host`、桌面 E2E 全部通过；控制 RPC 的延迟测试（`control_latency`）不退化。
 
 ## 4. 本期不做
 
-| 项                                                                        | 去向与原因                                                                                                                     |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 方法表宏（参数与结果类型、能力检查、向 TS 导出）与 `zcode-gateway-legacy` | U9（D-U5：从 U9 起以 Rust 方法表为契约来源）。在那之前契约来源仍是 TS，40 个 channel 继续由各 service 用 `ServiceBuilder` 注册 |
-| 按连接能力过滤方法（手机默认不能用终端等）                                | U7                                                                                                                             |
-| 投递策略对象（`Continuous` / `Replayable`）与两份 delivery 的合并         | U3 B 期，与进程内类型化链路一起做                                                                                              |
+| 项                                                                              | 去向与原因                                                                                                                     |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 方法表宏（参数与结果类型、能力检查、向 TS 导出）与 `zcode-gateway-legacy`       | U9（D-U5：从 U9 起以 Rust 方法表为契约来源）。在那之前契约来源仍是 TS，40 个 channel 继续由各 service 用 `ServiceBuilder` 注册 |
+| 按连接能力过滤方法（手机默认不能用终端等）                                      | U7                                                                                                                             |
+| 投递策略对象（`Continuous` / `Replayable`）与两份 delivery 的合并               | U3 B 期，与进程内类型化链路一起做                                                                                              |
+| 上限关闭后的 Renderer 恢复（Host 主动关闭连接时重新接入，而不是等待 Host 重启） | 待定：需要 Host 在 WebSocket Close 里给出原因，Renderer 据此 reload；终端流控之后正常使用不再到达上限                          |
