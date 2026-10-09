@@ -214,19 +214,12 @@ pub fn install(
     // 生命周期、查询与事件成员；automation / off-peak / bots 也可直接用 TaskLifecycle 的 API。
     let task_lifecycle = tasks::lifecycle::TaskLifecycle::start(task_context.clone());
     registry.implement(tasks::lifecycle_service::service(task_lifecycle));
-    // task realtime bridge：与 Main taskRealtimeBus 的 lease / owner 命令；会话消息总是应答。
-    tasks::realtime::register_session_messages(router, MainBridge::new(context.control.clone()));
-    if let Some(realtime) = tasks::realtime::TaskRealtimeBridge::for_host_init(
-        context.init.host_id.as_deref(),
-        context.init.delivery_kind.as_deref(),
-        MainBridge::new(context.control.clone()),
-    ) {
-        realtime.register(router);
-        task_context.set_realtime(realtime);
-    }
+    // App 级 Host 不建立到 Main taskRealtimeBus 的实时桥（rust-u4-app-host.md §2.5）：run 的 owner 与
+    // stale run 判断在 TaskLifecycle 内；远端 workspace 的会话消息请求由 remote 区域在 Host 内应答。
+    // `init-local` 的 hostId / deliveryKind 仍可解析但不再使用。
     let syncer = tasks::syncer::start(&observer, agent.clone(), task_service.clone());
     let controller = tasks::controller::Controller::start(
-        Arc::new(task_context.clone()),
+        Arc::new(task_context),
         observer.clone(),
         workspace_events,
     );
@@ -291,7 +284,6 @@ pub fn install(
             providers: providers.clone(),
         },
         &controller,
-        task_context.realtime().cloned(),
         router,
     );
 

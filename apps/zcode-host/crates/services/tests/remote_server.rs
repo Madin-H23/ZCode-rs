@@ -172,7 +172,6 @@ async fn remote_workspace_against_a_real_zcode_server() {
             },
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),
-            realtime: None,
         },
         &mut router,
     );

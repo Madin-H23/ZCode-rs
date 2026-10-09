@@ -40,8 +40,10 @@ pub enum MainToHost {
 #[serde(rename_all = "camelCase")]
 pub struct InitLocal {
     pub database_startup_id: Option<String>,
+    /// 旧的窗口 Host 注册 task realtime bus 用的 id；App 级 Host 不再使用（rust-u4-app-host.md §2.5），
+    /// Main 的旧路径落地前仍可能携带，保留可解析。
     pub host_id: Option<String>,
-    /// task realtime bridge 的投递方式（`TaskRealtimeHostDeliveryKind`），缺省 desktop_window。
+    /// 同上：task realtime bridge 的投递方式（`TaskRealtimeHostDeliveryKind`），不再使用。
     pub delivery_kind: Option<String>,
     pub device_mid: Option<String>,
     pub workspace_path: Option<String>,

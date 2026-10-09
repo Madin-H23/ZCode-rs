@@ -1,4 +1,4 @@
-//! 远端 workspace（docs/specs/rust-host-remote.md）：窗口级连接注册表、远端 `@zcode/rpc` 连接、
+//! 远端 workspace（docs/specs/rust-host-remote.md）：App 级连接注册表、远端 `@zcode/rpc` 连接、
 //! scoped channel 表、window-controller 远端 source 与远端媒体预览代理。
 //!
 //! [`RemoteWorkspaces`] 是本模块对 Host 其余部分的唯一入口：
@@ -31,7 +31,6 @@ use zcode_host_control::{ClientMode, ControlRouter, ControlSink, HostToMain, Log
 use zcode_host_kit::{ChannelRegistry, RpcValue, log};
 
 use crate::settings::SettingStore;
-use crate::tasks::realtime::TaskRealtimeBridge;
 use agent_scope::RemoteAgentChannel;
 use provisioning::ProvisioningSource;
 use registry::{
@@ -50,7 +49,7 @@ pub struct RemoteHandle {
     /// 每条 attachment 连接一个 scope，按 `CallContext.connection` 区分。
     pub agent: Arc<RemoteAgentChannel>,
     pub tracker: Arc<tasks::TaskTracker>,
-    /// zcode-task wrapper（附件物化、运行中任务、realtime 镜像），attachment 与 Bot 共用。
+    /// zcode-task wrapper（附件物化、运行中任务），attachment 与 Bot 共用。
     pub tasks: Arc<tasks::RemoteTaskOps>,
     /// 远端 attachment 的 `bots` channel 背后的 Bots 实例（第一次 attach 时建，§2.9.8）。
     bots: OnceLock<Arc<crate::bots::service::Bots>>,
@@ -87,8 +86,6 @@ pub struct RemoteConfig {
     /// `ZCODE_REMOTE_MEDIA_RANGE_PREVIEW_ENABLED !== "0"`。
     pub media_range_enabled: bool,
     pub wsl_idle_ttl: Duration,
-    /// tasks 区域的 task realtime bridge（InitLocal 带 hostId 时才有），远端 sendPrompt 镜像用。
-    pub realtime: Option<Arc<TaskRealtimeBridge>>,
 }
 
 /// host-core 拿到的远端 attachment：channel 表与断开信号（session 断线、释放或换代时置 true）。
@@ -149,7 +146,6 @@ impl RemoteWorkspaces {
             let settings = config.settings.clone();
             let control = config.control.clone();
             let progress_for_connect = progress.clone();
-            let realtime = config.realtime.clone();
             let owner = weak.clone();
             let mut options = RegistryOptions::new(Arc::new(move |request: ConnectRequest| {
                 let (transport, settings, control, progress, owner) = (
@@ -159,12 +155,8 @@ impl RemoteWorkspaces {
                     progress_for_connect.clone(),
                     owner.clone(),
                 );
-                let realtime = realtime.clone();
                 Box::pin(async move {
-                    connect_handle(
-                        transport, settings, control, progress, owner, realtime, request,
-                    )
-                    .await
+                    connect_handle(transport, settings, control, progress, owner, request).await
                 }) as BoxFuture<'static, _>
             }));
             options.release_workspace = Some(Arc::new(|handle: Arc<RemoteHandle>, context| {
@@ -688,7 +680,6 @@ async fn connect_handle(
     control: Arc<dyn ControlSink>,
     progress: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     owner: std::sync::Weak<RemoteWorkspaces>,
-    realtime: Option<Arc<TaskRealtimeBridge>>,
     request: ConnectRequest,
 ) -> Result<Arc<RemoteHandle>, String> {
     let current = settings.get().await;
@@ -762,7 +753,7 @@ async fn connect_handle(
         &control,
         telemetry_environment_key(&request.target),
     ));
-    // 运行中任务数（WSL 释放屏障）回到窗口 registry。
+    // 运行中任务数（WSL 释放屏障）回到 registry。
     let tracker = tasks::TaskTracker::new(
         connection.client.clone(),
         control,
@@ -778,7 +769,6 @@ async fn connect_handle(
         connection.client.clone(),
         connection.backend.clone(),
         tracker.clone(),
-        realtime,
     );
     Ok(Arc::new(RemoteHandle {
         tracker,
@@ -799,7 +789,6 @@ pub fn install(
     context: &crate::ServiceContext,
     sources: provisioning::ProvisioningSources,
     controller: &Arc<crate::tasks::controller::Controller>,
-    realtime: Option<Arc<TaskRealtimeBridge>>,
     router: &mut ControlRouter,
 ) -> Arc<RemoteWorkspaces> {
     let environment = &context.environment;
@@ -840,7 +829,6 @@ pub fn install(
             media_range_enabled: non_empty("ZCODE_REMOTE_MEDIA_RANGE_PREVIEW_ENABLED").as_deref()
                 != Some("0"),
             wsl_idle_ttl: Duration::from_secs(60),
-            realtime,
         },
         router,
     );
