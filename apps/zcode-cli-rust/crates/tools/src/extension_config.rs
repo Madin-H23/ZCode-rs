@@ -4,10 +4,10 @@ use std::path::{Component, Path, PathBuf};
 use tokio::io::AsyncReadExt;
 
 /// `~` / `~/…` against `home`, other relative paths against `base`; `.` and
-/// `..` components are folded. `home` comes from `zcode_kit::paths::home_dir`.
+/// `..` components are folded. `home` is the runtime's home (`Egress::home`).
 pub(super) fn resolve(base: &Path, path: &str, home: &Path) -> PathBuf {
     // B4 缺陷修复：旧实现在 HOME 为空时把 `~/x` 解析成相对路径 `x`（落到进程 cwd 下）；
-    // 现在 home 由调用方经 home_dir() 取得，绝不为空，`~` 展开与其他入口一致。
+    // 现在 home 是 runtime 启动时解析的目录（Egress::home），绝不为空，`~` 展开与其他入口一致。
     let raw = base.join(zcode_kit::paths::expand_home(path, home));
     let mut result = PathBuf::new();
     for part in raw.components() {
@@ -59,13 +59,16 @@ pub(super) fn strings(value: &Value) -> Vec<&str> {
 }
 
 /// Plugin discovery for the runtime (skills, MCP, agents; spec rust-m10-plugins §3.5).
+/// Templates read the runtime's environment (Node `process.env`), not the process's.
 pub(super) async fn plugins(
+    egress: &zcode_cli_net::Egress,
     cwd: &Path,
     config: &Value,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<zcode_cli_plugins::Outcome> {
-    let storage = zcode_cli_plugins::records::storage_root(config, &zcode_kit::paths::home_dir()?);
-    let lookup = |name: &str| std::env::var(name).ok();
+    let storage = zcode_cli_plugins::records::storage_root(config, egress.home());
+    let env = egress.runtime_env();
+    let lookup = |name: &str| env.get(name).map(str::to_owned);
     zcode_cli_plugins::discover(&zcode_cli_plugins::Request {
         config,
         storage: &storage,

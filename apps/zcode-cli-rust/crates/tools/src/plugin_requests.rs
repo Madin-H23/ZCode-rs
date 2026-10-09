@@ -45,7 +45,7 @@ pub(super) async fn handle(
     } else {
         &snapshot.config
     };
-    let storage = plugins::records::storage_root(view, &zcode_kit::paths::home_dir()?);
+    let storage = plugins::records::storage_root(view, tools.egress.home());
     let env = env_lookup(tools);
     let lookup = |name: &str| env.get(name).map(|v| (*v).to_owned());
     let request = plugins::Request {
@@ -145,9 +145,11 @@ pub(super) async fn hooks(
     cancel: &CancellationToken,
 ) -> Result<Vec<(zcode_cli_domain::hooks::HookEvent, Value)>> {
     let snapshot = tools.config.load().await?;
-    Ok(config::plugins(&tools.cwd, &snapshot.config, cancel)
-        .await?
-        .hooks)
+    Ok(
+        config::plugins(&tools.egress, &tools.cwd, &snapshot.config, cancel)
+            .await?
+            .hooks,
+    )
 }
 
 /// The workspace reference catalog with provenance roots (frozen per session by the engine).
@@ -156,6 +158,6 @@ pub(super) async fn catalog(
     cancel: &CancellationToken,
 ) -> Result<Vec<Value>> {
     let snapshot = tools.config.load().await?;
-    let outcome = config::plugins(&tools.cwd, &snapshot.config, cancel).await?;
+    let outcome = config::plugins(&tools.egress, &tools.cwd, &snapshot.config, cancel).await?;
     Ok(plugins::catalog::build(&outcome.plugins))
 }

@@ -432,6 +432,7 @@ impl Copier {
 
 /// `copyDataDirectory(oldBaseDir, newBaseDir)`。
 pub async fn copy_data_directory(old_base: &str, new_base: &str) -> Result<()> {
+    #[expect(clippy::disallowed_methods, reason = "存量，U3 改为显式传入")]
     let cwd = std::env::current_dir()
         .map(|dir| dir.to_string_lossy().into_owned())
         .unwrap_or_default();

@@ -154,3 +154,25 @@ fn log_files_are_owner_only() {
     let mode = std::fs::metadata(file).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);
 }
+
+#[test]
+fn options_come_from_the_given_environment() {
+    let home = std::path::Path::new("/home/u");
+    let defaults = LogOptions::from_env(home, |_| None);
+    assert_eq!(defaults.directory, home.join(".zcode/cli/log"));
+    assert_eq!(defaults.level, Level::INFO);
+    assert!(!defaults.console);
+    let env = |name: &str| {
+        let value = match name {
+            "ZCODE_LOG_DIR" => "/logs",
+            "ZCODE_RUNTIME_ENV" => "development",
+            "ZCODE_LOG_CONSOLE" => "1",
+            _ => return None,
+        };
+        Some(value.into())
+    };
+    let given = LogOptions::from_env(home, env);
+    assert_eq!(given.directory, std::path::PathBuf::from("/logs"));
+    assert_eq!(given.level, Level::DEBUG);
+    assert!(given.console);
+}

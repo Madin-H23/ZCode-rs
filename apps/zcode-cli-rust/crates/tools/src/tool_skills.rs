@@ -18,13 +18,15 @@ struct Root {
     plugin_root: Option<PathBuf>,
 }
 pub(super) async fn discover(
+    egress: &zcode_cli_net::Egress,
     cwd: &Path,
     config: &serde_json::Value,
     cancel: &CancellationToken,
 ) -> Result<SkillCatalog> {
-    tokio::select! {biased; _=cancel.cancelled()=>anyhow::bail!("Cancelled"), result=discover_inner(cwd,config,cancel)=>result}
+    tokio::select! {biased; _=cancel.cancelled()=>anyhow::bail!("Cancelled"), result=discover_inner(egress,cwd,config,cancel)=>result}
 }
 async fn discover_inner(
+    egress: &zcode_cli_net::Egress,
     cwd: &Path,
     config: &serde_json::Value,
     cancel: &CancellationToken,
@@ -40,7 +42,7 @@ async fn discover_inner(
     if !catalog.enabled {
         return Ok(catalog);
     }
-    let home = zcode_kit::paths::home_dir()?;
+    let home = egress.home().to_owned();
     let mut roots = config::strings(&config["skills"]["roots"])
         .into_iter()
         .map(|p| Root {
@@ -67,7 +69,10 @@ async fn discover_inner(
             });
         }
     }
-    for root in config::plugins(cwd, config, cancel).await?.skill_roots {
+    for root in config::plugins(egress, cwd, config, cancel)
+        .await?
+        .skill_roots
+    {
         roots.push(Root {
             path: root.path,
             scope: "plugin".into(),

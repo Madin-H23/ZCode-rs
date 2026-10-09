@@ -150,8 +150,7 @@ pub async fn resolve(input: &Input<'_>, ports: &Ports<'_>) -> Result<Resolved> {
             {
                 return Ok(Resolved::local(local));
             }
-            let fallback =
-                crate::fsx::resolve(&std::env::current_dir().unwrap_or_default(), source);
+            let fallback = crate::fsx::resolve(ports.cwd, source);
             if crate::fsx::is_dir(&fallback).await {
                 return Ok(Resolved::local(fallback));
             }
@@ -175,7 +174,7 @@ async fn object(source: &Map<String, Value>, id: &str, ports: &Ports<'_>) -> Res
     match kind {
         "directory" => {
             let raw = required(source, "path", "directory path")?;
-            let path = crate::fsx::resolve(&std::env::current_dir().unwrap_or_default(), raw);
+            let path = crate::fsx::resolve(ports.cwd, raw);
             if crate::fsx::is_dir(&path).await {
                 return Ok(Resolved::local(path));
             }
@@ -215,3 +214,7 @@ async fn object(source: &Map<String, Value>, id: &str, ports: &Ports<'_>) -> Res
         ),
     }
 }
+
+#[cfg(test)]
+#[path = "plugin_source_tests.rs"]
+mod tests;

@@ -123,6 +123,7 @@ impl RuntimeClock for Clock {
     }
 }
 #[tokio::test]
+#[expect(clippy::disallowed_methods, reason = "测试的 git 探测沿用进程环境")]
 async fn goal_start_and_verdict_are_durable_barriers_and_failure_stops_the_next_request() {
     for verdict in [false, true] {
         for success in [false, true] {

@@ -17,7 +17,15 @@ await-holding-invalid-types = [
 
 # 子进程的唯一入口（docs/specs/rust-u0-foundation.md §3.5）：只有 zcode-proc 可以直接创建 Command，
 # U1 起在那里注入运行时环境。测试同样经 zcode-proc 创建子进程。
+#
+# 进程环境与进程 cwd 只在二进制入口读取（docs/specs/rust-u1-runtime-library.md L4、L5）：
+# runtime 会嵌进 Host 进程，库内读到的会是 Host 的值。允许的位置逐处用 `#[expect]` 标注理由。
 disallowed-methods = [
   { path = "std::process::Command::new", reason = "use zcode_proc::std_command (rust/crates/proc, spec rust-u0-foundation §3.5)" },
   { path = "tokio::process::Command::new", reason = "use zcode_proc::command (rust/crates/proc, spec rust-u0-foundation §3.5)" },
+  { path = "std::env::var", reason = "read the runtime's RuntimeEnv snapshot or an explicit parameter (spec rust-u1-runtime-library L4/L5)" },
+  { path = "std::env::var_os", reason = "read the runtime's RuntimeEnv snapshot or an explicit parameter (spec rust-u1-runtime-library L4/L5)" },
+  { path = "std::env::vars", reason = "read the runtime's RuntimeEnv snapshot or an explicit parameter (spec rust-u1-runtime-library L4/L5)" },
+  { path = "std::env::vars_os", reason = "read the runtime's RuntimeEnv snapshot or an explicit parameter (spec rust-u1-runtime-library L4/L5)" },
+  { path = "std::env::current_dir", reason = "use the workspace root or an explicit base directory (spec rust-u1-runtime-library L4/L5)" },
 ]

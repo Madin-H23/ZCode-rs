@@ -60,12 +60,12 @@ fn entry_compatibility(entry: &Entry, marketplace: &str, out: &mut Vec<Diagnosti
     compatibility(&manifest, Path::new(&id), &id, out);
 }
 
-/// Node `validatePluginRoot`.
+/// Node `validatePluginRoot`; MCP `cwd` values resolve against `ports.cwd`.
 pub async fn root(
     entry: &Entry,
     marketplace: &str,
     root: &Path,
-    storage: &Path,
+    ports: &Ports<'_>,
 ) -> Vec<Diagnostic> {
     let id = format!("{}@{marketplace}", entry.name);
     let mut out = vec![];
@@ -103,8 +103,8 @@ pub async fn root(
     let definitions = crate::mcp::definitions(&plugin, &mut out).await;
     let context = crate::mcp::Context {
         loaded: &plugin,
-        data_path: &crate::store::data_dir(storage, &id),
-        cwd: &std::env::current_dir().unwrap_or_default(),
+        data_path: &crate::store::data_dir(ports.storage, &id),
+        cwd: ports.cwd,
         env: &|_| None,
         options: &Map::new(),
     };
@@ -245,15 +245,7 @@ async fn resolved_root(
     let id = format!("{}@{}", input.entry.name, input.marketplace);
     match plugin_source::resolve(input, ports).await {
         Ok(resolved) => {
-            out.extend(
-                root(
-                    input.entry,
-                    input.marketplace,
-                    &resolved.path,
-                    ports.storage,
-                )
-                .await,
-            );
+            out.extend(root(input.entry, input.marketplace, &resolved.path, ports).await);
             crate::store::cleanup(resolved.cleanup.as_deref()).await;
             true
         }

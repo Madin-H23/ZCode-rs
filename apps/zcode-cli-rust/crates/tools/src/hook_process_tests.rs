@@ -21,6 +21,7 @@ fn shell(command: &str) -> Program {
     }
 }
 
+#[expect(clippy::disallowed_methods, reason = "测试子进程沿用进程的 PATH")]
 fn base_env() -> Vec<(String, String)> {
     vec![("PATH".into(), std::env::var("PATH").unwrap_or_default())]
 }

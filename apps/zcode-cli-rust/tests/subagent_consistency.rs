@@ -126,6 +126,7 @@ impl RuntimeClock for Clock {
     }
 }
 #[tokio::test]
+#[expect(clippy::disallowed_methods, reason = "测试的 git 探测沿用进程环境")]
 async fn child_start_and_result_require_both_owners_to_commit_and_failure_releases_waiters() {
     for stage in ["child", "parent", "result"] {
         for success in [false, true] {

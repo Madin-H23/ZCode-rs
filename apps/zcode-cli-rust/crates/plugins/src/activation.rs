@@ -1,7 +1,7 @@
 //! Atomic directory activation (Node `activateDirectoryAtomically`): a staged
 //! copy replaces the target through a recoverable backup, committed once the
 //! authority file records the transaction id. Spec rust-m10-4-plugin-sources §3.
-use crate::atomic::{ACTIVE, Live, OWNER_ID, recover, sidecars};
+use crate::atomic::{ACTIVE, Live, OWNER_ID, Running, recover, registry, sidecars};
 use crate::store;
 use anyhow::{Result, anyhow};
 use serde_json::json;
@@ -27,8 +27,8 @@ fn already_active(target: &Path) -> anyhow::Error {
 
 /// Releases the in-process registration of a target.
 fn release(key: &Path) {
-    ACTIVE.lock().expect("atomic registry").remove(key);
-    RESERVED.lock().expect("atomic reservations").remove(key);
+    registry(&ACTIVE).remove(key);
+    registry(&RESERVED).remove(key);
 }
 
 pub struct Activation {
@@ -38,6 +38,8 @@ pub struct Activation {
     marker: PathBuf,
     moved: bool,
     pub transaction_id: String,
+    /// Set once the marker may exist; dropped with the activation.
+    running: Option<Running>,
 }
 
 impl Activation {
@@ -62,7 +64,8 @@ impl Activation {
 
 impl Drop for Activation {
     fn drop(&mut self) {
-        // finalize/rollback 之外被丢弃时仍解除登记；磁盘标记留给读取方按存活 owner 规则处理。
+        // finalize/rollback 之外被丢弃时仍解除登记；事务随之不再存活，磁盘标记由读取方按
+        // 无主事务恢复（spec rust-u1-runtime-library L6）。
         release(&self.key);
     }
 }
@@ -162,13 +165,14 @@ where
         marker,
         moved: false,
         transaction_id: uuid::Uuid::new_v4().to_string(),
+        running: None,
     };
     let mut marker_written = false;
     let result = async {
         {
             // 固定 backup/标记只支持单写者：同一目标的第二个事务直接失败。
-            let active = ACTIVE.lock().expect("atomic registry").contains_key(&key);
-            let mut reserved = RESERVED.lock().expect("atomic reservations");
+            let active = registry(&ACTIVE).contains_key(&key);
+            let mut reserved = registry(&RESERVED);
             if active || !reserved.insert(key.clone()) {
                 // 未取得保留时不能解除他人的登记。
                 activation.key = PathBuf::new();
@@ -185,7 +189,8 @@ where
         // 暂存完整后才进入提交点；之后不再响应取消。
         let had_target = tokio::fs::metadata(target).await.is_ok();
         let coordinated = authority.is_some();
-        ACTIVE.lock().expect("atomic registry").insert(
+        activation.running = Some(Running::register(&activation.transaction_id));
+        registry(&ACTIVE).insert(
             key.clone(),
             Live {
                 authority: authority.clone(),

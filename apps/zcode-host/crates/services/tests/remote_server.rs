@@ -4,6 +4,10 @@
 //! 再释放。所有出站 HTTP 被指向 127.0.0.1 上已关闭的端口，不访问任何真实服务。
 //!
 //! 构建产物：`pnpm --filter @zcode/server build:remote`。没有产物或找不到 node 时跳过并说明原因。
+#![expect(
+    clippy::disallowed_methods,
+    reason = "集成测试从进程环境取被测二进制与 PATH"
+)]
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

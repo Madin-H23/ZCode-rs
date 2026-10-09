@@ -32,6 +32,7 @@ pub struct Context {
 impl Context {
     /// `home` is resolved once by the entry point (`zcode_kit::paths::home_dir`),
     /// before logging starts, so every reader shares the same directory.
+    #[expect(clippy::disallowed_methods, reason = "二进制入口读取进程环境与 cwd")]
     pub async fn prepare(
         home: PathBuf,
         cwd: Option<PathBuf>,
@@ -76,6 +77,7 @@ impl Context {
                 runtime_env.clone(),
                 &NetworkPolicy::from_config(&startup_config.config["network"]),
                 &home,
+                &std::env::current_dir()?,
                 "electron",
             )
             .map_err(anyhow::Error::msg)
@@ -95,6 +97,7 @@ impl Context {
     }
 
     /// The Node session database and artifact root (spec rust-m11-node-storage §2.1).
+    #[expect(clippy::disallowed_methods, reason = "二进制入口读取进程 cwd")]
     pub async fn node_database(&self) -> Result<zcode_cli_host::storage_paths::StoragePaths> {
         let config = self.workspace_config.snapshot().await;
         Ok(zcode_cli_host::storage_paths::resolve(
@@ -119,7 +122,7 @@ impl Context {
         config: Option<&PathBuf>,
         desktop: bool,
     ) -> Result<Engine> {
-        let question_timing = zcode_cli_host::question_timing()?;
+        let question_timing = zcode_cli_host::question_timing(self.runtime_env.vars())?;
         let config = ModelConfig::load(config).await?;
         let registry = if config.is_none() {
             Registry::from_env(self.egress.clone())

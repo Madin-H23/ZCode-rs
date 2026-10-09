@@ -143,3 +143,47 @@ async fn waits_for_live_locks_and_reclaims_abandoned_ones() {
         .unwrap();
     store.load().await.unwrap();
 }
+
+/// Spec rust-u1-runtime-library L6: runtimes in one process share the pid. A
+/// lock left by a stopped or crashed runtime is reclaimed at once; the lock of
+/// another live runtime (its own store on the same file) is waited for.
+#[tokio::test]
+async fn locks_of_this_process_follow_the_live_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("trust.json");
+    let lock = root.path().join("trust.json.lock");
+    let owner = format!(
+        "{{\"pid\":{},\"startTime\":0,\"token\":\"gone\"}}\n",
+        std::process::id()
+    );
+    tokio::fs::write(&lock, owner).await.unwrap();
+    let started = std::time::Instant::now();
+    let records = FileTrustStore::new(file.clone())
+        .grant(vec![record("w", 'a')])
+        .await
+        .unwrap();
+    assert!(started.elapsed() < Duration::from_secs(1));
+
+    let first = std::sync::Arc::new(FileTrustStore::new(file.clone()));
+    let (entered, inside) = tokio::sync::oneshot::channel();
+    let (leave, left) = tokio::sync::oneshot::channel::<()>();
+    let holder = tokio::spawn(async move {
+        first
+            .locked(async move || {
+                entered.send(()).unwrap();
+                left.await.unwrap();
+                Ok(())
+            })
+            .await
+    });
+    inside.await.unwrap();
+    let held = tokio::fs::read_to_string(&lock).await.unwrap();
+    let second = FileTrustStore::new(file.clone());
+    let waiting = tokio::spawn(async move { second.load().await.unwrap() });
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(!waiting.is_finished());
+    assert_eq!(tokio::fs::read_to_string(&lock).await.unwrap(), held);
+    leave.send(()).unwrap();
+    holder.await.unwrap().unwrap();
+    assert_eq!(waiting.await.unwrap(), TrustLoad::Records(records));
+}

@@ -8,6 +8,10 @@
 //!
 //! CLI 可执行文件取 `ZCODE_TEST_CLI_RUST_BINARY`，否则用工作区内的 release 构建；都不存在时跳过。
 //! 数字用 `cargo test --release -p zcode-host --test control_latency -- --nocapture` 查看。
+#![expect(
+    clippy::disallowed_methods,
+    reason = "集成测试从进程环境取被测二进制与 PATH"
+)]
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;

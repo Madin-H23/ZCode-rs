@@ -66,7 +66,7 @@ pub(super) async fn run(
 }
 
 #[cfg(unix)]
-fn shell_command(command: &str, shell: &Shell) -> Command {
+fn shell_command(command: &str, shell: &Shell, _env: &[(String, String)]) -> Command {
     // Node `spawn(cmd, [], {shell})`：`shell: true` 在 POSIX 上为 /bin/sh。
     let program = match shell {
         Shell::Path(path) => path.as_str(),
@@ -78,10 +78,15 @@ fn shell_command(command: &str, shell: &Shell) -> Command {
 }
 
 #[cfg(windows)]
-fn shell_command(command: &str, shell: &Shell) -> Command {
+fn shell_command(command: &str, shell: &Shell, env: &[(String, String)]) -> Command {
+    // Node `process.env.ComSpec || 'cmd.exe'`：取 hook 子进程看到的 runtime 环境，不读宿主进程。
+    let comspec = env
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("ComSpec"))
+        .map(|(_, value)| value.clone());
     let program = match shell {
         Shell::Path(path) => path.clone(),
-        _ => std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".into()),
+        _ => comspec.unwrap_or_else(|| "cmd.exe".into()),
     };
     let mut c = zcode_proc::command(&program);
     let lower = program.to_ascii_lowercase();
@@ -93,9 +98,9 @@ fn shell_command(command: &str, shell: &Shell) -> Command {
     c
 }
 
-fn command(program: &Program) -> Command {
+fn command(program: &Program, env: &[(String, String)]) -> Command {
     match program {
-        Program::Command { command, shell, .. } => shell_command(command, shell),
+        Program::Command { command, shell, .. } => shell_command(command, shell, env),
         Program::Process { command, args } => {
             let mut c = zcode_proc::command(command);
             c.args(args);
@@ -150,7 +155,7 @@ async fn execute(
     if cancel.is_cancelled() {
         return Ok(exec("cancelled", None));
     }
-    let mut command = command(&request.program);
+    let mut command = command(&request.program, env);
     command
         .env_clear()
         .envs(env.iter().map(|(k, v)| (k, v)))

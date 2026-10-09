@@ -69,6 +69,7 @@ fn fuzz_fixtures_match_node() {
 /// 大规模差分测试入口：`BASH_PARSE_FIXTURES=<json> cargo test -p zcode-cli-bash-parse -- --ignored`。
 #[test]
 #[ignore = "needs an external fixture file"]
+#[expect(clippy::disallowed_methods, reason = "测试从进程环境取外部夹具路径")]
 fn external_fixtures_match_node() {
     let path = std::env::var("BASH_PARSE_FIXTURES").expect("BASH_PARSE_FIXTURES");
     let fixtures = std::fs::read_to_string(&path).expect("read fixtures");

@@ -141,6 +141,7 @@ async fn summary_boundary_must_commit_before_next_request_and_failure_stops_exec
 async fn partial_output_must_commit_before_continuation_and_failure_stops_execution() {
     check_commit_barrier(true).await;
 }
+#[expect(clippy::disallowed_methods, reason = "测试的 git 探测沿用进程环境")]
 async fn check_commit_barrier(continuation: bool) {
     for success in [false, true] {
         let (gate, mut gates) = mpsc::unbounded_channel();

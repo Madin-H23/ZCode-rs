@@ -27,6 +27,7 @@ pub async fn serve_values(
 
 /// The process environment as Node sees it after startup sanitization.
 /// Non-Unicode entries are converted lossily, like Node's `process.env`.
+#[expect(clippy::disallowed_methods, reason = "进程环境，供二进制、测试与示例")]
 pub fn runtime_env(home: &std::path::Path) -> zcode_cli_net::RuntimeEnv {
     let vars = std::env::vars_os().map(|(k, v)| {
         (
@@ -43,10 +44,12 @@ pub fn runtime_env(home: &std::path::Path) -> zcode_cli_net::RuntimeEnv {
 /// Egress built from the process environment without network configuration.
 /// Used by tests, examples and embedders. Fails when the home directory
 /// cannot be resolved (`zcode_kit::paths::home_dir`).
+#[expect(clippy::disallowed_methods, reason = "进程 cwd，供二进制、测试与示例")]
 pub fn egress() -> anyhow::Result<std::sync::Arc<zcode_cli_net::Egress>> {
     let home = zcode_kit::paths::home_dir()?;
     let env = std::sync::Arc::new(runtime_env(&home));
-    let egress = zcode_cli_net::Egress::new(env, &Default::default(), &home, "electron")
+    let base = std::env::current_dir()?;
+    let egress = zcode_cli_net::Egress::new(env, &Default::default(), &home, &base, "electron")
         .map_err(anyhow::Error::msg)?;
     Ok(std::sync::Arc::new(egress))
 }

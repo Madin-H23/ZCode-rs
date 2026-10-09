@@ -17,7 +17,7 @@ use zcode_cli_plugins::suggested;
 /// discovery (Node reads synchronously, so it is not cancellable).
 async fn read_state(tools: &WorkspaceTools, id: &str) -> Result<(Option<Value>, Value)> {
     let snapshot = tools.config.load().await?;
-    let storage = plugins::records::storage_root(&snapshot.config, &zcode_kit::paths::home_dir()?);
+    let storage = plugins::records::storage_root(&snapshot.config, tools.egress.home());
     let env = super::plugin_requests::env_lookup(tools);
     let lookup = |name: &str| env.get(name).map(|v| (*v).to_owned());
     let request = plugins::Request {
@@ -60,9 +60,7 @@ async fn refresh(
         .load()
         .await
         .map_err(|e| suggested::refresh_failed(id, &e.to_string()))?;
-    let home =
-        zcode_kit::paths::home_dir().map_err(|e| suggested::refresh_failed(id, &e.to_string()))?;
-    let storage = plugins::records::storage_root(&snapshot.config, &home);
+    let storage = plugins::records::storage_root(&snapshot.config, tools.egress.home());
     let http = super::plugin_io::PluginHttp {
         egress: tools.egress.clone(),
     };
@@ -73,6 +71,7 @@ async fn refresh(
     let context = plugins::market_admin::Context {
         ports: plugins::ports::Ports {
             storage: &storage,
+            cwd: &tools.cwd,
             cancel: &refresh_cancel,
             http: &http,
             git: &git,

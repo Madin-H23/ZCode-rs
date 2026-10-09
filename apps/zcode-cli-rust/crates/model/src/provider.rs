@@ -28,7 +28,7 @@ pub struct HttpModel {
 }
 impl HttpModel {
     pub fn new(config: ModelConfig, egress: Arc<Egress>) -> Self {
-        let retry = RetryPolicy::resolve(&config.retry);
+        let retry = RetryPolicy::resolve(&config.retry, egress.runtime_env());
         let endpoint = config.api_type.url(&config.base_url);
         // 与 Node 一致：先改写官方端点，再按实际发送地址判定代理与 no_proxy。
         let (url, via_gateway) = match egress.gateway(&endpoint) {
@@ -67,7 +67,7 @@ impl HttpModel {
             None if self.config.account_access.is_some() => None,
             None => self
                 .config
-                .api_key()
+                .api_key(self.egress.runtime_env())
                 .map_err(|_| ModelFailure::new("auth_failed", false))?,
         };
         let mut headers = self.headers(key.as_deref(), auth, &output.origin(), attempt)?;

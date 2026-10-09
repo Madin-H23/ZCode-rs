@@ -32,5 +32,8 @@ zcode-cli-host.workspace = true
 zcode-cli-net.workspace = true
 zcode-kit.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lib]
 doctest = false

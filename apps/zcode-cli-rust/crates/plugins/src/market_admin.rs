@@ -37,9 +37,8 @@ pub fn repoint(id: &str) -> Diagnostic {
 
 /// `plugins/marketplace/add`; `dryRun` only parses the source.
 pub async fn add(context: &Context<'_>, params: &Value) -> Result<Value> {
-    let source =
-        crate::source_input::parse(params["source"].as_str().unwrap_or_default(), context.home)
-            .await?;
+    let raw = params["source"].as_str().unwrap_or_default();
+    let source = crate::source_input::parse(raw, context.home, context.ports.cwd).await?;
     if params["dryRun"] == true {
         let summary = json!({"id":"dry-run","name":"dry-run","source":source,"pluginCount":0,"isOfficial":false});
         return Ok(json!({"marketplace":summary,"diagnostics":[]}));

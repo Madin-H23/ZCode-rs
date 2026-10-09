@@ -1,6 +1,6 @@
 //! Atomic file replacement in plugin storage (Node `writeFileAtomically`) and
 //! the per-storage-root mutation lock (Node `withPluginStorageLock`).
-use super::atomic::{OWNER_ID, recover, sidecars};
+use super::atomic::{OWNER_ID, Running, recover, registry, sidecars};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,9 +11,7 @@ static LOCKS: LazyLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> =
 
 /// Serializes plugin storage mutations of one storage root in this process.
 pub async fn lock(storage: &Path) -> tokio::sync::OwnedMutexGuard<()> {
-    let gate = LOCKS
-        .lock()
-        .expect("storage locks")
+    let gate = registry(&LOCKS)
         .entry(storage.to_owned())
         .or_default()
         .clone();
@@ -34,6 +32,9 @@ pub async fn write_file(path: &Path, data: &[u8]) -> std::io::Result<()> {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let stage = parent.join(format!(".{name}.stage-{}", uuid::Uuid::new_v4()));
     let (backup, transaction) = sidecars(path);
+    let transaction_id = uuid::Uuid::new_v4().to_string();
+    // 记录写出前登记、删除后注销；本函数被取消或 panic 时也随之注销，残留交给读取方恢复。
+    let _running = Running::register(&transaction_id);
     let result = async {
         tokio::fs::write(&stage, data).await?;
         match tokio::fs::rename(&stage, path).await {
@@ -42,7 +43,7 @@ pub async fn write_file(path: &Path, data: &[u8]) -> std::io::Result<()> {
             Err(_) => {}
         }
         let record = json!({"version":2,"stageName":stage.file_name().map(|n| n.to_string_lossy().into_owned()),
-            "transactionId":uuid::Uuid::new_v4().to_string(),"ownerId":OWNER_ID.as_str(),
+            "transactionId":transaction_id,"ownerId":OWNER_ID.as_str(),
             "ownerPid":std::process::id(),"hadTarget":true,"mode":"standalone"});
         // 标记文件排他创建：并发 writer 不能覆写仍存活事务的回滚快照。
         let mut options = tokio::fs::OpenOptions::new();

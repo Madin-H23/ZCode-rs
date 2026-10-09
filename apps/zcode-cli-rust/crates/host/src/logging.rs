@@ -13,6 +13,7 @@
 //! with an explicit marker and a bounded wait instead of joining the thread.
 use serde_json::{Map, Value, json};
 use std::{
+    ffi::OsString,
     fmt::Write as _,
     io::Write as _,
     path::PathBuf,
@@ -60,12 +61,14 @@ pub struct LogOptions {
 
 impl LogOptions {
     /// `ZCODE_LOG_DIR` or `~/.zcode/cli/log`; debug in development, info otherwise.
-    pub fn from_env(home: &std::path::Path) -> Self {
-        let directory = std::env::var_os("ZCODE_LOG_DIR")
+    /// `env` looks the variables up in the caller's environment (the binary
+    /// passes the process environment; the crate never reads it).
+    pub fn from_env(home: &std::path::Path, env: impl Fn(&str) -> Option<OsString>) -> Self {
+        let directory = env("ZCODE_LOG_DIR")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| home.join(".zcode/cli/log"));
-        let development = std::env::var("ZCODE_RUNTIME_ENV").is_ok_and(|v| v == "development");
+        let development = env("ZCODE_RUNTIME_ENV").is_some_and(|v| v == "development");
         Self {
             directory,
             level: if development {
@@ -73,7 +76,7 @@ impl LogOptions {
             } else {
                 Level::INFO
             },
-            console: std::env::var("ZCODE_LOG_CONSOLE").is_ok_and(|v| v == "1"),
+            console: env("ZCODE_LOG_CONSOLE").is_some_and(|v| v == "1"),
         }
     }
 }

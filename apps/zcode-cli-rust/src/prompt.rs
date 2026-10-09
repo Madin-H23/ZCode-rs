@@ -55,6 +55,7 @@ fn resolve(base: &Path, path: &str) -> PathBuf {
 }
 
 /// Node `resolveCliCwd`.
+#[expect(clippy::disallowed_methods, reason = "二进制入口读取进程 cwd")]
 async fn working_directory(requested: Option<&str>) -> Result<PathBuf, String> {
     let base = std::env::current_dir().map_err(|e| e.to_string())?;
     let Some(requested) = requested else {
@@ -174,7 +175,9 @@ fn watch_signals(interrupt: watch::Sender<Option<i32>>) {
 async fn run(prompt: PromptArgs, cwd: PathBuf) -> anyhow::Result<i32> {
     // B4 缺陷修复：同 app-server，home 解析失败时报错退出，不再把数据写到当前工作目录下。
     let home = zcode_kit::paths::home_dir()?;
-    let log_options = zcode_cli_host::logging::LogOptions::from_env(&home);
+    #[expect(clippy::disallowed_methods, reason = "二进制入口读取进程环境")]
+    let log_options =
+        zcode_cli_host::logging::LogOptions::from_env(&home, |name| std::env::var_os(name));
     let log_dir = log_options.directory.clone();
     let _logs = zcode_cli_host::logging::init(log_options);
     zcode_cli_host::log_retention::schedule(log_dir);

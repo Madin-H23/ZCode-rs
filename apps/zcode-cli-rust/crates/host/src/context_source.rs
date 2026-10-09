@@ -142,7 +142,7 @@ mod tests {
             root.path().into(),
             root.path().into(),
             false,
-            std::env::vars().collect(),
+            Vec::new().into(),
         );
         let cancel = CancellationToken::new();
         cancel.cancel();

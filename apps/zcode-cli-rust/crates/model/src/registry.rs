@@ -29,24 +29,32 @@ pub struct Registry {
     egress: Arc<zcode_cli_net::Egress>,
 }
 impl Registry {
+    /// The provider files named by the runtime's environment snapshot (the
+    /// Host injects them into the runtime only, never the process environment).
     pub async fn from_env(egress: Arc<zcode_cli_net::Egress>) -> Result<Option<Arc<Self>>> {
-        let builtin = std::env::var_os("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE");
-        let personal = std::env::var_os("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE");
+        let env = egress.runtime_env();
+        let builtin = env
+            .get("ZCODE_BUILTIN_PROVIDER_CONFIG_FILE")
+            .map(PathBuf::from);
+        let personal = env
+            .get("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE")
+            .map(PathBuf::from);
         if builtin.is_none() && personal.is_none() {
             return Ok(None);
         }
         let registry = Arc::new(Self::new(
-            builtin.context("Builtin config required")?.into(),
-            personal.context("Personal config required")?.into(),
+            builtin.context("Builtin config required")?,
+            personal.context("Personal config required")?,
             egress,
         ));
         registry.refresh(None).await?;
         Ok(Some(registry))
     }
+    /// Relative paths resolve against the runtime's base directory (Node: cwd).
     pub fn new(builtin: PathBuf, personal: PathBuf, egress: Arc<zcode_cli_net::Egress>) -> Self {
         Self {
-            builtin,
-            personal,
+            builtin: egress.base_dir().join(builtin),
+            personal: egress.base_dir().join(personal),
             account: Default::default(),
             snapshot: Default::default(),
             egress,
@@ -150,3 +158,7 @@ impl ModelRegistry for Registry {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+#[path = "registry_tests.rs"]
+mod tests;

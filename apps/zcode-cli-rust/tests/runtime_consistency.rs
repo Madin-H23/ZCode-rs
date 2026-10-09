@@ -293,6 +293,7 @@ async fn start_with_input(
 ) -> Runtime {
     start_timed(calls, gates, first, (60_000, 300_000)).await
 }
+#[expect(clippy::disallowed_methods, reason = "测试的 git 探测沿用进程环境")]
 async fn start_timed(
     calls: Vec<Value>,
     gates: Option<mpsc::UnboundedSender<ToolStart>>,

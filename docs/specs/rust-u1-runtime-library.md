@@ -117,3 +117,55 @@ sequenceDiagram
   - 同一个 runtime 里两个 workspace 各自创建会话并运行工具，文件落在各自的目录下。
   - 关闭写端后 `task` 正常完成；之后在同一进程再 `spawn` 一次可以正常服务（L6）。
 - `std::env::var*` 与 `current_dir` 在 `apps/zcode-cli-rust/crates/**` 的非测试代码中为 0 处；`#[expect]` 标注的位置都在第 2 节 L5 列出的允许范围内。
+
+## 6. L4–L6 的实现约定
+
+### 6.1 值的来源（L4）
+
+| 需要的值                            | 来源                                                                                                                    |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 环境变量                            | `RuntimeEnv`：tools / model 经 `Egress::runtime_env()`；host crate 用调用方给的变量列表（如 `WorkspaceContext` 的 env） |
+| home                                | `Egress::home()`（构造时传入的 runtime home）；`zcode_kit::paths::home_dir()` 只在二进制入口调用                        |
+| 不属于任何 workspace 的相对路径基准 | `Egress::base_dir()`（二进制传进程 cwd）：设备文件的 `ZCODE_DATA_BASE_DIR`、provider 配置文件路径                       |
+| workspace 内的相对路径基准          | 请求所在 workspace 的根（`WorkspaceTools` 的 cwd；plugins 经 `Ports.cwd`，对应 Node 的 `process.cwd()`）                |
+| 日志选项                            | `LogOptions::from_env(home, lookup)`：变量由调用方查找，二进制传进程环境                                                |
+
+- git 运行环境检查（`git_safety`）只接受绝对路径；相对路径无法在不读进程 cwd 的前提下确认，按不安全处理（fail-closed）。runtime 传入的工作目录总是绝对路径。
+- 与此前读进程环境的差别都向 Node 对齐（Node 读的是净化后的 `process.env`）：被净化的代理与 CA 变量不再出现在插件模板、API key 与重试变量里；beta 入口的 `ZCODE_STORAGE_DIR` 缺省值对 agent profile 与 memory 生效。
+
+### 6.2 同一进程里的多个 runtime（L6）
+
+U3 第一阶段会在同一进程里同时运行多个 runtime（每个 workspace 一个 Engine），也会在旧 runtime 停止或 panic 后启动新的。它们共用进程 pid 与插件事务的 `OWNER_ID`，所以“记录里的 pid 是本进程”不能说明 owner 还活着。规则：
+
+- **以 pid / `OWNER_ID` 标识 owner 的磁盘记录**（插件事务标记、hook 信任存储锁、设备 id 锁）同时写入一个进程内唯一的 token（插件事务用已有的 `transactionId`）。写入方先在进程级登记表里登记 token，再写记录；删除记录后注销。登记由 RAII 值持有，被取消或 panic 的 owner 在 drop 时注销。
+- 读取方遇到本进程 pid 的记录时，token 已登记即视为存活（另一个 runtime 正在进行，不回滚、不清理）；未登记即无主，立即按无主规则恢复或回收（不再等待超时，也不再永远视为存活）。其他进程的记录仍按 Node 规则（pid 存活、启动时间、超时）判断。
+- 进程级登记表用 `std::sync::Mutex`，只做单次插入与删除；中毒时用 `into_inner` 继续使用，一次 panic 不影响之后的 runtime。
+
+```mermaid
+sequenceDiagram
+    participant A as runtime A（写入方）
+    participant R as 进程级登记表
+    participant F as 磁盘记录（锁 / 事务标记）
+    participant B as runtime B（读取方）
+    A->>R: 登记 token
+    A->>F: 写记录（pid、token）
+    B->>F: 读到本进程 pid
+    B->>R: token 已登记？
+    R-->>B: 是：存活，等待或读已提交的一代
+    A->>F: 删除记录
+    A->>R: 注销 token（正常结束、取消或 panic 都会注销）
+    Note over A,B: A 中途停止时记录留在磁盘，token 已注销
+    B->>R: token 已登记？
+    R-->>B: 否：无主，立即恢复或回收
+```
+
+| 进程级状态                                  | 旧 runtime 停止后启动新的                       | 多个 runtime 同时存活                             | 处理                             |
+| ------------------------------------------- | ----------------------------------------------- | ------------------------------------------------- | -------------------------------- |
+| plugins `OWNER_ID` + 事务标记               | 残留标记曾被永远视为存活，进程内不恢复          | 共用 `OWNER_ID`；以登记表区分，不误回滚对方的事务 | 修复：按 `transactionId` 登记    |
+| plugins `ACTIVE` / `RESERVED`               | 由 `Activation` 的 drop 解除                    | 同一目标只允许一个激活，第二个报 already active   | 安全；中毒改为 `into_inner`      |
+| plugins `LOCKS`（storage root 的 tokio 锁） | guard 随 future drop 释放                       | 同一 storage root 的变更在进程内串行              | 安全；外层中毒改为 `into_inner`  |
+| hook 信任存储锁（pid + token）              | 残留锁曾在进程退出前无法回收                    | 另一个 runtime 持有时等待                         | 修复：token 登记表               |
+| 设备 id 锁 `telemetry-state.lock`（pid）    | 残留锁曾要等 5 分钟，期间只能用进程内临时 id    | 另一个 runtime 持有时等待                         | 修复：写入 token，按登记表判断   |
+| `official_auth` 的 `OnceLock`               | 字段属于每个 `WorkspaceTools`，不是进程级静态量 | 各 runtime 各自一条 Host 通道                     | 安全                             |
+| `read_pdf` 的 pdftoppm 可用性缓存           | 新 runtime 的 PATH 可能不同                     | 各 runtime 的 PATH 可能不同                       | 修复：按 PATH 缓存（只缓存成功） |
+| `process_clock` 的开机时间                  | 机器级常量                                      | 同左                                              | 安全                             |

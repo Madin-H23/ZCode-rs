@@ -1,6 +1,10 @@
 //! 账号栈的集成测试：已登录的 Z.ai 账号（临时凭据）、127.0.0.1 mock 的 ZCode / Z.ai 业务后端、
 //! 真实的 Rust CLI。验证账号 provider 进入模型选择、Account Config 同步到 CLI、
 //! 反向请求按账号鉴权应答。不访问任何真实服务，不读写开发者的 ~/.zcode。
+#![expect(
+    clippy::disallowed_methods,
+    reason = "集成测试从进程环境取被测二进制与 PATH"
+)]
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

@@ -39,7 +39,7 @@ async fn restore(
     plugins::mutations::restore_builtin(&paths, id, cua).await?;
     // 恢复后重读配置，确保抑制集合不再包含刚恢复的 id。
     let snapshot = tools.config.load().await?;
-    let storage = plugins::records::storage_root(&snapshot.config, &zcode_kit::paths::home_dir()?);
+    let storage = plugins::records::storage_root(&snapshot.config, tools.egress.home());
     let request = plugins::Request {
         config: &snapshot.config,
         storage: &storage,
@@ -70,8 +70,7 @@ pub(super) async fn handle(
     cancel: &CancellationToken,
 ) -> Result<Value> {
     let snapshot = tools.config.load().await?;
-    let home = zcode_kit::paths::home_dir()?;
-    let storage = plugins::records::storage_root(&snapshot.config, &home);
+    let storage = plugins::records::storage_root(&snapshot.config, tools.egress.home());
     let http = super::plugin_io::PluginHttp {
         egress: tools.egress.clone(),
     };
@@ -80,6 +79,7 @@ pub(super) async fn handle(
     let context = Context {
         ports: plugins::ports::Ports {
             storage: &storage,
+            cwd: &tools.cwd,
             cancel,
             http: &http,
             git: &git,
