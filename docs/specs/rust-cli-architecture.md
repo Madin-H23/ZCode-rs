@@ -9,7 +9,7 @@
 目标 workspace 包含以下 crate：
 
 - `zcode-cli-protocol`：V4 RPC、command、ACK、snapshot、event、capability 和错误 DTO；只包含 schema/type conversion。
-- `zcode-cli-domain`：Session、history、queue、context、goal、todo、attachment、subagent 和 workspace identity 的纯领域模型。
+- `zcode-cli-domain`：Session、history、queue、context、goal、todo、attachment、subagent 和 workspace identity 的纯领域模型。与 Host 共用的 JS 语义工具（`js_string`、`js_json`、`hooks::input::iso_timestamp`）与产品级格式（`workspace_identity`、`option_map`、`hooks::trust` 的信任记录）在 `rust/` 的 `zcode-kit`、`zcode-shared` 里，`domain` 按原路径重新导出（[rust-host-cli-boundary.md](rust-host-cli-boundary.md) §3.1）。
 - `zcode-cli-core-api`：`SessionRuntime`、`SessionStore`、`ModelPort`、`ToolPort`、`ContextPort`、`AuthPort` 和 `Clock` 公共契约。
 - `zcode-cli-core`：Session actor、Agent loop、command admission、commit barrier、recovery 和 projection。
 - `zcode-cli-state`：SQLite、session index/history、ACK、TS 只读导入、附件快照和 recovery。
@@ -19,7 +19,7 @@
 - `zcode-cli-delivery`：V4 topic 投递（订阅、缓冲与刷新窗口、snapshot/resync 恢复、两种 profile、wire 编码与分片）；只依赖 `core-api` 与 `domain`，stdio 前端与 Host 共用（rust-u3-stage-b.md 3.2）。
 - `zcode-cli-app-server`：stdio framing、RPC 路由、startup/storage handshake；投递经 `zcode-cli-delivery`。
 - `zcode-cli-tui`：只负责 TUI 输入和渲染，通过 `core-api` 工作。
-- `zcode-cli-rust`：唯一二进制和 composition root，负责 clap、依赖注入、信号和前端选择。
+- `zcode-cli-rust`：composition root（库）与独立二进制。CLI 入口在库里（`zcode_cli_rust::cli::main(program, args)`）：clap、`-p` 无头运行、`app-server --stdio`、`tui` 占位、信号、日志与退出码；它自己建 tokio 运行时，只用传入的命令行（`RuntimeOptions::from_process` 接收 argv，不读进程的 argv），是读取进程环境与 cwd 的唯一位置。独立二进制的 `main.rs` 只调用它；合并的 `zcode-host` 以 `cli` 子命令或 `zcode-cli-rust` 之名运行时也只调用它（rust-host-cli-boundary.md §3.4）。Host 只能使用库的公开入口 `embed`、`runtime::RuntimeOptions`、`serve::AppServerOptions`、`logging`、`log_retention`、`cli`。
 
 依赖方向固定为：
 
@@ -28,7 +28,7 @@ protocol/domain → core-api → core
                          ↑
                 state/model/tools/host
                          ↓
-              app-server / tui → cli binary
+              app-server / tui → zcode-cli-rust（库：cli 入口、embed）→ 独立二进制 / zcode-host
 ```
 
 `domain` 不依赖 tokio、reqwest、rusqlite、文件系统或具体 adapter；`core` 不依赖 state/model/tools；TUI 不直接访问持久化或 provider。
