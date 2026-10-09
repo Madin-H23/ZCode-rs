@@ -28,6 +28,7 @@
 - 第 5 层的三个 crate 互不依赖。
 - 有环的两簇各自留在一个 crate 内（`sessions`、`automation`）。把它们再拆细需要先把环改成事件或端口，属于后续步骤。
 - `zcode-host-services` 重新导出所有模块（`pub use zcode_host_sessions::agent;` 等），外部的 `zcode_host_services::<module>` 路径不变。
+- `crates/services/tests/` 下的集成测试暂留原处，经门面的路径引用各层；随后续步骤逐个移到被测的那一层。
 
 ## 3. 规则
 

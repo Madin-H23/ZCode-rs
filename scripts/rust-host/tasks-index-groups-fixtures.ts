@@ -19,7 +19,7 @@ type Op = Record<string, any>;
 const root = resolve(import.meta.dirname, "../..");
 const fixturePath = resolve(
   root,
-  "apps/zcode-host/crates/services/src/tasks_index/fixtures/parity-groups.json",
+  "apps/zcode-host/crates/sessions/src/tasks_index/fixtures/parity-groups.json",
 );
 const BASE_NOW = 1_760_000_000_000;
 const DAY = 24 * 60 * 60 * 1000;

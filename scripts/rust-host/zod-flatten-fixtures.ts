@@ -18,7 +18,7 @@ import {
 const root = resolve(import.meta.dirname, "../..");
 const fixturePath = resolve(
   root,
-  "apps/zcode-host/crates/services/src/support/fixtures/zod-flatten.json",
+  "apps/zcode-host/crates/automation/src/fixtures/zod-flatten.json",
 );
 
 // list 两个 schema 的调用方传 `request.params ?? {}`（zcodeAgentService.ts）。

@@ -42,7 +42,7 @@ import {
 const root = resolve(import.meta.dirname, "../..");
 const fixturePath = resolve(
   root,
-  "apps/zcode-host/crates/services/src/settings/fixtures/data-dir-parity.json",
+  "apps/zcode-host/crates/settings/src/settings/fixtures/data-dir-parity.json",
 );
 
 function errorRecord(error: unknown): Record<string, unknown> {

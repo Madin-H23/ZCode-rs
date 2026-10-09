@@ -3066,6 +3066,86 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcode-host-account"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "chrono-tz",
+ "futures-util",
+ "getrandom 0.3.4",
+ "iana-time-zone",
+ "libc",
+ "regex",
+ "reqwest",
+ "ring",
+ "rustls",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "url",
+ "zcode-host-base",
+ "zcode-host-control",
+ "zcode-host-kit",
+ "zcode-host-providers",
+ "zcode-host-sessions",
+ "zcode-host-settings",
+ "zip",
+]
+
+[[package]]
+name = "zcode-host-automation"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "chrono-tz",
+ "futures-util",
+ "getrandom 0.3.4",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "url",
+ "zcode-host-account",
+ "zcode-host-base",
+ "zcode-host-control",
+ "zcode-host-kit",
+ "zcode-host-providers",
+ "zcode-host-sessions",
+ "zcode-host-settings",
+]
+
+[[package]]
+name = "zcode-host-base"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "getrandom 0.3.4",
+ "libc",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "url",
+ "windows-sys 0.61.2",
+ "zcode-cli-domain",
+ "zcode-host-control",
+ "zcode-host-kit",
+ "zcode-host-rpc",
+ "zcode-kit",
+]
+
+[[package]]
 name = "zcode-host-control"
 version = "0.1.0"
 dependencies = [
@@ -3089,6 +3169,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcode-host-extensions"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "futures-util",
+ "libc",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "toml",
+ "yaml-rust2",
+ "zcode-cli-domain",
+ "zcode-host-base",
+ "zcode-host-control",
+ "zcode-host-kit",
+ "zcode-host-sessions",
+ "zcode-host-settings",
+]
+
+[[package]]
 name = "zcode-host-kit"
 version = "0.1.0"
 dependencies = [
@@ -3099,6 +3202,45 @@ dependencies = [
  "zcode-host-control",
  "zcode-host-rpc",
  "zcode-kit",
+]
+
+[[package]]
+name = "zcode-host-providers"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "regex",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "url",
+ "zcode-cli-domain",
+ "zcode-host-base",
+ "zcode-host-kit",
+]
+
+[[package]]
+name = "zcode-host-remote"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "getrandom 0.3.4",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "zcode-cli-domain",
+ "zcode-host-account",
+ "zcode-host-automation",
+ "zcode-host-base",
+ "zcode-host-control",
+ "zcode-host-kit",
+ "zcode-host-providers",
+ "zcode-host-rpc",
+ "zcode-host-sessions",
+ "zcode-host-settings",
 ]
 
 [[package]]
@@ -3115,42 +3257,98 @@ dependencies = [
 name = "zcode-host-services"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "base64 0.22.1",
- "chrono",
- "chrono-tz",
- "flate2",
+ "futures-util",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "zcode-host-account",
+ "zcode-host-automation",
+ "zcode-host-base",
+ "zcode-host-control",
+ "zcode-host-extensions",
+ "zcode-host-kit",
+ "zcode-host-providers",
+ "zcode-host-remote",
+ "zcode-host-rpc",
+ "zcode-host-sessions",
+ "zcode-host-settings",
+ "zcode-host-workspace",
+ "zcode-proc",
+]
+
+[[package]]
+name = "zcode-host-sessions"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "futures-util",
  "getrandom 0.3.4",
- "iana-time-zone",
+ "libc",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "url",
+ "zcode-cli-domain",
+ "zcode-cli-rust",
+ "zcode-host-base",
+ "zcode-host-control",
+ "zcode-host-kit",
+ "zcode-host-providers",
+ "zcode-host-settings",
+ "zcode-proc",
+]
+
+[[package]]
+name = "zcode-host-settings"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "libc",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "zcode-host-base",
+ "zcode-host-kit",
+ "zcode-proc",
+]
+
+[[package]]
+name = "zcode-host-workspace"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "getrandom 0.3.4",
  "ignore",
  "libc",
  "notify",
  "portable-pty",
  "regex",
  "reqwest",
- "ring",
- "rusqlite",
  "rustls",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
  "tokio",
- "tokio-tungstenite",
- "tokio-util",
  "toml",
  "url",
  "windows-sys 0.61.2",
  "yaml-rust2",
- "zcode-cli-domain",
- "zcode-cli-rust",
+ "zcode-host-base",
  "zcode-host-control",
  "zcode-host-kit",
- "zcode-host-rpc",
- "zcode-kit",
+ "zcode-host-providers",
+ "zcode-host-sessions",
+ "zcode-host-settings",
  "zcode-proc",
- "zip",
 ]
 
 [[package]]

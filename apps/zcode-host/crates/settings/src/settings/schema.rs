@@ -388,15 +388,7 @@ fn skipped_update_versions(value: &Value) -> Option<Value> {
     Some(Value::Object(out))
 }
 
-/// `normalizeZCodeEndpointOrigin`：http(s) URL 的 origin。
-pub fn endpoint_origin(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let url = url::Url::parse(trimmed).ok()?;
-    matches!(url.scheme(), "http" | "https").then(|| url.origin().ascii_serialization())
-}
+pub use crate::support::http::endpoint_origin;
 
 fn endpoint_origin_value(value: &Value) -> Option<Value> {
     value.is_string().then(|| value.clone())

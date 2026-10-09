@@ -12,7 +12,7 @@ import { cuaPermissionObservationSchema } from "../../packages/shared/src/zcode-
 const root = resolve(import.meta.dirname, "../..");
 const output = resolve(
   root,
-  "apps/zcode-host/crates/services/src/agent/fixtures/schema-cases.json",
+  "apps/zcode-host/crates/sessions/src/agent/fixtures/schema-cases.json",
 );
 
 type Json = Record<string, unknown>;

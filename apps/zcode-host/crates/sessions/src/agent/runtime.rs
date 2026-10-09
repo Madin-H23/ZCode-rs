@@ -1518,7 +1518,7 @@ impl ClientHandler for Handler {
 }
 
 /// 本地 authority 的会话运行时偏好（packages/services/src/node.ts resolveSessionRuntimePreferences）。
-pub(crate) fn runtime_preferences(settings: &Value, params: &Value) -> Value {
+pub fn runtime_preferences(settings: &Value, params: &Value) -> Value {
     let mut result = Map::new();
     result.insert(
         "askUserQuestionAutoResolutionEnabled".into(),

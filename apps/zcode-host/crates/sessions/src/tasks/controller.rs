@@ -106,7 +106,7 @@ pub struct Controller {
 }
 
 /// readSourceTaskIndex：active → pinned → archived，同一 taskId 后者覆盖前者。
-pub(crate) fn merge_partitions(partitions: Partitions) -> Vec<(Value, Value)> {
+pub fn merge_partitions(partitions: Partitions) -> Vec<(Value, Value)> {
     let mut order: Vec<String> = Vec::new();
     let mut merged: HashMap<String, (Value, Value)> = HashMap::new();
     let groups = [
@@ -160,7 +160,7 @@ fn task_key(target: &WorkspaceTarget, task_id: &str) -> String {
 }
 
 /// sessionOverlay 的 liveStatus。
-pub(crate) fn live_status(summary: &Value) -> &'static str {
+pub fn live_status(summary: &Value) -> &'static str {
     let summary_count = &summary["pendingInteractionSummary"];
     let pending = summary["pendingInteraction"].is_object()
         || summary_count["permissionCount"].as_u64().unwrap_or(0)
@@ -177,7 +177,7 @@ pub(crate) fn live_status(summary: &Value) -> &'static str {
     }
 }
 
-pub(crate) fn activity(summary: &Value) -> Value {
+pub fn activity(summary: &Value) -> Value {
     let mut activity = Map::new();
     activity.insert("phase".into(), summary["phase"].clone());
     activity.insert("lastActivityAt".into(), summary["lastActivityAt"].clone());
@@ -200,7 +200,7 @@ pub(crate) fn activity(summary: &Value) -> Value {
     Value::Object(activity)
 }
 
-pub(crate) fn status_from_phase(phase: &Value) -> Option<&'static str> {
+pub fn status_from_phase(phase: &Value) -> Option<&'static str> {
     match phase.as_str() {
         Some("prewarming" | "running") => Some("running"),
         Some("completedSuccess" | "completedInterrupted") => Some("completed"),
@@ -209,7 +209,7 @@ pub(crate) fn status_from_phase(phase: &Value) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn pending_interaction(summary: &Value) -> Option<Value> {
+pub fn pending_interaction(summary: &Value) -> Option<Value> {
     let pending = summary["pendingInteraction"].as_object()?;
     let mut out = Map::new();
     for key in ["interactionId", "kind", "toolName", "autoResolution"] {
@@ -414,7 +414,7 @@ fn target_of(scope: &Value) -> Option<WorkspaceTarget> {
     })
 }
 
-pub(crate) fn matches_kind(membership: &Value, kind: &str) -> bool {
+pub fn matches_kind(membership: &Value, kind: &str) -> bool {
     let pinned = membership["pinned"] == true;
     let archived = membership["archived"] == true;
     match kind {

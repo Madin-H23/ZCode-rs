@@ -164,7 +164,7 @@ UI                      Scope                         AgentRuntime / CLI
 
 ## 7. tasks-index repo
 
-模块：`apps/zcode-host/crates/services/src/tasks_index/`（`TasksIndex`）。移植自 `packages/services/src/session/taskIndexRepo.ts` 与 `tasksDatabase/`，只覆盖侧栏需要的部分：启动迁移与修复、列表读取、snapshot 合并、agent 补丁、unread、右键菜单操作。分组管理、搜索、归档清理、automation 与闲时任务的业务读写不在本节。
+模块：`apps/zcode-host/crates/sessions/src/tasks_index/`（`TasksIndex`）。移植自 `packages/services/src/session/taskIndexRepo.ts` 与 `tasksDatabase/`，只覆盖侧栏需要的部分：启动迁移与修复、列表读取、snapshot 合并、agent 补丁、unread、右键菜单操作。分组管理、搜索、归档清理、automation 与闲时任务的业务读写不在本节。
 
 ### 7.1 兼容规则
 

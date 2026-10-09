@@ -34,7 +34,7 @@ const { DatabaseSync } = createRequire(import.meta.url)(
 type Op = Record<string, any>;
 
 const root = resolve(import.meta.dirname, "../..");
-const fixtureDir = resolve(root, "apps/zcode-host/crates/services/src/automation/fixtures");
+const fixtureDir = resolve(root, "apps/zcode-host/crates/automation/src/automation/fixtures");
 
 let clock = scenarios.SERVICE_NOW;
 const realNow = Date.now;

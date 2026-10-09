@@ -1,6 +1,6 @@
 // Rust Host 扩展服务的对拍 fixture（docs/specs/rust-host-extensions.md §6）。
 // 用真实 TS 服务在临时目录里按 extensions-scenarios.ts 执行调用，把文件树、调用与归一化后的结果
-// 写进 apps/zcode-host/crates/services/src/extensions/fixtures/extensions-parity.json；
+// 写进 apps/zcode-host/crates/extensions/src/extensions/fixtures/extensions-parity.json；
 // Rust 测试 include_str! 后在自己的临时目录里复现并逐项比较。
 // 用法：pnpm exec tsx scripts/rust-host/extensions-fixtures.ts [--check]
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -12,7 +12,7 @@ import { CALLS, DUMPS, FILES, type ScenarioCall } from "./extensions-scenarios.j
 const repo = resolve(import.meta.dirname, "../..");
 const fixturePath = resolve(
   repo,
-  "apps/zcode-host/crates/services/src/extensions/fixtures/extensions-parity.json",
+  "apps/zcode-host/crates/extensions/src/extensions/fixtures/extensions-parity.json",
 );
 
 function substitute(text: string, root: string): string {

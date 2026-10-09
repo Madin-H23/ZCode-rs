@@ -1,0 +1,44 @@
+[package]
+name = "zcode-host-automation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# 其他 crate 的测试复用本 crate 的测试替身（bots::test_support）。
+test-support = []
+
+[dependencies]
+zcode-host-base.workspace = true
+zcode-host-settings.workspace = true
+zcode-host-providers.workspace = true
+zcode-host-sessions.workspace = true
+zcode-host-account.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+# bots：飞书长连接（wss，系统根证书）。
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
+tokio.workspace = true
+url.workspace = true
+zcode-host-control.workspace = true
+zcode-host-kit.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lib]
+doctest = false

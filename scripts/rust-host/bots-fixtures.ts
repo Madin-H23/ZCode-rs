@@ -22,7 +22,7 @@ import { normalizeAllowedWorkspaces } from "../../packages/services/src/bots/wor
 import { createCredentialCipherProvider } from "../../packages/services/src/credential/providers/credentialCipherProvider.js";
 
 const root = resolve(import.meta.dirname, "../..");
-const fixtureDir = resolve(root, "apps/zcode-host/crates/services/src/bots/fixtures");
+const fixtureDir = resolve(root, "apps/zcode-host/crates/automation/src/bots/fixtures");
 
 async function messageTable(): Promise<Record<string, Record<string, string>>> {
   const source = await readFile(resolve(root, "packages/services/src/bots/messages.ts"), "utf8");

@@ -20,8 +20,8 @@ pub mod status;
 pub mod store;
 pub mod stream;
 pub mod telegram;
-#[cfg(test)]
-pub(crate) mod test_support;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

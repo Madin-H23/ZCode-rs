@@ -6,7 +6,7 @@
 
 R6 首版只做了飞书 / Lark 长连接、20 个成员和终态摘要回推。本规格把 `bots` channel 补齐到与 Node Host（`packages/services/src/bots/**`）一致：
 
-| 部分                     | Node 来源                                                                        | Rust 模块（`apps/zcode-host/crates/services/src/bots/`） |
+| 部分                     | Node 来源                                                                        | Rust 模块（`apps/zcode-host/crates/automation/src/bots/`） |
 | ------------------------ | -------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | 微信扫码注册（2 个成员） | `providers/weixinRegistration.ts`                                                | `weixin.rs`                                              |
 | Telegram                 | `providers/telegramProvider.ts`、`telegramChannelRuntime.ts`                     | `telegram.rs`、`channel.rs`                              |

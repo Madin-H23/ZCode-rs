@@ -22,7 +22,7 @@ import { createSettingsSyncService } from "../../packages/services/src/settings-
 const root = resolve(import.meta.dirname, "../..");
 const fixturePath = resolve(
   root,
-  "apps/zcode-host/crates/services/src/settings_sync/fixtures/parity.json",
+  "apps/zcode-host/crates/extensions/src/settings_sync/fixtures/parity.json",
 );
 
 const json = (value: unknown) => JSON.stringify(value);

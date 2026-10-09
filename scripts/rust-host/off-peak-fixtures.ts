@@ -15,7 +15,7 @@ const { DatabaseSync } = createRequire(import.meta.url)(
 type Op = Record<string, any>;
 
 const root = resolve(import.meta.dirname, "../..");
-const fixtureDir = resolve(root, "apps/zcode-host/crates/services/src/off_peak/fixtures");
+const fixtureDir = resolve(root, "apps/zcode-host/crates/automation/src/off_peak/fixtures");
 const BASE_NOW = 1791300000000;
 let clock = BASE_NOW;
 const realNow = Date.now;

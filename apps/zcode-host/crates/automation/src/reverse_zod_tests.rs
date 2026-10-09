@@ -1,7 +1,7 @@
 //! 与真实 zod 4 的对拍（fixture 由 scripts/rust-host/zod-flatten-fixtures.ts 生成）。
 use serde_json::{Value, json};
 
-const FIXTURE: &str = include_str!("../fixtures/zod-flatten.json");
+const FIXTURE: &str = include_str!("fixtures/zod-flatten.json");
 
 fn validate(schema: &str, input: &Value) -> Result<serde_json::Map<String, Value>, Value> {
     match schema {

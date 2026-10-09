@@ -12,7 +12,7 @@
 
 远端 workspace（Bot 远程运行时、远端 collection）不在本阶段。
 
-模块：`apps/zcode-host/crates/services/src/automation/`（区域入口与 automation 本体）、`tasks_index/automation_repo.rs`、`off_peak/`、`tasks_index/off_peak_repo.rs`、`bots/`、`conversation_share/`、`cua_permission.rs`。`automation::install` 是本区域在 `install()` 里唯一的一段代码（`// ── automation ──`）。
+模块：`apps/zcode-host/crates/automation/src/automation/`（区域入口与 automation 本体）、`tasks_index/automation_repo.rs`、`off_peak/`、`tasks_index/off_peak_repo.rs`、`bots/`、`conversation_share/`、`cua_permission.rs`。`automation::install` 是本区域在 `install()` 里唯一的一段代码（`// ── automation ──`）。
 
 ## 2. automation 产品规则
 

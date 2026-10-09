@@ -111,7 +111,7 @@ impl TasksIndex {
         .await
     }
 
-    pub(crate) async fn open_with(
+    pub async fn open_with(
         path: PathBuf,
         progress: Arc<dyn Fn(StorageProgress) + Send + Sync>,
         clock: Clock,

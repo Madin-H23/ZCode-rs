@@ -26,7 +26,7 @@ type Database = InstanceType<typeof DatabaseSync>;
 type Op = Record<string, any>;
 
 const root = resolve(import.meta.dirname, "../..");
-const fixtureDir = resolve(root, "apps/zcode-host/crates/services/src/tasks_index/fixtures");
+const fixtureDir = resolve(root, "apps/zcode-host/crates/sessions/src/tasks_index/fixtures");
 const PREPARE_NOW = BASE_NOW + 1;
 
 // 时钟固定后，账本 time_applied、分组顺序时间戳与 unread marker 都可复现。

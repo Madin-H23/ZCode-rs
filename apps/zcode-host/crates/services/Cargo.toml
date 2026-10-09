@@ -10,50 +10,27 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-anyhow.workspace = true
-base64.workspace = true
-chrono.workspace = true
-chrono-tz.workspace = true
-flate2 = "1"
-futures-util.workspace = true
-getrandom.workspace = true
-iana-time-zone.workspace = true
-ignore = "0.4"
-notify.workspace = true
-portable-pty.workspace = true
-regex.workspace = true
-reqwest.workspace = true
-ring.workspace = true
-rustls.workspace = true
-rusqlite.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-sha2.workspace = true
-# bots：飞书长连接（wss，系统根证书）。
-tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
+zcode-host-base.workspace = true
+zcode-host-settings.workspace = true
+zcode-host-providers.workspace = true
+zcode-host-sessions.workspace = true
+zcode-host-account.workspace = true
+zcode-host-extensions.workspace = true
+zcode-host-workspace.workspace = true
+zcode-host-automation.workspace = true
+zcode-host-remote.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
-# settings-sync 导入 Codex `config.toml` 的 MCP 条目要按文档顺序（同 smol-toml）。
-toml = { workspace = true, features = ["preserve_order"] }
-url.workspace = true
-yaml-rust2.workspace = true
-zip.workspace = true
-zcode-cli-domain.workspace = true
-zcode-cli-rust.workspace = true
 zcode-host-control.workspace = true
 zcode-host-kit.workspace = true
-zcode-host-rpc.workspace = true
-zcode-kit.workspace = true
-zcode-proc.workspace = true
-
-[target.'cfg(unix)'.dependencies]
-libc.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+base64.workspace = true
+futures-util.workspace = true
+serde_json.workspace = true
+zcode-host-rpc.workspace = true
+zcode-proc.workspace = true
 
 [lib]
 doctest = false
+test = false

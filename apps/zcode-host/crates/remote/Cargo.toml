@@ -1,0 +1,34 @@
+[package]
+name = "zcode-host-remote"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+zcode-host-base.workspace = true
+zcode-host-settings.workspace = true
+zcode-host-providers.workspace = true
+zcode-host-sessions.workspace = true
+zcode-host-account.workspace = true
+zcode-host-automation.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+zcode-cli-domain.workspace = true
+zcode-host-control.workspace = true
+zcode-host-kit.workspace = true
+zcode-host-rpc.workspace = true
+
+[dev-dependencies]
+zcode-host-automation = { workspace = true, features = ["test-support"] }
+tempfile = "3"
+
+[lib]
+doctest = false

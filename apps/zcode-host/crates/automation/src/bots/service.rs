@@ -74,14 +74,14 @@ pub struct Typing {
 }
 
 pub struct Bots {
-    pub(crate) repo: BotsRepo,
-    pub(crate) credentials: CredentialStore,
-    pub(crate) providers: Arc<Providers>,
-    pub(crate) settings: SettingStore,
-    pub(crate) tasks: Arc<dyn TaskPort>,
+    pub repo: BotsRepo,
+    pub credentials: CredentialStore,
+    pub providers: Arc<Providers>,
+    pub settings: SettingStore,
+    pub tasks: Arc<dyn TaskPort>,
     pub(crate) remote: Arc<dyn RemoteBots>,
-    pub(crate) attachments_dir: PathBuf,
-    pub(crate) background: bool,
+    pub attachments_dir: PathBuf,
+    pub background: bool,
     pub(crate) bind_codes: Mutex<HashMap<String, BindCode>>,
     /// `runtimeByBotId`。
     runtime_status: Mutex<HashMap<String, Map<String, Value>>>,

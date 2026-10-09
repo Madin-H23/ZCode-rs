@@ -5,49 +5,42 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use zcode_host_control::{ControlRouter, ControlSink, InitLocal};
+use zcode_host_control::ControlRouter;
 use zcode_host_kit::ChannelRegistry;
 
-pub mod account;
-pub mod agent;
-pub mod automation;
-pub mod bots;
-pub mod broadcast;
-pub mod conversation_share;
-pub mod cua_permission;
-mod environment;
-pub mod extensions;
-pub mod file;
-pub mod file_watcher;
-pub mod git;
-pub mod integration;
-pub mod main_bridge;
-pub mod media_preview;
-pub mod off_peak;
-pub mod prompt_attachment_transfer;
-pub mod providers;
-pub mod remote;
-pub mod settings;
-pub mod settings_sync;
-pub mod store;
-pub mod support;
-pub mod system;
-pub mod tasks;
-pub mod tasks_index;
-pub mod terminal;
-#[cfg(test)]
-mod testing;
-pub mod workspace;
+pub use zcode_host_account::account;
+pub use zcode_host_automation::automation;
+pub use zcode_host_automation::bots;
+pub use zcode_host_automation::conversation_share;
+pub use zcode_host_automation::cua_permission;
+pub use zcode_host_automation::integration;
+pub use zcode_host_automation::off_peak;
+pub use zcode_host_base::broadcast;
+pub use zcode_host_base::environment;
+pub use zcode_host_base::main_bridge;
+pub use zcode_host_base::store;
+pub use zcode_host_base::support;
+pub use zcode_host_base::testing;
+pub use zcode_host_extensions::extensions;
+pub use zcode_host_extensions::settings_sync;
+pub use zcode_host_providers::providers;
+pub use zcode_host_remote::remote;
+pub use zcode_host_sessions::agent;
+pub use zcode_host_sessions::tasks;
+pub use zcode_host_sessions::tasks_index;
+pub use zcode_host_settings::settings;
+pub use zcode_host_workspace::file;
+pub use zcode_host_workspace::file_watcher;
+pub use zcode_host_workspace::git;
+pub use zcode_host_workspace::media_preview;
+pub use zcode_host_workspace::prompt_attachment_transfer;
+pub use zcode_host_workspace::system;
+pub use zcode_host_workspace::terminal;
+pub use zcode_host_workspace::workspace;
 
-pub use environment::HostEnvironment;
+pub use environment::{HostEnvironment, ServiceContext};
 use main_bridge::MainBridge;
 use support::env::ProcessEnv;
-
-pub struct ServiceContext {
-    pub environment: HostEnvironment,
-    pub init: InitLocal,
-    pub control: Arc<dyn ControlSink>,
-}
 
 /// 需要在 Host 退出时清理的资源。
 /// `InitLocal` 之后、安装服务之前准备好的存储（docs/specs/rust-host-r2.md §5.1）。

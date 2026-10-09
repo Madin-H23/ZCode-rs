@@ -34,7 +34,17 @@ pub fn zcode_api_origin(
         });
     match configured {
         None => Ok(DEFAULT_ZCODE_ENDPOINT_ORIGIN.to_owned()),
-        Some(value) => crate::settings::schema::endpoint_origin(value)
+        Some(value) => endpoint_origin(value)
             .ok_or_else(|| anyhow::anyhow!("ZCode endpoint origin must use http or https")),
     }
+}
+
+/// `normalizeZCodeEndpointOrigin`：http(s) URL 的 origin。
+pub fn endpoint_origin(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let url = url::Url::parse(trimmed).ok()?;
+    matches!(url.scheme(), "http" | "https").then(|| url.origin().ascii_serialization())
 }

@@ -1,6 +1,9 @@
 //! Host 进程环境快照（composition root 在启动时捕获一次）。
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use zcode_host_control::{ControlSink, InitLocal};
 
 /// 进程环境快照，由 composition root 读取后传入；service 不直接读 `std::env`。
 #[derive(Debug, Clone, Default)]
@@ -45,6 +48,13 @@ impl HostEnvironment {
     pub fn app_config_dir(&self) -> PathBuf {
         self.data_base_dir.join(".zcode").join("v2")
     }
+}
+
+/// service 构造时共用的上下文：环境快照、`InitLocal` 与到 Main 的控制通道。
+pub struct ServiceContext {
+    pub environment: HostEnvironment,
+    pub init: InitLocal,
+    pub control: Arc<dyn ControlSink>,
 }
 
 #[cfg(test)]

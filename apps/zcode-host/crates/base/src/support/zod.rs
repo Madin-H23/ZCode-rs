@@ -299,6 +299,3 @@ pub fn flatten(issues: &[Issue]) -> Value {
     }
     json!({"formErrors": form, "fieldErrors": fields})
 }
-
-#[cfg(test)]
-mod tests;

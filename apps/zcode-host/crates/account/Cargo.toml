@@ -1,0 +1,43 @@
+[package]
+name = "zcode-host-account"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+zcode-host-base.workspace = true
+zcode-host-settings.workspace = true
+zcode-host-providers.workspace = true
+zcode-host-sessions.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+iana-time-zone.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+ring.workspace = true
+rustls.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+url.workspace = true
+zip.workspace = true
+zcode-host-control.workspace = true
+zcode-host-kit.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lib]
+doctest = false
