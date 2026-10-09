@@ -1,4 +1,4 @@
-//! lifecycle 成员的实现（createTask、sendPrompt、resumeTask、closeTask、命令队列、交互回执）。
+//! lifecycle 成员的实现（createTask、sendPrompt、resumeTask、closeTask、交互回执）。
 use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
@@ -9,7 +9,7 @@ use super::agent_calls::{
 };
 use super::config_options::{parse_model_picker_value, settings_to_config_options, to_zcode_mode};
 use super::context::{invalid, repo_error, target_of};
-use super::lifecycle::{TaskLifecycle, now_ms, task_key};
+use super::lifecycle::{TaskLifecycle, task_key};
 use super::meta;
 use crate::agent::WorkspaceTarget;
 
@@ -324,7 +324,8 @@ impl TaskLifecycle {
         if let Some(remote) = params["remoteSessionId"].as_str().filter(|r| !r.is_empty()) {
             target.remote_session_id = Some(remote.to_owned());
         }
-        self.send_prompt_to_agent(&target, task_id, params).await
+        self.send_prompt_to_agent(&target, task_id, params, None)
+            .await
     }
 
     pub async fn resume_task(&self, params: &Value) -> Result<Value, RpcError> {
@@ -490,10 +491,6 @@ impl TaskLifecycle {
     pub async fn compact_session(&self, params: &Value) -> Result<Value, RpcError> {
         let task_id = str_param(params, "taskId")?;
         let target = explicit_or_registered(self, params, task_id).await?;
-        let key = task_key(&target, task_id);
-        if let Some(input) = params["inputId"].as_str().filter(|i| !i.is_empty()) {
-            self.set_active_input(key.clone(), input.to_owned());
-        }
         let request = json!({
             "sessionId": task_id,
             "inputId": params.get("inputId").cloned().unwrap_or(Value::Null),
@@ -501,41 +498,20 @@ impl TaskLifecycle {
             "expectedRevision": params.get("expectedRevision").cloned().unwrap_or(Value::Null),
         });
         let request = strip_nulls(request);
-        match calls::request(&self.context.runtime, &target, "session/compact", request).await {
-            Ok(result) => {
-                if result["compact"]["state"] == "accepted" {
-                    return Ok(result);
-                }
-                let meta = self.sync_snapshot(&result["snapshot"], None).await;
-                self.clear_active_input(&key);
-                let meta = meta?;
-                self.context.emit_list_changed(
-                    &target,
-                    Some(task_id),
-                    "task_status_changed",
-                    Some(&meta),
-                );
-                Ok(result)
-            }
-            Err(error) => {
-                self.clear_active_input(&key);
-                Err(error)
-            }
+        let result =
+            calls::request(&self.context.runtime, &target, "session/compact", request).await?;
+        if result["compact"]["state"] == "accepted" {
+            return Ok(result);
         }
+        let meta = self.sync_snapshot(&result["snapshot"], None).await?;
+        self.context
+            .emit_list_changed(&target, Some(task_id), "task_status_changed", Some(&meta));
+        Ok(result)
     }
 
     pub async fn goal_session(&self, params: &Value) -> Result<Value, RpcError> {
         let task_id = str_param(params, "taskId")?;
         let target = explicit_or_registered(self, params, task_id).await?;
-        let key = task_key(&target, task_id);
-        let action = params["action"].as_str().unwrap_or_default();
-        let may_continue = matches!(action, "set" | "replace" | "resume");
-        if let Some(input) = params["inputId"]
-            .as_str()
-            .filter(|i| !i.is_empty() && may_continue)
-        {
-            self.set_active_input(key.clone(), input.to_owned());
-        }
         let request = strip_nulls(json!({
             "sessionId": task_id,
             "inputId": params.get("inputId").cloned().unwrap_or(Value::Null),
@@ -548,9 +524,6 @@ impl TaskLifecycle {
         let meta = self.sync_snapshot(&result["snapshot"], None).await?;
         self.context
             .emit_list_changed(&target, Some(task_id), "task_status_changed", Some(&meta));
-        if !may_continue || result["snapshot"]["session"]["status"] != "running" {
-            self.clear_active_input(&key);
-        }
         Ok(result)
     }
 
@@ -592,10 +565,6 @@ impl TaskLifecycle {
         let snapshot = self.resume_snapshot(target, task_id, None, None).await?;
         self.sync_snapshot(&snapshot, None).await?;
         Ok(settings_to_config_options(&snapshot["settings"]))
-    }
-
-    pub(super) fn touch_command(command: &mut Value) {
-        command["updatedAt"] = json!(now_ms());
     }
 }
 

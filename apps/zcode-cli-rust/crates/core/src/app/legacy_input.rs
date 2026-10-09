@@ -127,7 +127,8 @@ impl Engine {
     }
 
     pub(super) async fn legacy_send(&mut self, raw: &Value) -> Result<Value> {
-        let p = legacy_input_params::send(raw).map_err(params_error)?;
+        let (raw, queued) = super::input_queue::legacy_queue_options(raw).map_err(params_error)?;
+        let p = legacy_input_params::send(&raw).map_err(params_error)?;
         let id = self.legacy_resident(&p)?;
         if self.sessions[&id].task_type == "subagent_child" {
             return Err(RuntimeError::Rejected {
@@ -138,7 +139,9 @@ impl Engine {
             .into());
         }
         self.legacy_expect(&id, &p)?;
-        if self.legacy_locked(&id) {
+        // 显式要求排队的输入（Host 的 task 命令）在 legacy 锁下也进入队列，不报忙。
+        let queue = queued.requested && self.sessions[&id].running();
+        if self.legacy_locked(&id) && !queue {
             return Err(busy("A prompt is already running for this session"));
         }
         self.touch_session(&id);
@@ -161,7 +164,15 @@ impl Engine {
         }
         if self.sessions[&id].running() {
             // Node Core admission：未持锁的运行中，有附件排队，否则引导进当前轮。
-            payload["requestedDelivery"] = if refs.is_empty() { "guide" } else { "queue" }.into();
+            let delivery = if queue || !refs.is_empty() {
+                "queue"
+            } else {
+                "guide"
+            };
+            payload["requestedDelivery"] = delivery.into();
+        }
+        if let Some(external) = queued.external_id {
+            payload["externalId"] = external.into();
         }
         if !refs.is_empty() {
             payload["attachments"] = refs.into();

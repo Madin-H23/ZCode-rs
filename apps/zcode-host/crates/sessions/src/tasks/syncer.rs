@@ -5,7 +5,8 @@
 //! SessionsIndexObserver ─► Snapshot(initial) ─► 非 draft 会话静默写基线（只插入缺失行，不广播）
 //!                       ├► Snapshot(恢复) / Upserted ─► 与上一份摘要比较：
 //!                       │    draft                 → 忽略（草稿不落库）
-//!                       │    非终态 → 终态          → patch 状态 → task_status_changed（+未读提醒）→ 回源
+//!                       │    非终态 → 终态          → 会话信号（带迁移前摘要的 activeInputId）→ patch 状态
+//!                       │                             → task_status_changed（+未读提醒）→ 回源
 //!                       │    首次可见（新会话/draft 提升）→ 回源并写 grouped 顶层顺序 → task_created
 //!                       │    标题变化              → patch 标题 → task_title_changed；无行则回源
 //!                       └► Removed / Offline ─► 不写库
@@ -108,7 +109,10 @@ impl Syncer {
             !meta::is_terminal_phase(&previous["phase"]) && meta::is_terminal_phase(&next["phase"])
         });
         if became_terminal {
-            self.terminal_transition(target, session_id, next, became_visible)
+            let input_id = previous
+                .and_then(|previous| previous["activeInputId"].as_str())
+                .map(str::to_owned);
+            self.terminal_transition(target, session_id, next, became_visible, input_id)
                 .await;
             return;
         }
@@ -129,6 +133,7 @@ impl Syncer {
         session_id: &str,
         summary: &Value,
         move_to_top: bool,
+        input_id: Option<String>,
     ) {
         let unread_signal = meta::terminal_unread_signal(summary);
         let failed = summary["phase"] == "error";
@@ -139,6 +144,7 @@ impl Syncer {
                 target: target.clone(),
                 session_id: session_id.to_owned(),
                 failed,
+                input_id,
             }));
         // error 的详情不在摘要里，留给随后回源写权威值；完成时清空旧错误。
         let patch = if failed {

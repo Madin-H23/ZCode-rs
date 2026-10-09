@@ -119,7 +119,7 @@ impl Engine {
             (
                 session.workspace.clone(),
                 session.listed && !session.archived,
-                session.summary(),
+                super::input_queue::index_summary(session),
             )
         });
         if !deltas.is_empty() {
@@ -234,7 +234,10 @@ impl Engine {
                 }));
         }
         let session = &self.sessions[id];
-        let (key, summary) = (session.workspace.clone(), session.summary());
+        let (key, summary) = (
+            session.workspace.clone(),
+            super::input_queue::index_summary(session),
+        );
         self.publish_index(&key, id, Some(summary))
     }
 

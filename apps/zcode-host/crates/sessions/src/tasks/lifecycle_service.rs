@@ -3,12 +3,13 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use zcode_host_kit::{Args, Reply, ServiceBuilder};
+use zcode_host_kit::{Args, Reply, RpcValue, ServiceBuilder};
 
 use super::context::target_of;
 use super::lifecycle::{TaskLifecycle, task_key};
 use super::lifecycle_members::unsupported;
 use super::service::CHANNEL;
+use crate::agent::WorkspaceTarget;
 
 fn first(args: &Args) -> Value {
     args.raw(0).cloned().unwrap_or(Value::Null)
@@ -32,8 +33,27 @@ fn by_task_id(arg: &Value) -> String {
         .unwrap_or_else(|| arg["taskId"].as_str().unwrap_or_default().to_owned())
 }
 
+/// task 命令的串行键（docs/specs/rust-u2-gateway.md §2.2、rust-u3-stage-b.md 3.4.7）：它们改变一个会话
+/// 的输入队列，与 `zcode-agent` 的会话写操作同用 `session:<workspace key>:<taskId>`，所以手机的入队与桌面
+/// 直接的 V4 发送按到达顺序交给 runtime，promote / cancel 的“读队列 → 写命令”也不与同一会话的其他写调用
+/// 交错。其余成员没有键（`sendPrompt` 的参数不带 workspace）。
+pub fn serial_key(method: &str, args: &[RpcValue]) -> Option<String> {
+    if !matches!(
+        method,
+        "enqueueTaskCommand" | "promoteTaskCommand" | "cancelTaskCommand"
+    ) {
+        return None;
+    }
+    let Some(RpcValue::Json(params)) = args.first() else {
+        return None;
+    };
+    let task = params["taskId"].as_str().filter(|id| !id.is_empty())?;
+    let workspace = WorkspaceTarget::key_of(params)?;
+    Some(format!("session:{workspace}:{task}"))
+}
+
 pub fn service(lifecycle: Arc<TaskLifecycle>) -> ServiceBuilder {
-    let b = ServiceBuilder::new(CHANNEL);
+    let b = ServiceBuilder::new(CHANNEL).serial_key(serial_key);
     let b = member!(b, "initialize", lifecycle, |l, p| l
         .initialize(&p)
         .await
@@ -204,4 +224,50 @@ pub fn service(lifecycle: Arc<TaskLifecycle>) -> ServiceBuilder {
     .event("onError", |_, _| {
         Ok(Box::pin(futures_util::stream::pending()))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_commands_share_the_session_key_of_zcode_agent() {
+        let args = |params: Value| vec![RpcValue::Json(params)];
+        let local = json!({"workspacePath": "/w", "taskId": "s1", "commandId": "c"});
+        for method in [
+            "enqueueTaskCommand",
+            "promoteTaskCommand",
+            "cancelTaskCommand",
+        ] {
+            assert_eq!(
+                serial_key(method, &args(local.clone())).as_deref(),
+                Some("session:/w:s1")
+            );
+        }
+        // 与 zcode-agent 同一个键空间：同一会话的 V4 发送与入队互相排队。
+        let send = json!({"workspacePath": "/w", "envelope": {"sessionId": "s1"}});
+        assert_eq!(
+            crate::agent::service::serial_key("sendConversationCommandV4", &args(send)),
+            serial_key("enqueueTaskCommand", &args(local.clone()))
+        );
+        let remote =
+            json!({"workspacePath": "/w", "workspaceIdentity": " ssh://h/w ", "taskId": "s1"});
+        assert_eq!(
+            serial_key("cancelTaskCommand", &args(remote)).as_deref(),
+            Some("session:ssh://h/w:s1")
+        );
+        assert_eq!(serial_key("sendPrompt", &args(local.clone())), None);
+        assert_eq!(serial_key("listTasks", &args(local)), None);
+        assert_eq!(
+            serial_key(
+                "enqueueTaskCommand",
+                &args(json!({"workspacePath": "/w", "taskId": ""}))
+            ),
+            None
+        );
+        assert_eq!(
+            serial_key("enqueueTaskCommand", &args(json!({"taskId": "s1"}))),
+            None
+        );
+    }
 }

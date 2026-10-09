@@ -59,6 +59,7 @@ methods! {
     ConversationFileRewindPreview => "v4/conversation/fileRewindPreview",
     UsageStats => "v4/usage/stats",
     ConversationUsage => "v4/conversation/usage",
+    ConversationInputQueue => "v4/conversation/inputQueue",
     LegacyUsageStats => "usage/stats",
     SessionUsage => "session/usage",
     McpList => "mcp/list",

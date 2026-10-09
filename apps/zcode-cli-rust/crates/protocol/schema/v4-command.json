@@ -1181,6 +1181,10 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "externalId": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": ["text"]

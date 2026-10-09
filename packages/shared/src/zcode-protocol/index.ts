@@ -1749,6 +1749,10 @@ export const zcodeSessionSendParamsSchema = z
     offPeakRunType: z.enum(["init", "resume"]).optional(),
     botDeliveryTarget: zcodeAutomationBotDeliveryTargetSchema.optional(),
     toolDenylist: z.array(nonEmptyString).optional(),
+    // 运行中以 queue 方式入队，legacy 锁被占用时也入队（Host 的 task 命令映射）；空闲时立即开跑。
+    requestedDelivery: z.literal("queue").optional(),
+    // 同 v4 sendText.externalId。
+    externalId: nonEmptyString.optional(),
   })
   .strict()
   .superRefine((payload, context) => {

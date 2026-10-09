@@ -109,6 +109,9 @@ export const commandPayloadSchemas = {
       // 定时任务会话的后续用户输入也必须保持 turn-scoped 工具面隔离；不能借用
       // automationId，否则会把普通用户输入误标成一次 automation 派发。
       toolDisallowlist: z.array(z.string().min(1)).optional(),
+      // 提交方给这条输入的名字（Host 的 task 命令 commandId）：排队时记在队列项上、开跑时记在
+      // 轮头上，供提交方之后按它找到这条输入。不进入持久化 intent，重启后不保留。
+      externalId: z.string().min(1).optional(),
     })
     .superRefine((payload, context) => {
       if (payload.automationId && payload.offPeakTaskId) {

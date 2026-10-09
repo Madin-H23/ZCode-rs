@@ -47,6 +47,9 @@ export const sessionSummarySchema = z.object({
   // optional 兼容旧 sessions-index frame / stored summary。
   pendingInteractionSummary: pendingInteractionSummarySchema.optional(),
   goalStatus: goalStateSchema.shape.status.optional(),
+  // 运行中的输入：当前轮头的 sourceCommandId（提交它的命令 id）；空闲或该轮没有来源命令时缺席。
+  // 与 phase 同时变化，Host 据此给出一轮终态的 inputId。optional 兼容旧 frame / 旧 CLI。
+  activeInputId: z.string().min(1).optional(),
   // 未读推导：客户端本地记 lastSeenActivityAt 比较（不用 seq，epoch 会重置）。
   lastActivityAt: timestampSchema,
   // ≤120 字符。

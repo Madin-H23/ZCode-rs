@@ -13,6 +13,7 @@ type MethodFn = Arc<dyn Fn(CallContext, Args) -> CallFuture + Send + Sync>;
 type ClosedFn = Arc<dyn Fn(&CallContext) + Send + Sync>;
 type FlowFn = Arc<dyn Fn(&CallContext, FlowState) + Send + Sync>;
 type ListenFn = Arc<dyn Fn(&CallContext, Value) -> Result<EventStream, RpcError> + Send + Sync>;
+type KeyFn = Arc<dyn Fn(&str, &[RpcValue]) -> Option<String> + Send + Sync>;
 
 pub struct ServiceBuilder {
     channel: String,
@@ -20,6 +21,7 @@ pub struct ServiceBuilder {
     events: HashMap<String, ListenFn>,
     closed: Option<ClosedFn>,
     flow: Option<FlowFn>,
+    key: Option<KeyFn>,
 }
 
 impl ServiceBuilder {
@@ -30,7 +32,18 @@ impl ServiceBuilder {
             events: HashMap::new(),
             closed: None,
             flow: None,
+            key: None,
         }
+    }
+
+    /// 这个 builder 注册的成员的串行键（docs/specs/rust-u2-gateway.md §2.2）。只读参数、不阻塞；
+    /// 没有注册的成员仍用回退 channel 的键。
+    pub fn serial_key(
+        mut self,
+        key: impl Fn(&str, &[RpcValue]) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.key = Some(Arc::new(key));
+        self
     }
 
     pub fn on_connection_closed(
@@ -82,6 +95,7 @@ impl ServiceBuilder {
             events: self.events,
             closed: self.closed,
             flow: self.flow,
+            key: self.key,
             fallback,
         })
     }
@@ -93,10 +107,21 @@ struct BuiltService {
     events: HashMap<String, ListenFn>,
     closed: Option<ClosedFn>,
     flow: Option<FlowFn>,
+    key: Option<KeyFn>,
     fallback: Option<Arc<dyn ServiceChannel>>,
 }
 
 impl ServiceChannel for BuiltService {
+    /// 成员由这一层处理时用这一层的键；否则交给处理它的回退 channel。
+    fn serial_key(&self, context: &CallContext, method: &str, args: &[RpcValue]) -> Option<String> {
+        if self.methods.contains_key(method) {
+            return self.key.as_ref().and_then(|key| key(method, args));
+        }
+        self.fallback
+            .as_ref()
+            .and_then(|fallback| fallback.serial_key(context, method, args))
+    }
+
     fn call(&self, context: &CallContext, method: &str, args: Vec<RpcValue>) -> CallFuture {
         if let Some(handler) = self.methods.get(method) {
             return handler(context.clone(), Args::from_rpc(args));
@@ -146,5 +171,56 @@ impl ServiceChannel for BuiltService {
         if let Some(fallback) = &self.fallback {
             fallback.connection_flow(context, state);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use zcode_host_control::ClientMode;
+
+    struct Keyed;
+
+    impl ServiceChannel for Keyed {
+        fn serial_key(&self, _: &CallContext, method: &str, _: &[RpcValue]) -> Option<String> {
+            Some(format!("lower:{method}"))
+        }
+        fn call(&self, _: &CallContext, _: &str, _: Vec<RpcValue>) -> CallFuture {
+            Box::pin(async { Ok(Reply::Undefined) })
+        }
+        fn listen(&self, _: &CallContext, _: &str, _: RpcValue) -> Result<EventStream, RpcError> {
+            Err(RpcError::new("Error", "no events"))
+        }
+    }
+
+    /// 自己注册的成员用自己的串行键（没有键函数时为 None）；未注册的成员交给回退 channel 的键。
+    #[test]
+    fn serial_keys_follow_the_channel_that_handles_the_member() {
+        let context = CallContext::new(1, "a", ClientMode::DesktopContinuous);
+        let args = [RpcValue::Json(json!({"taskId": "t"}))];
+        let keyed = ServiceBuilder::new("c")
+            .method("mine", |_, _| async { Ok(Reply::Undefined) })
+            .method("plain", |_, _| async { Ok(Reply::Undefined) })
+            .serial_key(|method, args| {
+                (method == "mine").then(|| match args.first() {
+                    Some(RpcValue::Json(params)) => format!("upper:{}", params["taskId"]),
+                    _ => "upper:?".into(),
+                })
+            })
+            .build(Some(Arc::new(Keyed)));
+        assert_eq!(
+            keyed.serial_key(&context, "mine", &args).as_deref(),
+            Some("upper:\"t\"")
+        );
+        assert_eq!(keyed.serial_key(&context, "plain", &args), None);
+        assert_eq!(
+            keyed.serial_key(&context, "other", &args).as_deref(),
+            Some("lower:other")
+        );
+        let plain = ServiceBuilder::new("c")
+            .method("mine", |_, _| async { Ok(Reply::Undefined) })
+            .build(None);
+        assert_eq!(plain.serial_key(&context, "mine", &args), None);
     }
 }

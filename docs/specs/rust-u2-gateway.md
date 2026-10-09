@@ -95,6 +95,14 @@ pub trait CallObserver: Send + Sync { fn call_finished(&self, channel: &str, met
 
 没有键：V4 `createSession`（信封不带 sessionId）、legacy `createSession`、握手与订阅（`hello`、`initialize`、`subscribe*`、`unsubscribe*`、`resync*`）、全部读取（`read*`、`list*`、`conversation*V4` 的查询、`attachmentReadV4`、`attachmentPreviewSourceV4`、`queryConversationCommandsV4`、`backgroundBashOutputV4`）、workspace 与 App 级的成员（插件、MCP、工作流、生成文本、用量、`disposeWorkspace` 等）。参数缺 `workspacePath` 或 sessionId 为空时不设键（调用本身会以参数错误失败）。
 
+`zcode-task` 的串行键（`crates/sessions/src/tasks/lifecycle_service.rs`，与上表同一个键空间，[rust-u3-stage-b.md](rust-u3-stage-b.md) 3.4.7）：
+
+| 方法                                                                                       | 会话 id 的位置 |
+| ------------------------------------------------------------------------------------------ | -------------- |
+| `enqueueTaskCommand`、`promoteTaskCommand`、`cancelTaskCommand`（改变 runtime 的输入队列） | `taskId`       |
+
+`zcode-task` 的其余成员没有键；`sendPrompt` 的参数不带 workspace，算不出键。
+
 占用通道的时间：上面的方法都在 runtime 接受（ACK）时返回，不等 run 结束；runtime 的 Engine 逐个处理请求，本来也不会在请求里等一个 run 跑完。会有限地等待的情形：runtime 实例启动与存储就绪（`get_ready_client`）、`sendText` 向 Main 取浏览器环境（每个请求至多 30 s）、`deleteSession` / `closeSession` 等被取消的 run 收口、到 runtime 的请求超时（180 s；`compactSession` 放宽到 5 min）。这些等待期间同一会话的后续写操作排在后面，这正是要保证的顺序。
 
 ### 2.3 出站队列

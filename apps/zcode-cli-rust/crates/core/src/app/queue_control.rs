@@ -129,6 +129,7 @@ impl Engine {
         if let Some(tools) = item.get("toolDisallowlist") {
             c.payload["toolDisallowlist"] = tools.clone();
         }
+        super::input_queue::copy_external_id(&item, &mut c.payload);
         if self
             .select(&c.payload, Some(self.session_selection(id)?))
             .is_err()
