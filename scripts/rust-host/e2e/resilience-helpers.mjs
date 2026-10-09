@@ -14,16 +14,21 @@ const HOST_COMMAND = /zcode-host(\.exe)?(\s|$)/;
 /** runtime 子进程的特征：Rust CLI 二进制，或任何以 `app-server --stdio` 启动的 CLI（含 TS CLI）。 */
 const RUNTIME_COMMAND = /zcode-cli-rust|app-server --stdio/;
 
-/** 当前进程表：pid、ppid、完整命令行。 */
+/** 当前进程表：pid、ppid、进程组、完整命令行。 */
 export async function processTable() {
-  const { stdout } = await run("ps", ["-axww", "-o", "pid=,ppid=,command="], {
+  const { stdout } = await run("ps", ["-axww", "-o", "pid=,ppid=,pgid=,command="], {
     maxBuffer: 16 * 1024 * 1024,
   });
   return stdout
     .split("\n")
-    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
+    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/))
     .filter(Boolean)
-    .map(([, pid, ppid, command]) => ({ pid: Number(pid), ppid: Number(ppid), command }));
+    .map(([, pid, ppid, pgid, command]) => ({
+      pid: Number(pid),
+      ppid: Number(ppid),
+      pgid: Number(pgid),
+      command,
+    }));
 }
 
 /** `pid` 的所有后代进程（不含它自己）。 */
@@ -62,7 +67,7 @@ export async function waitFor(
   }
 }
 
-/** Electron Main 下当前存活的 Rust Host（每个窗口一个）。 */
+/** Electron Main 下当前存活的 Rust Host（U4 起一个 App 一个，docs/specs/rust-u4-app-host.md）。 */
 export async function hostsOf(electronPid) {
   return (await processTable()).filter(
     (row) => row.ppid === electronPid && HOST_COMMAND.test(row.command),

@@ -5,9 +5,12 @@
 // 运行在 Host 进程内（docs/specs/rust-u3-single-process.md §2.2），模型是本地 mock 的 OpenAI 兼容端点；
 // 经 CDP（私有端口）驱动界面。不使用固定的 Vite 5174 / CDP 9229 端口，不读写 ~/.zcode，遥测端点置空。
 //
-// 用法：node scripts/rust-host/e2e-desktop.mjs [--scenario <name>]... [--runtime embedded|child]
-//                                             [--skip-build] [--keep] [--explore]
+// 用法：node scripts/rust-host/e2e-desktop.mjs [--scenario <name>]... [--host rust|node]
+//                                             [--runtime embedded|child] [--skip-build] [--keep] [--explore]
 //   --scenario    要运行的场景（scripts/rust-host/e2e/scenarios/<name>.mjs），可重复；默认 core
+//   --host        rust（缺省）= ZCODE_DESKTOP_HOST=rust，一个 App 一个 Rust Host（docs/specs/rust-u4-app-host.md）；
+//                 node = 发布的组合：Node Host（每个主窗口一个）+ TS CLI（apps/zcode-cli 的单文件构建），
+//                 用来确认 Main 侧的重构没有改变 Node 路径；--runtime 对它不生效
 //   --runtime     runtime 链路：embedded（缺省）= Host 的缺省链路，进程内 runtime，不需要 CLI 二进制，
 //                 继承环境里的 ZCODE_AGENT_SERVER_* 一律清掉；child = 差分对照，经
 //                 ZCODE_AGENT_SERVER_COMMAND 让 Host 为每个 workspace 启动 Rust CLI 子进程
@@ -17,35 +20,36 @@
 // child 模式下环境变量 ZCODE_E2E_CLI_RUST_BINARY 可指定 Rust CLI 可执行文件（默认用本仓库的 release 构建，
 // 需要先 cargo build --release）。
 //
+// 每个场景结束时 harness 断言进程表（Rust：Main 下恰好一个 Rust Host、没有 Node Host / scheduler 进程），
+// 然后正常退出 App（SIGTERM 只发给 Main），断言 Main 走完退出流程、Rust Host 经 dispose 退出、不留进程。
+//
 // 场景模块导出：
-//   run(context)           必需；context = { page, shots, model, workspace, home, temp, runtime,
-//                          mainPid, relaunch, secondInstance }
+//   run(context)           必需；context = { page, shots, model, workspace, home, temp, runtime, host,
+//                          mainPid, pages, main, relaunch, secondInstance }
 //   mockRules              可选；按顺序匹配的 mock 模型规则 { name, match(request), respond(request) }
 //   seed(context)          可选；在启动 App 之前补充隔离 profile（context = { home, workspace, temp, runtime }）
 //   env(context)           可选；返回追加给 App 进程树的环境变量（不能覆盖隔离用的 HOME 等键）
 //   args(context)          可选；返回追加给 Electron 的命令行参数
-// context.runtime 是 "embedded" 或 "child"；context.mainPid() 是当前 Electron Main 的 pid（relaunch 后会变），
-// 进程类断言从它向下找 Rust Host（e2e/resilience-helpers.mjs）。
+// context.runtime 是 "embedded" 或 "child"，context.host 是 "rust" 或 "node"；context.mainPid() 是当前
+// Electron Main 的 pid（relaunch 后会变），进程类断言从它向下找 Rust Host（e2e/resilience-helpers.mjs）；
+// context.pages() 是当前所有主窗口的页面；context.main() 是 Main 进程的 inspector（e2e/main-process.mjs）。
 // run(context) 另可用 context.secondInstance(args)：以同一隔离环境再启动一次 App，
 // 由单实例锁把 argv（例如 zcode:// deep link）转交给已运行的实例后退出。
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { createWriteStream, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { createRequire } from "node:module";
-import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 
+import { assertAppProcesses, assertCleanQuit, assertRuntimeLink, launchApp } from "./e2e/app.mjs";
 import { lastUserText } from "./e2e/helpers.mjs";
-import { hostLogLines, runtimeProcessesUnder } from "./e2e/resilience-helpers.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const desktop = join(root, "packages/desktop");
-const require = createRequire(join(desktop, "package.json"));
 const { values: options } = parseArgs({
   options: {
     scenario: { type: "string", multiple: true },
@@ -53,10 +57,13 @@ const { values: options } = parseArgs({
     keep: { type: "boolean" },
     explore: { type: "boolean" },
     runtime: { type: "string", default: "embedded" },
+    host: { type: "string", default: "rust" },
   },
 });
 if (!["embedded", "child"].includes(options.runtime))
   throw new Error(`--runtime must be embedded or child, got ${options.runtime}`);
+if (!["rust", "node"].includes(options.host))
+  throw new Error(`--host must be rust or node, got ${options.host}`);
 
 function run(command, args, cwd, env = process.env) {
   return new Promise((done, fail) => {
@@ -66,15 +73,6 @@ function run(command, args, cwd, env = process.env) {
       code === 0 ? done() : fail(new Error(`${command} ${args.join(" ")} exited ${code}`)),
     );
   });
-}
-
-async function freePort() {
-  const server = createNetServer();
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const { port } = server.address();
-  server.close();
-  return port;
 }
 
 /** 离线的 ZCode 控制面：所有请求 404（JSON），等同于控制面不可用。 */
@@ -206,57 +204,6 @@ async function seedProfile(home, workspace, baseUrl) {
   );
 }
 
-async function waitForCdp(port, child) {
-  for (let attempt = 0; attempt < 240; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`Electron exited early (${child.exitCode})`);
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/version`);
-      if (response.ok) return;
-    } catch {
-      // 还没监听
-    }
-    await sleep(500);
-  }
-  throw new Error("CDP endpoint did not come up");
-}
-
-async function appPage(browser) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    for (const context of browser.contexts()) {
-      for (const page of context.pages()) {
-        if (page.url().includes("index.html")) return page;
-      }
-    }
-    await sleep(500);
-  }
-  throw new Error("renderer page not found");
-}
-
-/**
- * 本次运行确实走了选定的 runtime 链路。Host 每启动一个 runtime 实例写一行
- * `agent[<key>#<代次>] started pid=<pid>`（经 Main 落盘），嵌入式实例没有 pid：
- *   embedded  没有一行带 pid，Electron Main 的进程树里也没有 CLI 进程；
- *   child     至少一行带 pid（启动时的预热就会拉起一个）。
- */
-async function assertRuntimeLink(runtime, home, mainPid) {
-  const lines = (await hostLogLines(home)).filter((line) => /agent\[.*\] started pid=/.test(line));
-  const withPid = lines.filter((line) => /started pid=\d+/.test(line));
-  if (runtime === "embedded") {
-    if (withPid.length > 0)
-      throw new Error(`embedded run started CLI processes:\n${withPid.join("\n")}`);
-    const processes = mainPid ? await runtimeProcessesUnder(mainPid) : [];
-    if (processes.length > 0)
-      throw new Error(
-        `embedded run has CLI processes: ${processes.map((row) => row.command).join("; ")}`,
-      );
-  } else if (withPid.length === 0) {
-    throw new Error("child run never started a CLI process");
-  }
-  console.info(
-    `[e2e] runtime link ${runtime}: ${lines.length} runtime starts, ${withPid.length} with a pid`,
-  );
-}
-
 async function runScenario(name, cli) {
   const runtime = options.runtime;
   const scenario = await import(`./e2e/scenarios/${name}.mjs`);
@@ -280,7 +227,7 @@ async function runScenario(name, cli) {
   let app;
   let failed = false;
   try {
-    app = await launchApp({ temp, home, cli, env, args });
+    app = await launchApp({ host: options.host, temp, home, cli, env, args });
     if (options.explore) {
       for (let index = 0; index < 8; index += 1) {
         await sleep(4000);
@@ -297,15 +244,22 @@ async function runScenario(name, cli) {
       home,
       temp,
       runtime,
+      host: options.host,
       mainPid: () => app.pid,
+      pages: () => app.pages(),
+      main: () => app.main,
       secondInstance: (extraArgs) => app.secondInstance(extraArgs),
       relaunch: async () => {
-        await app.stop();
-        app = await launchApp({ temp, home, cli, env, args });
+        await assertCleanQuit(options.host, home, await app.stop());
+        app = await launchApp({ host: options.host, temp, home, cli, env, args });
         return app.page;
       },
     });
-    await assertRuntimeLink(runtime, home, app.pid);
+    if (options.host === "rust") await assertRuntimeLink(runtime, home, app.pid);
+    await assertAppProcesses(options.host, app.pid);
+    const quit = await app.stop();
+    app = undefined;
+    await assertCleanQuit(options.host, home, quit);
     console.info(`[e2e:${name}] passed`);
   } catch (error) {
     failed = true;
@@ -326,16 +280,23 @@ async function runScenario(name, cli) {
 
 async function main() {
   // embedded 模式不需要 CLI 二进制；child 模式缺少时直接失败，不回退到嵌入式。
+  // Node Host 不认 --runtime：它总是为每个 workspace 起 CLI 子进程（缺省 TS CLI）。
   let cli = null;
-  if (options.runtime === "child") {
+  if (options.host === "rust" && options.runtime === "child") {
     cli =
       process.env.ZCODE_E2E_CLI_RUST_BINARY?.trim() ||
       join(root, "apps/zcode-cli-rust/target/release/zcode-cli-rust");
     if (!existsSync(cli)) throw new Error(`Rust CLI release build missing: ${cli}`);
   }
-  console.info(`[e2e] runtime: ${options.runtime}${cli ? ` (${cli})` : ""}`);
+  console.info(
+    options.host === "node"
+      ? "[e2e] host: node (Node Host, TS CLI)"
+      : `[e2e] host: rust, runtime: ${options.runtime}${cli ? ` (${cli})` : ""}`,
+  );
   if (!options["skip-build"]) {
-    await run("cargo", ["build"], join(root, "apps/zcode-host"));
+    if (options.host === "rust") await run("cargo", ["build"], join(root, "apps/zcode-host"));
+    // Node Host 跑的 agent 是 TS CLI 的单文件构建（scripts/build-desktop-agent-cli.mjs）。
+    else await run("node", ["scripts/build-desktop-agent-cli.mjs"], root);
     await run("node", ["scripts/ensure-local-runtime-assets.mjs"], desktop);
     await run("pnpm", ["exec", "tsup"], desktop, { ...process.env, NODE_ENV: "production" });
     await run("pnpm", ["exec", "vite", "build"], desktop, {
@@ -353,91 +314,6 @@ async function main() {
     process.exitCode = 1;
   } else {
     console.info(`[e2e] all scenarios passed: ${scenarios.join(", ")}`);
-  }
-}
-
-/** 启动一个隔离的 Electron 实例并连上它的 renderer 页面。 */
-async function launchApp({ temp, home, cli, env = {}, args = [] }) {
-  const cdpPort = await freePort();
-  const electronBinary = require("electron");
-  // runtime 链路只由 --runtime 决定：先清掉开发者环境里可能残留的选择变量。
-  const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith("ZCODE_AGENT_SERVER_")),
-  );
-  const appEnv = {
-    ...inherited,
-    ...env,
-    ZCODE_ENV: "production",
-    ZCODE_DESKTOP_HOST: "rust",
-    ...(cli
-      ? { ZCODE_AGENT_SERVER_COMMAND: cli, ZCODE_AGENT_SERVER_RUNTIME: "zcode-cli-rust" }
-      : {}),
-    // Main 直接用 os.homedir() 读 setting.json 并据此下发预热 workspace；不覆盖 HOME 就会
-    // 读到开发者真实的最近项目，并在那些目录里启动 CLI。所以整个进程树都换成临时 HOME。
-    HOME: home,
-    USERPROFILE: home,
-    ZCODE_DATA_BASE_DIR: home,
-    ZCODE_DESKTOP_HOME_DIR: home,
-    ZCODE_CLI_RUST_DATA_DIR: join(home, ".zcode", "rust"),
-    ZCODE_DESKTOP_USER_DATA_DIR: join(temp, "electron"),
-    ZCODE_DESKTOP_SESSION_DATA_DIR: join(temp, "electron-session"),
-    ZCODE_DESKTOP_APPLICATION_NAME: "ZCode Rust Host E2E",
-    ZCODE_DISABLE_FIXED_REMOTE_DEBUGGING_PORT: "1",
-    // 测试实例不对外上报：遥测、ARMS 与 OTLP 端点一律置空（显式空值覆盖 dotenv）。
-    ZCODE_TELEMETRY_REPORT_ENDPOINT: "",
-    ZCODE_ARMS_RUM_ENDPOINT: "",
-    OTEL_EXPORTER_OTLP_ENDPOINT: "",
-    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "",
-    ELECTRON_RENDERER_URL: "",
-  };
-  const electron = spawn(electronBinary, [".", `--remote-debugging-port=${cdpPort}`, ...args], {
-    cwd: desktop,
-    env: appEnv,
-    stdio: ["ignore", "inherit", "inherit"],
-    detached: process.platform !== "win32",
-  });
-  const secondInstance = async (extraArgs) => {
-    const child = spawn(electronBinary, [".", ...extraArgs], {
-      cwd: desktop,
-      env: appEnv,
-      stdio: ["ignore", "inherit", "inherit"],
-    });
-    const done = once(child, "exit");
-    const timedOut = await Promise.race([done.then(() => false), sleep(20_000).then(() => true)]);
-    if (timedOut) child.kill("SIGKILL");
-  };
-  const exited = once(electron, "exit");
-  const signal = (name) => {
-    if (electron.exitCode !== null || electron.signalCode !== null || !electron.pid) return;
-    try {
-      process.kill(process.platform === "win32" ? electron.pid : -electron.pid, name);
-    } catch {
-      electron.kill(name);
-    }
-  };
-  const stop = async () => {
-    signal("SIGTERM");
-    const timedOut = await Promise.race([exited.then(() => false), sleep(10_000).then(() => true)]);
-    if (timedOut) {
-      signal("SIGKILL");
-      await exited;
-    }
-  };
-  try {
-    await waitForCdp(cdpPort, electron);
-    const { chromium } = require("playwright-core");
-    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
-    const page = await appPage(browser);
-    // Renderer console 落到临时目录：失败时能看到 UI 自己的判断日志（CDP 接上之前的输出会缺失）。
-    const consoleLog = createWriteStream(join(temp, "renderer-console.log"), { flags: "a" });
-    page.on("console", (message) => {
-      consoleLog.write(`[${new Date().toISOString()}] [${message.type()}] ${message.text()}\n`);
-    });
-    exited.then(() => consoleLog.end());
-    return { page, stop, secondInstance, pid: electron.pid };
-  } catch (error) {
-    await stop();
-    throw error;
   }
 }
 

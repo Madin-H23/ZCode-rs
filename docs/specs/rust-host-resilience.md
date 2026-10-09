@@ -137,7 +137,7 @@ Renderer 读慢 → TCP 缓冲满 → ws 写任务 send 挂起 → FlowGauge 积
 | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | 重启策略：退避序列、60 s 内第 4 次放弃、窗口外的退出不计入                                            | `packages/desktop/test/rustHostRestartPolicy.test.ts`（node:test）                      |
 | 启动重试：失败 → retry（错误 attemptId 被忽略）→ 新 attemptId、sequence 递增 → ready；snapshot 重发   | `crates/zcode-host/tests/startup_retry.rs`（真实二进制）                                |
-| 启动重试真实 App：迁移失败页 → 等 30 s 以上 → 移除故障 → Retry → 进入主界面；Exit 退出 App            | E2E `resilience-startup`                                                                |
+| 启动重试真实 App：迁移失败页 → 等 30 s 以上 → 移除故障 → Retry → 进入主界面；Exit 退出 App            | E2E `resilience-startup`（两个主窗口）                                                  |
 | CLI 崩溃 → 懒重启：只杀本次隔离运行的 CLI，再发消息成功                                               | E2E `resilience-cli-crash`                                                              |
 | Renderer reload → 重新 attach，会话仍能流式                                                           | E2E `resilience-reload`                                                                 |
 | 设置快照加载前 provider 启动门禁保持 pending                                                          | `packages/ui/test/rootStartupGate.test.ts`；`resilience-reload` 并发压测                |
