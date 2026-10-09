@@ -1,7 +1,8 @@
 // Rust Host 自动重启的有界策略（docs/specs/rust-host-resilience.md §2.1）。
 //
-// 纯逻辑，不依赖 Electron：每个窗口一个实例，记录意外退出的时间；任意 windowMs 内最多自动重启
-// maxRestarts 次，第 n 次之前等待 backoffMs[n-1]。超出后放弃，由用户手动重新加载。
+// 纯逻辑，不依赖 Electron：App 级 Host 一个实例（docs/specs/rust-u4-app-host.md §2.8），记录意外
+// 退出的时间；任意 windowMs 内最多自动重启 maxRestarts 次，第 n 次之前等待 backoffMs[n-1]。超出后
+// 放弃，由用户在任意窗口点 Retry 触发一次重启。
 
 export interface RustHostRestartPolicyOptions {
   maxRestarts?: number;

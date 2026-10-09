@@ -142,6 +142,7 @@ import {
   showCurrentWindowFromDock,
   syncApplicationUnreadBadge,
   handleDesktopWindowCloseRequest,
+  type WindowOwnedHostOptions,
 } from "./desktopWindowLifecycle.js";
 import { resolveZCodeBuiltinProviderConfigFilePath } from "./desktopProviderConfig.js";
 import {
@@ -164,10 +165,19 @@ import {
 import {
   disposeHostProcess,
   disposeHostProcessAndWait,
+  type HostProcessDependencies,
   listDisposingHostProcesses,
   loadWindow,
   spawnHostProcess,
 } from "./desktopHostProcess.js";
+import { isRustDesktopHostEnabled } from "./rustDesktopHost.js";
+import {
+  createRustAppHost,
+  resolveRuntimeProcessEnvPatch,
+  type RustAppHostInit,
+} from "./rustAppHost.js";
+import type { MainSettingStore } from "./hostSettingWriter.js";
+import { createMainSettingsSync } from "./mainSettingsSync.js";
 import { spawnCronScheduler, type CronSchedulerHandle } from "./desktopCronScheduler.js";
 import {
   clearOAuthRoutesForWindow,
@@ -618,9 +628,18 @@ const windowWorkspaceMap = new Map<number, Set<string>>();
 const windowTaskRealtimeHostIdMap = new Map<number, string>();
 const windowUnreadCountMap = new Map<number, number>();
 const windowHostProcessMap = new Map<number, ElectronUtilityProcess>();
+/**
+ * 窗口当前使用的 Host（按 webContents.id）。Node 路径是窗口自己的 Host；Rust 开关下是 App 级
+ * Host，所有已接入的主窗口返回同一个进程（docs/specs/rust-u4-app-host.md §3）。
+ */
+function resolveWindowHost(webContentsId: number): ElectronUtilityProcess | undefined {
+  return rustAppHost
+    ? rustAppHost.hostForWindow(webContentsId)
+    : windowHostProcessMap.get(webContentsId);
+}
 const cuaPipFocusRouter = createCuaPipFocusRouter({
   send: (windowId, event) => {
-    windowHostProcessMap.get(windowId)?.postMessage({
+    resolveWindowHost(windowId)?.postMessage({
       type: HostMessageTypes.CuaPipFocusChanged,
       event,
     });
@@ -653,6 +672,12 @@ function wakeOffPeakScheduler(offPeakTaskId?: string): void {
   // 复用同一条 scheduler-wake 通道（tick 同时覆盖 cron 与 off-peak 分支），仅日志标签区分。
   cronScheduler?.wake(`offpeak:${offPeakTaskId ?? "sync"}`);
 }
+/**
+ * 执行中的闲时任务数：Node 路径来自 scheduler 进程，Rust 开关下来自 Host 的 off-peak-active-count
+ * （docs/specs/rust-u4-app-host.md §2.4）。keep-awake 已改为纯设置驱动（keepAwakeWhileRunning），
+ * 计数只保留给后续诊断/配额用途，不联动 powerSaveBlocker。
+ */
+function handleOffPeakActiveCountChanged(_count: number): void {}
 // 选一个本地 host 执行派发：本期本地 workspace 由任一本地窗口 host 的 createTask 按 path 拉起/复用 agent。
 function resolveCronDispatchHost(): ElectronUtilityProcess | null {
   const first = windowHostProcessMap.values().next();
@@ -668,7 +693,29 @@ const UPDATE_STATUS_WINDOW_COMPACT_HEIGHT = 205;
 const UPDATE_STATUS_WINDOW_PROGRESS_HEIGHT = 224;
 const UPDATE_STATUS_WINDOW_READY_HEIGHT = UPDATE_STATUS_WINDOW_PROGRESS_HEIGHT - 54;
 const UPDATE_STATUS_WINDOW_TRAFFIC_LIGHT_POSITION = { x: 10, y: 10 } as const;
-const mainSettingService = createSettingService();
+const fileSettingService = createSettingService();
+// Rust 开关下整个 App 只有一个 Host，并且是 setting.json 的唯一写入方（docs/specs/rust-u4-app-host.md）。
+const rustAppHost = isRustDesktopHostEnabled()
+  ? createRustAppHost({
+      logger,
+      getDependencies: () => buildHostProcessDependencies(),
+      prepareInit: prepareRustAppHostInit,
+      findWindowIdForRemoteWorkspace: (workspace) =>
+        remoteSessionManager.findWindowIdForRemoteWorkspace(workspace),
+      onSettingChanged: (settings) => mainSettingsSync.acceptHostSnapshot(settings),
+      onOffPeakActiveCountChanged: handleOffPeakActiveCountChanged,
+      disposingHostProcessTimers,
+    })
+  : null;
+/** Main 读写设置的入口：Node 路径直接读写文件；Rust 开关下读文件、写经 Host（§2.6）。 */
+const mainSettingService: MainSettingStore = rustAppHost
+  ? rustAppHost.createSettingStore(fileSettingService)
+  : fileSettingService;
+/** Main 内存里的设置派生状态只认一个来源：Node 路径是 Renderer 的通知，Rust 开关下是 Host 的推送。 */
+const mainSettingsSync = createMainSettingsSync({
+  source: rustAppHost ? "host" : "renderer",
+  apply: (patch) => syncImmediateAppSettings(patch),
+});
 const appLaunchGate = createAppLaunchGate();
 const appLaunchCoordinator = createAppLaunchCoordinator(appLaunchGate);
 const appTelemetryCredentialService = createCredentialService();
@@ -780,7 +827,7 @@ app.on("browser-window-created", (_event, win) => {
 
 const remoteSessionManager = createRemoteWorkspaceSessionManager({
   logger,
-  windowHostProcessMap,
+  resolveWindowHost,
   resolveRemoteAssetDirs: () =>
     resolveRemoteAssetDirs({ locale: currentApplicationLocale }, hostProcessLocalEnv),
   resolveWslTarget: resolveCanonicalWslTarget,
@@ -1064,6 +1111,15 @@ async function prepareAppQuit(reason: string, kind: AppShutdownKind = "normal"):
     // remote session、attachment 和 transport 都由窗口 Host 持有；这里先清理
     // Main 的请求关联，再由下方每窗口唯一 Host 的 shutdown barrier 释放真实连接与 Agent。
     remoteSessionManager.disposeAllAndWaitForAppShutdown(reason),
+    // Rust 开关：App 级 Host 先等在途的设置写入结果，再走同一条 dispose 屏障（§2.6）。
+    ...(rustAppHost
+      ? [
+          rustAppHost.disposeAndWait(reason, {
+            forceKillDelayMs: activeAppShutdownPolicy.forceKillDelayMs,
+            waitTimeoutMs: activeAppShutdownPolicy.waitTimeoutMs,
+          }),
+        ]
+      : []),
     ...hostProcesses.map((child, index) =>
       disposeHostProcessAndWait(
         child,
@@ -1669,8 +1725,195 @@ function openUpdateStatusWindow() {
   });
 }
 
-function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
+/**
+ * Host→Main 消息的处理依赖；Node 窗口 Host 与 App 级 Rust Host 共用。需要回到窗口的请求由
+ * desktopHostProcess 按 Host 类型解析出 `win`（Node：拉起它的窗口；Rust：消息里的 windowId）。
+ */
+function buildHostProcessDependencies(): HostProcessDependencies {
+  return {
+    hostProcessLocalEnv,
+    desktopContextPromptEnabled: resolveDesktopContextPromptEnabledForHost,
+    logger,
+    hostRunningTaskCountMap,
+    onCuaOperationStateChanged: (source, event) =>
+      windowsCuaOperationIndicator.handleState(source, event),
+    onCuaOperationStateSourceExited: (source) => windowsCuaOperationIndicator.clearSource(source),
+    onAgentProcessExited: (event) => reportAgentProcessExitToArms(event, logger),
+    onAgentProcessError: (event) => reportAgentProcessSpawnErrorToArms(event, logger),
+    onAgentProcessException: (event) => reportAgentProcessExceptionToArms(event, logger),
+    onAgentProcessReady: (event) => reportAgentProcessReadyToArms(event, logger),
+    onAgentProcessSpawned: (event) => reportAgentProcessStartToArms(event, logger),
+    onMcpTelemetry: (message) => reportMcpTelemetryToArms(message.event, message.runtimeSurface),
+    onSessionCreateTelemetry: (message) => {
+      void appTelemetryCore.reportEvent(message.event).catch(() => {});
+    },
+    authorizeLocalMediaPreviewPath: localMediaPreviewPathRegistry.authorize,
+    // Bugfix: bot service 运行在本地窗口 host 内，/reconnect 必须能从本地 host 请求 main 创建远端 session。
+    handleBotRemoteWorkspaceReconnectRequest: async ({
+      win,
+      requestId,
+      workspacePath,
+      workspaceIdentity,
+      target,
+    }) => {
+      try {
+        const sessionId = await remoteSessionManager.reconnectBotRemoteWorkspaceSession(win, {
+          target,
+          workspacePath,
+          workspaceIdentity,
+          requestId,
+        });
+        if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+          win.webContents.send(PlatformChannels.BotRemoteWorkspaceReconnected, {
+            sessionId,
+            workspacePath,
+            workspaceIdentity,
+            target,
+          });
+        }
+        return { ok: true, sessionId };
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    handleBotRemoteWorkspaceConnectionStatusRequest: async ({
+      win,
+      target,
+      workspacePath,
+      workspaceIdentity,
+    }) => ({
+      ok: true,
+      // Bugfix: Bot 远端连接状态必须按 workspaceIdentity/workspacePath 精确隔离。
+      // 只按 SSH target 判断会把同一台机器上的其他目录误判为当前 workspace 已连接。
+      connected: remoteSessionManager.hasRemoteWorkspaceSessionForTarget(win, target, {
+        workspacePath,
+        workspaceIdentity,
+      }),
+    }),
+    handleBotRemoteWorkspaceRuntimePortRequest: async ({
+      win,
+      requestId,
+      workspacePath,
+      workspaceIdentity,
+      target,
+    }) => {
+      try {
+        const port = await remoteSessionManager.createBotRemoteWorkspaceRuntimePort(
+          win,
+          {
+            target,
+            workspacePath,
+            workspaceIdentity,
+          },
+          requestId,
+        );
+        return { ok: true, port };
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    // browser-use：main 用 WebContentsView+CDP 执行命令。
+    handleBrowserExecuteRequest: ({ win: browserWin, ...request }) =>
+      runBrowserCommandOnView({ win: browserWin, ...request }),
+  };
+}
+
+function resolveBuiltinProviderConfigFilePathForHost(): string {
+  return resolveZCodeBuiltinProviderConfigFilePath({
+    env: { ...hostProcessLocalEnv, ...process.env },
+  });
+}
+
+/**
+ * App 级 Rust Host 的 `init-local`（docs/specs/rust-u4-app-host.md §2.1）：灰度裁决与登录 shell 环境的
+ * 等待规则与今天首个窗口 Host 相同；预热名单是上次会话的启动 workspace（Host 先于首窗口启动，命令行或
+ * deep link 指定的 workspace 由首窗口打开时懒启动）。
+ */
+async function prepareRustAppHostInit(): Promise<RustAppHostInit> {
+  await awaitFirstHostSpawnDecision();
+  const runtimeProcessEnvPatch = await resolveRuntimeProcessEnvPatch(
+    takeRuntimeProcessEnvPreparation(),
+    logger,
+  );
+  const startupBootstrap = await resolveStartupWindowBootstrap({
+    settingsFile,
+    conversationWorkspaceDir: getConversationWorkspaceDir(),
+    logger,
+  });
+  const warmupTargets = startupBootstrap.agentWarmupTargets ?? [];
+  return {
+    deviceMid,
+    workspacePath: warmupTargets[0]?.workspacePath,
+    workspaceIdentity: warmupTargets[0]?.workspaceIdentity,
+    ...(warmupTargets.length > 0 ? { agentWarmupTargets: [...warmupTargets] } : {}),
+    runtimeProcessEnvPatch,
+    agentSpawnFallbackCwd: getConversationWorkspaceDir(),
+    zcodeBuiltinProviderConfigFilePath: resolveBuiltinProviderConfigFilePathForHost(),
+  };
+}
+
+/** Node 路径的窗口 Host：每个主窗口在 dom-ready 时拉起自己的 Host，并接入 BroadcastHub / taskRealtimeBus。 */
+function createWindowOwnedHostOptions(
+  startupBootstrap: StartupWindowBootstrap,
+): WindowOwnedHostOptions {
   const runtimeProcessEnvPreparation = takeRuntimeProcessEnvPreparation();
+  return {
+    kind: "window",
+    windowHostProcessMap,
+    awaitFirstHostSpawnDecision,
+    spawnHostProcess: (win, label, initMessage) =>
+      spawnHostProcess(
+        win,
+        label,
+        {
+          ...initMessage,
+          zcodeBuiltinProviderConfigFilePath: resolveBuiltinProviderConfigFilePathForHost(),
+        },
+        {
+          ...buildHostProcessDependencies(),
+          broadcastHub,
+          taskRealtimeBus,
+          windowHostProcessMap,
+          onCronRunResult: forwardCronRunResult,
+          onOffPeakRunResult: forwardOffPeakRunResult,
+          onCronSchedulerWakeRequested: wakeCronScheduler,
+          onOffPeakSchedulerWakeRequested: wakeOffPeakScheduler,
+        },
+        {
+          taskRealtime: {
+            workspaceKeys: windowWorkspaceMap.get(win.id) ?? [],
+            onHostId: (hostId) => {
+              windowTaskRealtimeHostIdMap.set(win.id, hostId);
+            },
+          },
+        },
+      ),
+    disposeHostProcess: (child, label, forceKillDelayMs) =>
+      disposeHostProcess(
+        child,
+        label,
+        disposingHostProcessTimers,
+        logger,
+        label.includes("window-closed")
+          ? activeAppShutdownPolicy.forceKillDelayMs
+          : forceKillDelayMs,
+      ),
+    agentWarmupTargets: startupBootstrap.agentWarmupTargets,
+    // startupBootstrap 只标记 active workspace 是否不可用，但 local Host 会为所有
+    // 已恢复 workspace 建立后台索引。始终注入 canonical fallback，才能覆盖非 active 历史目录已删除的情况。
+    agentSpawnFallbackCwd: getConversationWorkspaceDir(),
+    runtimeProcessEnvPatchPromise: runtimeProcessEnvPreparation.patchPromise,
+    runtimeProcessEnvFallbackPatch: runtimeProcessEnvPreparation.fallbackPatch,
+  };
+}
+
+function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
   const win = createWindow({
     iconPath,
     preloadPath,
@@ -1693,139 +1936,10 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
         },
         hideWindow: () => win.hide(),
       }),
-    windowHostProcessMap,
+    host: rustAppHost
+      ? { kind: "app", appHost: rustAppHost }
+      : createWindowOwnedHostOptions(startupBootstrap),
     onHostProcessReady: (windowKey) => cuaPipFocusRouter.refreshWindow(windowKey),
-    awaitFirstHostSpawnDecision,
-    spawnHostProcess: (win, label, initMessage) =>
-      spawnHostProcess(
-        win,
-        label,
-        {
-          ...initMessage,
-          zcodeBuiltinProviderConfigFilePath: resolveZCodeBuiltinProviderConfigFilePath({
-            env: { ...hostProcessLocalEnv, ...process.env },
-          }),
-        },
-        {
-          hostProcessLocalEnv,
-          desktopContextPromptEnabled: resolveDesktopContextPromptEnabledForHost,
-          logger,
-          broadcastHub,
-          taskRealtimeBus,
-          windowHostProcessMap,
-          hostRunningTaskCountMap,
-          onCuaOperationStateChanged: (source, event) =>
-            windowsCuaOperationIndicator.handleState(source, event),
-          onCuaOperationStateSourceExited: (source) =>
-            windowsCuaOperationIndicator.clearSource(source),
-          onAgentProcessExited: (event) => reportAgentProcessExitToArms(event, logger),
-          onAgentProcessError: (event) => reportAgentProcessSpawnErrorToArms(event, logger),
-          onAgentProcessException: (event) => reportAgentProcessExceptionToArms(event, logger),
-          onAgentProcessReady: (event) => reportAgentProcessReadyToArms(event, logger),
-          onAgentProcessSpawned: (event) => reportAgentProcessStartToArms(event, logger),
-          onMcpTelemetry: (message) =>
-            reportMcpTelemetryToArms(message.event, message.runtimeSurface),
-          onSessionCreateTelemetry: (message) => {
-            void appTelemetryCore.reportEvent(message.event).catch(() => {});
-          },
-          onCronRunResult: forwardCronRunResult,
-          onOffPeakRunResult: forwardOffPeakRunResult,
-          onCronSchedulerWakeRequested: wakeCronScheduler,
-          onOffPeakSchedulerWakeRequested: wakeOffPeakScheduler,
-          authorizeLocalMediaPreviewPath: localMediaPreviewPathRegistry.authorize,
-          // Bugfix: bot service 运行在本地窗口 host 内，/reconnect 必须能从本地 host 请求 main 创建远端 session。
-          handleBotRemoteWorkspaceReconnectRequest: async ({
-            win,
-            requestId,
-            workspacePath,
-            workspaceIdentity,
-            target,
-          }) => {
-            try {
-              const sessionId = await remoteSessionManager.reconnectBotRemoteWorkspaceSession(win, {
-                target,
-                workspacePath,
-                workspaceIdentity,
-                requestId,
-              });
-              if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
-                win.webContents.send(PlatformChannels.BotRemoteWorkspaceReconnected, {
-                  sessionId,
-                  workspacePath,
-                  workspaceIdentity,
-                  target,
-                });
-              }
-              return { ok: true, sessionId };
-            } catch (error) {
-              return {
-                ok: false,
-                error: error instanceof Error ? error.message : String(error),
-              };
-            }
-          },
-          handleBotRemoteWorkspaceConnectionStatusRequest: async ({
-            win,
-            target,
-            workspacePath,
-            workspaceIdentity,
-          }) => ({
-            ok: true,
-            // Bugfix: Bot 远端连接状态必须按 workspaceIdentity/workspacePath 精确隔离。
-            // 只按 SSH target 判断会把同一台机器上的其他目录误判为当前 workspace 已连接。
-            connected: remoteSessionManager.hasRemoteWorkspaceSessionForTarget(win, target, {
-              workspacePath,
-              workspaceIdentity,
-            }),
-          }),
-          handleBotRemoteWorkspaceRuntimePortRequest: async ({
-            win,
-            requestId,
-            workspacePath,
-            workspaceIdentity,
-            target,
-          }) => {
-            try {
-              const port = await remoteSessionManager.createBotRemoteWorkspaceRuntimePort(
-                win,
-                {
-                  target,
-                  workspacePath,
-                  workspaceIdentity,
-                },
-                requestId,
-              );
-              return { ok: true, port };
-            } catch (error) {
-              return {
-                ok: false,
-                error: error instanceof Error ? error.message : String(error),
-              };
-            }
-          },
-          // browser-use：main 用 WebContentsView+CDP 执行命令。
-          handleBrowserExecuteRequest: ({ win: browserWin, ...request }) =>
-            runBrowserCommandOnView({ win: browserWin, ...request }),
-        },
-        {
-          taskRealtime: {
-            workspaceKeys: windowWorkspaceMap.get(win.id) ?? [],
-            onHostId: (hostId) => {
-              windowTaskRealtimeHostIdMap.set(win.id, hostId);
-            },
-          },
-        },
-      ),
-    disposeHostProcess: (child, label, forceKillDelayMs) =>
-      disposeHostProcess(
-        child,
-        label,
-        disposingHostProcessTimers,
-        logger,
-        label.includes("window-closed")
-          ? activeAppShutdownPolicy.forceKillDelayMs
-          : forceKillDelayMs,
-      ),
     syncAutoUpdaterStateToWindow,
     syncReadyUpdateToWindow,
     syncPostUpdateReleaseNotesToWindow,
@@ -1839,13 +1953,7 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
       initialWorkspacePurpose: startupBootstrap.initialWorkspacePurpose,
       unavailableWorkspacePath: startupBootstrap.unavailableWorkspacePath,
     },
-    agentWarmupTargets: startupBootstrap.agentWarmupTargets,
-    // startupBootstrap 只标记 active workspace 是否不可用，但 local Host 会为所有
-    // 已恢复 workspace 建立后台索引。始终注入 canonical fallback，才能覆盖非 active 历史目录已删除的情况。
-    agentSpawnFallbackCwd: getConversationWorkspaceDir(),
     deviceMid,
-    runtimeProcessEnvPatchPromise: runtimeProcessEnvPreparation.patchPromise,
-    runtimeProcessEnvFallbackPatch: runtimeProcessEnvPreparation.fallbackPatch,
     initialDesktopZoomLevel: currentDesktopZoomLevel,
     initialWindowSize: currentDesktopWindowSize,
     currentApplicationLocale: () => currentApplicationLocale,
@@ -1858,6 +1966,23 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
   });
   registerStabilityMainWindow(win);
   return win;
+}
+
+/**
+ * 多窗口的开发入口（docs/specs/rust-u4-app-host.md §2.9）：`ZCODE_DEV_EXTRA_MAIN_WINDOW=1` 且非打包
+ * 构建时，在第一个主窗口就绪后再建一个主窗口，绕过 primaryWindowCoordinator 的复用。只用于 E2E。
+ */
+function maybeCreateDevExtraMainWindow(primaryWindow: BrowserWindow | undefined): void {
+  if (app.isPackaged || process.env.ZCODE_DEV_EXTRA_MAIN_WINDOW?.trim() !== "1" || !primaryWindow)
+    return;
+  const createExtra = () => {
+    if (primaryWindow.isDestroyed() || forceQuitRef.current) return;
+    logger.info("[startup] creating the extra main window (ZCODE_DEV_EXTRA_MAIN_WINDOW)");
+    createWindowInstance({});
+  };
+  if (primaryWindow.webContents.isLoading())
+    primaryWindow.webContents.once("dom-ready", createExtra);
+  else createExtra();
 }
 
 registerDeepLinkProtocol(logger, { iconPath: linuxDesktopIntegrationIconPath });
@@ -1949,6 +2074,7 @@ app.whenReady().then(async () => {
     keepAwakeWhileRunning = bootstrapSettings.keepAwakeWhileRunning ?? false;
     currentDesktopZoomLevel = clampDesktopZoomLevel(bootstrapSettings.desktopZoomLevel ?? 0);
     currentDesktopWindowSize = bootstrapSettings.desktopWindowSize;
+    mainSettingsSync.setBaseline(bootstrapSettings);
     // 全局 keep-awake：启动时若设置已开，立刻持有 powerSaveBlocker，不必等设置变更事件。
     reconcileKeepAwakeBlocker();
   } catch {
@@ -1960,19 +2086,24 @@ app.whenReady().then(async () => {
     markExplicitQuit("database-startup-exit");
     app.quit();
   });
-  onLocalDatabaseStartupReady(() => {
-    try {
-      cronScheduler = spawnCronScheduler({
-        hostProcessLocalEnv,
-        logger,
-        resolveDispatchHost: resolveCronDispatchHost,
-        // keep-awake 已改为纯设置驱动；计数上报保留给后续诊断/配额用途，不再联动 blocker。
-        onOffPeakActiveCountChanged: () => {},
-      });
-    } catch (error) {
-      logger.error("[cron-scheduler] failed to spawn scheduler process:", error);
-    }
-  });
+  if (rustAppHost) {
+    // App 级 Host 在 App ready 时拉起（数据目录已生效），不依赖窗口；调度在 Host 内，不再 fork
+    // scheduler 进程（docs/specs/rust-u4-app-host.md §2.1、§2.4）。
+    rustAppHost.start();
+  } else {
+    onLocalDatabaseStartupReady(() => {
+      try {
+        cronScheduler = spawnCronScheduler({
+          hostProcessLocalEnv,
+          logger,
+          resolveDispatchHost: resolveCronDispatchHost,
+          onOffPeakActiveCountChanged: handleOffPeakActiveCountChanged,
+        });
+      } catch (error) {
+        logger.error("[cron-scheduler] failed to spawn scheduler process:", error);
+      }
+    });
+  }
 
   if (process.platform === "win32") {
     // 打包态必须与 NSIS 快捷方式使用同一 AUMID，否则 Shell 把它们当成不同应用。
@@ -2153,7 +2284,7 @@ app.whenReady().then(async () => {
     getDesktopSessionActivity: () => ({
       runningAgentSessionCount: getRunningAgentSessionCount(),
     }),
-    syncAppSettings: syncImmediateAppSettings,
+    syncAppSettings: mainSettingsSync.acceptRendererPatch,
     setShortcutRecordingActive,
     deviceMid,
   });
@@ -2282,6 +2413,7 @@ app.whenReady().then(async () => {
   if (primaryWindow) {
     scheduleReportPerfAppStartAfterMainViewReady(primaryWindow.webContents, logger);
   }
+  maybeCreateDevExtraMainWindow(primaryWindow);
 
   // 启动后检测 CPU 架构是否匹配（如 Apple 芯片误装 x64 版本经 Rosetta 转译运行），
   // 命中后异步弹框提示安装原生架构版本，不阻塞主界面。

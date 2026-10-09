@@ -21,12 +21,15 @@ Rust Host 从“每个窗口一个进程”改为“每个 App 一个进程”�
 | App 退出                    | Main 发 `dispose`，最多等 3.5 s 后结束进程（不变）                                       |
 | Host 意外退出               | 见 2.8                                                                                   |
 
-- `init-local` 是 App 级的：`runtimeProcessEnvPatch` 是 App 启动时采集的环境；`agentWarmupTargets` 是启动 workspace；不再携带 `hostId`（2.5）。`databaseStartupId` 是 App Host 的固定标识。
-- 没有窗口时 Host 照常工作（调度、Bot、远端连接都不依赖窗口）。
+- 拉起时机：App ready 后读完启动设置（数据目录已生效）就拉起，不等第一个窗口。灰度裁决（≤ 2 s）与登录 shell 环境（≤ 4.5 s）的等待规则与今天首个窗口 Host 相同，从拉起时开始计。
+- `init-local` 是 App 级的：`runtimeProcessEnvPatch` 是 App 启动时采集的环境，重启沿用；`agentWarmupTargets` 是上次会话的启动 workspace（Host 先于首窗口启动，命令行或 deep link 指定的 workspace 不预热，打开时懒启动）；不再携带 `hostId`（2.5）。`databaseStartupId` 由 Main 在每次拉起（含重启）时新生成，所有窗口共用，保证 Renderer 的同代准入不把上一代的状态与新一代的 endpoint 拼在一起。
+- “Host 就绪”指当前代的启动状态第一次进入 `ready`。endpoint 在每个启动尝试第一次 `ready` 时签发给所有还没拿到 endpoint 的窗口（rust-host-resilience.md §2.2 的规则不变）；签发期间窗口已 reload 或关闭的，结果丢弃。
+- 窗口关闭时 Main 让 Host 释放这个窗口的远端 logical session（`dispose-remote-workspace-session`）、取消它等待中的连接，与今天“关窗即结束该窗口的远程连接”一致；Renderer 的 WebSocket 随页面关闭。
+- 没有窗口时 Host 照常工作：调度与本地 workspace 的 Bot 不依赖窗口。远端连接在 U5 之前随发起它的窗口（连接器在 Main 里按窗口持有，见上一条与第 3 节）。
 
 ### 2.2 窗口身份
 
-- `issue-attachment-endpoint` 增加 `windowId`（主窗口的窗口 id，与今天 `sourceWindowId` 用的是同一个值）。
+- `issue-attachment-endpoint` 增加 `windowId`（主窗口的窗口 id，即 `webContents.id`，与今天 `sourceWindowId` 用的是同一个值）。窗口的本地与远端 scope Renderer attachment 都带；Main 经 MessagePort 桥接的 attachment（手机远控、Bot 运行时）省略。
 - Host 把 `windowId` 记在 attachment 上，连接建立后进入该连接的调用上下文（`CallContext.window_id`）。
 - 一个窗口可以有多条连接（reload 前后的新旧连接、同一窗口的多个 attachment），它们的窗口身份相同。
 - `windowId` 必须是 ≥ 1 的整数，可省略但不可为 `null`；不合法时按非法载荷回 `ok:false`。
@@ -67,7 +70,7 @@ Rust Host 从“每个窗口一个进程”改为“每个 App 一个进程”�
 - **退出**：`dispose` 先等当前一轮结束，再释放仍在途的认领（定时 run 复位为 idle，manual run 只释放锁，闲时任务释放认领），在途的派发任务随 `Scheduler` 结束而取消。
 - 认领的 SQL 语义与 Node 的 repo 相同（`BEGIN IMMEDIATE`，认领超时后的回收规则不变）。因此同一份 tasks-index 被另一个 App 实例的 Node scheduler 同时使用时，一个任务仍只会被认领一次。例外是启动回收：`recoverInterrupted` 假设自己是 App 级单例，把所有 running 的闲时任务置回 queued，另一个实例启动时正在执行的闲时任务会被再次派发（Node 相同，不在本期改变）。
 - 轮询用单调时钟的定时器，到期判断用墙上时钟。休眠唤醒后最迟 20 s 进入下一轮，由 misfire 规则处理错过的窗口。时钟与轮询间隔可注入，测试不等待 20 s。
-- 执行中的闲时任务数变化时（启动后的第一次上报总会发出），Host 发 `off-peak-active-count` 给 Main，Main 据此维持防休眠（与今天 scheduler 上报的用途相同）。`Scheduler` 只依赖构造时传入的上报端口；端口与控制消息的接线在 `services::install` 中单独完成。
+- 执行中的闲时任务数变化时（启动后的第一次上报总会发出），Host 发 `off-peak-active-count` 给 Main。Main 的处理与今天 scheduler 上报相同：这个计数目前不驱动任何行为（防休眠只由 `keepAwakeWhileRunning` 设置决定）。`Scheduler` 只依赖构造时传入的上报端口；端口与控制消息的接线在 `services::install` 中完成。
 
 ```text
 Host install 完成 ─► Scheduler::start ─► recoverInterrupted ─► 第一轮
@@ -111,42 +114,64 @@ Rust 开关下 Main 不再启动 scheduler 进程，也不再转发 `cron-run` /
 ```
 
 - Host 按到达顺序串行处理 `setting-write`（Main 先后两次写同一字段时后到的后写）；排队上限 64，满时直接回 `ok:false`。`patch` 的校验与 `setting` channel 的 `update` 相同，不合法时回 `ok:false` 和错误文案；没有 `requestId` 的请求无法应答，忽略。服务安装之前（`init-local` 后、`database-startup-state` 到 ready 之前）到达的 `setting-write` 立即回 `ok:false`（`Rust Host services are not initialized`），不让 Main 等满超时。
-- Host 启动之前的读取（数据目录、硬件加速、启动 workspace）仍然直接读文件：这些值决定 Host 怎么启动。
-- Host 不可用时（启动中、重启中）Main 的写入请求等待 Host 就绪；超过 10 s 记 warn 并放弃这次写入，不回落到直接写文件。
-- App 退出与安装更新前的写入，先等结果再 `dispose` Host。
+- Host 启动之前的读取（数据目录、硬件加速、启动 workspace）仍然直接读文件：这些值决定 Host 怎么启动。Main 的其他读取也仍直接读文件（Host 原子写入、落盘后才回 `ok`）。
+- “Main 的设置缓存”指 Main 内存里由设置派生的状态（关闭到托盘、防休眠、更新渠道、菜单快捷键）。Rust 开关下它只由 `setting-changed` 更新：Main 与上一次快照逐字段比较，只应用变化的字段；Renderer 的 `SyncAppSettings` 被忽略。两个来源不并存，同一次修改的 IPC 通知与 Host 推送不会乱序覆盖。基线是 Main 启动时直接读到的设置。
+- `patch` 里值为 `undefined` 的字段在线上写成 `null`（JSON 没有 undefined），表示清除。
+- Main 在当前代 Host 的启动状态进入 `ready` 之后才发 `setting-write`；Host 不可用时（启动中、重启中）写入请求等待就绪，超过 10 s 记 warn 并放弃这次写入，不回落到直接写文件。等待 `setting-write-result` 同样以 10 s 为上限；当前代 Host 退出时，在途写入失败（是否已落盘未知，由调用方按失败处理）。
+- App 退出与安装更新前的写入，先等结果再 `dispose` Host；此时仍在等 Host 就绪的写入直接放弃，之后的新写入被拒绝。
 
 ### 2.7 Bot 远端运行时
 
 - 连接状态查询改为 Host 直接读自己的远端注册表，不经 Main：存在同 workspaceKey（`workspaceIdentity?.trim() || workspacePath`）、同 target（Main `isSameRemoteTarget` 的比较规则）、在线且 workspace 运行时就绪的 logical session 即为已连接，与 Main 原来按 route 表的判定对应。注册表是 App 级的，不区分窗口。
-- 重连仍由 Main 的远端会话管理器执行（它持有 SSH 连接器，U5 替换）。重连只由 Bot 的入站消息发起，没有发起窗口，请求不带 `windowId`；Main 把重连结果通知发给持有该 workspace route 的窗口（没有时任意一个主窗口）。
-- Main 的 `ensureHostListener` 不再把第一个窗口固定为 Host 的归属窗口，连接结果按请求里的窗口路由。
+- 重连仍由 Main 的远端会话管理器执行（它持有 SSH 连接器，U5 替换）。重连只由 Bot 的入站消息发起，没有发起窗口，Host 的请求不带 `windowId`；Main 把重连交给持有该 workspace route 的窗口，没有时用任意一个主窗口（优先聚焦窗口），没有主窗口时回失败。（Main 的校验接受可选的 `windowId`：带了就只找那个窗口，窗口已关闭时回失败。）
+- Main 的 `ensureHostListener` 不再把第一个窗口固定为 Host 的归属窗口：连接结果按 (Host, requestId) 找回发起窗口，关闭与退出按 route 记录的 Host 判断。
 
 ### 2.8 Host 意外退出
 
 - 重启策略是 App 级的：60 s 内最多 3 次，退避 500 ms / 2 s / 5 s（数值不变）。
 - 顺序：所有主窗口收到连接状态（断开）→ Main 重启 Host → Host 就绪后 Main reload 所有主窗口 → 每个窗口在 dom-ready 时重新接入。
-- 放弃重启后，所有主窗口显示启动失败页；任意一个窗口的 Retry 触发一次 App 级重启，Exit 退出 App。
-- 数据库启动状态（`database-startup-state`）向所有主窗口扇出；任意窗口的 retry / exit 控制都被接受。
+- 退避期间用户手动 reload 的窗口不提前触发重启，等计划中的重启；新一代就绪后它直接拿到 endpoint，不再被 reload。
+- 放弃重启后，所有主窗口显示启动失败页；任意一个窗口的 Retry（页面自身 reload）触发一次 App 级重启，不经过重启策略、没有退避；新一代就绪后 reload 其余仍停在失败页的窗口。Exit 退出 App。
+- 数据库启动状态（`database-startup-state`）向所有主窗口扇出；任意窗口的 retry / exit 控制都被接受，`snapshot` 只回给请求的窗口。每一代 Host 一份中继绑定，新一代替换旧一代，旧代的 `failed/transport_closed` 不会重放给新页面。
+
+```mermaid
+sequenceDiagram
+    participant M as Main（App Host owner）
+    participant H1 as Host（第 n 代）
+    participant H2 as Host（第 n+1 代）
+    participant W as 所有主窗口
+    H1--xM: exit（未经 dispose）
+    M->>W: database-startup-state(failed, transport_closed)
+    M->>W: host-connection-state{restarting, attempt k, delayMs}
+    Note over M: 退避 500 ms / 2 s / 5 s
+    M->>H2: spawn，init-local{新 databaseStartupId}
+    H2-->>M: starting → … → ready
+    M->>W: reload（属于第 n 代的页面）
+    W-->>M: dom-ready
+    M->>H2: issue-attachment-endpoint{windowId}
+    Note over M,W: 60 s 内第 4 次：M→W {failed}；任意窗口 Retry → 立即拉起一代
+```
 
 沿用 reload 而不是原地重连：桌面是 `desktop-continuous` 语义，Renderer 没有“断线后补齐”的恢复路径，reload 是今天已验证的做法。
 
 ### 2.9 多窗口的开发入口
 
-`ZCODE_DEV_EXTRA_MAIN_WINDOW=1` 且非打包构建时，Main 在第一个主窗口就绪后再创建一个主窗口。只用于 E2E。
+`ZCODE_DEV_EXTRA_MAIN_WINDOW=1` 且非打包构建时，Main 在第一个主窗口 dom-ready 后再创建一个主窗口（绕过主窗口复用）。只用于 E2E；Node 路径下第二个窗口照旧有自己的 Host。macOS 上点关闭只是隐藏窗口（今天的行为），E2E 要验证“关闭第二个窗口”需销毁它。
 
 ## 3. 状态所有者
 
-| 状态                              | 今天（Rust 开关下）                | U4 之后                         |
-| --------------------------------- | ---------------------------------- | ------------------------------- |
-| Host 进程句柄、重启计数           | Main，按窗口                       | Main，App 级                    |
-| 窗口 → attachment                 | Main `windowHostProcessMap`        | Main（窗口表）与 Host（连接表） |
-| 广播扇出、claim 表                | Main BroadcastHub                  | Host `broadcast`                |
-| 调度状态机（认领、misfire、退避） | Node scheduler 进程                | Host automation `Scheduler`     |
-| run lease、owner 路由             | Main `taskRealtimeBus` 加 Host     | Host                            |
-| `setting.json` 写入               | Main 与 Host（跨进程文件锁）       | Host                            |
-| Main 的设置缓存                   | Renderer 的 `SyncAppSettings` 通知 | Host 的 `setting-changed` 推送  |
-| 远端连接注册表                    | Host（窗口级）                     | Host（App 级）                  |
-| SSH 连接器、远端 route 表         | Main，按窗口                       | 不变（U5 迁走）                 |
+| 状态                              | 今天（Rust 开关下）                | U4 之后                                             |
+| --------------------------------- | ---------------------------------- | --------------------------------------------------- |
+| Host 进程句柄、重启计数           | Main，按窗口                       | Main `rustAppHost.ts`，App 级                       |
+| 窗口 → attachment                 | Main `windowHostProcessMap`        | Main（`RustAppHostCore` 的窗口表）与 Host（连接表） |
+| Main 发起的在途设置写入           | 无（直接写文件）                   | Main `HostSettingWriter`（只有在途请求）            |
+| 广播扇出、claim 表                | Main BroadcastHub                  | Host `broadcast`                                    |
+| 调度状态机（认领、misfire、退避） | Node scheduler 进程                | Host automation `Scheduler`                         |
+| run lease、owner 路由             | Main `taskRealtimeBus` 加 Host     | Host                                                |
+| `setting.json` 写入               | Main 与 Host（跨进程文件锁）       | Host                                                |
+| Main 的设置缓存                   | Renderer 的 `SyncAppSettings` 通知 | Host 的 `setting-changed` 推送                      |
+| 远端连接注册表                    | Host（窗口级）                     | Host（App 级）                                      |
+| SSH 连接器、远端 route 表         | Main，按窗口                       | 不变（U5 迁走）                                     |
 
 ## 4. 控制消息
 
@@ -211,6 +236,7 @@ sequenceDiagram
   - 调度状态机：到期认领、misfire 跳过、一次性任务终结、失败退避与上限、手动运行、闲时任务的回收与退避；两个调度器同时认领时一个任务只派发一次。
   - 调度用到的 repo 操作（automation 的认领、台账、结算、释放，闲时任务的认领、释放、回收、计数、结算）与 TS repo 对拍：`scripts/rust-host/scheduler-fixtures.ts` 用真实 TS 实现生成 fixture，Rust 逐步复现返回值与表内容。
   - 没有任何连接时，到期的 automation 被派发并结算。
+- Main 单测（`packages/desktop/test/rustAppHostCore.test.ts`、`rustAppHostSettings.test.ts`，`packages/shared/test/rustU4ControlMessages.test.ts`）：App Host 状态机（拉起 → 就绪 → 多窗口接入 → 关窗不影响 Host → 意外退出 → 退避重启 → 放弃 → Retry）、按 `windowId` 路由、设置写入的等待 / 超时 / 退出收尾、`setting-changed` 的按序增量应用、4.1 消息的严格校验。
 - 桌面 E2E（Rust 开关）：
   - 进程表中恰好一个 Host，没有 scheduler 进程，没有 CLI 子进程。
   - 两个窗口（2.9）接入同一个 Host；一个窗口切换语言，另一个窗口跟随；关闭第二个窗口后第一个窗口继续正常对话。

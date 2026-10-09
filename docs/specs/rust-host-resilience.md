@@ -58,16 +58,16 @@
 
 ## 3. 状态所有者
 
-| 状态                                             | 唯一所有者                                                  |
-| ------------------------------------------------ | ----------------------------------------------------------- |
-| 是否重启、重启计数与退避                         | Main：`rustHostRestart.ts`（每个窗口一个计数）              |
-| 窗口 → Host 映射                                 | Main `windowHostProcessMap`（不变）                         |
-| 启动状态（startupId、attemptId、sequence、阶段） | Host：`host-core` 的 `StartupCoordinator`                   |
-| 启动状态的中继与 Renderer 侧镜像                 | Main `databaseStartupRelay`（不变）                         |
-| Renderer endpoint 的签发时机                     | Main：按 Host 报告的 ready 触发                             |
-| “本地服务已断开”页面状态                         | Renderer 启动代码（`main.tsx`），只消费 Main 通知与连接关闭 |
-| 连接积压字节与饱和边沿                           | Rust Host 接入层（`ws.rs` 的 `FlowGauge`）                  |
-| 已向各 workspace 转发的流控状态                  | `zcode-agent` 连接 scope（`agent/flow.rs`）                 |
+| 状态                                             | 唯一所有者                                                                                                                |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| 是否重启、重启计数与退避                         | Main：`rustAppHost.ts` / `rustAppHostCore.ts`（U4 起 App 级一个计数，见 [rust-u4-app-host.md](rust-u4-app-host.md) §2.8） |
+| 窗口 → Host 映射                                 | Main `windowHostProcessMap`（不变）                                                                                       |
+| 启动状态（startupId、attemptId、sequence、阶段） | Host：`host-core` 的 `StartupCoordinator`                                                                                 |
+| 启动状态的中继与 Renderer 侧镜像                 | Main `databaseStartupRelay`（不变）                                                                                       |
+| Renderer endpoint 的签发时机                     | Main：按 Host 报告的 ready 触发                                                                                           |
+| “本地服务已断开”页面状态                         | Renderer 启动代码（`main.tsx`），只消费 Main 通知与连接关闭                                                               |
+| 连接积压字节与饱和边沿                           | Rust Host 接入层（`ws.rs` 的 `FlowGauge`）                                                                                |
+| 已向各 workspace 转发的流控状态                  | `zcode-agent` 连接 scope（`agent/flow.rs`）                                                                               |
 
 ## 4. 事件顺序
 

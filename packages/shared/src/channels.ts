@@ -535,6 +535,8 @@ export const HostMessageTypes = {
   DetachServicePort: "detach-service-port",
   /** main → Rust Host：为一个 attachment 签发 WebSocket endpoint 与一次性 capability */
   IssueAttachmentEndpoint: "issue-attachment-endpoint",
+  /** main → Rust App Host：请求 Host 的 SettingStore 写入 setting.json（docs/specs/rust-u4-app-host.md §2.6） */
+  SettingWrite: "setting-write",
   /** 窗口关闭，清理资源 */
   Dispose: "dispose",
   /** 广播消息中转 */
@@ -585,6 +587,12 @@ export const HostResponseTypes = {
   HostEndpointReady: "host-endpoint-ready",
   /** Rust Host → main：attachment endpoint 签发结果，按 requestId 关联 */
   AttachmentEndpointIssued: "attachment-endpoint-issued",
+  /** Rust App Host → main：`setting-write` 的结果，落盘后才回 ok，按 requestId 关联 */
+  SettingWriteResult: "setting-write-result",
+  /** Rust App Host → main：任意一次成功写入后的完整设置快照 */
+  SettingChanged: "setting-changed",
+  /** Rust App Host → main：执行中的闲时任务数（只在变化时发） */
+  OffPeakActiveCount: "off-peak-active-count",
   /** window Host → main：按 requestId 上报远程连接过程日志 */
   RemoteWorkspaceConnectionLog: "remote-workspace-connection-log",
   /** window Host → main：远程 logical session 已建立 */
