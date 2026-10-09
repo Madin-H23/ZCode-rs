@@ -6,13 +6,15 @@
 //!   two bounded channels cannot deadlock.
 //! - A runtime reply is written before the events that follow it in the same
 //!   runtime batch, matching the Node runtime (response line, then frames).
-use super::{Sink, delivery::Delivery};
+use super::{Sink, outlet::Outlet};
 use crate::contract::{ClientMsg, Input, Method, RuntimeError, ServerMsg};
 use crate::domain::protocol::{Request, RequestId};
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use tokio::sync::mpsc;
+use zcode_cli_delivery::{Call, Delivery, Link};
 
 /// Queued runtime requests above which stdin is not read (backpressure to the reader thread).
 const MAX_QUEUED_REQUESTS: usize = 64;
@@ -20,29 +22,54 @@ const RUNTIME_CHANNEL: usize = 64;
 
 pub(super) enum Pending {
     Rpc(Option<RequestId>),
-    Subscribe {
-        id: Option<RequestId>,
-        topic: String,
-        connection: String,
-        profile: crate::domain::delivery::Profile,
-    },
-    Resync {
-        id: Option<RequestId>,
-        subscription: String,
-    },
-    Recover {
-        subscription: String,
-    },
+    /// A runtime request of delivery (subscribe, resync, snapshot recovery).
+    Delivery(Call<Option<RequestId>>),
+}
+
+/// The runtime link: requests waiting to be sent, their pending replies, and
+/// the output that delivery's answers go to.
+pub(super) struct Upstream {
+    pub(super) to_runtime: VecDeque<ClientMsg>,
+    pub(super) calls: HashMap<u64, Pending>,
+    next_token: u64,
+    pub(super) outlet: Arc<Outlet>,
+}
+
+impl Upstream {
+    pub(super) fn forward(&mut self, method: Method, params: Value, pending: Pending) {
+        self.next_token += 1;
+        self.calls.insert(self.next_token, pending);
+        self.to_runtime.push_back(ClientMsg::Request {
+            token: self.next_token,
+            method,
+            params,
+        });
+    }
+}
+
+impl Link<Option<RequestId>> for Upstream {
+    fn request(&mut self, method: Method, params: Value, call: Call<Option<RequestId>>) {
+        self.forward(method, params, Pending::Delivery(call));
+    }
+
+    fn release(&mut self, topic: String) {
+        self.to_runtime
+            .push_back(ClientMsg::TopicReleased { topic });
+    }
+
+    /// 写进本步的输出：回复行排在随后 push 的初始帧之前（与 Node 相同）。
+    fn answer(&mut self, reply: Option<RequestId>, result: Result<Value, RuntimeError>) {
+        if let Some(id) = reply {
+            self.outlet.line(response(id, result));
+        }
+    }
 }
 
 pub(super) struct Server {
     pub(super) sink: Sink,
     pub(super) delivery: Delivery,
-    pub(super) to_runtime: VecDeque<ClientMsg>,
-    pub(super) calls: HashMap<u64, Pending>,
-    pub(super) next_token: u64,
+    pub(super) up: Upstream,
     pub(super) input_open: bool,
-    pub(super) congested: bool,
 }
 
 /// Run the App Server over `runtime`, reading parsed wire input and writing to `sink`.
@@ -59,18 +86,20 @@ where
     let mut server = Server {
         sink,
         delivery: Delivery::default(),
-        to_runtime: VecDeque::new(),
-        calls: HashMap::new(),
-        next_token: 0,
+        up: Upstream {
+            to_runtime: VecDeque::new(),
+            calls: HashMap::new(),
+            next_token: 0,
+            outlet: Arc::default(),
+        },
         input_open: true,
-        congested: false,
     };
     let mut drain = tokio::time::interval(std::time::Duration::from_millis(100));
     drain.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let served = async {
         loop {
-            // 订阅者缓冲的刷新窗口（spec rust-m8-delivery §5）；拥塞期间由 drain 恢复。
-            let due = server.delivery.next_due().filter(|_| !server.congested);
+            // 订阅者缓冲的刷新窗口（spec rust-m8-delivery §5）；拥塞的连接不参与，由 drain 恢复。
+            let due = server.delivery.next_due();
             let flush_at =
                 due.map_or_else(tokio::time::Instant::now, tokio::time::Instant::from_std);
             tokio::select! {
@@ -83,16 +112,16 @@ where
                     }
                 },
                 _ = tokio::time::sleep_until(flush_at), if due.is_some() => server.flush().await?,
-                permit = client_tx.reserve(), if !server.to_runtime.is_empty() => match permit {
-                    Ok(permit) => permit.send(server.to_runtime.pop_front().expect("queue is not empty")),
+                permit = client_tx.reserve(), if !server.up.to_runtime.is_empty() => match permit {
+                    Ok(permit) => permit.send(server.up.to_runtime.pop_front().expect("queue is not empty")),
                     // runtime 已停止接收；剩余请求没有 owner，等待其输出关闭后退出。
-                    Err(_) => server.to_runtime.clear(),
+                    Err(_) => server.up.to_runtime.clear(),
                 },
-                message = input.recv(), if server.input_open && server.to_runtime.len() < MAX_QUEUED_REQUESTS => match message {
+                message = input.recv(), if server.input_open && server.up.to_runtime.len() < MAX_QUEUED_REQUESTS => match message {
                     Some(message) => server.on_input(message).await?,
                     None => server.end_input(),
                 },
-                _ = drain.tick(), if server.congested => server.relieve().await?,
+                _ = drain.tick(), if server.up.outlet.congested() => server.relieve(),
             }
         }
     }
@@ -123,28 +152,11 @@ pub(super) fn required<'a>(p: &'a Value, key: &str) -> Result<&'a str, RuntimeEr
         .ok_or_else(|| RuntimeError::InvalidParams(format!("{key}: required")))
 }
 
-pub(super) fn not_owned() -> RuntimeError {
-    RuntimeError::Fault {
-        message: "fault.subscription.notOwned".into(),
-        code: None,
-    }
-}
-
 impl Server {
-    pub(super) fn forward(&mut self, method: Method, params: Value, pending: Pending) {
-        self.next_token += 1;
-        self.calls.insert(self.next_token, pending);
-        self.to_runtime.push_back(ClientMsg::Request {
-            token: self.next_token,
-            method,
-            params,
-        });
-    }
-
     fn end_input(&mut self) {
         if self.input_open {
             self.input_open = false;
-            self.to_runtime.push_back(ClientMsg::Eof);
+            self.up.to_runtime.push_back(ClientMsg::Eof);
         }
     }
 
@@ -154,9 +166,18 @@ impl Server {
         result: Result<Value, RuntimeError>,
     ) -> Result<()> {
         match id {
-            Some(id) => self.sink.send(vec![response(id, result)]).await,
+            Some(id) => {
+                self.up.outlet.line(response(id, result));
+                self.send_step().await
+            }
             None => Ok(()),
         }
+    }
+
+    /// Writes the lines collected in the outlet during this step.
+    pub(super) async fn send_step(&mut self) -> Result<()> {
+        let lines = self.up.outlet.take();
+        self.sink.send(lines).await
     }
 
     async fn on_input(&mut self, message: Input) -> Result<()> {
@@ -164,7 +185,8 @@ impl Server {
         match message {
             Input::Request(request) => self.on_request(request).await,
             Input::Response { id, result } => {
-                self.to_runtime
+                self.up
+                    .to_runtime
                     .push_back(ClientMsg::HostReply { id, result });
                 Ok(())
             }
@@ -201,7 +223,7 @@ impl Server {
             "v4/connection/flow" => self.flow(&params).map(Some),
             name => match Method::parse(name) {
                 Some(method) => {
-                    self.forward(method, params, Pending::Rpc(id.clone()));
+                    self.up.forward(method, params, Pending::Rpc(id.clone()));
                     Ok(None)
                 }
                 None => Err(RuntimeError::MethodNotFound(name.into())),

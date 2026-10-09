@@ -2257,14 +2257,12 @@ name = "zcode-cli-app-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
- "crc32fast",
  "serde_json",
  "tokio",
  "tokio-util",
- "uuid",
  "zcode-async",
  "zcode-cli-core-api",
+ "zcode-cli-delivery",
  "zcode-cli-domain",
 ]
 
@@ -2313,6 +2311,19 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-util",
+ "zcode-cli-domain",
+]
+
+[[package]]
+name = "zcode-cli-delivery"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "crc32fast",
+ "serde_json",
+ "uuid",
+ "zcode-cli-core-api",
  "zcode-cli-domain",
 ]
 

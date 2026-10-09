@@ -1,4 +1,4 @@
-//! Topic subscriptions owned by the App Server (spec rust-m8-delivery §5–6).
+//! Topic subscriptions per (topic, connection) (spec rust-m8-delivery §5–6).
 //!
 //! The runtime owns topic facts, sequence numbers and the retained log; this
 //! registry decides which subscriber receives which frame and when. Each
@@ -7,36 +7,47 @@
 //! overflow and backlog turn into snapshot recovery, and deltas that arrive
 //! while a runtime reply is in flight are covered by that reply, so
 //! correctness never depends on the relative timing of replies and events.
-pub use super::subscription::Subscription;
-use super::subscription::snapshot_payload;
+use crate::connections::{Outlet, congested, push_to};
 use crate::domain::delivery::Profile;
+use crate::sink::Connection;
+use crate::subscription::{Subscription, snapshot_payload};
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
-/// A registered subscription and its initial frame.
-pub struct Subscribed {
-    pub id: String,
-    pub mode: &'static str,
-    pub replaced: bool,
-    pub lines: Vec<String>,
+/// What a subscription is registered for, as the embedder gave it.
+pub(crate) struct Target {
+    pub(crate) topic: String,
+    pub(crate) connection: Connection,
+    pub(crate) profile: Profile,
+    pub(crate) workspace_key: String,
 }
 
-/// Frames and runtime requests produced by one delivery step.
+/// A registered subscription and its initial frames (not yet pushed).
+pub(crate) struct Subscribed {
+    pub(crate) id: String,
+    pub(crate) mode: &'static str,
+    pub(crate) replaced: bool,
+    pub(crate) lines: Vec<String>,
+}
+
+/// Runtime requests produced by one delivery step.
 #[derive(Default)]
-pub struct Output {
-    pub lines: Vec<String>,
+pub(crate) struct Output {
     /// `(subscription, topic)` needing a snapshot from the runtime.
-    pub recover: Vec<(String, String)>,
+    pub(crate) recover: Vec<(String, String)>,
     /// Topics whose subscription ended because its snapshot could not be encoded.
-    pub released: Vec<String>,
+    pub(crate) released: Vec<String>,
 }
 
+/// Delivery for the topics of one runtime: its subscriptions and connections.
 pub struct Delivery {
-    subscriptions: BTreeMap<String, Subscription>,
-    /// Connections the Host reported saturated (Node `pausedConnections`).
-    paused: BTreeSet<String>,
+    pub(crate) subscriptions: BTreeMap<String, Subscription>,
+    /// Outlets of the connections that have a subscription.
+    pub(crate) connections: BTreeMap<String, Outlet>,
+    /// Connections reported `saturated` (Node `pausedConnections`).
+    pub(crate) saturated: BTreeSet<String>,
     epoch: String,
     next_id: u64,
 }
@@ -45,7 +56,8 @@ impl Default for Delivery {
     fn default() -> Self {
         Self {
             subscriptions: BTreeMap::new(),
-            paused: BTreeSet::new(),
+            connections: BTreeMap::new(),
+            saturated: BTreeSet::new(),
             epoch: uuid::Uuid::new_v4().simple().to_string()[..12].to_owned(),
             next_id: 0,
         }
@@ -53,29 +65,26 @@ impl Default for Delivery {
 }
 
 impl Delivery {
-    pub fn get(&self, id: &str) -> Option<&Subscription> {
+    pub(crate) fn get(&self, id: &str) -> Option<&Subscription> {
         self.subscriptions.get(id)
     }
 
     /// Registers the subscription answered by the runtime's `topicOpen` reply.
     /// Only once its initial frame is encoded does it replace the connection's
     /// previous subscription on the topic (Node rollback keeps the old one).
-    pub fn subscribe(
-        &mut self,
-        (topic, connection): (&str, &str),
-        profile: Profile,
-        state: &Value,
-    ) -> Result<Subscribed> {
+    pub(crate) fn register(&mut self, target: &Target, state: &Value) -> Result<Subscribed> {
         self.next_id += 1;
         let id = format!("sub-{}-{}", self.epoch, self.next_id);
         let seq = state["seq"].as_u64().unwrap_or(0);
-        let mut sub = Subscription::new(topic, connection, profile, seq);
+        let mut sub = Subscription::new(target, seq);
         let lines = sub.apply(&id, "initial", state, false)?;
+        let (topic, connection) = (&target.topic, &target.connection.id);
         let before = self.subscriptions.len();
         self.subscriptions
-            .retain(|_, s| s.topic != topic || s.connection != connection);
+            .retain(|_, s| s.topic != *topic || s.connection != *connection);
         let replaced = self.subscriptions.len() != before;
         self.subscriptions.insert(id.clone(), sub);
+        self.attach(&target.connection);
         let mode = if state["mode"] == "resume" {
             "resume"
         } else {
@@ -89,48 +98,20 @@ impl Delivery {
         })
     }
 
-    pub fn unsubscribe(&mut self, id: &str) -> Option<Subscription> {
-        self.subscriptions.remove(id)
-    }
-
-    /// Drop every subscription of a closed connection; returns their topics for pin release.
-    pub fn close_connection(&mut self, connection: &str) -> Vec<String> {
-        self.paused.remove(connection);
-        let ids = self.ids(|s| s.connection == connection);
-        ids.iter()
-            .filter_map(|id| self.subscriptions.remove(id).map(|s| s.topic))
-            .collect()
+    pub(crate) fn remove(&mut self, id: &str) -> Option<Subscription> {
+        let sub = self.subscriptions.remove(id)?;
+        self.detach_unused();
+        Some(sub)
     }
 
     /// Runtime ended the topic; its pins are already gone.
-    pub fn close_topic(&mut self, topic: &str) {
+    pub(crate) fn close_topic(&mut self, topic: &str) {
         self.subscriptions.retain(|_, s| s.topic != topic);
-    }
-
-    /// `saturated`: timers stop, buffers keep accumulating until they overflow.
-    pub fn pause(&mut self, connection: &str) {
-        self.paused.insert(connection.into());
-        for sub in self.subscriptions.values_mut() {
-            if sub.connection == connection {
-                sub.due = None;
-            }
-        }
-    }
-
-    /// `drained`: every subscription of the connection flushes now.
-    pub fn drain(&mut self, connection: &str, now: Instant) {
-        if !self.paused.remove(connection) {
-            return;
-        }
-        for sub in self.subscriptions.values_mut() {
-            if sub.connection == connection {
-                sub.due = Some(now);
-            }
-        }
+        self.detach_unused();
     }
 
     /// Client resync: the reply replaces whatever the subscription buffered.
-    pub fn resync_started(&mut self, id: &str) {
+    pub(crate) fn resync_started(&mut self, id: &str) {
         if let Some(sub) = self.subscriptions.get_mut(id) {
             sub.buffer.clear();
             sub.due = None;
@@ -139,7 +120,7 @@ impl Delivery {
     }
 
     /// Applies the runtime reply of a resync (`recovery`) or snapshot recovery (`online`).
-    pub fn recovered(&mut self, id: &str, kind: &str, state: &Value) -> Result<Vec<String>> {
+    pub(crate) fn recovered(&mut self, id: &str, kind: &str, state: &Value) -> Result<Vec<String>> {
         let Some(sub) = self.subscriptions.get_mut(id) else {
             return Ok(vec![]);
         };
@@ -152,19 +133,21 @@ impl Delivery {
     }
 
     /// A recovery reply failed; the subscription recovers by snapshot on its next flush.
-    pub fn recovery_failed(&mut self, id: &str, now: Instant) {
+    pub(crate) fn recovery_failed(&mut self, id: &str, now: Instant) {
         if let Some(sub) = self.subscriptions.get_mut(id) {
             sub.recovering = sub.recovering.saturating_sub(1);
             sub.buffer.clear();
             sub.resync = true;
-            if !self.paused.contains(&sub.connection) {
+            if !self.saturated.contains(&sub.connection) {
                 sub.due = Some(now);
             }
         }
     }
 
-    /// Buffers one runtime publication `(from, to]` for every subscriber of `topic`.
-    pub fn deltas(
+    /// Buffers one runtime publication `(from, to]` for every subscriber of
+    /// `topic`; a subscriber of a congested connection skips it and waits for
+    /// a snapshot instead.
+    pub(crate) fn deltas(
         &mut self,
         topic: &str,
         (from, to): (u64, u64),
@@ -173,6 +156,14 @@ impl Delivery {
     ) {
         for sub in self.subscriptions.values_mut() {
             if sub.topic != topic || sub.resync || sub.recovering > 0 || from < sub.seq {
+                continue;
+            }
+            if congested(&self.connections, &sub.connection) {
+                // 修复：拥塞期间跳过的增量只能由快照补齐。以前只在进入拥塞时标记一次，拥塞期间才登记、
+                // 或经 resync / 快照恢复 / 历史重置拿到新快照的订阅跳过增量后不再标记，拥塞解除时
+                // relieve 不会让它到期，要等下一次增量暴露断档才补齐，会话空闲时一直停在旧状态。
+                sub.buffer.clear();
+                sub.resync = true;
                 continue;
             }
             if from > sub.seq {
@@ -189,7 +180,7 @@ impl Delivery {
                 }
                 sub.seq = to;
             }
-            if sub.due.is_none() && !self.paused.contains(&sub.connection) {
+            if sub.due.is_none() && !self.saturated.contains(&sub.connection) {
                 sub.due = Some(now + sub.window);
             }
         }
@@ -197,7 +188,7 @@ impl Delivery {
 
     /// Local TTFT facts for the next online frame of every continuous
     /// subscriber of `topic` (Node attaches them to `continuous` + `online` frames).
-    pub fn ttft(&mut self, topic: &str, observations: &[Value]) {
+    pub(crate) fn ttft(&mut self, topic: &str, observations: &[Value]) {
         let Some((first, related)) = observations.split_first() else {
             return;
         };
@@ -209,15 +200,19 @@ impl Delivery {
             ));
         }
         for sub in self.subscriptions.values_mut() {
-            if sub.topic == topic && sub.profile == Profile::Continuous && !sub.resync {
+            if sub.topic == topic
+                && sub.profile == Profile::Continuous
+                && !sub.resync
+                && !congested(&self.connections, &sub.connection)
+            {
                 sub.ttft = Some(fields.clone());
             }
         }
     }
 
     /// Snapshot to every subscriber of `topic` (history reset, config change),
-    /// serialized once; paused subscribers recover when drained.
-    pub fn snapshot_topic(
+    /// serialized once; saturated subscribers recover when drained.
+    pub(crate) fn snapshot_topic(
         &mut self,
         topic: &str,
         kind: &str,
@@ -231,15 +226,15 @@ impl Delivery {
                 .subscriptions
                 .get_mut(&id)
                 .expect("listed subscription");
-            if self.paused.contains(&sub.connection) {
+            if self.saturated.contains(&sub.connection) {
                 sub.buffer.clear();
                 sub.resync = true;
                 continue;
             }
             match sub.snapshot_frame(&id, kind, seq, &payload) {
-                Ok(lines) => out.lines.extend(lines),
+                Ok(lines) => push_to(&self.connections, sub, lines),
                 Err(_) => {
-                    self.subscriptions.remove(&id);
+                    self.remove(&id);
                     out.released.push(topic.into());
                 }
             }
@@ -247,11 +242,15 @@ impl Delivery {
         out
     }
 
-    /// Frames of every due subscription, and the snapshots they need.
-    pub fn flush_due(&mut self, now: Instant) -> Output {
+    /// Pushes the frames of every due subscription and returns the snapshots
+    /// they need. Subscriptions of saturated or congested connections wait.
+    pub(crate) fn flush_due(&mut self, now: Instant) -> Output {
         let mut out = Output::default();
         for (id, sub) in &mut self.subscriptions {
-            if sub.due.is_none_or(|due| due > now) || self.paused.contains(&sub.connection) {
+            if sub.due.is_none_or(|due| due > now)
+                || self.saturated.contains(&sub.connection)
+                || congested(&self.connections, &sub.connection)
+            {
                 continue;
             }
             sub.due = None;
@@ -262,7 +261,7 @@ impl Delivery {
                 let deltas = sub.buffer.take();
                 // 被 profile 过滤掉的 seq 也在区间内，客户端连续性判定不受过滤影响。
                 match sub.online_frame(id, (sub.sent_seq, sub.seq), &deltas) {
-                    Ok(lines) => out.lines.extend(lines),
+                    Ok(lines) => push_to(&self.connections, sub, lines),
                     Err(_) => sub.resync = true,
                 }
             }
@@ -274,41 +273,36 @@ impl Delivery {
         out
     }
 
-    /// Output ended: every buffered delta is written; snapshots can no longer be served.
-    pub fn flush_all(&mut self, now: Instant) -> Vec<String> {
+    /// Output ended: every buffered delta is pushed; snapshots can no longer
+    /// be served. A congested connection has nothing buffered: its deltas
+    /// were skipped and its frames since were pushed directly.
+    pub(crate) fn flush_all(&mut self, now: Instant) {
         for sub in self.subscriptions.values_mut() {
             sub.due = Some(now);
         }
-        self.flush_due(now).lines
+        self.flush_due(now);
     }
 
+    /// When the earliest flush window of a connection that can receive ends.
     pub fn next_due(&self) -> Option<Instant> {
         self.subscriptions
             .values()
-            .filter(|s| !self.paused.contains(&s.connection))
+            .filter(|s| {
+                !self.saturated.contains(&s.connection)
+                    && !congested(&self.connections, &s.connection)
+            })
             .filter_map(|s| s.due)
             .min()
     }
 
-    /// Writer backlog: every buffer is dropped and recovered by snapshot later.
-    pub fn invalidate_all(&mut self) {
-        for sub in self.subscriptions.values_mut() {
-            sub.buffer.clear();
-            sub.resync = true;
-            sub.due = None;
+    /// Pushes frames of subscription `id` to its connection.
+    pub(crate) fn push(&self, id: &str, lines: Vec<String>) {
+        if let Some(sub) = self.subscriptions.get(id) {
+            push_to(&self.connections, sub, lines);
         }
     }
 
-    /// Backlog relieved: subscriptions waiting for a snapshot become due.
-    pub fn wake(&mut self, now: Instant) {
-        for sub in self.subscriptions.values_mut() {
-            if sub.resync && !self.paused.contains(&sub.connection) {
-                sub.due = Some(now);
-            }
-        }
-    }
-
-    fn ids(&self, filter: impl Fn(&Subscription) -> bool) -> Vec<String> {
+    pub(crate) fn ids(&self, filter: impl Fn(&Subscription) -> bool) -> Vec<String> {
         self.subscriptions
             .iter()
             .filter(|(_, s)| filter(s))
@@ -318,5 +312,5 @@ impl Delivery {
 }
 
 #[cfg(test)]
-#[path = "delivery_tests.rs"]
+#[path = "registry_tests.rs"]
 mod tests;

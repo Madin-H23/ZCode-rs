@@ -16,7 +16,8 @@
 - `zcode-cli-model`：OpenAI/Anthropic provider、SSE、retry、registry 和请求期鉴权。
 - `zcode-cli-tools`：文件工具、Shell、后台任务、MCP、Skills、checkpoint/rewind 和 process cleanup。
 - `zcode-cli-host`：workspace 路径/身份、配置、context source、平台路径和 runtime 环境组合。
-- `zcode-cli-app-server`：stdio framing、RPC 路由、startup/storage handshake、snapshot/resync 和 App projection。
+- `zcode-cli-delivery`：V4 topic 投递（订阅、缓冲与刷新窗口、snapshot/resync 恢复、两种 profile、wire 编码与分片）；只依赖 `core-api` 与 `domain`，stdio 前端与 Host 共用（rust-u3-stage-b.md 3.2）。
+- `zcode-cli-app-server`：stdio framing、RPC 路由、startup/storage handshake；投递经 `zcode-cli-delivery`。
 - `zcode-cli-tui`：只负责 TUI 输入和渲染，通过 `core-api` 工作。
 - `zcode-cli-rust`：唯一二进制和 composition root，负责 clap、依赖注入、信号和前端选择。
 

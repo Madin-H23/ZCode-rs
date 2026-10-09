@@ -1,14 +1,13 @@
-//! App Server frontend: stdio framing, JSON-RPC routing, V4 topic delivery and
-//! host bridging over the runtime transport contract. It owns no session facts.
+//! App Server frontend: stdio framing, JSON-RPC routing and host bridging
+//! over the runtime transport contract; V4 topic delivery is
+//! `zcode-cli-delivery`. It owns no session facts.
 use zcode_cli_core_api as contract;
 use zcode_cli_domain as domain;
-mod codec;
-mod delivery;
+mod outlet;
 mod routes;
 mod server;
 mod sink;
 pub mod stdio;
-mod subscription;
 pub use server::serve;
 pub use sink::Sink;
 pub use stdio::{finish, finish_task, start, start_reader, storage_prepare};

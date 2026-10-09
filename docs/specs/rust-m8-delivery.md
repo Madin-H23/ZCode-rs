@@ -68,11 +68,11 @@
   - 维护保留日志：每个会话一份，另有一份 index 日志；
   - 计算 `state.updated` 的差量；
   - 裁决 resume 还是 snapshot，并生成快照或回放。
-- **App Server** 负责：
+- **投递**（`zcode-cli-delivery` crate，App Server 是它的一个使用方，见 rust-u3-stage-b.md 3.2）负责：
   - 订阅注册表与 profile；
   - 每个订阅者的缓冲与定时器；
   - 连接暂停；
-  - stdout 拥塞阀；
+  - 积压暂停与恢复（stdout 拥塞阀的水位由 App Server 测量，经连接的 sink 告知投递）；
   - 打帧与分片。
 - **Host** 负责上报 `saturated`、`drained`、`closed`。
 - 本方案不涉及 Main 和 relay。
@@ -165,6 +165,7 @@ sequenceDiagram
 - **`drained`**：解除暂停，立即刷新该连接的全部订阅。
 - **`closed`**：Rust 仍直接移除该连接的全部订阅，并释放它们的 pin 与上传。Host 在 closed 之后总会逐个 unsubscribe，终态与 Node 相同，只是更早释放内存。
 - **stdout 拥塞阀**（保留）：写队列积压超过 64 MiB 时，清空全部缓冲、标记 `resyncRequired` 并停止刷新；降到 16 MiB 以下后逐个快照恢复。这是 Node 没有的安全阀，防止 Host 读不动 stdout 时无界积压。
+  - 修复：拥塞期间跳过增量的订阅都标记 `resyncRequired`。以前只在进入拥塞时标记，拥塞期间才登记或刚拿到快照（resync、恢复、历史重置）的订阅跳过增量后不标记，解除后要等下一次增量暴露断档才补齐。
 
 ## 7. 与 Node 的差异
 
