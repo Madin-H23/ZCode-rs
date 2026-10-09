@@ -47,8 +47,14 @@ await run(process.execPath, [
   "scripts/rust-host/tasks-index-groups-fixtures.ts",
   "--check",
 ]);
-// R6 automation 区域：automation / 闲时任务仓库、cron 计算与 bots 的对拍 fixture（同上，由 TS 实现生成）。
-for (const script of ["automation-fixtures.ts", "off-peak-fixtures.ts", "bots-fixtures.ts"]) {
+// R6 automation 区域：automation / 闲时任务仓库、cron 计算与 bots 的对拍 fixture（同上，由 TS 实现生成）；
+// U4 调度状态机用到的 repo 操作与结算（docs/specs/rust-u4-app-host.md §2.4）。
+for (const script of [
+  "automation-fixtures.ts",
+  "off-peak-fixtures.ts",
+  "bots-fixtures.ts",
+  "scheduler-fixtures.ts",
+]) {
   await run(process.execPath, ["--import", "tsx", `scripts/rust-host/${script}`, "--check"]);
 }
 // 扩展服务的对拍 fixture 由真实 TS 服务生成（docs/specs/rust-host-extensions.md §6）。
