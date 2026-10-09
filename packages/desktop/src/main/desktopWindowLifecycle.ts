@@ -8,7 +8,6 @@ import { createBrowserWindow } from "./desktopWindowChrome.js";
 import type { HostInitMessage, WindowBootstrapOptions } from "./desktopHostProcess.js";
 import type { StartupWorkspaceWarmupTarget } from "./startupWorkspace.js";
 import { handleDarwinWindowCloseRequest } from "./desktopDarwinCloseBehavior.js";
-import { asRustHostProcess, sendRustHostServiceEndpoint } from "./rustDesktopHost.js";
 import {
   parseWindowUnreadCount,
   sumWindowUnreadCounts,
@@ -22,12 +21,9 @@ import {
 
 const DEFAULT_RUNTIME_PROCESS_ENV_WAIT_TIMEOUT_MS = 4_500;
 
-export function createWindow(options: {
-  iconPath: string;
-  preloadPath: string;
-  logger: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void };
-  forceQuitRef: { current: boolean };
-  handleBeforeClose?: (win: BrowserWindow, label: string) => boolean;
+/** Node 路径：每个主窗口一个 Host，dom-ready 时拉起，reload 时为存活的 Host 补挂端口。 */
+export interface WindowOwnedHostOptions {
+  kind: "window";
   windowHostProcessMap: Map<number, ElectronUtilityProcess>;
   spawnHostProcess: (
     win: BrowserWindow,
@@ -39,19 +35,8 @@ export function createWindow(options: {
     label: string,
     forceKillDelayMs?: number,
   ) => void;
-  syncAutoUpdaterStateToWindow: (win: BrowserWindow) => void;
-  syncReadyUpdateToWindow: (win: BrowserWindow) => void;
-  syncPostUpdateReleaseNotesToWindow: (win: BrowserWindow) => void;
-  disposeRemoteWorkspaceSessionsForWindow: (windowId: number, reason: string) => void;
-  reattachRemoteWorkspaceSessionsForWindow: (win: BrowserWindow, reason: string) => void;
-  bootstrap?: WindowBootstrapOptions;
   agentWarmupTargets?: readonly StartupWorkspaceWarmupTarget[];
   agentSpawnFallbackCwd: string;
-  deviceMid: string;
-  initialDesktopZoomLevel?: number;
-  initialWindowSize?: DesktopWindowSize;
-  currentApplicationLocale?: () => Locale;
-  persistWindowSize?: (state: DesktopWindowSize) => Promise<void>;
   /** Main 模块初始化期已开始的异步环境采集；通常在 renderer dom-ready 前完成。 */
   runtimeProcessEnvPatchPromise?: Promise<Record<string, string>>;
   /** 不执行 shell 即可计算的完整降级 patch；预热失败/超时时仍要注入 Local Host。 */
@@ -66,6 +51,42 @@ export function createWindow(options: {
    * 避免冷启动快照 { enabled:false } 被烤进首 Host env 后无法被异步成功结果覆盖。
    */
   awaitFirstHostSpawnDecision?: () => Promise<void>;
+}
+
+/**
+ * Rust 开关：App 级 Host 由 rustAppHost.ts 拥有（docs/specs/rust-u4-app-host.md §2.1）。
+ * 窗口 dom-ready 只申请接入，关闭只断开自己；Host 的拉起、就绪与重启不归窗口管。
+ */
+interface AppHostWindowOptions {
+  kind: "app";
+  appHost: {
+    attachWindow(win: BrowserWindow): void;
+    detachWindow(webContentsId: number): void;
+  };
+}
+
+export function createWindow(options: {
+  iconPath: string;
+  preloadPath: string;
+  logger: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void };
+  forceQuitRef: { current: boolean };
+  handleBeforeClose?: (win: BrowserWindow, label: string) => boolean;
+  host: WindowOwnedHostOptions | AppHostWindowOptions;
+  syncAutoUpdaterStateToWindow: (win: BrowserWindow) => void;
+  syncReadyUpdateToWindow: (win: BrowserWindow) => void;
+  syncPostUpdateReleaseNotesToWindow: (win: BrowserWindow) => void;
+  disposeRemoteWorkspaceSessionsForWindow: (
+    windowId: number,
+    reason: string,
+    disposeOptions?: { releaseInHost?: boolean },
+  ) => void;
+  reattachRemoteWorkspaceSessionsForWindow: (win: BrowserWindow, reason: string) => void;
+  bootstrap?: WindowBootstrapOptions;
+  deviceMid: string;
+  initialDesktopZoomLevel?: number;
+  initialWindowSize?: DesktopWindowSize;
+  currentApplicationLocale?: () => Locale;
+  persistWindowSize?: (state: DesktopWindowSize) => Promise<void>;
   /** Local Host map insertion completed; presentation facts can now be replayed safely. */
   onHostProcessReady?: (windowKey: number) => void;
   resolveBrowserViewOwner?: Parameters<typeof createBrowserWindow>[0]["resolveBrowserViewOwner"];
@@ -118,6 +139,7 @@ export function createWindow(options: {
 
   const wcId = win.webContents.id;
   const browserWindowId = win.id;
+  const host = options.host;
   // 资源遥测据此把主窗口 renderer 归 renderer_main；辅助窗口与 DevTools 归 chromium_other。
   registerMainApplicationWindow(wcId);
   let domReadyGeneration = 0;
@@ -134,7 +156,19 @@ export function createWindow(options: {
       win.focus();
     }
 
-    const oldChild = options.windowHostProcessMap.get(wcId);
+    if (host.kind === "app") {
+      // App 级 Host：首次加载与 reload 都只为当前页面申请接入（Host 未就绪时由 owner 等就绪后签发）。
+      host.appHost.attachWindow(win);
+      options.onHostProcessReady?.(wcId);
+      options.syncAutoUpdaterStateToWindow(win);
+      options.syncReadyUpdateToWindow(win);
+      options.syncPostUpdateReleaseNotesToWindow(win);
+      // 修复原因：原 Rust 分支在 reload 时直接返回，没有为窗口重新挂远端 workspace 的 attachment。
+      options.reattachRemoteWorkspaceSessionsForWindow(win, `${label}:renderer-ready`);
+      return;
+    }
+
+    const oldChild = host.windowHostProcessMap.get(wcId);
     // renderer 刷新（reload）
     // 曾经无条件杀掉旧 host 进程再重建——host 连带 CLI agent 一起死，运行中的会话直接消失，
     // 这正是「会话身份易失」病根。host/CLI 的生命周期属于窗口而非
@@ -145,23 +179,6 @@ export function createWindow(options: {
       try {
         const startupPayload = getDatabaseStartupPortPayload(oldChild);
         if (!startupPayload) throw new Error("Previous Host startup binding is unavailable");
-        const rustHost = asRustHostProcess(oldChild);
-        if (rustHost) {
-          // Rust Host 的 Renderer 经 WebSocket 接入：reload 只需为存活的 Host 重新签发 endpoint。
-          void sendRustHostServiceEndpoint(
-            win,
-            rustHost,
-            startupPayload.databaseStartupId,
-            options.logger,
-          );
-          options.logger.info(
-            `[createWindow] renderer reloaded, reissued Rust Host endpoint (${label}), pid=${oldChild.pid}`,
-          );
-          options.syncAutoUpdaterStateToWindow(win);
-          options.syncReadyUpdateToWindow(win);
-          options.syncPostUpdateReleaseNotesToWindow(win);
-          return;
-        }
         const { port1, port2 } = new MessageChannelMain();
         oldChild.postMessage(
           {
@@ -193,35 +210,35 @@ export function createWindow(options: {
       options.logger.info(
         `[createWindow] killing previous host process for (${label}), pid=${oldChild.pid ?? "unknown"}`,
       );
-      options.disposeHostProcess(oldChild, `${label}:reload`, 150);
+      host.disposeHostProcess(oldChild, `${label}:reload`, 150);
     }
 
     // 首个 Local Host 创建前的有界灰度裁决门。用 `if` 守卫而非 `await cb?.()`——
     // cb 缺省时不触发任何 await，async handler 同步跑完，保证既有调用方与测试零回归。
     // 仅在需要 spawn 新 Host 的路径上等待（reattach 早退路径已在上方 return，不触发）。
-    if (options.awaitFirstHostSpawnDecision) {
-      await options.awaitFirstHostSpawnDecision();
+    if (host.awaitFirstHostSpawnDecision) {
+      await host.awaitFirstHostSpawnDecision();
     }
 
     const spawnLocalHost = (runtimeProcessEnvPatch: Record<string, string>) => {
       if (currentDomReadyGeneration !== domReadyGeneration || win.isDestroyed()) {
         return;
       }
-      const primaryWarmupTarget = options.agentWarmupTargets?.[0];
-      const child = options.spawnHostProcess(win, label, {
+      const primaryWarmupTarget = host.agentWarmupTargets?.[0];
+      const child = host.spawnHostProcess(win, label, {
         type: HostMessageTypes.InitLocal,
         deviceMid: options.deviceMid,
         workspacePath: primaryWarmupTarget?.workspacePath,
         workspaceIdentity: primaryWarmupTarget?.workspaceIdentity,
-        ...(options.agentWarmupTargets && options.agentWarmupTargets.length > 0
-          ? { agentWarmupTargets: [...options.agentWarmupTargets] }
+        ...(host.agentWarmupTargets && host.agentWarmupTargets.length > 0
+          ? { agentWarmupTargets: [...host.agentWarmupTargets] }
           : {}),
         runtimeProcessEnvPatch,
         // 同一窗口会后台索引所有已恢复 workspace，不只索引启动时的 active workspace。
         // fallback 必须跟随 local Host 生命周期常驻，否则非 active 历史目录被删除后会用失效 cwd 反复 spawn。
-        agentSpawnFallbackCwd: options.agentSpawnFallbackCwd,
+        agentSpawnFallbackCwd: host.agentSpawnFallbackCwd,
       });
-      options.windowHostProcessMap.set(wcId, child);
+      host.windowHostProcessMap.set(wcId, child);
       options.onHostProcessReady?.(wcId);
       options.syncAutoUpdaterStateToWindow(win);
       options.syncReadyUpdateToWindow(win);
@@ -229,13 +246,13 @@ export function createWindow(options: {
       options.reattachRemoteWorkspaceSessionsForWindow(win, `${label}:renderer-ready`);
     };
 
-    if (!options.runtimeProcessEnvPatchPromise) {
-      spawnLocalHost(options.runtimeProcessEnvFallbackPatch);
+    if (!host.runtimeProcessEnvPatchPromise) {
+      spawnLocalHost(host.runtimeProcessEnvFallbackPatch);
       return;
     }
     let settled = false;
     const waitTimeoutMs =
-      options.runtimeProcessEnvWaitTimeoutMs ?? DEFAULT_RUNTIME_PROCESS_ENV_WAIT_TIMEOUT_MS;
+      host.runtimeProcessEnvWaitTimeoutMs ?? DEFAULT_RUNTIME_PROCESS_ENV_WAIT_TIMEOUT_MS;
     let timeout: ReturnType<typeof setTimeout> | null = null;
     const cancelWait = () => {
       if (settled) {
@@ -264,16 +281,16 @@ export function createWindow(options: {
       options.logger.warn(
         `[createWindow] runtime env prewarm exceeded ${waitTimeoutMs}ms after dom-ready (${label}), using shell-free fallback`,
       );
-      completeWait(options.runtimeProcessEnvFallbackPatch);
+      completeWait(host.runtimeProcessEnvFallbackPatch);
     }, waitTimeoutMs);
-    void options.runtimeProcessEnvPatchPromise.then(completeWait, (error) => {
+    void host.runtimeProcessEnvPatchPromise.then(completeWait, (error) => {
       options.logger.warn(
         `[createWindow] runtime env prewarm failed (${label}), using shell-free fallback:`,
         error,
       );
       // 旧 rejection 分支传 undefined，Host 随后又同步执行同一个 login shell，
       // 可能把 Main 的白屏转移成 Host 卡死。Main 路径始终传入预计算 fallback patch。
-      completeWait(options.runtimeProcessEnvFallbackPatch);
+      completeWait(host.runtimeProcessEnvFallbackPatch);
     });
   });
 
@@ -281,11 +298,20 @@ export function createWindow(options: {
     unregisterMainApplicationWindow(wcId);
     cancelRuntimeProcessEnvWait?.();
     cancelRuntimeProcessEnvWait = null;
+    if (host.kind === "app") {
+      // App 级 Host 继续运行：只断开这个窗口，并让 Host 释放这个窗口的远端 logical session。
+      options.logger.info(`[createWindow] window closed, detaching from the app host (${label})`);
+      host.appHost.detachWindow(wcId);
+      options.disposeRemoteWorkspaceSessionsForWindow(wcId, `${label}:window-closed`, {
+        releaseInHost: true,
+      });
+      return;
+    }
     options.logger.info(`[createWindow] window closed, killing host process (${label})`);
-    const child = options.windowHostProcessMap.get(wcId);
+    const child = host.windowHostProcessMap.get(wcId);
     if (child) {
-      options.disposeHostProcess(child, `${label}:window-closed`);
-      options.windowHostProcessMap.delete(wcId);
+      host.disposeHostProcess(child, `${label}:window-closed`);
+      host.windowHostProcessMap.delete(wcId);
     }
     options.disposeRemoteWorkspaceSessionsForWindow(wcId, `${label}:window-closed`);
   });

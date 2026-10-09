@@ -35,6 +35,8 @@ interface PendingConnect {
   requestId: string;
   webContentsId: number;
   win: BrowserWindow;
+  /** 请求发往的 Host；Host 的结果按 (Host, requestId) 找回发起窗口，不再按 Host 固定窗口。 */
+  child: ElectronUtilityProcess;
   remoteUsageTelemetryEligible: boolean;
   resolve: (sessionId: string) => void;
   reject: (error: Error) => void;
@@ -42,6 +44,8 @@ interface PendingConnect {
 
 interface RemoteAttachmentRoute {
   webContentsId: number;
+  /** 持有这个 logical session 的 Host（App 级 Rust Host 被多个窗口共享）。 */
+  child: ElectronUtilityProcess;
   // Main 只保留端口转发所需的 request/session 关联和脱敏 descriptor；连接/任务事实归 Host。
   descriptor: WindowHostRemoteWorkspaceDescriptor;
   rendererAttachmentId?: string;
@@ -141,7 +145,11 @@ export function createRemoteWorkspaceSessionManager(options: {
     warn: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
   };
-  windowHostProcessMap: Map<number, ElectronUtilityProcess>;
+  /**
+   * 窗口当前使用的 Host：Node 路径是窗口自己的 Host，Rust 开关下是 App 级 Host（窗口已接入时）。
+   * （docs/specs/rust-u4-app-host.md §2.7）
+   */
+  resolveWindowHost: (webContentsId: number) => ElectronUtilityProcess | undefined;
   resolveRemoteAssetDirs: () => RemoteAssetDirs;
   resolveWslTarget?: (
     target: Extract<RemoteTarget, { kind: "wsl" }>,
@@ -180,12 +188,22 @@ export function createRemoteWorkspaceSessionManager(options: {
   }
 
   function getWindowHost(win: BrowserWindow): ElectronUtilityProcess {
-    const child = options.windowHostProcessMap.get(win.webContents.id);
+    const child = options.resolveWindowHost(win.webContents.id);
     if (!child || child.pid == null) {
       throw new Error(`未找到窗口 Local Host，windowId=${win.webContents.id}`);
     }
-    ensureHostListener(child, win.webContents.id);
+    ensureHostListener(child);
     return child;
+  }
+
+  function findPendingConnect(
+    child: ElectronUtilityProcess,
+    requestId: string,
+  ): [string, PendingConnect] | undefined {
+    for (const entry of pendingByRequestKey) {
+      if (entry[1].child === child && entry[1].requestId === requestId) return entry;
+    }
+    return undefined;
   }
 
   function createMessageChannel() {
@@ -304,7 +322,13 @@ export function createRemoteWorkspaceSessionManager(options: {
         // Rust Host（开发开关）：Renderer 经 WebSocket 直连远端 scope，不经 MessagePort
         // （docs/specs/rust-host-remote.md §4.2）。ready ACK 与超时沿用同一条 pending 记录。
         void rustHost
-          .requestServiceEndpoint({ attachmentId, clientMode: "desktop-continuous", scope })
+          .requestServiceEndpoint({
+            attachmentId,
+            clientMode: "desktop-continuous",
+            scope,
+            // 远端 scope 的连接同样属于这个主窗口（docs/specs/rust-u4-app-host.md §2.2）。
+            windowId: win.webContents.id,
+          })
           .then((endpoint) => {
             if (route.pendingRendererAttachment?.attachmentId !== attachmentId) return;
             if (win.isDestroyed() || win.webContents.isDestroyed()) {
@@ -380,7 +404,7 @@ export function createRemoteWorkspaceSessionManager(options: {
 
     clearTimeout(pending.timeout);
     route.pendingRendererAttachment = undefined;
-    const child = options.windowHostProcessMap.get(route.webContentsId);
+    const child = options.resolveWindowHost(route.webContentsId);
     if (!child || child.pid == null) {
       pending.reject(new Error(`窗口 Local Host 已退出，sessionId=${payload.sessionId}`));
       return;
@@ -413,13 +437,11 @@ export function createRemoteWorkspaceSessionManager(options: {
 
   function handleConnected(
     child: ElectronUtilityProcess,
-    webContentsId: number,
     requestId: string,
     descriptor: WindowHostRemoteWorkspaceDescriptor,
   ): void {
-    const key = requestKey(webContentsId, requestId);
-    const pending = pendingByRequestKey.get(key);
-    if (!pending) {
+    const found = findPendingConnect(child, requestId);
+    if (!found) {
       child.postMessage({
         type: HostMessageTypes.DisposeRemoteWorkspaceSession,
         requestId: randomUUID(),
@@ -427,9 +449,11 @@ export function createRemoteWorkspaceSessionManager(options: {
       });
       return;
     }
+    const [key, pending] = found;
     pendingByRequestKey.delete(key);
     const route: RemoteAttachmentRoute = {
-      webContentsId,
+      webContentsId: pending.webContentsId,
+      child,
       descriptor,
       attachmentState: "attachable",
       connectedAtMonotonicMs: monotonicNowMs(),
@@ -503,7 +527,7 @@ export function createRemoteWorkspaceSessionManager(options: {
     reason: string,
     error: Error,
   ): void {
-    const child = options.windowHostProcessMap.get(route.webContentsId);
+    const child = options.resolveWindowHost(route.webContentsId);
     if (route.pendingRendererAttachment) {
       const pending = route.pendingRendererAttachment;
       clearTimeout(pending.timeout);
@@ -551,7 +575,7 @@ export function createRemoteWorkspaceSessionManager(options: {
   }
 
   function handleClosed(
-    webContentsId: number,
+    child: ElectronUtilityProcess,
     event: {
       remoteSessionId: string;
       reason: "connection-closed" | "disposed" | "connect-cancelled";
@@ -561,7 +585,8 @@ export function createRemoteWorkspaceSessionManager(options: {
     },
   ): void {
     const route = routesBySessionId.get(event.remoteSessionId);
-    if (!route || route.webContentsId !== webContentsId) return;
+    if (!route || route.child !== child) return;
+    const webContentsId = route.webContentsId;
     if (event.reason !== "connection-closed") {
       route.providerProvisioningDispose?.();
       retireActiveRoute(route, "disposed", () => {
@@ -603,14 +628,17 @@ export function createRemoteWorkspaceSessionManager(options: {
     }
   }
 
-  function ensureHostListener(child: ElectronUtilityProcess, webContentsId: number): void {
+  // 修复原因：这里曾按进程只登记一次并固化第一个窗口的 webContentsId；App 级 Rust Host 被多个窗口
+  // 共享后，第二个窗口的连接结果会按错误的窗口查找而丢失。改为按 (Host, requestId) 找回发起窗口，
+  // 关闭与退出按 route / pending 记录的 Host 判断；Node 窗口 Host 一对一，行为不变。
+  function ensureHostListener(child: ElectronUtilityProcess): void {
     if (listenedHosts.has(child)) return;
     listenedHosts.add(child);
     child.on("message", (message: unknown) => {
       const parsed = hostResponseMessageSchema.safeParse(message);
       if (!parsed.success) return;
       if (parsed.data.type === HostResponseTypes.RemoteWorkspaceConnectionLog) {
-        const pending = pendingByRequestKey.get(requestKey(webContentsId, parsed.data.requestId));
+        const pending = findPendingConnect(child, parsed.data.requestId)?.[1];
         if (!pending) return;
         // 多个远程连接共享 window Host，不能再从进程 label/stdout 猜日志归属；
         // Host 已带上连接 requestId，Main 只向对应发起窗口做薄转发。
@@ -650,13 +678,13 @@ export function createRemoteWorkspaceSessionManager(options: {
         return;
       }
       if (parsed.data.type === HostResponseTypes.RemoteWorkspaceConnected) {
-        handleConnected(child, webContentsId, parsed.data.requestId, parsed.data.descriptor);
+        handleConnected(child, parsed.data.requestId, parsed.data.descriptor);
         return;
       }
       if (parsed.data.type === HostResponseTypes.RemoteWorkspaceConnectFailed) {
-        const key = requestKey(webContentsId, parsed.data.requestId);
-        const pending = pendingByRequestKey.get(key);
-        if (!pending) return;
+        const found = findPendingConnect(child, parsed.data.requestId);
+        if (!found) return;
+        const [key, pending] = found;
         pendingByRequestKey.delete(key);
         emitConnectionLog(pending.win, {
           requestId: parsed.data.requestId,
@@ -667,7 +695,7 @@ export function createRemoteWorkspaceSessionManager(options: {
         return;
       }
       if (parsed.data.type === HostResponseTypes.RemoteWorkspaceClosed) {
-        handleClosed(webContentsId, parsed.data);
+        handleClosed(child, parsed.data);
       }
     });
     child.once("exit", () => {
@@ -678,13 +706,13 @@ export function createRemoteWorkspaceSessionManager(options: {
         pendingExecution.reject(error);
       }
       for (const [key, pending] of Array.from(pendingByRequestKey)) {
-        if (pending.webContentsId === webContentsId) {
+        if (pending.child === child) {
           pendingByRequestKey.delete(key);
           pending.reject(error);
         }
       }
       for (const [sessionId, route] of Array.from(routesBySessionId)) {
-        if (route.webContentsId !== webContentsId) continue;
+        if (route.child !== child) continue;
         route.providerProvisioningDispose?.();
         retireActiveRoute(route, "host-exit", () => {
           routesBySessionId.delete(sessionId);
@@ -735,6 +763,7 @@ export function createRemoteWorkspaceSessionManager(options: {
         requestId: resolvedRequestId,
         webContentsId: win.webContents.id,
         win,
+        child,
         remoteUsageTelemetryEligible: lifecycle?.remoteUsageTelemetryEligible ?? false,
         resolve,
         reject,
@@ -768,7 +797,7 @@ export function createRemoteWorkspaceSessionManager(options: {
     const workspaceIdentity =
       context.workspaceIdentity?.trim() ||
       buildRemoteWorkspaceIdentity(context.workspacePath, route.descriptor.target);
-    const child = options.windowHostProcessMap.get(route.webContentsId);
+    const child = options.resolveWindowHost(route.webContentsId);
     const win = BrowserWindow.getAllWindows().find(
       (candidate) => candidate.webContents.id === route.webContentsId,
     );
@@ -828,7 +857,7 @@ export function createRemoteWorkspaceSessionManager(options: {
       routesBySessionId.delete(sessionId);
     });
     route.providerProvisioningDispose?.();
-    const child = options.windowHostProcessMap.get(route.webContentsId);
+    const child = options.resolveWindowHost(route.webContentsId);
     if (route.pendingRendererAttachment) {
       const pending = route.pendingRendererAttachment;
       clearTimeout(pending.timeout);
@@ -850,7 +879,16 @@ export function createRemoteWorkspaceSessionManager(options: {
     });
   }
 
-  function disposeRemoteWorkspaceSessionsForWindow(webContentsId: number): void {
+  /**
+   * 窗口关闭时清理它的 route 与等待中的连接。Node 窗口 Host 随窗口一起 dispose，Host 内的会话随之释放；
+   * App 级 Host 在窗口关闭后继续运行，`releaseInHost` 让 Host 释放这个窗口的 logical session、取消
+   * 等待中的连接（与今天“关窗即结束该窗口的远程连接”一致，docs/specs/rust-u4-app-host.md §2.1）。
+   */
+  function disposeRemoteWorkspaceSessionsForWindow(
+    webContentsId: number,
+    _reason?: string,
+    disposeOptions?: { releaseInHost?: boolean },
+  ): void {
     for (const [sessionId, route] of Array.from(routesBySessionId)) {
       if (route.webContentsId !== webContentsId) continue;
       retireActiveRoute(route, "window-closed", () => {
@@ -861,11 +899,38 @@ export function createRemoteWorkspaceSessionManager(options: {
         clearTimeout(route.pendingRendererAttachment.timeout);
         route.pendingRendererAttachment.reject(new Error("窗口已关闭，attachment 已取消"));
       }
+      if (disposeOptions?.releaseInHost) {
+        for (const attachmentId of [
+          route.pendingRendererAttachment?.attachmentId,
+          route.rendererAttachmentId,
+        ]) {
+          if (attachmentId) detachServicePort(route.child, attachmentId, "window-closed");
+        }
+        postToHost(route.child, {
+          type: HostMessageTypes.DisposeRemoteWorkspaceSession,
+          requestId: randomUUID(),
+          remoteSessionId: sessionId,
+        });
+      }
     }
     for (const [key, pending] of Array.from(pendingByRequestKey)) {
       if (pending.webContentsId !== webContentsId) continue;
       pendingByRequestKey.delete(key);
       pending.reject(new Error("窗口已关闭，远程连接已取消"));
+      if (disposeOptions?.releaseInHost) {
+        postToHost(pending.child, {
+          type: HostMessageTypes.CancelRemoteWorkspaceConnect,
+          requestId: pending.requestId,
+        });
+      }
+    }
+  }
+
+  function postToHost(child: ElectronUtilityProcess, message: unknown): void {
+    try {
+      child.postMessage(message);
+    } catch (error) {
+      options.logger.warn("[window-host-remote] post to host failed", { error });
     }
   }
 
@@ -874,7 +939,7 @@ export function createRemoteWorkspaceSessionManager(options: {
     _reason: string,
     requestId?: string,
   ): void {
-    const child = options.windowHostProcessMap.get(webContentsId);
+    const child = options.resolveWindowHost(webContentsId);
     if (!child) return;
     for (const pending of pendingByRequestKey.values()) {
       if (
@@ -906,6 +971,25 @@ export function createRemoteWorkspaceSessionManager(options: {
             workspaceIdentity: route.descriptor.workspaceIdentity,
           }) === workspaceKey),
     );
+  }
+
+  /** 持有这个 workspace 可用 route 的窗口（Bot 重连请求没有 windowId 时使用，§2.7）。 */
+  function findWindowIdForRemoteWorkspace(params: {
+    target: RemoteTarget;
+    workspacePath: string;
+    workspaceIdentity: string;
+  }): number | undefined {
+    for (const route of routesBySessionId.values()) {
+      if (
+        route.attachmentState === "attachable" &&
+        route.descriptor.workspacePath === params.workspacePath &&
+        route.descriptor.workspaceIdentity === params.workspaceIdentity &&
+        isSameRemoteTarget(route.descriptor.target, params.target)
+      ) {
+        return route.webContentsId;
+      }
+    }
+    return undefined;
   }
 
   function attachRemoteWorkspaceSessionHost(params: {
@@ -1035,6 +1119,7 @@ export function createRemoteWorkspaceSessionManager(options: {
     confirmRendererAttachmentReady,
     reattachRemoteWorkspaceSessionsForWindow,
     hasRemoteWorkspaceSessionForTarget,
+    findWindowIdForRemoteWorkspace,
     createBotRemoteWorkspaceRuntimePort,
     getRemoteConnectionStats,
     disposeRemoteWorkspaceSession,

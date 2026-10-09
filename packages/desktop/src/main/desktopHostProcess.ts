@@ -55,12 +55,8 @@ import { ingestCliResourceSample } from "./processResourceCliSource.js";
 import { ingestHostSelfResourceSample } from "./processResourceSelfHeapSource.js";
 import { createFeedbackLogArchiveFromExportLogs } from "./exportLogs.js";
 import { buildHostE2ECoverageEnv } from "./e2eCoverage.js";
-import {
-  createRustHostEndpointIssuer,
-  isRustDesktopHostEnabled,
-  spawnRustHostProcess,
-} from "./rustDesktopHost.js";
-import { handleUnexpectedRustHostExit } from "./rustHostRestart.js";
+import { type RustHostProcess, spawnRustHostProcess } from "./rustDesktopHost.js";
+import type { HostRequestWindowResolution } from "./hostRequestWindowRouting.js";
 
 export interface WindowBootstrapOptions {
   restoreSession?: boolean;
@@ -155,113 +151,109 @@ export function loadWindow(
   }
 }
 
-export function spawnHostProcess(
-  win: BrowserWindow,
-  label: string,
-  initMessage: HostInitMessage,
-  dependencies: {
-    hostProcessLocalEnv: Record<string, string>;
-    /** Main 进程已完成服务端灰度裁决；Host 只消费这个快照，不自行请求或分桶。 */
-    desktopContextPromptEnabled?: () => boolean;
-    logger: {
-      info: (...args: unknown[]) => void;
-      warn: (...args: unknown[]) => void;
-    };
-    broadcastHub: BroadcastHub;
-    taskRealtimeBus?: TaskRealtimeBus;
-    windowHostProcessMap: Map<number, ElectronUtilityProcess>;
-    hostRunningTaskCountMap: Map<ElectronUtilityProcess, number>;
-    onWorkspaceRunningTaskCountChanged?: (
-      child: ElectronUtilityProcess,
-      event: {
-        workspacePath: string;
-        workspaceIdentity?: string;
-        runningTaskCount: number;
-      },
-    ) => void;
-    onAgentProcessExited?: (event: HostAgentProcessExitedResponse) => void;
-    onAgentProcessError?: (event: HostAgentProcessErrorResponse) => void;
-    onAgentProcessException?: (event: HostAgentProcessExceptionResponse) => void;
-    onAgentProcessReady?: (event: HostAgentProcessReadyResponse) => void;
-    onAgentProcessSpawned?: (event: HostAgentProcessSpawnedResponse) => void;
-    onMcpTelemetry?: (event: HostMcpTelemetryResponse) => void;
-    onSessionCreateTelemetry?: (event: HostSessionCreateTelemetryResponse) => void;
-    onCuaOperationStateChanged?: (
-      source: ElectronUtilityProcess,
-      event: HostCuaOperationStateResponse,
-    ) => void;
-    onCuaOperationStateSourceExited?: (source: ElectronUtilityProcess) => void;
-    handleBotRemoteWorkspaceReconnectRequest?: (params: {
-      win: BrowserWindow;
-      requestId: string;
+type HostProcessLogger = {
+  info: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+};
+
+type BotRemoteWorkspaceRequestParams = {
+  win: BrowserWindow;
+  requestId: string;
+  workspacePath: string;
+  workspaceIdentity: string;
+  target: RemoteTarget;
+};
+
+/**
+ * 需要回到某个窗口的 Host→Main 请求（browser-use、Bot 远端）按此解析目标窗口。
+ * Node 窗口 Host 固定是拉起它的窗口；App 级 Rust Host 按消息里的 windowId 路由
+ * （docs/specs/rust-u4-app-host.md §2.2、§2.7）。
+ */
+type HostRequestWindowResolver = (request: {
+  windowId?: number;
+  workspace?: { workspacePath: string; workspaceIdentity: string; target: RemoteTarget };
+}) => HostRequestWindowResolution<BrowserWindow>;
+
+/** Node 窗口 Host 与 App 级 Rust Host 共用的进程依赖（拉起、日志、Host→Main 消息处理）。 */
+export interface HostProcessDependencies {
+  hostProcessLocalEnv: Record<string, string>;
+  /** Main 进程已完成服务端灰度裁决；Host 只消费这个快照，不自行请求或分桶。 */
+  desktopContextPromptEnabled?: () => boolean;
+  logger: HostProcessLogger;
+  hostRunningTaskCountMap: Map<ElectronUtilityProcess, number>;
+  onWorkspaceRunningTaskCountChanged?: (
+    child: ElectronUtilityProcess,
+    event: {
       workspacePath: string;
-      workspaceIdentity: string;
-      target: RemoteTarget;
-    }) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
-    handleBotRemoteWorkspaceConnectionStatusRequest?: (params: {
-      win: BrowserWindow;
-      requestId: string;
-      workspacePath: string;
-      workspaceIdentity: string;
-      target: RemoteTarget;
-    }) => Promise<{ ok: boolean; connected?: boolean; error?: string }>;
-    handleBotRemoteWorkspaceRuntimePortRequest?: (params: {
-      win: BrowserWindow;
-      requestId: string;
-      workspacePath: string;
-      workspaceIdentity: string;
-      target: RemoteTarget;
-    }) => Promise<{ ok: boolean; port?: MessagePortMain; error?: string }>;
-    /** host → main：定时任务派发结果，转交给 cron scheduler 结算调度状态机。 */
-    onCronRunResult?: (result: {
-      runId: string;
-      ok: boolean;
-      taskId?: string;
-      sessionId?: string;
-      error?: string;
-      failureKind?: "transient" | "permanent";
-    }) => void;
-    /** host → main：闲时任务派发结果，转交给 scheduler 结算（与 cron 独立）。 */
-    onOffPeakRunResult?: (result: {
-      offPeakTaskId: string;
-      ok: boolean;
-      conversationId?: string;
-      sessionId?: string;
-      error?: string;
-      failureKind?: "transient" | "permanent";
-    }) => void;
-    /** host 中 manual run 落库后请求 main 立即唤醒 scheduler。 */
-    onCronSchedulerWakeRequested?: (automationId: string) => void;
-    /** host 中闲时任务翻 schedulable 后请求 main 立即唤醒 scheduler。 */
-    onOffPeakSchedulerWakeRequested?: (offPeakTaskId?: string) => void;
-    // browser-use：main 用 WebContentsView+CDP 执行一条命令。实现由宿主注入；缺省则 backend_unavailable。
-    handleBrowserExecuteRequest?: (params: {
-      win: BrowserWindow;
-      requestId: string;
-      browserId?: string;
-      browserGeneration?: number;
-      sessionId: string;
-      turnId?: string;
-      workspaceKey?: string;
-      workspacePath?: string;
       workspaceIdentity?: string;
-      remoteSessionId?: string;
-      clientMode?: "desktop-continuous" | "web-remote-replayable";
-      sessionContext?: "live" | "cached";
-      command: unknown;
-    }) => Promise<{ ok: boolean; [k: string]: unknown }>;
-    /** Host 已完成附件授权后，由 Main 将本地视频 realpath 加入精确协议授权集合。 */
-    authorizeLocalMediaPreviewPath?: (path: string) => Promise<string>;
-  },
-  options?: SpawnHostProcessOptions,
-): ElectronUtilityProcess {
-  const hostId = randomUUID();
-  const glmBinaryPath = resolveBundledGlmBinaryPath();
-  const execArgv = [
-    ...(RUNTIME_ZCODE_DEBUG ? [`--inspect-brk=${RUNTIME_ZCODE_DEBUG}`] : []),
-    "--no-warnings",
-  ];
-  const hostEnv = {
+      runningTaskCount: number;
+    },
+  ) => void;
+  onAgentProcessExited?: (event: HostAgentProcessExitedResponse) => void;
+  onAgentProcessError?: (event: HostAgentProcessErrorResponse) => void;
+  onAgentProcessException?: (event: HostAgentProcessExceptionResponse) => void;
+  onAgentProcessReady?: (event: HostAgentProcessReadyResponse) => void;
+  onAgentProcessSpawned?: (event: HostAgentProcessSpawnedResponse) => void;
+  onMcpTelemetry?: (event: HostMcpTelemetryResponse) => void;
+  onSessionCreateTelemetry?: (event: HostSessionCreateTelemetryResponse) => void;
+  onCuaOperationStateChanged?: (
+    source: ElectronUtilityProcess,
+    event: HostCuaOperationStateResponse,
+  ) => void;
+  onCuaOperationStateSourceExited?: (source: ElectronUtilityProcess) => void;
+  handleBotRemoteWorkspaceReconnectRequest?: (
+    params: BotRemoteWorkspaceRequestParams,
+  ) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
+  handleBotRemoteWorkspaceConnectionStatusRequest?: (
+    params: BotRemoteWorkspaceRequestParams,
+  ) => Promise<{ ok: boolean; connected?: boolean; error?: string }>;
+  handleBotRemoteWorkspaceRuntimePortRequest?: (
+    params: BotRemoteWorkspaceRequestParams,
+  ) => Promise<{ ok: boolean; port?: MessagePortMain; error?: string }>;
+  /** host → main：定时任务派发结果，转交给 cron scheduler 结算调度状态机。 */
+  onCronRunResult?: (result: {
+    runId: string;
+    ok: boolean;
+    taskId?: string;
+    sessionId?: string;
+    error?: string;
+    failureKind?: "transient" | "permanent";
+  }) => void;
+  /** host → main：闲时任务派发结果，转交给 scheduler 结算（与 cron 独立）。 */
+  onOffPeakRunResult?: (result: {
+    offPeakTaskId: string;
+    ok: boolean;
+    conversationId?: string;
+    sessionId?: string;
+    error?: string;
+    failureKind?: "transient" | "permanent";
+  }) => void;
+  /** host 中 manual run 落库后请求 main 立即唤醒 scheduler。 */
+  onCronSchedulerWakeRequested?: (automationId: string) => void;
+  /** host 中闲时任务翻 schedulable 后请求 main 立即唤醒 scheduler。 */
+  onOffPeakSchedulerWakeRequested?: (offPeakTaskId?: string) => void;
+  // browser-use：main 用 WebContentsView+CDP 执行一条命令。实现由宿主注入；缺省则 backend_unavailable。
+  handleBrowserExecuteRequest?: (params: {
+    win: BrowserWindow;
+    requestId: string;
+    browserId?: string;
+    browserGeneration?: number;
+    sessionId: string;
+    turnId?: string;
+    workspaceKey?: string;
+    workspacePath?: string;
+    workspaceIdentity?: string;
+    remoteSessionId?: string;
+    clientMode?: "desktop-continuous" | "web-remote-replayable";
+    sessionContext?: "live" | "cached";
+    command: unknown;
+  }) => Promise<{ ok: boolean; [k: string]: unknown }>;
+  /** Host 已完成附件授权后，由 Main 将本地视频 realpath 加入精确协议授权集合。 */
+  authorizeLocalMediaPreviewPath?: (path: string) => Promise<string>;
+}
+
+function buildHostSpawnEnv(label: string, dependencies: HostProcessDependencies) {
+  return {
     ...buildHostProcessEnv(dependencies.hostProcessLocalEnv),
     ...buildHostE2ECoverageEnv(),
     ZCODE_PROCESS_LABEL: label,
@@ -280,18 +272,15 @@ export function spawnHostProcess(
         }
       : {}),
   };
-  // 开发开关打开时改起原生 Rust Host（docs/specs/rust-host-r0.md）；adapter 对下面的代码表现为 UtilityProcess。
-  const rustHost = isRustDesktopHostEnabled()
-    ? spawnRustHostProcess(label, hostEnv, dependencies.logger)
-    : null;
-  const child =
-    rustHost?.asUtilityProcess() ??
-    electronUtilityProcess.fork(hostModulePath, [], {
-      serviceName: formatZCodeHostProcessName(label),
-      execArgv,
-      env: hostEnv,
-    });
+}
 
+/** 拉起后的日志与 stdout/stderr 中继；返回给退出时 flush。 */
+function startHostOutputRelay(
+  label: string,
+  child: ElectronUtilityProcess,
+  glmBinaryPath: string | null | undefined,
+  dependencies: HostProcessDependencies,
+) {
   dependencies.logger.info(
     `[spawnHostProcess] forked host process for (${label}), pid=${child.pid}`,
   );
@@ -314,10 +303,48 @@ export function spawnHostProcess(
   child.stdout?.on("data", (data: Buffer) => {
     hostLogRelay.onStdout(data.toString());
   });
+  return hostLogRelay;
+}
 
-  const databaseStartupRelay = bindDatabaseStartupRelay(win, child, hostId);
-  // Rust Host 的 Renderer endpoint 在每次启动尝试 ready 时签发（rust-host-resilience.md §2.2）。
-  let issueRustHostEndpoint: ((state: DatabaseStartupState) => void) | undefined;
+/** Host 退出时两条路径共有的记账；之后各自清理 BroadcastHub / 窗口映射或通知 App 级 owner。 */
+function recordHostProcessExit(
+  child: ElectronUtilityProcess,
+  label: string,
+  code: number,
+  hostLogRelay: ReturnType<typeof createHostLogRelay>,
+  dependencies: HostProcessDependencies,
+): void {
+  exitedHostProcesses.add(child);
+  // Host exit 是 fail-hidden 权威边界；不能依赖即将退出的 Host 再补发 inactive。
+  dependencies.onCuaOperationStateSourceExited?.(child);
+  hostLogRelay.flushRawLogs();
+  dependencies.logger.info(`[spawnHostProcess] host process (${label}) exited with code ${code}`);
+  dependencies.hostRunningTaskCountMap.delete(child);
+}
+
+function postBotRemoteWorkspaceFailure(
+  child: ElectronUtilityProcess,
+  type:
+    | typeof HostMessageTypes.BotRemoteWorkspaceReconnectResult
+    | typeof HostMessageTypes.BotRemoteWorkspaceConnectionStatusResult
+    | typeof HostMessageTypes.BotRemoteWorkspaceRuntimePort,
+  requestId: string,
+  error: string,
+): void {
+  child.postMessage({ type, requestId, ok: false, error });
+}
+
+/** Host→Main 消息处理；`win` 只经 resolveRequestWindow 取得，不在这里固定。 */
+function bindHostResponseHandlers(
+  child: ElectronUtilityProcess,
+  label: string,
+  hostLogRelay: ReturnType<typeof createHostLogRelay>,
+  dependencies: HostProcessDependencies,
+  hooks: {
+    onDatabaseStartupState: (state: DatabaseStartupState) => void;
+    resolveRequestWindow: HostRequestWindowResolver;
+  },
+): void {
   child.on("message", (message: unknown) => {
     const result = hostResponseMessageSchema.safeParse(message);
     if (!result.success) {
@@ -325,8 +352,7 @@ export function spawnHostProcess(
     }
 
     if (result.data.type === HostResponseTypes.DatabaseStartupState) {
-      databaseStartupRelay.receive(result.data.state);
-      issueRustHostEndpoint?.(result.data.state);
+      hooks.onDatabaseStartupState(result.data.state);
       return;
     }
 
@@ -459,10 +485,13 @@ export function spawnHostProcess(
         },
         elapsedMs: 0,
       };
+      const target = handler
+        ? hooks.resolveRequestWindow({ windowId: result.data.windowId })
+        : null;
       void (
-        handler
+        handler && target?.ok
           ? handler({
-              win,
+              win: target.window,
               requestId,
               browserId: result.data.browserId,
               browserGeneration: result.data.browserGeneration,
@@ -483,7 +512,16 @@ export function spawnHostProcess(
               },
               elapsedMs: 0,
             }))
-          : Promise.resolve(fallback)
+          : Promise.resolve(
+              target && !target.ok
+                ? {
+                    ok: false as const,
+                    // App 级 Host：发起调用的窗口已不存在，明确回失败而不是借用别的窗口执行。
+                    error: { code: "renderer_unreachable", message: target.error },
+                    elapsedMs: 0,
+                  }
+                : fallback,
+            )
       ).then((commandResult) => {
         child.postMessage({
           type: HostMessageTypes.BrowserExecuteResult,
@@ -587,18 +625,31 @@ export function spawnHostProcess(
       const request = result.data;
       const handler = dependencies.handleBotRemoteWorkspaceReconnectRequest;
       if (!handler) {
-        child.postMessage({
-          type: HostMessageTypes.BotRemoteWorkspaceReconnectResult,
-          requestId: request.requestId,
-          ok: false,
+        postBotRemoteWorkspaceFailure(
+          child,
+          HostMessageTypes.BotRemoteWorkspaceReconnectResult,
+          request.requestId,
           // Bugfix: /reconnect 需要 main 侧 bridge，缺 handler 时返回明确原因，避免继续显示笼统的不可访问。
-          error: "未注入 Bot 远端 workspace 重连处理器。",
-        });
+          "未注入 Bot 远端 workspace 重连处理器。",
+        );
+        return;
+      }
+      const target = hooks.resolveRequestWindow({
+        windowId: request.windowId,
+        workspace: request,
+      });
+      if (!target.ok) {
+        postBotRemoteWorkspaceFailure(
+          child,
+          HostMessageTypes.BotRemoteWorkspaceReconnectResult,
+          request.requestId,
+          target.error,
+        );
         return;
       }
 
       void handler({
-        win,
+        win: target.window,
         requestId: request.requestId,
         workspacePath: request.workspacePath,
         workspaceIdentity: request.workspaceIdentity,
@@ -625,20 +676,31 @@ export function spawnHostProcess(
     }
 
     if (result.data.type === HostResponseTypes.BotRemoteWorkspaceConnectionStatusRequest) {
+      // Node Host 使用；App 级 Rust Host 直接读自己的远端注册表，不再发这条请求（§2.7）。
       const request = result.data;
       const handler = dependencies.handleBotRemoteWorkspaceConnectionStatusRequest;
       if (!handler) {
-        child.postMessage({
-          type: HostMessageTypes.BotRemoteWorkspaceConnectionStatusResult,
-          requestId: request.requestId,
-          ok: false,
-          error: "未注入 Bot 远端 workspace 连接状态处理器。",
-        });
+        postBotRemoteWorkspaceFailure(
+          child,
+          HostMessageTypes.BotRemoteWorkspaceConnectionStatusResult,
+          request.requestId,
+          "未注入 Bot 远端 workspace 连接状态处理器。",
+        );
+        return;
+      }
+      const target = hooks.resolveRequestWindow({ workspace: request });
+      if (!target.ok) {
+        postBotRemoteWorkspaceFailure(
+          child,
+          HostMessageTypes.BotRemoteWorkspaceConnectionStatusResult,
+          request.requestId,
+          target.error,
+        );
         return;
       }
 
       void handler({
-        win,
+        win: target.window,
         requestId: request.requestId,
         workspacePath: request.workspacePath,
         workspaceIdentity: request.workspaceIdentity,
@@ -668,19 +730,29 @@ export function spawnHostProcess(
       const request = result.data;
       const handler = dependencies.handleBotRemoteWorkspaceRuntimePortRequest;
       if (!handler) {
-        child.postMessage({
-          type: HostMessageTypes.BotRemoteWorkspaceRuntimePort,
-          requestId: request.requestId,
-          ok: false,
+        postBotRemoteWorkspaceFailure(
+          child,
+          HostMessageTypes.BotRemoteWorkspaceRuntimePort,
+          request.requestId,
           // Bugfix: 远端 Bot 不能在缺少 runtime bridge 时回落到本地 ZCode Agent，
           // 否则会把 remote workspace 的任务写到本地并触发错误模型。
-          error: "未注入 Bot 远端 workspace runtime 处理器。",
-        });
+          "未注入 Bot 远端 workspace runtime 处理器。",
+        );
+        return;
+      }
+      const target = hooks.resolveRequestWindow({ workspace: request });
+      if (!target.ok) {
+        postBotRemoteWorkspaceFailure(
+          child,
+          HostMessageTypes.BotRemoteWorkspaceRuntimePort,
+          request.requestId,
+          target.error,
+        );
         return;
       }
 
       void handler({
-        win,
+        win: target.window,
         requestId: request.requestId,
         workspacePath: request.workspacePath,
         workspaceIdentity: request.workspaceIdentity,
@@ -716,6 +788,39 @@ export function spawnHostProcess(
       return;
     }
   });
+}
+
+/** Node 窗口 Host：每个主窗口一个进程，BroadcastHub / taskRealtimeBus 在 Main 中继。 */
+export function spawnHostProcess(
+  win: BrowserWindow,
+  label: string,
+  initMessage: HostInitMessage,
+  dependencies: HostProcessDependencies & {
+    broadcastHub: BroadcastHub;
+    taskRealtimeBus?: TaskRealtimeBus;
+    windowHostProcessMap: Map<number, ElectronUtilityProcess>;
+  },
+  options?: SpawnHostProcessOptions,
+): ElectronUtilityProcess {
+  const hostId = randomUUID();
+  const glmBinaryPath = resolveBundledGlmBinaryPath();
+  const execArgv = [
+    ...(RUNTIME_ZCODE_DEBUG ? [`--inspect-brk=${RUNTIME_ZCODE_DEBUG}`] : []),
+    "--no-warnings",
+  ];
+  const hostEnv = buildHostSpawnEnv(label, dependencies);
+  const child = electronUtilityProcess.fork(hostModulePath, [], {
+    serviceName: formatZCodeHostProcessName(label),
+    execArgv,
+    env: hostEnv,
+  });
+  const hostLogRelay = startHostOutputRelay(label, child, glmBinaryPath, dependencies);
+
+  const databaseStartupRelay = bindDatabaseStartupRelay(win, child, hostId);
+  bindHostResponseHandlers(child, label, hostLogRelay, dependencies, {
+    onDatabaseStartupState: (state) => databaseStartupRelay.receive(state),
+    resolveRequestWindow: () => ({ ok: true, window: win }),
+  });
 
   const shouldAttachRealtimeHost = options?.taskRealtime != null;
   const hostInitMessage: HostInitMessage = shouldAttachRealtimeHost
@@ -727,25 +832,7 @@ export function spawnHostProcess(
       }
     : { ...initMessage, databaseStartupId: databaseStartupRelay.startupId };
 
-  if (rustHost) {
-    child.postMessage(hostInitMessage);
-    if (
-      options?.attachInitialServicePort === false ||
-      options?.onPortReady ||
-      options?.internalChannel === InternalChannels.ScopedServicePort
-    ) {
-      dependencies.logger.warn(
-        `[spawnHostProcess] Rust Host supports only the window's own renderer attachment (${label})`,
-      );
-    } else {
-      issueRustHostEndpoint = createRustHostEndpointIssuer(
-        win,
-        rustHost,
-        databaseStartupRelay.startupId,
-        dependencies.logger,
-      );
-    }
-  } else if (options?.attachInitialServicePort === false) {
+  if (options?.attachInitialServicePort === false) {
     child.postMessage(hostInitMessage);
   } else {
     const { port1, port2 } = new MessageChannelMain();
@@ -784,38 +871,56 @@ export function spawnHostProcess(
   registerHostProcess(label, child);
 
   child.on("exit", (code) => {
-    exitedHostProcesses.add(child);
-    // Host exit 是 fail-hidden 权威边界；不能依赖即将退出的 Host 再补发 inactive。
-    dependencies.onCuaOperationStateSourceExited?.(child);
-    hostLogRelay.flushRawLogs();
-    dependencies.logger.info(`[spawnHostProcess] host process (${label}) exited with code ${code}`);
-    dependencies.hostRunningTaskCountMap.delete(child);
+    recordHostProcessExit(child, label, code, hostLogRelay, dependencies);
     if (shouldRegisterBroadcast) {
       dependencies.broadcastHub.unregister(windowId);
     }
     unregisterHostProcess(label);
-    let wasWindowHost = false;
     for (const [wcId, process] of dependencies.windowHostProcessMap) {
       if (process === child) {
         dependencies.windowHostProcessMap.delete(wcId);
-        wasWindowHost = true;
         break;
       }
-    }
-    // D2：窗口自己的 Rust Host 未经 dispose 就退出时由 Main 有界自动重启（rust-host-resilience.md §2.1）。
-    // dispose（窗口关闭、App 退出、reload 回退）先登记 disposingHostProcesses，因此不会误触发。
-    if (rustHost && wasWindowHost && !disposingHostProcesses.has(child)) {
-      handleUnexpectedRustHostExit({
-        win,
-        label,
-        code,
-        hasHost: () => dependencies.windowHostProcessMap.has(windowId),
-        logger: dependencies.logger,
-      });
     }
   });
 
   return child;
+}
+
+/**
+ * App 级 Rust Host（docs/specs/rust-u4-app-host.md）：所有主窗口共用一个进程。不注册 BroadcastHub
+ * 与 taskRealtimeBus，`init-local` 不带 hostId / deliveryKind；启动状态、endpoint 签发与重启由
+ * rustAppHost.ts 的 owner 负责。`onSpawned` 在注册消息与退出监听之前调用，用来先绑定启动中继。
+ */
+export function spawnRustAppHostProcess(
+  label: string,
+  initMessage: HostInitMessage,
+  dependencies: HostProcessDependencies,
+  hooks: {
+    onSpawned: (host: RustHostProcess) => void;
+    onDatabaseStartupState: (state: DatabaseStartupState) => void;
+    resolveRequestWindow: HostRequestWindowResolver;
+    onExit: (code: number) => void;
+  },
+): RustHostProcess {
+  const glmBinaryPath = resolveBundledGlmBinaryPath();
+  const rustHost = spawnRustHostProcess(
+    label,
+    buildHostSpawnEnv(label, dependencies),
+    dependencies.logger,
+  );
+  const child = rustHost.asUtilityProcess();
+  const hostLogRelay = startHostOutputRelay(label, child, glmBinaryPath, dependencies);
+  hooks.onSpawned(rustHost);
+  bindHostResponseHandlers(child, label, hostLogRelay, dependencies, hooks);
+  child.postMessage(initMessage);
+  registerHostProcess(label, child);
+  child.on("exit", (code) => {
+    recordHostProcessExit(child, label, code, hostLogRelay, dependencies);
+    unregisterHostProcess(label);
+    hooks.onExit(code);
+  });
+  return rustHost;
 }
 
 export function disposeHostProcess(

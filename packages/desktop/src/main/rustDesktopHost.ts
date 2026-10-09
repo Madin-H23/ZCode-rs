@@ -1,8 +1,8 @@
 // Rust Host 开发开关与进程 adapter（docs/specs/rust-host-r0.md）。
 //
 // adapter 对 Main 其余代码表现为 Electron UtilityProcess：postMessage 写入 Rust Host 的 stdin，
-// stdout 上的每行 JSON 以 "message" 事件交回，进程退出发 "exit"。这样 BroadcastHub、
-// taskRealtimeBus、databaseStartupRelay 等按原样工作，只有 Renderer 建连改走 WebSocket endpoint。
+// stdout 上的每行 JSON 以 "message" 事件交回，进程退出发 "exit"。U4 起 Rust Host 是 App 级的
+// （docs/specs/rust-u4-app-host.md），由 rustAppHost.ts 拥有；BroadcastHub、taskRealtimeBus 不再接入。
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -11,7 +11,6 @@ import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 import { app, type BrowserWindow, type MessagePortMain, type UtilityProcess } from "electron";
 import {
-  type DatabaseStartupState,
   type HostIssueAttachmentEndpointMessage,
   HostMessageTypes,
   HostResponseTypes,
@@ -173,7 +172,7 @@ export class RustHostProcess extends EventEmitter {
 
   async requestServiceEndpoint(
     options?: Partial<
-      Pick<HostIssueAttachmentEndpointMessage, "attachmentId" | "clientMode" | "scope">
+      Pick<HostIssueAttachmentEndpointMessage, "attachmentId" | "clientMode" | "scope" | "windowId">
     >,
   ): Promise<ServiceEndpoint> {
     await this.endpointReady;
@@ -183,6 +182,8 @@ export class RustHostProcess extends EventEmitter {
       attachmentId: options?.attachmentId ?? randomUUID(),
       clientMode: options?.clientMode ?? "desktop-continuous",
       scope: options?.scope ?? { kind: "local" },
+      // 主窗口的 Renderer attachment 带窗口身份（docs/specs/rust-u4-app-host.md §2.2）。
+      ...(options?.windowId === undefined ? {} : { windowId: options.windowId }),
     };
     return new Promise<ServiceEndpoint>((resolveEndpoint, rejectEndpoint) => {
       this.pendingEndpoints.set(request.requestId, {
@@ -266,16 +267,20 @@ export function spawnRustHostProcess(
   );
 }
 
-/** 签发一个 Renderer endpoint 并下发；首次建连与 reload 重新 attach 都走这里。 */
+/**
+ * 为主窗口当前页面签发一个 Renderer endpoint 并下发（docs/specs/rust-u4-app-host.md §2.1）。
+ * `isCurrentPage` 为 false 说明签发期间窗口已 reload 或关闭，结果丢弃。
+ */
 export async function sendRustHostServiceEndpoint(
   win: BrowserWindow,
   host: RustHostProcess,
   databaseStartupId: string,
   logger: RustHostLogger,
+  isCurrentPage: () => boolean,
 ): Promise<void> {
   try {
-    const endpoint = await host.requestServiceEndpoint();
-    if (win.isDestroyed() || win.webContents.isDestroyed()) return;
+    const endpoint = await host.requestServiceEndpoint({ windowId: win.webContents.id });
+    if (win.isDestroyed() || win.webContents.isDestroyed() || !isCurrentPage()) return;
     const payload: ServiceEndpointPayload = { databaseStartupId, ...endpoint };
     win.webContents.send(InternalChannels.ServiceEndpoint, payload);
   } catch (error) {
@@ -284,23 +289,4 @@ export async function sendRustHostServiceEndpoint(
       error instanceof Error ? error.message : String(error),
     );
   }
-}
-
-/**
- * 每个启动尝试第一次进入 ready 时签发一次 Renderer endpoint（rust-host-resilience.md §2.2）。
- * capability 只有 30 s 有效期：在拉起时签发，长迁移或 30 s 后才点重试会拿到过期凭据。
- */
-export function createRustHostEndpointIssuer(
-  win: BrowserWindow,
-  host: RustHostProcess,
-  databaseStartupId: string,
-  logger: RustHostLogger,
-): (state: DatabaseStartupState) => void {
-  const issuedAttempts = new Set<string>();
-  return (state) => {
-    if (state.startupId !== databaseStartupId || state.phase !== "ready") return;
-    if (issuedAttempts.has(state.attemptId)) return;
-    issuedAttempts.add(state.attemptId);
-    void sendRustHostServiceEndpoint(win, host, databaseStartupId, logger);
-  };
 }

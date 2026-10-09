@@ -29,30 +29,33 @@ export function getDatabaseStartupPortPayload(
   return databaseStartupId ? { databaseStartupId } : undefined;
 }
 
-/** 解除窗口当前的启动中继绑定；Rust Host 自动重启在 reload 前调用（rust-host-resilience.md §4.1）。 */
-export function releaseDatabaseStartupRelay(win: BrowserWindow): void {
-  windowBindings.get(win)?.();
+/** 启动状态发给谁、接受谁的控制：Node 路径是绑定的那个窗口，App 级 Rust Host 是所有主窗口。 */
+interface DatabaseStartupRelayTargets {
+  deliver(state: DatabaseStartupState): void;
+  /** `snapshot` 控制的应答只发给请求方。 */
+  reply(sender: Electron.WebContents, state: DatabaseStartupState): void;
+  acceptsControlFrom(sender: Electron.WebContents): boolean;
 }
 
-export function bindDatabaseStartupRelay(
-  win: BrowserWindow,
+interface DatabaseStartupRelayBinding {
+  receive: (state: DatabaseStartupState) => void;
+  startupId: string;
+  dispose: () => void;
+}
+
+function createDatabaseStartupRelayBinding(
   child: UtilityProcess,
-  startupId = randomUUID(),
-) {
-  // 同窗口重建 Host 时，旧监听不能继续重放 ready 或接收用户控制命令。
-  windowBindings.get(win)?.();
+  startupId: string,
+  targets: DatabaseStartupRelayTargets,
+): DatabaseStartupRelayBinding {
   hostStartupIds.set(child, startupId);
   let disposed = false;
   let latest: DatabaseStartupState | undefined;
   let exited = false;
-  const forward = (state: DatabaseStartupState) => {
-    if (!disposed && !win.isDestroyed() && !win.webContents.isDestroyed())
-      win.webContents.send(InternalChannels.DatabaseStartupState, state);
-  };
   const applyState = (state: DatabaseStartupState) => {
     if (latest && state.startupId === latest.startupId && state.sequence <= latest.sequence) return;
     latest = state;
-    forward(state);
+    if (!disposed) targets.deliver(state);
     try {
       reportDatabaseStartupState(state);
     } catch {
@@ -69,14 +72,14 @@ export function bindDatabaseStartupRelay(
     applyState(state);
   };
   const control = (event: Electron.IpcMainEvent, raw: unknown) => {
-    if (disposed || event.sender !== win.webContents) return;
+    if (disposed || !targets.acceptsControlFrom(event.sender)) return;
     const result = databaseStartupControlSchema.safeParse(raw);
     if (!result.success) return;
     if (result.data.action === "exit") {
       quit?.();
       return;
     }
-    if (result.data.action === "snapshot" && latest) forward(latest);
+    if (result.data.action === "snapshot" && latest) targets.reply(event.sender, latest);
     if (!exited)
       child.postMessage({ type: HostMessageTypes.DatabaseStartupControl, control: result.data });
   };
@@ -111,14 +114,69 @@ export function bindDatabaseStartupRelay(
     if (disposed) return;
     disposed = true;
     ipcMain.removeListener(InternalChannels.DatabaseStartupControl, control);
-    win.removeListener("closed", dispose);
     child.removeListener("exit", onExit);
     hostStartupIds.delete(child);
+  };
+  ipcMain.on(InternalChannels.DatabaseStartupControl, control);
+  child.once("exit", onExit);
+  return { receive, startupId, dispose };
+}
+
+function sendStartupState(webContents: Electron.WebContents, state: DatabaseStartupState): void {
+  if (!webContents.isDestroyed()) webContents.send(InternalChannels.DatabaseStartupState, state);
+}
+
+/** Node 窗口 Host：启动状态只发给这个窗口，也只接受这个窗口的控制。 */
+export function bindDatabaseStartupRelay(
+  win: BrowserWindow,
+  child: UtilityProcess,
+  startupId = randomUUID(),
+) {
+  // 同窗口重建 Host 时，旧监听不能继续重放 ready 或接收用户控制命令。
+  windowBindings.get(win)?.();
+  const forward = (state: DatabaseStartupState) => {
+    if (!win.isDestroyed()) sendStartupState(win.webContents, state);
+  };
+  const binding = createDatabaseStartupRelayBinding(child, startupId, {
+    deliver: forward,
+    reply: (_sender, state) => forward(state),
+    acceptsControlFrom: (sender) => sender === win.webContents,
+  });
+  const dispose = () => {
+    binding.dispose();
+    win.removeListener("closed", dispose);
     if (windowBindings.get(win) === dispose) windowBindings.delete(win);
   };
   windowBindings.set(win, dispose);
-  ipcMain.on(InternalChannels.DatabaseStartupControl, control);
   win.once("closed", dispose);
-  child.once("exit", onExit);
-  return { receive, startupId };
+  return { receive: binding.receive, startupId };
+}
+
+let appBinding: DatabaseStartupRelayBinding | undefined;
+
+/**
+ * App 级 Rust Host（docs/specs/rust-u4-app-host.md §2.8）：每一代 Host 一个绑定，替换上一代；
+ * 启动状态扇出到所有主窗口，任意主窗口的 retry / exit / snapshot 都被接受。
+ */
+export function bindAppDatabaseStartupRelay(
+  child: UtilityProcess,
+  startupId: string,
+  windows: {
+    listMainWindows: () => BrowserWindow[];
+    isMainWindowSender: (sender: Electron.WebContents) => boolean;
+  },
+): { receive: (state: DatabaseStartupState) => void; startupId: string } {
+  // 上一代的监听不能继续接收控制，也不能把旧代的 failed/transport_closed 重放给新页面。
+  appBinding?.dispose();
+  const binding = createDatabaseStartupRelayBinding(child, startupId, {
+    deliver: (state) => {
+      for (const win of windows.listMainWindows()) {
+        if (!win.isDestroyed()) sendStartupState(win.webContents, state);
+      }
+    },
+    reply: sendStartupState,
+    acceptsControlFrom: windows.isMainWindowSender,
+  });
+  appBinding = binding;
+  return { receive: binding.receive, startupId };
 }
