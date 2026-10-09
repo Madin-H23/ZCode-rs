@@ -8,10 +8,10 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
-    process::Child,
     sync::Mutex,
 };
 use tokio_util::sync::CancellationToken;
+use zcode_proc::ledger::{Containment, Isolation, Ledger, Purpose};
 pub(super) use zcode_proc::tree::Shutdown;
 const MAX_STREAM: u64 = 16 * 1024 * 1024;
 struct Captured {
@@ -55,10 +55,11 @@ async fn capture(
     }
     result
 }
+/// `(env, processes)`：子进程的完整环境，以及启动进程树时写记录的账本（工具运行时共用）。
 #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
 pub(super) async fn run(
     cwd: &Path,
-    env: &[(String, String)],
+    (env, processes): (&[(String, String)], &Ledger),
     text: &str,
     path: &Path,
     combined: Arc<Mutex<tokio::fs::File>>,
@@ -79,20 +80,26 @@ pub(super) async fn run(
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
     // 修复 B7：原来用 process_group(0)，子进程留在 runtime 的会话里、保留控制终端，读取 /dev/tty 的
-    // ssh / sudo / git 凭据提示会一直挂到超时；isolate 用 setsid 建新会话（Node detached: true）。
-    zcode_proc::group::isolate(&mut command);
-    let mut child = command.spawn().context("Cannot start shell")?;
-    let pid = child.id().context("Missing child pid")?;
-    let tree = ProcessTree::contain(&child, pid);
+    // ssh / sudo / git 凭据提示会一直挂到超时；Isolation::Session 用 setsid 建新会话（Node detached: true）。
+    // Windows 上这棵树在自己的 Job 里：结束时 Job::terminate，根进程退出后留下的后代也一起结束。
+    let mut tree = processes
+        .spawn(
+            &mut command,
+            Purpose::Bash,
+            Isolation::Session,
+            Containment::OwnJob,
+        )
+        .await
+        .context("Cannot start shell")?;
     let overflow = CancellationToken::new();
     let mut out = zcode_async::owned(capture(
-        child.stdout.take().unwrap(),
+        tree.child().stdout.take().unwrap(),
         path.with_extension("stdout"),
         combined.clone(),
         overflow.clone(),
     ));
     let mut err = zcode_async::owned(capture(
-        child.stderr.take().unwrap(),
+        tree.child().stderr.take().unwrap(),
         path.with_extension("stderr"),
         combined.clone(),
         overflow.clone(),
@@ -109,7 +116,7 @@ pub(super) async fn run(
         _=cancel.cancelled()=>(None,"cancelled"),
         _=overflow.cancelled()=>(None,"failed"),
         _=&mut timer=>(None,"timed_out"),
-        result=child.wait()=>(Some(result?),"completed"),
+        result=tree.child().wait()=>(Some(result?),"completed"),
     };
     let captured = async {
         let shutdown = if status.is_none() {
@@ -117,7 +124,7 @@ pub(super) async fn run(
         } else {
             Shutdown::Immediate
         };
-        tree.terminate(&mut child, shutdown).await?;
+        tree.terminate(shutdown).await?;
         let streams = async { tokio::join!(&mut out, &mut err) };
         tokio::pin!(streams);
         if reason != "completed" {
@@ -136,7 +143,7 @@ pub(super) async fn run(
         if let Some(result) = ready {
             return Ok(result);
         }
-        tree.terminate(&mut child, Shutdown::Graceful).await?;
+        tree.terminate(Shutdown::Graceful).await?;
         // 期限只用于报告无法确认回收的错误，绝不把未关闭的 pipe 当作成功。
         tokio::time::timeout(Duration::from_secs(1), &mut streams)
             .await
@@ -195,87 +202,4 @@ pub(super) async fn read_head(path: &Path, limit: usize) -> Result<String> {
         }
         Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
     })
-}
-
-/// 一棵子进程树的所有权与结束方式。
-///
-/// Unix：按身份追踪整棵树（`zcode_proc::tree`），根进程须自成进程组。Windows：Bash 工具的子进程
-/// 在 spawn 后立即加入 Job，结束时 `Job::terminate`，Job 被 drop 时其中残留的进程也一起结束；
-/// 没有 Job（MCP、hooks，或加入 Job 失败）时退回 `taskkill /T /F`。
-pub(super) struct ProcessTree {
-    pid: u32,
-    #[cfg(windows)]
-    job: Option<zcode_proc::job::Job>,
-}
-
-impl ProcessTree {
-    /// 不加入 Job 的子进程（MCP stdio、hooks）：Windows 上用 taskkill 结束。
-    pub(super) fn uncontained(pid: u32) -> Self {
-        Self {
-            pid,
-            #[cfg(windows)]
-            job: None,
-        }
-    }
-
-    /// Bash 工具的子进程：Windows 上紧接 spawn 加入 Job，加入失败时退回 taskkill。
-    pub(super) fn contain(child: &Child, pid: u32) -> Self {
-        #[cfg(windows)]
-        {
-            let job = zcode_proc::job::Job::new().and_then(|job| job.assign(child).map(|()| job));
-            match job {
-                Ok(job) => Self {
-                    pid,
-                    job: Some(job),
-                },
-                Err(error) => {
-                    tracing::warn!(
-                        pid,
-                        %error,
-                        "cannot contain the process in a Job; falling back to taskkill"
-                    );
-                    Self::uncontained(pid)
-                }
-            }
-        }
-        #[cfg(unix)]
-        {
-            let _ = child;
-            Self::uncontained(pid)
-        }
-    }
-
-    /// 结束整棵树并回收 `child`；错误表示无法确认回收。Windows 上没有 TERM 阶段，`shutdown` 不起作用。
-    pub(super) async fn terminate(&self, child: &mut Child, shutdown: Shutdown) -> Result<()> {
-        #[cfg(unix)]
-        {
-            zcode_proc::tree::terminate(child, self.pid, shutdown).await
-        }
-        #[cfg(windows)]
-        {
-            let _ = shutdown;
-            if let Some(job) = &self.job {
-                // 根进程退出后 taskkill /T 已无法沿父进程找到后代；Job 不依赖父子关系，整棵树一起结束。
-                job.terminate()
-                    .context("Cannot terminate the process job")?;
-                if child.try_wait()?.is_none() {
-                    child.wait().await?;
-                }
-                return Ok(());
-            }
-            let result = zcode_proc::command("taskkill")
-                .args(["/PID", &self.pid.to_string(), "/T", "/F"])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .kill_on_drop(true)
-                .status()
-                .await;
-            if child.try_wait()?.is_none() {
-                anyhow::ensure!(result?.success(), "Bash taskkill failed");
-                child.wait().await?;
-            }
-            Ok(())
-        }
-    }
 }

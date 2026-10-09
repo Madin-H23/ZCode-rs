@@ -38,6 +38,7 @@ impl WorkspaceTools {
             cwd: &self.cwd,
             config: self.config.as_ref(),
             official: &self.official,
+            processes: &self.shared.processes,
         };
         (&self.shared.mcp, scope)
     }
@@ -301,7 +302,8 @@ impl ToolPort for WorkspaceTools {
         request: crate::contract::HookProcess,
         cancel: &CancellationToken,
     ) -> Result<crate::domain::hooks::output::Exec> {
-        super::hook_process::run(request, &self.env, cancel).await
+        let spawn = (&*self.env, &self.shared.processes);
+        super::hook_process::run(request, spawn, cancel).await
     }
     async fn permission(
         &self,

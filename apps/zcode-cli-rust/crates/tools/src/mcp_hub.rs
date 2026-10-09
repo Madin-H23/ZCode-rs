@@ -22,12 +22,13 @@ struct State {
     /// Server statuses of the latest prepare and the workspace root it served.
     statuses: (PathBuf, BTreeMap<String, Value>),
 }
-/// The workspace view a hub call serves: its root, configuration and official
-/// MCP identity (spec rust-cli-architecture, Workspace 作用域).
+/// The workspace view a hub call serves (spec rust-cli-architecture, Workspace 作用域),
+/// and the tool runtime's process ledger that starts stdio servers.
 pub(super) struct Scope<'a> {
     pub cwd: &'a Path,
     pub config: &'a dyn crate::contract::ConfigSource,
     pub official: &'a Arc<super::official_auth::OfficialAuth>,
+    pub processes: &'a zcode_proc::ledger::Ledger,
 }
 /// MCP connections of the process, shared by every workspace view.
 pub(super) struct Hub {
@@ -222,7 +223,7 @@ impl Hub {
                                 scope.official,
                                 cancel,
                                 telemetry,
-                                &tasks,
+                                (&tasks, scope.processes),
                             )
                             .await
                             .map(|c| Some(Arc::new(c)))

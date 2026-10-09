@@ -26,14 +26,21 @@ pub struct ShellTasks {
     pub(super) jobs: Mutex<HashMap<String, HashMap<String, Arc<Job>>>>,
     /// Complete child environment (Node `buildExecutionEnv`).
     pub(super) env: Arc<[(String, String)]>,
+    /// The tool runtime's process ledger: every Bash process tree is started through it.
+    pub(super) processes: zcode_proc::ledger::Ledger,
     /// The tool runtime's scope: Bash processes and background jobs.
     pub(super) tasks: zcode_async::Spawner,
 }
 impl ShellTasks {
-    pub fn new(env: Arc<[(String, String)]>, tasks: zcode_async::Spawner) -> Self {
+    pub fn new(
+        env: Arc<[(String, String)]>,
+        processes: zcode_proc::ledger::Ledger,
+        tasks: zcode_async::Spawner,
+    ) -> Self {
         Self {
             jobs: Mutex::default(),
             env,
+            processes,
             tasks,
         }
     }
@@ -170,7 +177,8 @@ impl ShellTasks {
                 return Ok(shell_output(&command, data, Some(started)));
             }
             let Launch { path, combined, .. } = launch;
-            let data = run(cwd, &self.env, &command, &path, combined, timeout, cancel).await?;
+            let spawn = (&*self.env, &self.processes);
+            let data = run(cwd, spawn, &command, &path, combined, timeout, cancel).await?;
             return Ok(shell_output(&command, data, Some(started)));
         }
         let sink = sink.context("Background execution requires a session owner")?;

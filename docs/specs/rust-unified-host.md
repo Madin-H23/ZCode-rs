@@ -595,7 +595,7 @@ flowchart LR
 | U3   | A 期已完成：Host 进程内运行 runtime（每个 workspace 一个实例，D-U12 的最终形态），进程内是缺省。B 期按 D-U13 修订后：投递逻辑的抽取、结构隔离、三种构建形态、合并二进制的 `cli` 入口已完成。进行中：输入队列的映射（D-U6）、工具进程的回收（D-U15）。未开始：已接受输入在实例重启后的结算测试、投递 crate 的订阅竞争缺陷 | [rust-u3-single-process.md](rust-u3-single-process.md)、[rust-u3-stage-b.md](rust-u3-stage-b.md)、[rust-host-cli-boundary.md](rust-host-cli-boundary.md) |
 | U4   | 已完成并在 Electron 里验证（在合并 Gateway 之前的提交上）：一个 App 一个 Rust Host；28 个桌面 E2E 场景在进程内 runtime 下通过，包括多窗口、没有窗口时的调度、设置读写、崩溃重启；Node Host 路径 5 个场景通过。进行中：合并 Gateway 之后重跑全部 E2E                                                                      | [rust-u4-app-host.md](rust-u4-app-host.md)                                                                                                               |
 
-用户已决定、正在实现：工具进程的回收（D-U15）、输入队列的映射（D-U6）。
+用户已决定、正在实现：输入队列的映射（D-U6）。工具进程的回收（D-U15）：账本与清扫、Windows Job 已实现；Linux `PR_SET_PDEATHSIG` 未启用，待定项见 [rust-tool-process-reaping.md](rust-tool-process-reaping.md) 第 6 节。
 
 **不做中间发布（D-U8）。** U0–U7 都是开发里程碑，不是发布版本：
 

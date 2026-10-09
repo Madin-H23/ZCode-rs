@@ -18,6 +18,9 @@ pub(super) struct Shared {
     /// MCP process notifications until the engine takes them.
     pub(super) process_events:
         std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<(&'static str, Value)>>>,
+    /// The process ledger of this runtime instance (spec rust-tool-process-reaping):
+    /// Bash, hooks and MCP stdio servers start their process trees through it.
+    pub(super) processes: zcode_proc::ledger::Ledger,
     /// Owns the shell and MCP tasks (`<parent>/tools`): they are aborted when
     /// the tool runtime is dropped (spec rust-u2-task-scope §4.1).
     _tasks: zcode_async::TaskScope,
@@ -33,17 +36,27 @@ impl WorkspaceTools {
     ) -> Self {
         let tasks = tasks.child("tools");
         let env = egress.tool_env();
+        // 账本在工具目录（`<数据目录>/tool-results`）下。实例启动时清扫一次：上一个 runtime 所在
+        // 进程被强杀时留下的工具进程树在这里结束；启动工具进程树之前会等这次清扫结束。
+        let processes = zcode_proc::ledger::Ledger::open(artifacts.join("processes"));
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let processes = processes.clone();
+            tasks
+                .spawner()
+                .spawn("process-sweep", async move { processes.sweep().await });
+        }
         let (sink, events) = tokio::sync::mpsc::unbounded_channel();
         let mcp = super::mcp_hub::Hub::new(egress.clone(), Some(sink), &tasks.spawner());
         let official = super::official_auth::OfficialAuth::for_workspace(&egress, &cwd);
         Self {
             shared: Arc::new(Shared {
-                shell: ShellTasks::new(env.clone(), tasks.spawner()),
+                shell: ShellTasks::new(env.clone(), processes.clone(), tasks.spawner()),
                 web: super::web_fetch::WebFetcher::new(egress.clone()),
                 mcp,
                 process_events: std::sync::Mutex::new(Some(events)),
                 reads: Mutex::new(HashMap::new()),
                 writes: Arc::new(Mutex::new(())),
+                processes,
                 _tasks: tasks,
             }),
             env,

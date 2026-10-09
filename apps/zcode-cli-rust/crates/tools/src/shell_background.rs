@@ -185,6 +185,7 @@ impl ShellTasks {
             token.cancel();
         }
         let (cwd, env, sink) = (cwd.to_owned(), self.env.clone(), sink.clone());
+        let processes = self.processes.clone();
         let result = backgrounded(&launch);
         self.tasks.spawn("bash-background", async move {
             let Launch {
@@ -193,7 +194,8 @@ impl ShellTasks {
                 command,
                 ..
             } = launch;
-            let outcome = run(&cwd, &env, &command, &path, combined, timeout, &token).await;
+            let spawn = (&*env, &processes);
+            let outcome = run(&cwd, spawn, &command, &path, combined, timeout, &token).await;
             finish(&sink, task, &tx, outcome).await;
         });
         Ok(result)
@@ -211,7 +213,8 @@ impl ShellTasks {
     ) -> Result<Value> {
         let token = CancellationToken::new();
         let (tx, state) = watch::channel(None);
-        let (cwd_owned, env) = (cwd.to_owned(), self.env.clone());
+        let (cwd_owned, env, processes) =
+            (cwd.to_owned(), self.env.clone(), self.processes.clone());
         let (path, combined, command) = (
             launch.path.clone(),
             launch.combined.clone(),
@@ -224,7 +227,7 @@ impl ShellTasks {
         let mut process = self.tasks.spawn("bash", async move {
             run(
                 &cwd_owned,
-                &env,
+                (&env, &processes),
                 &command,
                 &path,
                 combined,

@@ -10,13 +10,12 @@
 /// 终端里运行时，读取 `/dev/tty` 的 ssh / sudo / git 凭据提示会一直等输入，直到超时。新会话没有
 /// 控制终端，这类提示立即失败。
 ///
-/// Windows：无操作，进程树由 `crate::job::Job` 负责。
-#[cfg(unix)]
+/// Windows 上没有对应操作，进程树由 `crate::job::Job` 负责。
 #[expect(
     unsafe_code,
     reason = "pre_exec 是 unsafe API；闭包只调用 async-signal-safe 的 setsid / setpgid"
 )]
-pub fn isolate(command: &mut tokio::process::Command) {
+pub(crate) fn isolate(command: &mut tokio::process::Command) {
     // SAFETY: 闭包在 fork 之后、exec 之前运行于子进程中，只调用 async-signal-safe 的 setsid 与
     // setpgid 并读取 errno，不分配内存、不加锁，也不访问父进程的其他状态。
     unsafe {
@@ -33,12 +32,6 @@ pub fn isolate(command: &mut tokio::process::Command) {
     }
 }
 
-/// 让子进程成为新会话与新进程组的首进程；Windows 上无操作，进程树由 `crate::job::Job` 负责。
-#[cfg(windows)]
-pub fn isolate(command: &mut tokio::process::Command) {
-    let _ = command;
-}
-
-#[cfg(all(test, unix))]
+#[cfg(test)]
 #[path = "group_tests.rs"]
 mod tests;

@@ -58,7 +58,7 @@ async fn snapshot_failure_still_terminates_the_leader_and_its_descendants() {
     for shutdown in [Shutdown::Graceful, Shutdown::Immediate] {
         let (mut child, pid, background) = spawn("sleep 30 & echo $!; sleep 30").await;
         let _cleanup = Cleanup(pid as i32);
-        terminate_with(&mut child, pid, shutdown, &failing)
+        terminate_with(Root::Child(&mut child), pid, shutdown, &failing)
             .await
             .unwrap();
         assert!(child.try_wait().unwrap().is_some(), "{shutdown:?}: leader");
@@ -79,7 +79,7 @@ async fn snapshot_failure_inside_the_kill_loop_falls_back_to_the_root_group() {
             failing().await
         }
     };
-    terminate_with(&mut child, pid, Shutdown::Graceful, &flaky)
+    terminate_with(Root::Child(&mut child), pid, Shutdown::Graceful, &flaky)
         .await
         .unwrap();
     assert!(calls.load(Ordering::SeqCst) >= 2);
