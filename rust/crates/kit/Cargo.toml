@@ -1,0 +1,16 @@
+[package]
+name = "zcode-kit"
+description = "Filesystem, path, secret and redaction primitives shared by the ZCode Rust workspaces"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]

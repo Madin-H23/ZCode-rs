@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { requireCargoTools } from "./cargo-tools.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
-const workspaces = ["apps/zcode-cli-rust", "apps/zcode-host"];
+const workspaces = ["apps/zcode-cli-rust", "apps/zcode-host", "rust"];
 
 function run(command, args, cwd = root) {
   return new Promise((resolveRun, rejectRun) => {
@@ -22,6 +22,7 @@ function run(command, args, cwd = root) {
 
 await requireCargoTools(["deny", "shear"]);
 await run(process.execPath, ["scripts/check-zcode-cli-rust-boundaries.mjs"]);
+await run(process.execPath, ["scripts/rust/check-foundation-boundaries.mjs"]);
 for (const workspace of workspaces) {
   const manifest = `${workspace}/Cargo.toml`;
   await run("cargo", ["fmt", "--all", "--manifest-path", manifest, "--check"]);

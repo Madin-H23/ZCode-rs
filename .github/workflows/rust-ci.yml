@@ -70,6 +70,7 @@ jobs:
           workspaces: |
             apps/zcode-cli-rust -> target
             apps/zcode-host -> target
+            rust -> target
       - name: Boundaries, fmt, clippy, cargo-deny, cargo-shear
         run: node scripts/rust/check.mjs
 
@@ -93,10 +94,11 @@ jobs:
           workspaces: |
             apps/zcode-cli-rust -> target
             apps/zcode-host -> target
+            rust -> target
       - name: Clippy (platform-specific code)
         shell: bash
         run: |
-          for workspace in apps/zcode-cli-rust apps/zcode-host; do
+          for workspace in apps/zcode-cli-rust apps/zcode-host rust; do
             cargo clippy --locked --workspace --all-targets --manifest-path "$workspace/Cargo.toml" -- -D warnings
           done
 
@@ -123,14 +125,16 @@ jobs:
           workspaces: |
             apps/zcode-cli-rust -> target
             apps/zcode-host -> target
+            rust -> target
       - name: Tests
         shell: bash
         run: |
-          for workspace in apps/zcode-cli-rust apps/zcode-host; do
+          for workspace in apps/zcode-cli-rust apps/zcode-host rust; do
             cargo nextest run --locked --workspace --manifest-path "$workspace/Cargo.toml"
           done
 
-  # 其余 crate 的测试从未在 Windows 上运行过；先与 rust-npm-windows.yml 的范围对齐，再逐步扩大。
+  # rust/ 的基础 crate（含 Windows Job Object）全部在 Windows 上测试；应用 crate 的测试从未在 Windows 上
+  # 运行过，先与 rust-npm-windows.yml 的范围对齐，再逐步扩大。
   test-windows:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
@@ -147,10 +151,14 @@ jobs:
           tool: cargo-nextest
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: apps/zcode-cli-rust -> target
+          workspaces: |
+            apps/zcode-cli-rust -> target
+            rust -> target
       - name: Tests
         shell: bash
-        run: cargo nextest run --locked --manifest-path apps/zcode-cli-rust/Cargo.toml -p zcode-cli-protocol -p zcode-cli-domain
+        run: |
+          cargo nextest run --locked --workspace --manifest-path rust/Cargo.toml
+          cargo nextest run --locked --manifest-path apps/zcode-cli-rust/Cargo.toml -p zcode-cli-protocol -p zcode-cli-domain
 
   required:
     needs: [changes, static, clippy, test, test-windows]

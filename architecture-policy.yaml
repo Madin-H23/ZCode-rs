@@ -61,6 +61,11 @@ modules:
     managed: false
     owner: agent-runtime
     publicEntrypoints: [apps/zcode-cli-rust/crates/core-api/src/contract.rs]
+  # Rust 基础 crate（docs/specs/rust-u0-foundation.md）；边界由 scripts/rust/check-foundation-boundaries.mjs 检查。
+  - id: rust-foundation
+    roots: [rust/crates]
+    managed: false
+    owner: agent-runtime
 
 global:
   maxFileLines: 400

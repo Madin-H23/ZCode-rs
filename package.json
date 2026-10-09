@@ -48,6 +48,7 @@
     "build:zcode-cli-rust": "cargo build --locked --manifest-path apps/zcode-cli-rust/Cargo.toml",
     "check:zcode-cli-rust": "node scripts/check-zcode-cli-rust-boundaries.mjs && cargo fmt --manifest-path apps/zcode-cli-rust/Cargo.toml --all --check && cargo clippy --locked --manifest-path apps/zcode-cli-rust/Cargo.toml --workspace --all-targets -- -D warnings",
     "check:rust": "node scripts/rust/check.mjs",
+    "test:rust": "node scripts/rust/test.mjs",
     "test:zcode-cli-rust": "node scripts/test-zcode-cli-rust.mjs",
     "dev:desktop:zcode-cli-rust": "node scripts/dev-desktop-zcode-cli-rust.mjs",
     "test:rust-npm": "node --test apps/zcode-cli-rust/npm/test/*.test.mjs",
