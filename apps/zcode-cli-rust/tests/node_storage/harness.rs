@@ -290,6 +290,8 @@ pub struct Harness {
     pub workspace: String,
     pub root: PathBuf,
     _dir: Option<Arc<tempfile::TempDir>>,
+    /// The scope of the store's worker and the engine's tasks.
+    _tasks: zcode_async::TaskScope,
 }
 
 /// A runtime in a fresh root: `ZCODE_CLI_RUST_NODE_DUMP/<dump>` when set
@@ -324,9 +326,15 @@ async fn run(
 ) -> Harness {
     let db = root.join("cli/db/db.sqlite");
     let workspace = root.join("w").to_string_lossy().into_owned();
-    let store = NodeStore::open(db.clone(), root.join("cli/artifacts"), root.join("cache"))
-        .await
-        .unwrap();
+    let tasks = zcode_async::TaskScope::root("test", |_| {});
+    let store = NodeStore::open(
+        db.clone(),
+        root.join("cli/artifacts"),
+        root.join("cache"),
+        &tasks.spawner(),
+    )
+    .await
+    .unwrap();
     let (requests_tx, requests) = mpsc::unbounded_channel();
     let ports = RuntimePorts {
         context: Arc::new(zcode_cli_host::context_source::WorkspaceContext::new(
@@ -353,7 +361,7 @@ async fn run(
         reasoning_level: "high".into(),
     };
     // 提问自动结束：20ms 后可见，60ms 后按空答案继续（Node 自动结束语义）。
-    let engine = Engine::new(workspace.clone(), Some(identity), ports)
+    let engine = Engine::new(workspace.clone(), Some(identity), ports, &tasks.spawner())
         .await
         .unwrap()
         .with_question_timing(20, 60);
@@ -373,6 +381,7 @@ async fn run(
         workspace,
         root,
         _dir: dir,
+        _tasks: tasks,
     }
 }
 

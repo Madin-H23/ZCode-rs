@@ -150,6 +150,7 @@ serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+zcode-async.workspace = true
 zcode-cli-domain.workspace = true
 zcode-cli-core-api.workspace = true
 zcode-cli-core.workspace = true

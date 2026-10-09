@@ -144,7 +144,7 @@ impl ModelRegistry for Registry {
         }
         let egress = self.egress.clone();
         let account_value = account.clone().unwrap_or_else(|| json!({}));
-        let mut next = tokio::task::spawn_blocking(move || {
+        let mut next = zcode_async::blocking(move || {
             resolve(
                 &builtin["config"],
                 &personal["config"],

@@ -173,10 +173,9 @@ pub async fn resolve_http(ports: &Ports<'_>, input: HttpZip<'_>) -> Result<Resol
         tokio::fs::write(&archive, bytes).await?;
         let extract = temp.join("extract");
         let (target, cancel) = (extract.clone(), ports.cancel.clone());
-        let top_level = tokio::task::spawn_blocking(move || {
-            crate::zip_extract::extract(&archive, &target, &cancel)
-        })
-        .await??;
+        let top_level =
+            zcode_async::blocking(move || crate::zip_extract::extract(&archive, &target, &cancel))
+                .await??;
         root(&extract, &input, &top_level).await
     }
     .await;

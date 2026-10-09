@@ -132,6 +132,7 @@ async fn child_start_and_result_require_both_owners_to_commit_and_failure_releas
         for success in [false, true] {
             let (gate, mut gates) = mpsc::unbounded_channel();
             let (calls, mut requests) = mpsc::unbounded_channel();
+            let tasks = zcode_async::TaskScope::root("test", |_| {});
             let engine = Engine::new(
                 "workspace",
                 Some(ModelIdentity {
@@ -155,6 +156,7 @@ async fn child_start_and_result_require_both_owners_to_commit_and_failure_releas
                     tools: Arc::new(Tools),
                     clock: Arc::new(Clock(AtomicUsize::new(1))),
                 },
+                &tasks.spawner(),
             )
             .await
             .unwrap();

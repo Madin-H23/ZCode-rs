@@ -14,15 +14,17 @@ pub(super) struct Transport {
     endpoint: Arc<str>,
     headers: reqwest::header::HeaderMap,
     rx: mpsc::Receiver<ServerJsonRpcMessage>,
-    worker: Option<tokio::task::JoinHandle<()>>,
+    worker: Option<zcode_async::Task<()>>,
     cancel: CancellationToken,
     _guard: DropGuard,
 }
 impl Transport {
+    /// The SSE reader is a task of `tasks`; dropping the transport cancels it.
     pub async fn open(
         config: &Server,
         client: reqwest::Client,
         stop: &CancellationToken,
+        tasks: &zcode_async::Spawner,
     ) -> Result<Self> {
         let url = url::Url::parse(config.raw["url"].as_str().unwrap())?;
         let mut headers = reqwest::header::HeaderMap::new();
@@ -40,7 +42,7 @@ impl Transport {
         let cancel = CancellationToken::new();
         let worker_cancel = cancel.clone();
         let guard = cancel.clone().drop_guard();
-        let worker = tokio::spawn(async move {
+        let worker = tasks.spawn("mcp-sse", async move {
             let stream = async {
                 let mut stream = response.bytes_stream();
                 let mut decoder = Decoder::default();

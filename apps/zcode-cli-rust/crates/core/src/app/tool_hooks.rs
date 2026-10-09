@@ -182,7 +182,8 @@ pub(super) async fn race(
         scope,
     );
     let chain_cancel = cancel.child_token();
-    let mut chain = tokio::spawn({
+    // 链属于 Engine 的作用域而不是本次调用：用户先答复时只取消、不等待它，它仍要上报生命周期事件。
+    let mut chain = hooks.tasks.spawn("permission-hooks", {
         let hooks = hooks.clone();
         let sink = sink.clone();
         let token = chain_cancel.clone();

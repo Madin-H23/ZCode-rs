@@ -31,7 +31,7 @@ impl Engine {
         };
         let tools = self.scope(&workspace.key)?.tools.clone();
         let params = request.params.clone();
-        tokio::spawn(async move {
+        self.tasks.spawner().spawn("mcp-query", async move {
             // panic 时按配置失败回复，mcp/list 的调用方不会永远挂起。
             let result = zcode_async::catch_panic(tools.mcp_list(&params, &cancel))
                 .await

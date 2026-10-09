@@ -69,7 +69,7 @@ impl Engine {
         };
         let tools = self.scope(&workspace.key)?.tools.clone();
         let method = request.method;
-        tokio::spawn(async move {
+        self.tasks.spawner().spawn("plugin-request", async move {
             // panic 时照常回复错误，插件请求的调用方不会永远挂起。
             let result =
                 zcode_async::catch_panic(tools.plugins(method.as_str(), &params, &cancel, &sink))

@@ -5,7 +5,9 @@ use zcode_cli_rust::contract::ToolPort;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cwd = std::path::PathBuf::from(std::env::args().nth(1).unwrap());
-    let tools = zcode_cli_rust::workspace_tools(cwd.clone(), cwd.join(".artifacts"))?;
+    let scope = zcode_cli_rust::runtime::instance_scope();
+    let tools =
+        zcode_cli_rust::workspace_tools(cwd.clone(), cwd.join(".artifacts"), &scope.spawner())?;
     let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     let mut out = tokio::io::stdout();
     while let Some(line) = lines.next_line().await? {

@@ -64,6 +64,23 @@ impl RuntimeOptions {
     }
 }
 
+/// The task scope of one runtime instance (spec rust-u2-task-scope §4.1). The
+/// entry that owns the instance creates it and keeps it for the instance's
+/// lifetime; everything the instance starts runs in it. A task panic is logged
+/// with its scope path and task name.
+pub fn instance_scope() -> zcode_async::TaskScope {
+    zcode_async::TaskScope::root("runtime", |panic| {
+        tracing::error!(
+            target: "zcode::runtime",
+            event = "task.panicked",
+            scope = %panic.scope,
+            task = panic.task,
+            message = %panic.message,
+            "Runtime task panicked"
+        );
+    })
+}
+
 /// `path` made absolute against `base` instead of the process cwd.
 fn absolute(base: &std::path::Path, path: &std::path::Path) -> std::io::Result<PathBuf> {
     if path.is_absolute() {
@@ -86,13 +103,17 @@ pub struct Context {
     pub workspace_config: Arc<WorkspaceConfig>,
     pub startup_config: ConfigSnapshot,
     pub egress: Arc<Egress>,
+    /// The instance's scope: the session store, the tools and the engine start
+    /// their tasks in it.
+    tasks: zcode_async::Spawner,
 }
 
 impl Context {
     /// `options.home` is resolved once by the entry point
     /// (`zcode_kit::paths::home_dir`), before logging starts, so every reader
-    /// shares the same directory.
-    pub async fn prepare(options: RuntimeOptions) -> Result<Self> {
+    /// shares the same directory. `tasks` is the instance's scope
+    /// ([`instance_scope`]).
+    pub async fn prepare(options: RuntimeOptions, tasks: zcode_async::Spawner) -> Result<Self> {
         let RuntimeOptions {
             home,
             env,
@@ -143,6 +164,7 @@ impl Context {
             workspace_config,
             startup_config,
             egress,
+            tasks,
         })
     }
 
@@ -160,7 +182,7 @@ impl Context {
     pub async fn node_store(&self) -> Result<NodeStore> {
         let source = self.node_database().await?;
         let media_cache = self.data_dir.join("tool-results");
-        NodeStore::open(source.database, source.artifacts, media_cache).await
+        NodeStore::open(source.database, source.artifacts, media_cache, &self.tasks).await
     }
 
     /// The engine over `store`: a static `--config` model or the provider
@@ -210,6 +232,7 @@ impl Context {
             self.data_dir.join("tool-results"),
             self.workspace_config.clone(),
             self.egress.clone(),
+            &self.tasks,
         ));
         // 进程 cwd 只是缺省 workspace；请求可以指向任意 workspace（spec rust-cli-architecture）。
         let workspace = Workspace {
@@ -238,6 +261,7 @@ impl Context {
                 tools,
                 clock: Arc::new(SystemClock),
             },
+            &self.tasks,
         )
         .await?
         .with_workspaces(workspaces)

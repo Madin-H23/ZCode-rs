@@ -95,15 +95,21 @@ pub struct Engine {
     pub(super) hooks: super::workspace_trust::HookState,
     /// Generated session titles (Node enables them for protocol sessions only).
     pub(super) titles: bool,
+    /// `<instance>/engine`: runs, hooks, titles and auxiliary requests. Closed
+    /// at the end of `wind_down`; dropping the engine aborts what is left
+    /// (spec rust-u2-task-scope §4.1).
+    pub(super) tasks: zcode_async::TaskScope,
     #[cfg(debug_assertions)]
     pub(super) fault: super::engine_fault::Fault,
 }
 impl Engine {
     /// An engine whose default workspace is `workspace` (a plain path is local).
+    /// Its tasks belong to a child of `tasks`, the runtime instance's scope.
     pub async fn new(
         workspace: impl Into<crate::contract::Workspace>,
         config: Option<ModelIdentity>,
         ports: RuntimePorts,
+        tasks: &zcode_async::Spawner,
     ) -> Result<Self> {
         let workspace = workspace.into();
         let RuntimePorts {
@@ -159,6 +165,7 @@ impl Engine {
             event_rx,
             hooks: Default::default(),
             titles: false,
+            tasks: tasks.child("engine"),
             #[cfg(debug_assertions)]
             fault: Default::default(),
         })

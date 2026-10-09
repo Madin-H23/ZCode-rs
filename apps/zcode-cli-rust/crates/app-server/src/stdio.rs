@@ -92,13 +92,18 @@ fn parse(line: &[u8]) -> Option<Input> {
 }
 
 /// Same framing as [`start`] over any async reader (an in-memory pipe when the
-/// runtime is embedded, spec rust-u1-runtime-library §3).
-pub fn start_reader<R>(mut reader: R, input_closed: CancellationToken) -> mpsc::Receiver<Input>
+/// runtime is embedded, spec rust-u1-runtime-library §3). The reader is a task
+/// of `tasks`: it stops at EOF, when the receiver is dropped, or with the scope.
+pub fn start_reader<R>(
+    mut reader: R,
+    input_closed: CancellationToken,
+    tasks: &zcode_async::Spawner,
+) -> mpsc::Receiver<Input>
 where
     R: AsyncBufRead + Unpin + Send + 'static,
 {
     let (in_tx, in_rx) = mpsc::channel(64);
-    tokio::spawn(async move {
+    tasks.spawn("stdio-reader", async move {
         let mut line = Vec::new();
         while let Ok(available) = reader.fill_buf().await {
             if available.is_empty() {
@@ -145,8 +150,9 @@ pub async fn finish(writer: std::thread::JoinHandle<()>) -> Result<()> {
         .map_err(|_| anyhow::anyhow!("Protocol writer failed"))
 }
 
-/// [`finish`] for the writer task of [`Sink::writer`].
-pub async fn finish_task(writer: tokio::task::JoinHandle<()>) -> Result<()> {
+/// [`finish`] for the writer task of [`Sink::writer`]; a writer that does not
+/// finish in time is aborted with its handle.
+pub async fn finish_task(writer: zcode_async::OwnedTask<()>) -> Result<()> {
     match tokio::time::timeout(std::time::Duration::from_secs(2), writer).await {
         Ok(joined) => joined.map_err(|_| anyhow::anyhow!("Protocol writer failed")),
         Err(_) => bail!("Protocol output drain timed out"),

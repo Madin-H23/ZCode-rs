@@ -1,7 +1,12 @@
-//! 引擎停止时的收口：取消运行中的 run，等工具任务结束，持久化中断态。
+//! 引擎停止时的收口：取消运行中的 run，等工具任务结束，持久化中断态，最后关闭 Engine 的任务作用域。
 use super::{Engine, Event};
 use crate::contract::StorageCommitFailure;
 use anyhow::Result;
+use std::time::Duration;
+
+/// 收口之后仍在运行的任务（已取消的 async hook、权限 hook 链、标题等辅助请求）自行结束的期限：
+/// 覆盖工具进程的 TERM→KILL（1.5 s 宽限 + 1 s KILL 确认）与随后 1 s 的管道关闭。
+const TASK_GRACE: Duration = Duration::from_millis(3500);
 
 impl Engine {
     /// `result` 是服务循环的结果。循环以存储提交失败或 panic 结束时，内存里的事实可能只改了
@@ -76,6 +81,16 @@ impl Engine {
                     .commit_receipt(&workspace, Some(session), None)
                     .await?;
             }
+        }
+        // 有序收口之后才关闭作用域：取消令牌已全部发出，这里只等它们走完自己的收口，超时的被中止。
+        let aborted = self.tasks.close(TASK_GRACE).await;
+        if !aborted.is_empty() {
+            tracing::warn!(
+                target: "zcode::runtime",
+                event = "runtime.tasks.aborted",
+                tasks = ?aborted,
+                "Runtime tasks were still running after shutdown and were aborted"
+            );
         }
         result
     }

@@ -7,15 +7,19 @@ use crate::domain::session::Session;
 use crate::domain::session_listing::ListParams;
 use serde_json::json;
 
-async fn store(dir: &tempfile::TempDir) -> NodeStore {
+/// The store and the scope its worker belongs to; keep both for the test.
+async fn store(dir: &tempfile::TempDir) -> (zcode_async::TaskScope, NodeStore) {
     let root = dir.path();
-    NodeStore::open(
+    let tasks = zcode_async::TaskScope::root("test", |_| {});
+    let store = NodeStore::open(
         root.join("db/db.sqlite"),
         root.join("artifacts"),
         root.join("cache"),
+        &tasks.spawner(),
     )
     .await
-    .unwrap()
+    .unwrap();
+    (tasks, store)
 }
 
 fn session(workspace: &str) -> Session {
@@ -35,7 +39,7 @@ fn session(workspace: &str) -> Session {
 #[tokio::test]
 async fn project_settings_use_nodes_project_ids() {
     let dir = tempfile::tempdir().unwrap();
-    let store = store(&dir).await;
+    let (_tasks, store) = store(&dir).await;
     let ruleset = json!({"version": 1, "allow": [{"toolName": "Write"}]});
     store
         .save_project_setting("/", "permission", "ruleset", &ruleset)
@@ -78,7 +82,7 @@ async fn project_settings_use_nodes_project_ids() {
 #[tokio::test]
 async fn a_failed_commit_keeps_the_writes_and_a_later_commit_applies_them() {
     let dir = tempfile::tempdir().unwrap();
-    let store = store(&dir).await;
+    let (_tasks, store) = store(&dir).await;
     let mut s = session("/w");
     // 会话行尚未写入时账本外键失败：待写记录必须留在会话上，不能丢。
     let admission = |s: &mut Session| {
@@ -114,7 +118,7 @@ async fn a_failed_commit_keeps_the_writes_and_a_later_commit_applies_them() {
 #[tokio::test]
 async fn listing_and_index_read_node_session_rows() {
     let dir = tempfile::tempdir().unwrap();
-    let store = store(&dir).await;
+    let (_tasks, store) = store(&dir).await;
     let mut s = session("/w");
     s.node_ensure_created(7, "Hello   there", "0.0.0");
     store.commit("/w", Some(&mut s), None).await.unwrap();

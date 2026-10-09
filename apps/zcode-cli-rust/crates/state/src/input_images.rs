@@ -14,10 +14,7 @@ pub(crate) async fn prepare(
     bytes: Vec<u8>,
     mime: &'static str,
 ) -> Result<Result<Prepared, String>> {
-    Ok(
-        tokio::task::spawn_blocking(move || processor::prepare(bytes, mime, Budget::ATTACHMENT))
-            .await?,
-    )
+    Ok(zcode_async::blocking(move || processor::prepare(bytes, mime, Budget::ATTACHMENT)).await?)
 }
 
 /// The processor's fallback type of a submitted image MIME (it sniffs the

@@ -22,7 +22,9 @@ async fn main() -> anyhow::Result<()> {
     );
     let cancel = CancellationToken::new();
     let start = Instant::now();
-    let tools = zcode_cli_rust::workspace_tools(root.clone(), root.join("artifacts"))?;
+    let scope = zcode_cli_rust::runtime::instance_scope();
+    let tools =
+        zcode_cli_rust::workspace_tools(root.clone(), root.join("artifacts"), &scope.spawner())?;
     stage("tools.new", start);
     let context = WorkspaceContext::new(
         root,

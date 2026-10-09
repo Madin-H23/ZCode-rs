@@ -152,7 +152,7 @@ impl Engine {
         };
         let store = self.store.clone();
         let now = self.clock.now() as i64;
-        tokio::spawn(async move {
+        self.tasks.spawner().spawn("usage-query", async move {
             let query = async {
                 if stats {
                     app_snapshot(store.as_ref(), &p, now).await

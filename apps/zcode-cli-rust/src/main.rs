@@ -51,7 +51,10 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
         zcode_cli_host::logging::LogOptions::from_env(&home, |name| std::env::var_os(name));
     let log_dir = log_options.directory.clone();
     let _logs = zcode_cli_host::logging::init(log_options);
-    zcode_cli_host::log_retention::schedule(log_dir);
+    // 实例的任务作用域：在日志之后创建、之前释放，本函数返回时其中剩余的任务被中止。
+    let scope = zcode_cli_rust::runtime::instance_scope();
+    let tasks = scope.spawner();
+    zcode_cli_host::log_retention::schedule(&tasks, log_dir);
     tracing::info!(
         target: "zcode::runtime",
         event = "runtime.started",
@@ -69,7 +72,7 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
     };
     let cancel = CancellationToken::new();
     let signal_cancel = cancel.clone();
-    tokio::spawn(async move {
+    tasks.spawn("signals", async move {
         #[cfg(unix)]
         {
             if let Ok(mut term) =
@@ -88,7 +91,7 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
     });
     let input = stdio::start(CancellationToken::new());
     let (output, writer) = Sink::stdout(cancel.clone());
-    let served = zcode_cli_rust::serve::app_server(options, input, output, cancel).await;
+    let served = zcode_cli_rust::serve::app_server(options, &tasks, input, output, cancel).await;
     // 失败路径同样先等写线程落盘：存储失败的错误响应必须送达 Host 后进程才能退出。
     let drained = stdio::finish(writer).await;
     served.and(drained)

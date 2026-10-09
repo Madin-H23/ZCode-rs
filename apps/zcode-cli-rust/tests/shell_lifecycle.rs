@@ -42,8 +42,14 @@ async fn stopped(pid: i32) {
 #[tokio::test]
 async fn cancellation_honors_term_cleanup_and_retains_output() {
     let root = tempfile::tempdir().unwrap();
+    let tasks = zcode_async::TaskScope::root("test", |_| {});
     let tools = Arc::new(
-        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap(),
+        zcode_cli_rust::workspace_tools(
+            root.path().into(),
+            root.path().join("artifacts"),
+            &tasks.spawner(),
+        )
+        .unwrap(),
     );
     let cancel = CancellationToken::new();
     let job = {
@@ -80,8 +86,14 @@ async fn cancellation_honors_term_cleanup_and_retains_output() {
 #[tokio::test]
 async fn cancellation_reaps_term_ignoring_job_control_descendants() {
     let root = tempfile::tempdir().unwrap();
+    let tasks = zcode_async::TaskScope::root("test", |_| {});
     let tools = Arc::new(
-        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap(),
+        zcode_cli_rust::workspace_tools(
+            root.path().into(),
+            root.path().join("artifacts"),
+            &tasks.spawner(),
+        )
+        .unwrap(),
     );
     let cancel = CancellationToken::new();
     let job = {
@@ -109,8 +121,14 @@ async fn cancellation_reaps_term_ignoring_job_control_descendants() {
 #[tokio::test]
 async fn timeout_reaps_cross_group_workers_without_explicit_cancellation() {
     let root = tempfile::tempdir().unwrap();
+    let tasks = zcode_async::TaskScope::root("test", |_| {});
     let tools = Arc::new(
-        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap(),
+        zcode_cli_rust::workspace_tools(
+            root.path().into(),
+            root.path().join("artifacts"),
+            &tasks.spawner(),
+        )
+        .unwrap(),
     );
     let job = tokio::spawn({
         let tools = tools.clone();
@@ -136,8 +154,14 @@ async fn timeout_reaps_cross_group_workers_without_explicit_cancellation() {
 #[tokio::test]
 async fn normal_leader_exit_reaps_workers_that_hold_output_pipes() {
     let root = tempfile::tempdir().unwrap();
+    let tasks = zcode_async::TaskScope::root("test", |_| {});
     let tools = Arc::new(
-        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap(),
+        zcode_cli_rust::workspace_tools(
+            root.path().into(),
+            root.path().join("artifacts"),
+            &tasks.spawner(),
+        )
+        .unwrap(),
     );
     let job = tokio::spawn({
         let tools = tools.clone();
@@ -162,8 +186,14 @@ async fn normal_leader_exit_reaps_workers_that_hold_output_pipes() {
 #[tokio::test]
 async fn bash_commands_lead_a_new_session_without_the_runtime_terminal() {
     let root = tempfile::tempdir().unwrap();
+    let tasks = zcode_async::TaskScope::root("test", |_| {});
     let tools = Arc::new(
-        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap(),
+        zcode_cli_rust::workspace_tools(
+            root.path().into(),
+            root.path().join("artifacts"),
+            &tasks.spawner(),
+        )
+        .unwrap(),
     );
     let job = tokio::spawn({
         let tools = tools.clone();

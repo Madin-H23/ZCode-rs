@@ -18,30 +18,33 @@ pub(super) struct Shared {
     /// MCP process notifications until the engine takes them.
     pub(super) process_events:
         std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<(&'static str, Value)>>>,
+    /// Owns the shell and MCP tasks (`<parent>/tools`): they are aborted when
+    /// the tool runtime is dropped (spec rust-u2-task-scope §4.1).
+    _tasks: zcode_async::TaskScope,
 }
 impl WorkspaceTools {
+    /// `tasks` is the scope of the runtime instance the tools serve.
     pub fn new(
         cwd: PathBuf,
         artifacts: PathBuf,
         config: Arc<dyn crate::contract::ConfigSource>,
         egress: Arc<zcode_cli_net::Egress>,
+        tasks: &zcode_async::Spawner,
     ) -> Self {
+        let tasks = tasks.child("tools");
         let env = egress.tool_env();
         let (sink, events) = tokio::sync::mpsc::unbounded_channel();
-        let mcp = super::mcp_hub::Hub::new(egress.clone(), Some(sink));
-        // 资源采样依赖运行时；没有 tokio 运行时的构造（单元测试）不采样。
-        if tokio::runtime::Handle::try_current().is_ok() {
-            super::mcp_resources::start(mcp.telemetry.clone(), mcp.stopped());
-        }
+        let mcp = super::mcp_hub::Hub::new(egress.clone(), Some(sink), &tasks.spawner());
         let official = super::official_auth::OfficialAuth::for_workspace(&egress, &cwd);
         Self {
             shared: Arc::new(Shared {
-                shell: ShellTasks::new(env.clone()),
+                shell: ShellTasks::new(env.clone(), tasks.spawner()),
                 web: super::web_fetch::WebFetcher::new(egress.clone()),
                 mcp,
                 process_events: std::sync::Mutex::new(Some(events)),
                 reads: Mutex::new(HashMap::new()),
                 writes: Arc::new(Mutex::new(())),
+                _tasks: tasks,
             }),
             env,
             egress,

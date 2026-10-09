@@ -86,7 +86,7 @@ impl Engine {
             origin: crate::contract::RequestOrigin::detached(self.clock.id()),
             request_auth: None,
         };
-        tokio::spawn(async move {
+        self.tasks.spawner().spawn("auxiliary", async move {
             // panic 时照常回复失败，等待这个辅助请求的调用方不会永远挂起。
             let output = zcode_async::catch_panic(model.complete(messages, &tools, &sink, &cancel))
                 .await

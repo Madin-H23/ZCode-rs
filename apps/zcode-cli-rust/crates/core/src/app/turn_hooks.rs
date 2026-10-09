@@ -123,6 +123,7 @@ impl TurnHooks {
         self.hooks = Arc::new(Hooks {
             registrations,
             tools: current.tools.clone(),
+            tasks: current.tasks.clone(),
             clock: current.clock.clone(),
             cwd: current.cwd.clone(),
             turn_id: current.turn_id.clone(),

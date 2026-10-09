@@ -186,7 +186,7 @@ impl ShellTasks {
         }
         let (cwd, env, sink) = (cwd.to_owned(), self.env.clone(), sink.clone());
         let result = backgrounded(&launch);
-        tokio::spawn(async move {
+        self.tasks.spawn("bash-background", async move {
             let Launch {
                 path,
                 combined,
@@ -219,7 +219,9 @@ impl ShellTasks {
         );
         let process_token = token.clone();
         let mut guard = Foreground(Some(token.clone()));
-        let mut process = tokio::spawn(async move {
+        // 进程任务属于工具作用域而不是本次调用：调用被丢弃时 Foreground 只取消令牌，进程任务仍要
+        // 走完 TERM→KILL 收口；超过前台时限后，句柄移交给后台任务。
+        let mut process = self.tasks.spawn("bash", async move {
             run(
                 &cwd_owned,
                 &env,
@@ -255,7 +257,7 @@ impl ShellTasks {
             }
         };
         let sink = sink.clone();
-        tokio::spawn(async move {
+        self.tasks.spawn("bash-background", async move {
             let outcome = match process.await {
                 Ok(outcome) => outcome,
                 Err(error) => Err(error.into()),

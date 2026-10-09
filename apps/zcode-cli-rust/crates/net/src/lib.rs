@@ -158,7 +158,7 @@ impl Egress {
             let rules = self.rules.clone();
             let ca = self.ca_cert_file.clone();
             // CA 文件读取与平台证书校验器初始化是阻塞 IO，不能占用运行时工作线程。
-            tokio::task::spawn_blocking(move || build_client(purpose, rules, ca.as_deref()))
+            zcode_async::blocking(move || build_client(purpose, rules, ca.as_deref()))
                 .await
                 .map_err(|e| EgressError::CaCertificate(e.to_string()))?
         })

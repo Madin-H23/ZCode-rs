@@ -11,7 +11,12 @@ fn dispatched(line: &str) -> Input {
 async fn async_readers_frame_lines_like_stdin() {
     let (mut host, runtime) = tokio::io::duplex(64);
     let closed = CancellationToken::new();
-    let mut input = start_reader(tokio::io::BufReader::new(runtime), closed.clone());
+    let tasks = zcode_async::TaskScope::root("test", |_| {});
+    let mut input = start_reader(
+        tokio::io::BufReader::new(runtime),
+        closed.clone(),
+        &tasks.spawner(),
+    );
     tokio::io::AsyncWriteExt::write_all(
         &mut host,
         b"{\"id\":\"a\",\"result\":1}\n\n{\"id\":1,\"method\":\"runtime/capabilities\",\"params\":{}}\nnot json\n",
