@@ -1,13 +1,18 @@
 // Renderer reload → 重新 attach（rust-host-r0.md §5）：流式进行中 reload，reload 之后的输出继续显示。
 // reload 只重建 Renderer：Rust Host 与这个 workspace 的 runtime 实例都不能重启——child 模式比较 CLI pid，
 // embedded 模式（没有 pid）比较 Host 日志里的 runtime 代次。
+// Rust Host 上另查 Gateway 的收口（docs/specs/rust-u2-gateway.md §2.4）：旧页面的连接关闭后 Host 上的
+// Renderer 连接数回到 reload 之前，新连接上的订阅与命令都可用（reload 后再发一条消息），新页面没有
+// “连接已关闭”类的错误。
 import { join } from "node:path";
 
 import { sendMessage, sseChunk, sseText } from "../helpers.mjs";
 import {
   findRunProcesses,
   hostLogLines,
+  hostRpcConnections,
   runtimeGenerations,
+  waitFor,
   waitUsable,
 } from "../resilience-helpers.mjs";
 
@@ -49,6 +54,8 @@ export async function run(context) {
   const attachments = async () =>
     (await hostLogLines(home)).filter((line) => /attachment \S+ connected/.test(line)).length;
   const attachmentsBefore = await attachments();
+  const connectionsBefore =
+    context.host === "rust" ? await hostRpcConnections(home, before.host) : 0;
   await page.reload();
   await waitUsable(page);
   // reload 后由恢复的标签页重新打开会话；没有自动打开时从侧栏点开。
@@ -73,4 +80,26 @@ export async function run(context) {
   console.info(
     `[e2e] reload reattached to the same Host and runtime (generation ${generationsAfter.at(-1)}); streaming continued to the end`,
   );
+
+  // 新连接上的命令与订阅：reload 后再发一条消息，回复照常到达。
+  await sendMessage(page, "after the reload");
+  await bodyHas(page, "Reply to: after the reload", 60_000);
+  const text = await page.evaluate(() => document.body.innerText);
+  if (/connection closed|service connection/i.test(text))
+    throw new Error("the reloaded page shows a connection error");
+  if (context.host === "rust") {
+    // 旧页面的连接由 Gateway 收口：Host 上的 Renderer 连接数回到 reload 之前。
+    const settled = await waitFor(
+      async () => {
+        const count = await hostRpcConnections(home, after.host);
+        return count === connectionsBefore ? count : null;
+      },
+      { timeout: 30_000, what: `the Host to keep ${connectionsBefore} Renderer connections` },
+    ).catch(async (error) => {
+      throw new Error(`${error.message} (now ${await hostRpcConnections(home, after.host)})`);
+    });
+    console.info(
+      `[e2e] the old page's connection was closed: ${settled} Renderer connection(s) before and after the reload`,
+    );
+  }
 }
