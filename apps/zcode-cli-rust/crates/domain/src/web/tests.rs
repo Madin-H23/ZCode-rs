@@ -142,14 +142,18 @@ fn search_output_matches_node() {
         output.as_object_mut().unwrap().remove("durationMs");
         assert_eq!(output, case["output"], "{}", case["text"]);
     }
-    let template = fixtures()["searchDescription"]
-        .as_str()
-        .unwrap()
-        .replace("September 2026", "{currentMonth}");
+    // 样例里存的是 TS 描述的模板（月份为占位符，不随生成时间变化）。
+    let fixtures = fixtures();
+    let template = fixtures["searchDescription"].as_str().unwrap();
+    let described = search::description(template, "October 2026");
     assert_eq!(
-        search::description(&template, "September 2026"),
-        fixtures()["searchDescription"]
+        described
+            .matches("The current month is October 2026 —")
+            .count(),
+        1,
+        "{described}"
     );
+    assert!(!described.contains("{currentMonth}"));
     let tool = search::provider_tool(
         &serde_json::json!({"query": "q", "allowed_domains": [], "blocked_domains": ["x.com"]}),
     );

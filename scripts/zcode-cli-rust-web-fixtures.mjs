@@ -327,6 +327,11 @@ export async function webFixtures() {
     prompts: await prompts(),
     validation: validation(),
     searches: searches(),
-    searchDescription: webSearchToolEntry.metadata.description,
+    // 修复：TS 的描述 getter 按读取时的本地时间填入月份，原来把当时的月份写进了样例，跨月后
+    // `--check` 必然失败。与 web_descriptions.json 相同，月份存成占位符，由 Rust 在构建工具定义时填入。
+    searchDescription: webSearchToolEntry.metadata.description.replace(
+      /The current month is .+? —/u,
+      "The current month is {currentMonth} —",
+    ),
   };
 }
