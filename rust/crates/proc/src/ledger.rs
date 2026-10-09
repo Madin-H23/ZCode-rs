@@ -155,7 +155,12 @@ impl Ledger {
                 path,
                 _instance: self.inner.clone(),
             });
-            Ok(Tracked { child, pid, record })
+            Ok(Tracked {
+                child,
+                pid,
+                record,
+                keep_group: false,
+            })
         }
         #[cfg(windows)]
         {
@@ -211,13 +216,16 @@ struct Pending {
 
 /// [`Ledger::spawn`] 启动的进程树：持有根进程与它的记录（Unix）或 Job（Windows）。
 ///
-/// 没有经 [`Tracked::terminate`] 或 [`Tracked::release`] 确认就被丢弃时记录留下（交给下一次清扫）；
-/// 根进程照调用方设置的 `kill_on_drop` 处理。
+/// 没有经 [`Tracked::terminate`] 或 [`Tracked::release`] 确认就被丢弃时（任务或 runtime 实例被中止），
+/// Unix 上向整个进程组发 KILL，记录留给下一次清扫删除；Windows 上由 Job 处理。
 pub struct Tracked {
     child: Child,
     pid: u32,
     #[cfg(unix)]
     record: Option<Pending>,
+    /// [`Tracked::release`] 时根进程还没有被回收：其余进程是有意保留的，丢弃时不结束进程组。
+    #[cfg(unix)]
+    keep_group: bool,
     #[cfg(windows)]
     job: Option<crate::job::Job>,
 }
@@ -254,6 +262,8 @@ impl Tracked {
         #[cfg(unix)]
         if matches!(self.child.try_wait(), Ok(Some(_))) {
             self.forget().await;
+        } else {
+            self.keep_group = true;
         }
         #[cfg(windows)]
         let _ = &mut self;
@@ -270,6 +280,33 @@ impl Tracked {
                 path = %path.display(),
                 %error,
                 "Cannot remove a process ledger record"
+            );
+        }
+    }
+}
+
+/// 缺陷修复：任务被中止（例如 Host 等实例收口超时后中止它）时，`kill_on_drop` 只结束根进程，组内
+/// 其余进程留下；根进程已不存在，下一次清扫也只能删除记录（规格 2.2：不向身份对不上的进程发信号）。
+/// 丢弃时根进程还没有被回收，它的 pid 与进程组 id 都不会被复用，所以向整个进程组发 KILL 只会命中
+/// 这棵树。已经离开进程组、自建会话的后代不在其中（与正常停止的边界相同）。
+#[cfg(unix)]
+impl Drop for Tracked {
+    fn drop(&mut self) {
+        if self.record.is_none() || self.keep_group || self.child.id().is_none() {
+            return;
+        }
+        let Ok(group) = libc::pid_t::try_from(self.pid) else {
+            return;
+        };
+        // SAFETY: killpg 只投递信号；根进程是本进程尚未回收的子进程，进程组 id 不会被复用。
+        #[expect(unsafe_code, reason = "killpg(2) 是 libc 的 FFI")]
+        let sent = unsafe { libc::killpg(group, libc::SIGKILL) } == 0;
+        if !sent {
+            tracing::debug!(
+                event = "process_ledger.drop_kill_failed",
+                group,
+                error = %std::io::Error::last_os_error(),
+                "Cannot kill the process group of a dropped tool process tree"
             );
         }
     }

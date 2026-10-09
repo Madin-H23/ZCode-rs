@@ -265,31 +265,19 @@ async fn trees_that_end_normally_leave_no_record() {
 #[tokio::test]
 async fn a_tree_left_by_an_ended_instance_of_this_process_is_reaped() {
     let dir = tempfile::tempdir().unwrap();
-    // 进程内的 runtime 实例结束时没有收口（例如被中止）：记录留下，实例已注销。
-    let ended_instance = Ledger::open(dir.path().into());
-    let mut command = sh();
-    let mut left = ended_instance
-        .spawn(
-            &mut command,
-            Purpose::Bash,
-            Isolation::Session,
-            Containment::OwnJob,
-        )
-        .await
-        .unwrap();
-    let (pid, background) = (
-        i32::try_from(left.pid()).unwrap(),
-        background_of(left.child()).await,
-    );
-    let _cleanup = Cleanup(vec![pid]);
-    drop(left);
-    drop(ended_instance);
-    assert_eq!(records(dir.path()).len(), 1);
+    // 进程内的 runtime 实例结束时没有收口：记录属于本进程里一个已经注销的实例。
+    let tree = tree().await;
+    let _cleanup = Cleanup(vec![tree.pid]);
+    let owner = this_process().await.unwrap().clone();
+    write(dir.path(), identity(tree.pid).await, owner, u64::MAX).await;
 
     // 同一进程里的下一个实例。
     Ledger::open(dir.path().into()).sweep().await;
 
-    assert_eq!((ended(pid).await, ended(background).await), (true, true));
+    assert_eq!(
+        (ended(tree.pid).await, ended(tree.background).await),
+        (true, true)
+    );
     assert_eq!(records(dir.path()), Vec::<String>::new());
 }
 
@@ -386,3 +374,6 @@ async fn records_name_their_fields_and_reject_other_names() {
         assert_eq!(Record::parse(other), None, "{other}");
     }
 }
+
+#[path = "drop_tests.rs"]
+mod drop_tests;
