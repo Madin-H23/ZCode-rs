@@ -32,7 +32,7 @@
 
 ## 3. 规则
 
-1. **依赖方向**：crate 只能依赖表中层号更小的 crate，由 Cargo 保证；新增跨层依赖必须先改本表。
+1. **依赖方向**：crate 只能依赖表中层号更小的 crate；同层的 crate 互不依赖。Cargo 保证无环，`scripts/rust/check-host-layers.mjs`（`pnpm check:rust` 的一步）按本表检查越层与同层依赖，包括 dev-dependencies。新增 crate 或跨层依赖必须先改本表和脚本里的层号。
 2. **模块内的路径不改**：每个 crate 的 `lib.rs` 用 `use zcode_host_<lower>::<module>;` 把下层模块引入 crate 根，原有的 `crate::<module>::…` 路径保持有效。
 3. **可见性最小放开**：只把编译器报告的、确实被上层 crate 用到的 `pub(crate)` / `pub(super)` 条目改为 `pub`；其余保持原样。
 4. **测试替身跨 crate 复用**：用 crate 的 `test-support` feature（`#[cfg(any(test, feature = "test-support"))]`），由使用方在 `[dev-dependencies]` 中开启；测试辅助代码不进入正式构建。目前只有 `zcode-host-automation`（`bots::test_support`，被 `remote` 的测试使用）。

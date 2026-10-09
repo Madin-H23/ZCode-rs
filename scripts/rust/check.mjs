@@ -23,6 +23,7 @@ function run(command, args, cwd = root) {
 await requireCargoTools(["deny", "shear"]);
 await run(process.execPath, ["scripts/check-zcode-cli-rust-boundaries.mjs"]);
 await run(process.execPath, ["scripts/rust/check-foundation-boundaries.mjs"]);
+await run(process.execPath, ["scripts/rust/check-host-layers.mjs"]);
 for (const workspace of workspaces) {
   const manifest = `${workspace}/Cargo.toml`;
   await run("cargo", ["fmt", "--all", "--manifest-path", manifest, "--check"]);
