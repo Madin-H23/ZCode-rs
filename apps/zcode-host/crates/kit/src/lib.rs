@@ -2,6 +2,7 @@
 //!
 //! 各 service 用 [`ServiceBuilder`] 按方法注册实现；没实现的成员回退到契约 stub
 //! （立即回 `NotImplemented`），保证 Renderer 的任何调用都不会挂起。
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 pub mod args;
 pub mod builder;
 pub mod channel;

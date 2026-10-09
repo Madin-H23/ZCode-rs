@@ -343,7 +343,7 @@ fn apply_op(conn: &mut Connection, op: &Value, clock: &mut i64) -> anyhow::Resul
                     archived: filter["archived"].as_bool(),
                 },
             )?;
-            Value::Array(metas.iter().map(|meta| meta.to_value()).collect())
+            Value::Array(metas.iter().map(super::meta::JsObject::to_value).collect())
         }
         "listDeleted" => json!(repo::list_deleted_task_ids(
             conn,

@@ -216,7 +216,7 @@ impl Scope {
     fn lock(&self) -> std::sync::MutexGuard<'_, ScopeState> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn assert_open(&self) -> Result<(), RpcError> {
@@ -680,7 +680,7 @@ impl RemoteAgentChannel {
         let scope = self
             .scopes
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(context.connection)
             .or_insert_with(|| {
                 Arc::new(Scope {
@@ -887,7 +887,7 @@ impl ServiceChannel for RemoteAgentChannel {
         let scope = self
             .scopes
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&context.connection);
         if let Some(scope) = scope {
             tokio::spawn(async move { scope.dispose().await });

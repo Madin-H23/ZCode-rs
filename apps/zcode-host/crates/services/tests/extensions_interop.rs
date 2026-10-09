@@ -18,6 +18,7 @@ fn repo_root() -> PathBuf {
         .unwrap()
 }
 
+#[expect(clippy::print_stderr, reason = "前置条件缺失时提示测试被跳过")]
 fn node_available() -> bool {
     let root = repo_root();
     if !root.join("node_modules/tsx/package.json").exists() {

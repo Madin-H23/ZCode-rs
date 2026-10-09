@@ -284,7 +284,7 @@ impl ProtocolClient {
     fn lock_pending(&self) -> std::sync::MutexGuard<'_, Pending> {
         self.pending
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub fn is_closed(&self) -> bool {
@@ -326,12 +326,14 @@ impl ProtocolClient {
     }
 
     /// 关闭 stdin：app-server 把 EOF 当作退出请求。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn close_input(&self) {
         if let Some(mut writer) = self.writer.lock().await.take() {
             let _ = writer.shutdown().await;
         }
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn write_line(&self, line: String) -> Result<(), ClientError> {
         let mut writer = self.writer.lock().await;
         let Some(stream) = writer.as_mut() else {

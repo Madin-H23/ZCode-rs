@@ -109,7 +109,10 @@ impl TaskRealtimeBridge {
 
     /// 送达事件按 eventId 去重，只保留最近 1000 个。
     fn remember_event(&self, event_id: &str) -> bool {
-        let mut seen = self.seen.lock().unwrap_or_else(|p| p.into_inner());
+        let mut seen = self
+            .seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if seen.0.contains(event_id) {
             return false;
         }

@@ -629,7 +629,7 @@ impl Feedback {
             && let Some(previous) = self
                 .creates
                 .lock()
-                .unwrap_or_else(|p| p.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .insert(id.clone(), cancel.clone())
         {
             let _ = previous.send(true);
@@ -681,7 +681,10 @@ impl Feedback {
             _ = cancelled.wait_for(|cancelled| *cancelled) => Err(error("This operation was aborted")),
         };
         if let Some(id) = &operation_id {
-            let mut creates = self.creates.lock().unwrap_or_else(|p| p.into_inner());
+            let mut creates = self
+                .creates
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if creates
                 .get(id)
                 .is_some_and(|current| current.same_channel(&cancel))
@@ -733,7 +736,7 @@ impl Feedback {
         if let Some(cancel) = self
             .creates
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(key)
         {
             let _ = cancel.send(true);
@@ -1154,7 +1157,7 @@ impl Feedback {
         let (cancel, cancelled) = watch::channel(false);
         self.uploads
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(progress_id.clone(), cancel);
         let result = self
             .upload_file(
@@ -1171,7 +1174,7 @@ impl Feedback {
             .await;
         self.uploads
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&progress_id);
         if let Err(failure) = &result
             && failure.message == UPLOAD_CANCELED
@@ -1185,7 +1188,7 @@ impl Feedback {
         if let Some(cancel) = self
             .uploads
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(progress_id)
         {
             let _ = cancel.send(true);

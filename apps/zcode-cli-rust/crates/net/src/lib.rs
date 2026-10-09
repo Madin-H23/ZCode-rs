@@ -1,6 +1,7 @@
 //! Runtime environment and network egress for every outbound HTTP request and
 //! tool child process (Node `shared/src/runtimeEnv.ts`, `adapters/src/network`,
 //! `bootstrap/src/model-config.ts`). This crate has no internal dependencies.
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 mod child;
 pub mod device;
 mod env;

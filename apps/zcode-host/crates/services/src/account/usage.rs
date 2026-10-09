@@ -856,7 +856,7 @@ impl UsageStats {
         let quota_data = quota_payload
             .filter(bigmodel_envelope_ok)
             .map(|payload| payload["data"].clone())
-            .filter(|data| data.is_object());
+            .filter(serde_json::Value::is_object);
         let limits = normalize_limits(
             quota_data
                 .as_ref()

@@ -751,12 +751,12 @@ fn writable_hook(hook: &Value) -> Value {
     );
     let enabled = hook.get("enabled").cloned().unwrap_or(Value::Null);
     let declaration = match hook.get("configuredState").and_then(Value::as_object) {
-        None => enabled.clone(),
+        None => enabled,
         Some(state) if state.get("configuredEnabled") == Some(&enabled) => state
             .get("declarationEnabled")
             .cloned()
             .unwrap_or(Value::Null),
-        Some(_) => enabled.clone(),
+        Some(_) => enabled,
     };
     out.insert("enabled".into(), declaration);
     if let Some(message) = hook.get("statusMessage").filter(|value| truthy(value)) {

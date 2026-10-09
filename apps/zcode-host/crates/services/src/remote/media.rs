@@ -227,7 +227,7 @@ impl MediaPreviewProxy {
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn url(&self, token: &str) -> Result<String, RpcError> {
@@ -251,6 +251,7 @@ impl MediaPreviewProxy {
         Ok((stat["type"] == "file", stat["size"].as_u64()))
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn ensure_listening(&self) -> Result<(), RpcError> {
         let _guard = self.listening.lock().await;
         if self.lock().port.is_some() {

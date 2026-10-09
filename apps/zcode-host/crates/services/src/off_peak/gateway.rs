@@ -299,7 +299,7 @@ fn route(shared: &Shared, request: &Request) -> Response {
     let mut state = shared
         .state
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let now = now_ms();
     let path = request.path.as_str();
     if request.method == "GET" && path == "/__e2e/off-peak/requests" && config.scenario.is_some() {

@@ -114,7 +114,7 @@ impl AccountStack {
         );
         let app_version = endpoints.app_version();
         runtime.set_builtin_environment(crate::providers::builtin::BuiltinEnvironment {
-            config_root: app_config_dir.clone(),
+            config_root: app_config_dir,
             platform: platform.clone(),
             app_version: app_version.clone(),
             resolve_origin: {

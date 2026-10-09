@@ -70,6 +70,7 @@ impl FileTrustStore {
         Ok(())
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn locked<T>(&self, operation: impl AsyncFnOnce() -> Result<T>) -> Result<T> {
         let _queued = self.queue.lock().await;
         self.ensure_directory().await?;

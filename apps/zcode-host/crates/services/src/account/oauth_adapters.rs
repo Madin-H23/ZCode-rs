@@ -202,7 +202,10 @@ impl ZaiBusinessTokenResolver {
             return Err(required());
         }
         {
-            let mut cached = self.cached.lock().unwrap_or_else(|p| p.into_inner());
+            let mut cached = self
+                .cached
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some((source, business, expires_at)) = cached.as_ref()
                 && source == token
                 && expires_at - ZAI_BUSINESS_TOKEN_REFRESH_SKEW_MS > now_ms()
@@ -239,7 +242,10 @@ impl ZaiBusinessTokenResolver {
             .as_f64()
             .filter(|value| value.is_finite() && *value != 0.0)
         {
-            *self.cached.lock().unwrap_or_else(|p| p.into_inner()) = Some((
+            *self
+                .cached
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((
                 token.to_owned(),
                 access.clone(),
                 now_ms() + (expires_in * 1000.0) as i64,
@@ -458,7 +464,7 @@ impl Adapter {
         *self
             .last_backend_user
             .lock()
-            .unwrap_or_else(|p| p.into_inner()) =
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
             meaningful.then(|| (state.to_owned(), backend_user_profile(user)));
         Ok(TokenSet {
             access_token: business,
@@ -515,7 +521,7 @@ impl Adapter {
             let mut cached = self
                 .last_backend_user
                 .lock()
-                .unwrap_or_else(|p| p.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if cached
                 .as_ref()
                 .is_some_and(|(cached_state, _)| cached_state == state)

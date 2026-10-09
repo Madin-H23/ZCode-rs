@@ -167,7 +167,7 @@ impl ChildHandle {
         let sender = self
             .kill
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
         if let Some(sender) = sender {
             let _ = sender.send(());
@@ -343,7 +343,7 @@ async fn connect_via_connector(
     let writer = Arc::new(Mutex::new(Some(writer)));
     let disposed = Arc::new(OnceCell::new());
     let disposer = {
-        let (child, writer, disposed) = (child.clone(), writer.clone(), disposed.clone());
+        let (child, writer, disposed) = (child.clone(), writer, disposed);
         Arc::new(move || -> BoxFuture<'static, ()> {
             let (child, writer, disposed) = (child.clone(), writer.clone(), disposed.clone());
             Box::pin(async move {
@@ -351,7 +351,7 @@ async fn connect_via_connector(
                     .get_or_init(|| async move {
                         let writer = writer
                             .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .take();
                         if let Some(writer) = writer {
                             let _ =
@@ -390,7 +390,7 @@ impl ConnectorSinks {
         let sender = self
             .control
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
         if let Some(sender) = sender {
             let _ = sender.send(event);
@@ -602,7 +602,7 @@ async fn connect_process(
                     // stdin EOF 让远端 stdio server 自行收口（stdio-lifecycle）；超时再结束进程树。
                     writer
                         .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .take();
                     if !child.wait(Duration::from_secs(5)).await {
                         child.kill().await;

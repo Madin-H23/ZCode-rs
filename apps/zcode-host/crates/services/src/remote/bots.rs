@@ -94,7 +94,7 @@ impl Shared {
     fn preferences(&self) -> std::sync::MutexGuard<'_, Preferences> {
         self.preferences
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -149,7 +149,7 @@ impl PortInner {
     fn remember(&self, target: &WorkspaceTarget) {
         self.targets
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(target.key(), target.clone());
     }
 
@@ -157,13 +157,14 @@ impl PortInner {
     fn target_for_key(&self, key: &str) -> WorkspaceTarget {
         self.targets
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(key)
             .cloned()
             .unwrap_or_else(|| WorkspaceTarget::local(key.to_owned()))
     }
 
     /// 首次使用前：确认远端 Model Selection 就绪，再推 App 运行时偏好（推送期间版本变了就再推）。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn ready(&self) -> Result<(), String> {
         let Some(readiness) = &self.readiness else {
             return Ok(());
@@ -823,13 +824,13 @@ impl RemoteBotRuntime {
     fn connected(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
         self.connected
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn runtimes(&self) -> std::sync::MutexGuard<'_, HashMap<String, Cached>> {
         self.runtimes
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// `buildRemoteTargetForWorkspace`：按 identity（再按 path + identity）在 `lastWorkspaceSession` 里找

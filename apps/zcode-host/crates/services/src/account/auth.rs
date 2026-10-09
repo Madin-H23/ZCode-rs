@@ -492,7 +492,10 @@ impl CodingPlanKeys {
         let key = credential_key(provider_id, "individual-coding-plan", identity, None).ok()?;
         let operation = format!("{}:{key}", if force_refresh { "refresh" } else { "load" });
         let future = {
-            let mut in_flight = self.in_flight.lock().unwrap_or_else(|p| p.into_inner());
+            let mut in_flight = self
+                .in_flight
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(existing) = in_flight.get(&operation) {
                 existing.clone()
             } else {
@@ -506,7 +509,7 @@ impl CodingPlanKeys {
                         .await;
                     this.in_flight
                         .lock()
-                        .unwrap_or_else(|p| p.into_inner())
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .remove(&operation_key);
                     result
                 }

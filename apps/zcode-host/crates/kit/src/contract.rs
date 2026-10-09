@@ -30,6 +30,10 @@ pub struct Contract {
 const EMBEDDED: &str = include_str!("../../../contract/channels.json");
 
 /// 清单随二进制编译进来；格式错误属于构建产物损坏，测试会先拦住。
+#[expect(
+    clippy::expect_used,
+    reason = "内嵌清单在构建时生成并由测试校验，解析失败是构建产物损坏"
+)]
 pub fn embedded() -> Contract {
     serde_json::from_str(EMBEDDED).expect("apps/zcode-host/contract/channels.json is invalid")
 }

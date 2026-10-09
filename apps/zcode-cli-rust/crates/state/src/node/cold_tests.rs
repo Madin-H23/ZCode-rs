@@ -23,7 +23,7 @@ fn rebuilt_history_matches_node_for_every_scenario() {
         let entries: Vec<Value> = hydrate(&active, &|_| None)
             .entries
             .iter()
-            .map(|e| e.to_node())
+            .map(zcode_cli_domain::node_history::Entry::to_node)
             .collect();
         assert_eq!(
             stringify(&Value::Array(entries)),

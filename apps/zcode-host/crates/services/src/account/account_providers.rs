@@ -187,7 +187,7 @@ impl AccountProviderSource {
         self.inner
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 启动：首轮刷新，并订阅内置配置与账号相关设置的变化。

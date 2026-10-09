@@ -3,6 +3,7 @@
 //! 接入层只向这里交付两样东西：Main 的控制消息（[`HostCore::on_control`]），以及每个 attachment
 //! 一条已鉴权的 `@zcode/rpc` 连接（[`HostCore::attach`]）。services 在收到 `InitLocal` 时按
 //! Main 给的路径与环境构建；构建完成前建立的 attachment 先挂起，之后才发 `[200]`。
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 pub mod attachments;
 pub mod rpc_telemetry;
 mod server;
@@ -146,7 +147,7 @@ impl HostCore {
             .inner
             .installed
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         if let Some(installed) = installed {
             installed.shutdown().await;
@@ -239,7 +240,7 @@ impl HostCore {
             .inner
             .installed
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(installed));
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(installed));
         reporter.send("ready", None);
         self.inner.registry.send_replace(Some(Arc::new(registry)));
         log::info("init-local received; services installed");
@@ -251,14 +252,14 @@ impl HostCore {
         self.inner
             .startup
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn lock_router(&self) -> std::sync::MutexGuard<'_, ControlRouter> {
         self.inner
             .router
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn issue_endpoint(&self, meta: AttachmentMeta) -> AttachmentEndpointResult {
@@ -293,7 +294,7 @@ impl HostCore {
         self.inner
             .installed
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -303,7 +304,7 @@ impl HostCore {
         self.inner
             .connections
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// `detach-service-port`：关闭该 attachmentId 的全部连接（本地与远端 scope 同样适用）。
@@ -462,6 +463,7 @@ pub fn now_ms() -> u64 {
 }
 
 /// 操作系统随机源生成的十六进制串；十六进制字符都是合法的 WebSocket 子协议 token。
+#[expect(clippy::expect_used, reason = "系统熵源不可用时不能签发凭据，只能终止")]
 pub fn random_hex(bytes: usize) -> String {
     let mut buffer = vec![0u8; bytes];
     // 取随机数失败说明系统熵源不可用，此时不能签发凭据，直接终止。

@@ -166,7 +166,7 @@ impl BrowserBridge {
         self.inner
             .pending
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 登记 Main 的结果消息与两个反向请求处理器。

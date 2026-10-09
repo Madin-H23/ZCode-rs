@@ -347,6 +347,7 @@ impl Connection {
         output.failed = result["isError"] == true;
         Ok(output)
     }
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn close(&self) -> Result<()> {
         // 进程先退出（传输已断）后的关闭是崩溃的收口（如调用失败后关闭）：Node 仍记 process_crash。
         let crashed = self.peer.is_transport_closed() && !self.closing.swap(true, Ordering::SeqCst);

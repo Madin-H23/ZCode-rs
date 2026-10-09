@@ -83,6 +83,7 @@ impl ModelRegistry for Registry {
             .cloned()
             .context("Selected model is unavailable")
     }
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn refresh(&self, update: Option<Value>) -> Result<bool> {
         // 配置刷新共用一个串行入口；迟到的文件读取不能覆盖新账号事实。
         let mut account = self.account.lock().await;

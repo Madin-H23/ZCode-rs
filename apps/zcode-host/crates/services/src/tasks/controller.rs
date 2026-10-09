@@ -494,7 +494,7 @@ impl Controller {
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 挂上远端 source（rust-host-remote.md §2.7）。
@@ -502,13 +502,13 @@ impl Controller {
         *self
             .external
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(external);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(external);
     }
 
     fn external(&self) -> Option<Arc<dyn ExternalSources>> {
         self.external
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -552,6 +552,7 @@ impl Controller {
     }
 
     /// 登记 source（首次登记发 workspace.upserted），按需读取分区并更新投影。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn refresh(&self, target: &WorkspaceTarget, force: bool) -> Result<(), RpcError> {
         let _guard = self.refresh_lock.lock().await;
         let key = target.key();

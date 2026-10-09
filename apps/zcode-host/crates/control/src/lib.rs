@@ -3,6 +3,7 @@
 //! 传输是 Rust Host 的 stdin/stdout，每行一个 JSON 对象；消息对象与今天 `parentPort` 上的相同，
 //! TS 侧 schema 在 `packages/shared/src/validation.ts`。R0 只解析用到的字段，其余消息原样识别为
 //! [`MainToHost::Other`]，由调用方记 debug 日志后忽略。
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 

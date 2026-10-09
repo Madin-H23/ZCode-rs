@@ -55,7 +55,7 @@ impl StartupCoordinator {
     fn lock(&self) -> std::sync::MutexGuard<'_, Cell> {
         self.cell
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 生成下一条状态并记为最新；在锁内发出，保证发给 Main 的顺序与 sequence 一致。

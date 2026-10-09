@@ -338,7 +338,7 @@ pub fn install(
             providers.clone(),
             agent.clone(),
             observer.clone(),
-            task_service.clone(),
+            task_service,
             storage.tasks_index.clone(),
             account.credentials.clone(),
             account.repo.clone(),
@@ -365,9 +365,9 @@ pub fn install(
             child_env: &child_env,
             settings: settings.clone(),
             agent: agent.clone(),
-            agent_api: agent_api.clone(),
+            agent_api,
             providers: providers.clone(),
-            bridge: bridge.clone(),
+            bridge,
         },
         registry,
         router,
@@ -394,7 +394,7 @@ pub fn install(
     // `updateDataBaseDir` 叠在 R1 的 setting channel 上：守卫 → 复制 `.zcode/v2` → 经 SettingStore
     // 写 `dataBaseDir`。Host 自己的数据根运行期不变，重启后由 Main 按 setting.json 下发。
     registry.implement(settings::data_dir::service(
-        settings::data_dir::DataDirMove::new(settings.clone(), &context.environment),
+        settings::data_dir::DataDirMove::new(settings, &context.environment),
     ));
 
     agent::session::warm_up(

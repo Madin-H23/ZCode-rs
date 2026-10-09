@@ -79,7 +79,11 @@ pub fn info(plugin: &Plugin, sources: Option<&Sources<'_>>) -> Value {
         .filter(|(key, _)| user_config[key.as_str()]["sensitive"] != true)
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let components: Vec<Value> = plugin.components.iter().map(|g| g.protocol()).collect();
+    let components: Vec<Value> = plugin
+        .components
+        .iter()
+        .map(super::components::Group::protocol)
+        .collect();
     let mut info = json!({"id":loaded.id,"name":loaded.name(),"enabled":plugin.enabled,
         "source":loaded.source.as_str(),"marketplace":loaded.marketplace,
         "skillCount":plugin.skill_count,"skillRootCount":plugin.skill_root_count,

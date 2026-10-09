@@ -1018,6 +1018,7 @@ impl Bots {
     }
 
     /// 入站命令分发（`handleInboundMessage`）；同一聊天上下文串行处理。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn handle_inbound(
         self: &Arc<Self>,
         inbound: &Inbound,

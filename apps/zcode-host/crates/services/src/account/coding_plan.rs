@@ -318,7 +318,10 @@ impl CodingPlanSubscription {
     /// `client/configs`：1 小时快照，并发读取合并成一次请求。
     async fn client_configs(&self, force_refresh: bool) -> Result<Value, RpcError> {
         let future = {
-            let mut cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+            let mut cache = self
+                .cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if force_refresh {
                 cache.snapshot = None;
             }
@@ -344,7 +347,10 @@ impl CodingPlanSubscription {
                         let result = this
                             .read(ApiRequest::get(url).timeout_ms(REQUEST_TIMEOUT_MS))
                             .await;
-                        let mut cache = this.cache.lock().unwrap_or_else(|p| p.into_inner());
+                        let mut cache = this
+                            .cache
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                         cache.request = None;
                         if let Ok(payload) = &result {
                             cache.snapshot =

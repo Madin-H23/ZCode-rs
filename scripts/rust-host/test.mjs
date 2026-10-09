@@ -4,6 +4,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { requireCargoTools } from "../rust/cargo-tools.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const manifest = resolve(root, "apps/zcode-host/Cargo.toml");
@@ -83,7 +84,8 @@ await run("cargo", [
 if (!existsSync(resolve(root, "packages/server/dist/remote/zcode-server.cjs"))) {
   await run("pnpm", ["--filter", "@zcode/server", "build:remote"]);
 }
-await run("cargo", ["test", "--manifest-path", manifest]);
+await requireCargoTools(["nextest"]);
+await run("cargo", ["nextest", "run", "--workspace", "--manifest-path", manifest]);
 await run("cargo", ["build", "--manifest-path", manifest]);
 
 // 用 Renderer 实际使用的客户端连接真实二进制；测试放在 client 包内，按公开入口导入 @zcode/shared。

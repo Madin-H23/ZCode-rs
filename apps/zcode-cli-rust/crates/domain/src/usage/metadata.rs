@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 /// provider's `server_tool_use`). Members Node leaves undefined are omitted;
 /// `Null` when the provider reported no usage.
 pub fn model_usage(raw: &Value) -> Value {
-    if raw.as_object().is_none_or(|u| u.is_empty()) {
+    if raw.as_object().is_none_or(serde_json::Map::is_empty) {
         return Value::Null;
     }
     let mut out = Map::new();

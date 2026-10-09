@@ -19,14 +19,14 @@ impl Session {
                 "lastError":self.last_error,"apiRetry":self.api_retry},
             "availability":{"fork":if self.history.responses.is_empty(){json!({"allowed":false,"reasonCode":"guard.forkTargetNotStable"})}else{json!({"allowed":true})},"compact":{"allowed":true},"switchModelConfig":{"allowed":true},
                 "setFollowupMode":{"allowed":true},"queueEdit":{"allowed":true},"sendQueuedNow":if self.queued_now.is_none(){json!({"allowed":true})}else{json!({"allowed":false,"reasonCode":"guard.queuePromotionBusy"})},
-                "pauseGoal":if self.goal.as_ref().is_some_and(|g|g.active()){json!({"allowed":true})}else{json!({"allowed":false,"reasonCode":if self.goal.is_none(){"noGoalToPause"}else{"goalNotActive"}})},
+                "pauseGoal":if self.goal.as_ref().is_some_and(super::goal::Goal::active){json!({"allowed":true})}else{json!({"allowed":false,"reasonCode":if self.goal.is_none(){"noGoalToPause"}else{"goalNotActive"}})},
                 "resumeGoal":if self.goal.as_ref().is_some_and(|g|matches!(g.status.as_str(),"paused"|"failed"|"notSatisfied")) && !self.running(){json!({"allowed":true})}else{json!({"allowed":false,"reasonCode":if self.goal.is_none(){"noGoalToResume"}else{"goalNotPaused"}})}},
             "inputRouting":{"mode":if self.running(){if self.followup_mode=="guide"{"guide"}else{"enqueue"}}else if !self.auto_drain && !self.queue.is_empty(){"choice"}else{"startNow"}},
             "meta":{"title":self.title,"titleSource":self.projected_title_source()},
             "config":{"provider":self.provider,"model":self.model,"thought":self.reasoning_level,"thoughtLevels":if self.thought_levels.is_empty(){vec![self.reasoning_level.clone()]}else{self.thought_levels.clone()},
                 "modelSelection":{"providerId":self.provider,"modelId":self.model,"options":{"reasoningLevel":self.reasoning_level}},"followupMode":self.followup_mode,"mode":self.mode,"planEnabled":self.plan_enabled},
             "usage":self.usage,"queue":{"items":self.queue.iter().filter(|q|q["delivery"]["admitted"]!="startNow").collect::<Vec<_>>(),"autoDrain":self.auto_drain},
-            "pendingInteractions":self.pending,"workspaceHookAdmission":self.runtime.workspace_hook_admission,"pendingCommands":[],"backgroundWorks":self.background.values().filter(|t|t.status=="running").map(|t|t.projection()).collect::<Vec<_>>(),"goal":self.goal.as_ref().map(|g|g.projection()),"plan":super::todo::plan(&self.todos,self.todos_updated_at)});
+            "pendingInteractions":self.pending,"workspaceHookAdmission":self.runtime.workspace_hook_admission,"pendingCommands":[],"backgroundWorks":self.background.values().filter(|t|t.status=="running").map(super::background::BackgroundTask::projection).collect::<Vec<_>>(),"goal":self.goal.as_ref().map(super::goal::Goal::projection),"plan":super::todo::plan(&self.todos,self.todos_updated_at)});
         if let Some(transition) = &self.plan_transition {
             patch["config"]["planTransition"] = transition.clone();
         }
@@ -77,7 +77,7 @@ impl Session {
         if let Some(goal) = &self.goal {
             summary["goalStatus"] = goal.status.clone().into();
         }
-        if self.children.values().any(|t| t.running()) {
+        if self.children.values().any(super::subagent::Task::running) {
             summary["hasBackgroundWork"] = true.into();
         }
         summary

@@ -275,7 +275,7 @@ impl RemoteWorkspaces {
     fn lock_leases(&self) -> std::sync::MutexGuard<'_, Vec<Lease>> {
         self.leases
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 关闭满足条件的远端 attachment（`detachRemoteSessionAttachments` 等）。
@@ -366,7 +366,7 @@ impl RemoteWorkspaces {
         let active = Arc::new(AtomicBool::new(true));
         self.progress
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(request_id.clone(), active.clone());
         tokio::spawn(async move {
             let result = self
@@ -382,7 +382,7 @@ impl RemoteWorkspaces {
             active.store(false, Ordering::SeqCst);
             self.progress
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .remove(&request_id);
             match result {
                 Ok(descriptor) => {
@@ -632,7 +632,7 @@ impl RemoteWorkspaces {
             registry.register(
                 "media-preview",
                 Arc::new(media::MediaPreviewChannel(media::MediaPreviewProxy::new(
-                    client.clone(),
+                    client,
                     scope.clone(),
                 ))),
             );
@@ -658,7 +658,7 @@ impl RemoteWorkspaces {
     fn lock_background(&self) -> std::sync::MutexGuard<'_, Vec<AbortHandle>> {
         self.background
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Host 退出：关闭全部远端 attachment，释放全部连接。
@@ -717,7 +717,7 @@ async fn connect_handle(
     let request_id = request.request_id.clone();
     let active = progress
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(&request_id)
         .cloned();
     let log_control = control.clone();

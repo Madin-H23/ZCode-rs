@@ -119,10 +119,11 @@ impl Waiters {
     /// Cancel only host requests of `owner` (e.g. stop while awaiting credentials).
     /// Returned requests must be announced to the host as cancelled.
     pub fn release_host(&mut self, owner: &str) -> Vec<(String, HostWait)> {
-        let ids = self.host_ids(owner).cloned().collect::<Vec<_>>();
-        ids.into_iter()
-            .filter_map(|id| self.host.remove(&id).map(|w| (id, w)))
-            .collect()
+        let (released, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.host)
+            .into_iter()
+            .partition(|(_, w)| w.owner == owner);
+        self.host = kept.into_iter().collect();
+        released
     }
 
     /// Release every waiter of `owner`; pending answers resolve as cancelled.

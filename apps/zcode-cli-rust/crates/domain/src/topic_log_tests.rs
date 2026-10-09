@@ -61,7 +61,7 @@ fn only_changed_top_level_keys_are_published() {
     let mut topic = ConversationTopic::default();
     let full = json!({"revision":1,"meta":{"title":"a"}});
     assert_eq!(topic.changed("e", full.clone()), Some(full.clone()));
-    assert_eq!(topic.changed("e", full.clone()), None);
+    assert_eq!(topic.changed("e", full), None);
     assert_eq!(
         topic.changed("e", json!({"revision":2,"meta":{"title":"a"}})),
         Some(json!({"revision":2}))

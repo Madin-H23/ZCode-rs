@@ -182,7 +182,7 @@ impl SessionService {
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// withApiRetryRuntime。
@@ -476,7 +476,7 @@ pub fn service(sessions: Arc<SessionService>) -> ServiceBuilder {
                 .map(Reply::Value)
         }
     });
-    let runtime = api.chat.clone();
+    let runtime = api.chat;
     builder = builder.method("initializeWorkspace", move |_, args| {
         let runtime = runtime.clone();
         async move {

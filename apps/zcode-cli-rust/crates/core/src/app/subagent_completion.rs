@@ -8,7 +8,9 @@ impl Engine {
         if s.agent_profile.is_none()
             || s.running()
             || s.background.values().any(|t| t.status == "running")
-            || s.children.values().any(|t| t.running())
+            || s.children
+                .values()
+                .any(zcode_cli_domain::subagent::Task::running)
         {
             return Ok(());
         }
@@ -125,7 +127,7 @@ impl Engine {
         self.select(&json!({}), Some(self.session_selection(id)?))?;
         let text = pending
             .iter()
-            .map(|t| t.notification())
+            .map(zcode_cli_domain::subagent::Task::notification)
             .collect::<Vec<_>>()
             .join("\n");
         let c = super::subagents::child_command(id, &self.clock.id(), &text);

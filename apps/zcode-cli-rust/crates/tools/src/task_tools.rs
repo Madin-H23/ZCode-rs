@@ -59,7 +59,7 @@ impl ShellTasks {
         let mut state = job.state.clone();
         tokio::select! {
             _ = cancel.cancelled() => bail!("Cancelled"),
-            result = state.wait_for(|v| v.is_some()) => { result?; }
+            result = state.wait_for(std::option::Option::is_some) => { result?; }
         }
         let (content, data) = task_stop_content(id, &job.command);
         let mut output = ToolOutput::new(content, data);
@@ -89,7 +89,7 @@ impl ShellTasks {
             if boolean(args, "block", true)? {
                 let wait = tokio::time::timeout(
                     Duration::from_millis(timeout),
-                    state.wait_for(|s| s.is_some()),
+                    state.wait_for(std::option::Option::is_some),
                 );
                 tokio::select! {
                     _ = cancel.cancelled() => bail!("Cancelled"),

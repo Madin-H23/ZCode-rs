@@ -224,7 +224,7 @@ impl OAuthCredentialRepo {
         *self
             .on_corrupt_cleared
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(handler);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handler);
     }
 
     /// 解密失败统一按损坏登录态处理；其他错误原样上抛。
@@ -515,7 +515,7 @@ impl OAuthCredentialRepo {
         let handler = self
             .on_corrupt_cleared
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         if let Some(handler) = handler {
             handler(self.known.clone()).await;

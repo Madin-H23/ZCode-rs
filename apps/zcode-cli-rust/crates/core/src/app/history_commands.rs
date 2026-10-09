@@ -152,7 +152,10 @@ impl Engine {
         self.cancel_children(id).await?;
         self.tools.cancel_session(id, None).await?;
         while self.active.contains_key(id)
-            || self.sessions[id].children.values().any(|t| t.running())
+            || self.sessions[id]
+                .children
+                .values()
+                .any(zcode_cli_domain::subagent::Task::running)
             || self.sessions[id]
                 .background
                 .values()

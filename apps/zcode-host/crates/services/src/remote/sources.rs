@@ -126,7 +126,7 @@ impl Source {
             let subscription = observer
                 .subscription
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .take();
             if let Some(subscription_id) = subscription {
                 let mut params = workspace_target(&self.scope);
@@ -291,14 +291,14 @@ impl RemoteSources {
         *self
             .controller
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::downgrade(controller);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::downgrade(controller);
         controller.set_external(self.clone());
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn publish(&self, state: &State, task_deltas: Vec<Value>, workspace_deltas: Vec<Value>) {
@@ -308,7 +308,7 @@ impl RemoteSources {
         let controller = self
             .controller
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .upgrade();
         if let Some(controller) = controller {
             controller.publish_external(ExternalUpdate {
@@ -354,6 +354,7 @@ impl RemoteSources {
     }
 
     /// 登记并在需要时读取远端分区（`refreshSource`）。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn refresh_source(
         &self,
         scope: &RemoteScope,
@@ -941,7 +942,7 @@ async fn observe_sessions(
     let remember = |subscription: Option<String>| {
         *current
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = subscription;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = subscription;
     };
     let mut lifecycle = client.listen(
         "zcode-agent",

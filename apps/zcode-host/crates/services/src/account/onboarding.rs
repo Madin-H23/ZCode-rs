@@ -222,6 +222,7 @@ impl OnboardingRecords {
         json!({"version": 2, "deviceMid": device_mid, "entries": [], "decisions": []})
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn append_record(&self, device_mid: &str, entry: &Value) -> Result<(), RpcError> {
         let user = (self.load_user_id)().await;
         let _queue = self.queue.lock().await;
@@ -258,6 +259,7 @@ impl OnboardingRecords {
         self.write(&file).await
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn claim_anonymous_record(&self) -> Result<(), RpcError> {
         let Some(user) = (self.load_user_id)().await else {
             return Ok(());
@@ -280,6 +282,7 @@ impl OnboardingRecords {
         Ok(())
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn should_onboard(&self, device_mid: &str) -> Result<bool, RpcError> {
         let user = (self.load_user_id)().await;
         if self
@@ -313,6 +316,7 @@ impl OnboardingRecords {
         Ok(false)
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn dismiss_onboarding(&self, device_mid: &str) -> Result<(), RpcError> {
         let user = (self.load_user_id)().await;
         let _queue = self.queue.lock().await;
@@ -366,6 +370,7 @@ impl OnboardingRecords {
         })
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn update_record_preferences(&self, patch: &Value) -> Result<(), RpcError> {
         let user = (self.load_user_id)().await;
         let _queue = self.queue.lock().await;
@@ -387,6 +392,7 @@ impl OnboardingRecords {
         self.write(&file).await
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn clear_records(&self) -> Result<(), RpcError> {
         let _queue = self.queue.lock().await;
         match tokio::fs::remove_file(&self.file).await {

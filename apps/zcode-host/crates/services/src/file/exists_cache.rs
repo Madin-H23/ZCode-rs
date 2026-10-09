@@ -17,7 +17,10 @@ pub struct ExistsCache {
 
 impl ExistsCache {
     fn get(&self, path: &str) -> Option<bool> {
-        let mut guard = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+        let mut guard = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (map, order) = &mut *guard;
         let (exists, expires) = *map.get(path)?;
         order.retain(|entry| entry != path);
@@ -30,7 +33,10 @@ impl ExistsCache {
     }
 
     fn set(&self, path: &str, exists: bool) {
-        let mut guard = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+        let mut guard = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (map, order) = &mut *guard;
         let now = Instant::now();
         map.retain(|_, (_, expires)| *expires > now);

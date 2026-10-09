@@ -3,6 +3,7 @@
 //! per session, for `scripts/zcode-cli-rust-node-db-compare.mjs` to compare
 //! with Node's own readers (spec rust-m11-node-storage §11 scenario 1).
 //! Usage: `node_read <db> <artifact-root> <out-dir>`. Not a release entry.
+#![expect(clippy::print_stdout, reason = "开发用示例，结果输出到 stdout")]
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -28,7 +29,7 @@ fn main() -> anyhow::Result<()> {
             let history: Vec<Value> = zcode_cli_rust::domain::node_history::hydrate(&active, &read)
                 .entries
                 .iter()
-                .map(|e| e.to_node())
+                .map(zcode_cli_rust::domain::node_history::Entry::to_node)
                 .collect();
             let Some(resumed) = zcode_cli_state::node::resume::resume(&conn, id, &read, None)?
             else {

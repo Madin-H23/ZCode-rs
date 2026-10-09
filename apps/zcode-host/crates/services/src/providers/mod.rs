@@ -136,7 +136,7 @@ impl ProviderRuntime {
             .inner
             .active_builtin
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         active.or_else(|| self.inner.builtin_file.clone())
     }
@@ -150,7 +150,7 @@ impl ProviderRuntime {
             .inner
             .builtin_source
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
             Some(builtin::BuiltinSource::new(bundled, environment));
     }
 
@@ -158,7 +158,7 @@ impl ProviderRuntime {
         self.inner
             .builtin_source
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -214,7 +214,7 @@ impl ProviderRuntime {
                     .inner
                     .active_builtin
                     .write()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
                     read.materialized.then(|| read.path.clone());
                 (read.bytes, value, Some(read.path))
             }
@@ -410,14 +410,14 @@ impl ProviderRuntime {
         self.inner
             .state
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn lock_write(&self) -> std::sync::RwLockWriteGuard<'_, State> {
         self.inner
             .state
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

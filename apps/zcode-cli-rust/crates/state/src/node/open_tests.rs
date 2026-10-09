@@ -140,7 +140,6 @@ fn another_writer_makes_startup_wait_or_time_out() {
 
     let (release, released) = mpsc::channel();
     let waiter = {
-        let path = path.clone();
         std::thread::spawn(move || {
             let (result, _) = open_at(&path, Duration::from_secs(5));
             release.send(()).ok();

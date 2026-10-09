@@ -30,7 +30,7 @@ fn diagnostic_body_key() -> &'static Regex {
 }
 
 fn normalize_key(key: &str) -> String {
-    key.chars().filter(|c| c.is_ascii_alphanumeric()).collect()
+    key.chars().filter(char::is_ascii_alphanumeric).collect()
 }
 
 fn should_redact_key(key: &str, diagnostic: bool) -> bool {

@@ -359,7 +359,7 @@ impl IndexCache {
     fn lock(&self) -> std::sync::MutexGuard<'_, VecDeque<CacheEntry>> {
         self.entries
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub async fn get(

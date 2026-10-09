@@ -1,0 +1,171 @@
+name: Rust CI
+
+# 所有 Rust workspace 的 PR 准入（docs/specs/rust-u0-foundation.md §2）。分支保护只依赖最后的
+# `required` job；没有 Rust 相关改动时，各 job 跳过，`required` 直接通过。
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: filter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          pattern='^(apps/zcode-cli-rust/|apps/zcode-host/|rust/|rust-toolchain\.toml$|\.cargo/|clippy\.toml$|deny\.toml$|scripts/rust/|scripts/check-zcode-cli-rust-boundaries\.mjs$|\.github/workflows/rust-ci\.yml$)'
+          if git diff --name-only "$BASE_SHA" HEAD | grep -qE "$pattern"; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  static:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24.14.0" # mise.toml
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-deny,cargo-shear@1.11.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            apps/zcode-cli-rust -> target
+            apps/zcode-host -> target
+      - name: Boundaries, fmt, clippy, cargo-deny, cargo-shear
+        run: node scripts/rust/check.mjs
+
+  clippy:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            apps/zcode-cli-rust -> target
+            apps/zcode-host -> target
+      - name: Clippy (platform-specific code)
+        shell: bash
+        run: |
+          for workspace in apps/zcode-cli-rust apps/zcode-host; do
+            cargo clippy --locked --workspace --all-targets --manifest-path "$workspace/Cargo.toml" -- -D warnings
+          done
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-nextest
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            apps/zcode-cli-rust -> target
+            apps/zcode-host -> target
+      - name: Tests
+        shell: bash
+        run: |
+          for workspace in apps/zcode-cli-rust apps/zcode-host; do
+            cargo nextest run --locked --workspace --manifest-path "$workspace/Cargo.toml"
+          done
+
+  # 其余 crate 的测试从未在 Windows 上运行过；先与 rust-npm-windows.yml 的范围对齐，再逐步扩大。
+  test-windows:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-nextest
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: apps/zcode-cli-rust -> target
+      - name: Tests
+        shell: bash
+        run: cargo nextest run --locked --manifest-path apps/zcode-cli-rust/Cargo.toml -p zcode-cli-protocol -p zcode-cli-domain
+
+  required:
+    needs: [changes, static, clippy, test, test-windows]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: All Rust jobs passed or were skipped for lack of Rust changes
+        shell: bash
+        env:
+          RUST_CHANGED: ${{ needs.changes.outputs.rust }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            if [ "$result" = "success" ]; then continue; fi
+            if [ "$result" = "skipped" ] && [ "$RUST_CHANGED" = "false" ]; then continue; fi
+            echo "A Rust CI job finished with: $result"
+            exit 1
+          done

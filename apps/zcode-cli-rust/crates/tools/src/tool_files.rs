@@ -35,6 +35,7 @@ pub struct FileTools<'a> {
     pub writes: &'a Mutex<()>,
 }
 impl FileTools<'_> {
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn call(
         &self,
         name: &str,

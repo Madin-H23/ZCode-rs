@@ -192,7 +192,7 @@ impl OAuthService {
             .inner
             .on_logout
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(hook);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hook);
     }
 
     fn now(&self) -> i64 {
@@ -203,7 +203,7 @@ impl OAuthService {
         self.inner
             .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn adapter(&self, provider: &str) -> Result<Arc<Adapter>, RpcError> {
@@ -224,6 +224,7 @@ impl OAuthService {
     }
 
     /// 在会话变更队列里执行（`runSessionMutation`）。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn mutate<T, F: Future<Output = T>>(&self, run: impl FnOnce() -> F) -> T {
         let _guard = self.inner.mutation.lock().await;
         run().await
@@ -1288,7 +1289,7 @@ impl OAuthService {
             .inner
             .on_logout
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         match hook {
             Some(hook) => hook(provider.to_owned(), identity).await,

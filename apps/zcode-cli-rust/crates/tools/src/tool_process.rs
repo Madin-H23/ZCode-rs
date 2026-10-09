@@ -17,6 +17,7 @@ struct Captured {
     bytes: u64,
     path: PathBuf,
 }
+#[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
 async fn capture(
     mut stream: impl AsyncRead + Unpin,
     path: PathBuf,
@@ -53,6 +54,7 @@ async fn capture(
     }
     result
 }
+#[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
 pub(super) async fn run(
     cwd: &Path,
     env: &[(String, String)],

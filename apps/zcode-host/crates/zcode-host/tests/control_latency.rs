@@ -209,6 +209,7 @@ fn percentile(sorted: &[Duration], fraction: f64) -> Duration {
     sorted[index]
 }
 
+#[expect(clippy::print_stderr, reason = "输出延迟统计供性能对比")]
 fn summary(name: &str, mut samples: Vec<Duration>) -> Duration {
     samples.sort();
     let p95 = percentile(&samples, 0.95);

@@ -124,7 +124,7 @@ fn a_tool_turn_reads_back_as_the_live_context() {
     let canonical: Vec<Value> = hydrate(&records, &|_| None)
         .entries
         .iter()
-        .map(|e| e.canonical())
+        .map(crate::node_history::Entry::canonical)
         .collect();
     assert_eq!(
         canonical,
@@ -190,7 +190,7 @@ fn cancellation_keeps_the_streamed_output_and_marks_the_turn_cancelled() {
     let canonical: Vec<Value> = hydrate(&records, &|_| None)
         .entries
         .iter()
-        .map(|e| e.canonical())
+        .map(crate::node_history::Entry::canonical)
         .collect();
     assert_eq!(
         canonical[1],
@@ -247,7 +247,7 @@ fn a_run_ending_during_tools_stores_their_results_and_closes_the_step() {
     let canonical: Vec<Value> = hydrate(&records, &|_| None)
         .entries
         .iter()
-        .map(|e| e.canonical())
+        .map(crate::node_history::Entry::canonical)
         .collect();
     assert_eq!(canonical[2]["content"], results[0].1);
 }
@@ -277,8 +277,8 @@ fn a_model_switch_is_stored_as_a_separator_when_the_next_turn_starts() {
     s.node_record_model_change("part_r1".into(), Some(high.clone()), low.clone());
     s.node_record_model_change("part_r2".into(), Some(low.clone()), high.clone());
     assert!(s.node.model_change.is_none());
-    s.node_record_model_change("part_r3".into(), Some(high.clone()), low.clone());
-    s.node_record_model_change("part_r4".into(), Some(low), other.clone());
+    s.node_record_model_change("part_r3".into(), Some(high), low.clone());
+    s.node_record_model_change("part_r4".into(), Some(low), other);
     s.node.take();
     s.node_user_prompt(20, prompt("msg_u2"));
     let writes = s.node.take();

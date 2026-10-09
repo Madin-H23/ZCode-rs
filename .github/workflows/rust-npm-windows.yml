@@ -21,7 +21,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_TERM_COLOR: never
-      RUSTFLAGS: "-C target-feature=+crt-static"
+      # crt-static 由仓库根 .cargo/config.toml 配置；设置 RUSTFLAGS 会覆盖它。
     defaults:
       run:
         shell: pwsh

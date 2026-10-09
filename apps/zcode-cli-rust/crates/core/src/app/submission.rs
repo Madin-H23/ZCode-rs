@@ -199,7 +199,7 @@ mod tests {
         assert_eq!(auth.0["apiKey"], "secret");
         assert!(!format!("{auth:?}").contains("secret"));
         assert!(execution(&json!({}), identity()).is_none());
-        let mut payload = p.clone();
+        let mut payload = p;
         strip_transient(&mut payload);
         assert!(payload.get("modelExecution").is_none());
     }

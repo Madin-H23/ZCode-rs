@@ -93,7 +93,7 @@ impl<T: Clone + Send + 'static> EventHub<T> {
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Subscriber<T>>> {
         self.subscribers
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

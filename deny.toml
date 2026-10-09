@@ -1,0 +1,48 @@
+# 仓库内所有 Rust workspace 共用的 cargo-deny 配置（docs/specs/rust-u0-foundation.md §2）。
+# 用法：cargo deny --manifest-path <workspace>/Cargo.toml check --config deny.toml
+# 每条 ignore / exception 都必须写明理由和移除条件。
+
+[graph]
+all-features = false
+no-default-features = false
+
+[advisories]
+ignore = []
+
+[licenses]
+confidence-threshold = 0.8
+# 同一份清单服务三个 workspace，某个 workspace 用不到其中的许可证是正常的。
+unused-allowed-license = "allow"
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+exceptions = []
+
+[licenses.private]
+# 仓库内的 crate 都设置了 publish = false，不参与许可证检查。
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

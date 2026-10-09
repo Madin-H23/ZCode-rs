@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { requireCargoTools } from "./rust/cargo-tools.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 async function run(command, args) {
@@ -49,7 +50,16 @@ await run(process.execPath, [
   "-p",
   "packages/services/tests/tsconfig.zcode-cli-rust.json",
 ]);
-await run("cargo", ["test", "--locked", "--manifest-path", "apps/zcode-cli-rust/Cargo.toml"]);
+await requireCargoTools(["nextest"]);
+// --workspace：根 Cargo.toml 同时是一个 package，不加时只会运行根包的测试。
+await run("cargo", [
+  "nextest",
+  "run",
+  "--locked",
+  "--workspace",
+  "--manifest-path",
+  "apps/zcode-cli-rust/Cargo.toml",
+]);
 // Node 读取 Rust 写入的会话库（spec rust-m11-node-storage §5.2）。
 await run(process.execPath, ["--import", "tsx", "scripts/zcode-cli-rust-node-storage-check.mjs"]);
 await run("cargo", [

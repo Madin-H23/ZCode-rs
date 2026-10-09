@@ -106,13 +106,13 @@ impl SessionsIndexObserver {
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Watched>> {
         self.watched
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn watch(self: &Arc<Self>, target: WorkspaceTarget, generation: u64) {
         let key = target.key();
         let observer = Arc::downgrade(self);
-        let task_target = target.clone();
+        let task_target = target;
         let task = tokio::spawn(async move {
             let Some(strong) = observer.upgrade() else {
                 return;

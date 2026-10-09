@@ -143,8 +143,7 @@ pub async fn describe(ports: &Ports<'_>, marketplace: &str, name: &str) -> Descr
 
 /// Protocol `ZCodePluginsDescribeResult`.
 pub fn protocol(described: &Described) -> Value {
-    let mut result =
-        json!({"components":described.components.iter().map(|g| g.protocol()).collect::<Vec<_>>()});
+    let mut result = json!({"components":described.components.iter().map(super::components::Group::protocol).collect::<Vec<_>>()});
     if !described.diagnostics.is_empty() {
         result["diagnostics"] = described
             .diagnostics

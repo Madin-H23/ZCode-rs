@@ -60,7 +60,7 @@ fn stored_agent_calls_list_like_node() {
     assert_eq!(ended[1]["subagentType"], "Explore");
     assert_eq!(ended[1]["status"], "success");
     // 运行中的父会话：未结束的调用按 running 列出。
-    let mut open = messages.clone();
+    let mut open = messages;
     open[0].parts[0]["state"]["status"] = "running".into();
     open[0].parts[0]["metadata"] = json!({"agentId": "one"});
     let live = Live {

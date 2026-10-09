@@ -215,8 +215,8 @@ impl Visit for Fields {
     }
 }
 
-fn level_name(level: &Level) -> &'static str {
-    match *level {
+fn level_name(level: Level) -> &'static str {
+    match level {
         Level::ERROR => "error",
         Level::WARN => "warn",
         Level::INFO => "info",
@@ -233,7 +233,7 @@ fn format_line(metadata: &Metadata<'_>, fields: Fields) -> String {
             .to_string()
             .into(),
     );
-    line.insert("level".into(), level_name(metadata.level()).into());
+    line.insert("level".into(), level_name(*metadata.level()).into());
     line.insert("module".into(), metadata.target().into());
     line.insert("message".into(), fields.message.into());
     line.extend(fields.top);

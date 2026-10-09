@@ -55,7 +55,7 @@ impl AttachmentRegistry {
         // 登记表只做插入和删除，持锁时 panic 也不会留下半更新状态，可以继续使用。
         self.pending
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

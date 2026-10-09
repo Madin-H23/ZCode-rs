@@ -457,7 +457,7 @@ mod tests {
         let events = projector.apply(&deltas(
             json!([{"op": "state.updated", "patch": {"pendingInteractions": [interaction]}}]),
         ));
-        assert_eq!(events, vec![StreamEvent::Interaction(interaction.clone())]);
+        assert_eq!(events, vec![StreamEvent::Interaction(interaction)]);
         let events = projector.apply(&deltas(
             json!([{"op": "state.updated", "patch": {"pendingInteractions": []}}]),
         ));

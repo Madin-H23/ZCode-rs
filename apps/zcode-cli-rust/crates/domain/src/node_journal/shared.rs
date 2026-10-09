@@ -80,7 +80,7 @@ impl Session {
             now,
             Op::SharedTransition {
                 context: context.into(),
-                from: from.iter().map(|s| s.to_string()).collect(),
+                from: from.iter().map(std::string::ToString::to_string).collect(),
                 to: to.into(),
                 source: source.map(str::to_owned),
             },

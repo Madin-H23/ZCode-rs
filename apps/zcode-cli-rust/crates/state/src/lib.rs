@@ -1,3 +1,4 @@
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 use zcode_cli_core_api as contract;
 use zcode_cli_domain as domain;
 mod input_attachments;

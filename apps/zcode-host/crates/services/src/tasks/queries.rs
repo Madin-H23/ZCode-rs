@@ -126,7 +126,7 @@ impl TaskLifecycle {
         let command = Value::Object(command);
         self.commands
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(key)
             .or_default()
             .push(command.clone());
@@ -141,8 +141,11 @@ impl TaskLifecycle {
         self.assert_owner(&key, params)?;
         let command_id = params["commandId"].clone();
         let promoted = {
-            let mut commands = self.commands.lock().unwrap_or_else(|p| p.into_inner());
-            let queue = commands.entry(key.clone()).or_default();
+            let mut commands = self
+                .commands
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let queue = commands.entry(key).or_default();
             let Some(index) = queue.iter().position(|c| c["commandId"] == command_id) else {
                 return Err(owner_error(
                     "Task command not found.",
@@ -169,7 +172,10 @@ impl TaskLifecycle {
         self.assert_owner(&key, params)?;
         let command_id = params["commandId"].clone();
         let removed = {
-            let mut commands = self.commands.lock().unwrap_or_else(|p| p.into_inner());
+            let mut commands = self
+                .commands
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let Some(queue) = commands.get_mut(&key) else {
                 return Ok(
                     json!({"canceled": true, "commandId": command_id, "reason": "not_found"}),

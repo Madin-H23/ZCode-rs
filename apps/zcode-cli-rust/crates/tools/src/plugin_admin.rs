@@ -63,6 +63,7 @@ async fn install(
     }
 }
 
+#[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
 pub(super) async fn handle(
     tools: &WorkspaceTools,
     method: &str,

@@ -266,7 +266,7 @@ fn rewind(
         + 1;
     let revert = json!({
         "keptMessageIDs": kept,
-        "branchCutAfterMessageID": all.last().map(|m| m.id()),
+        "branchCutAfterMessageID": all.last().map(zcode_cli_domain::node_history::Record::id),
         "branchGeneration": generation,
         "messageID": kept.last().cloned().unwrap_or_else(|| anchor.into()),
         "kind": "conversation_rewind",

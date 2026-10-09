@@ -87,7 +87,7 @@ fn serializers_preserve_tool_associations_and_private_reasoning() {
     assert_eq!(response["input"][4]["call_id"], "call");
     assert!(!response.to_string().contains("signature"));
     config.api_type = ApiType::Anthropic;
-    let anthropic = body(&config, messages.clone(), &[], None).unwrap();
+    let anthropic = body(&config, messages, &[], None).unwrap();
     assert_eq!(anthropic["messages"].as_array().unwrap().len(), 2);
     assert_eq!(
         anthropic["messages"][0]["content"][0]["signature"],

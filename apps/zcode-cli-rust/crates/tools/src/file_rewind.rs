@@ -123,6 +123,7 @@ async fn read_journal(path: &Path) -> Result<Journal> {
     );
     Ok(serde_json::from_slice(&tokio::fs::read(path).await?)?)
 }
+#[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
 pub(super) async fn recover(
     root: &Path,
     session: &str,
@@ -142,6 +143,7 @@ pub(super) async fn recover(
     tokio::fs::remove_file(&path).await?;
     blobs::sync_parent(&path).await
 }
+#[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
 pub(super) async fn begin(
     root: &Path,
     session: &str,

@@ -59,7 +59,7 @@ pub fn read(conn: &Connection, session: &str) -> Result<Option<SharedContext>> {
     else {
         return Ok(None);
     };
-    let mut data = entry.data.clone();
+    let mut data = entry.data;
     let context = data["contextId"].clone();
     let (source, attached) = match data.as_object_mut() {
         Some(fields) => (

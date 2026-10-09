@@ -20,7 +20,6 @@ regex.workspace = true
 reqwest.workspace = true
 sse-stream.workspace = true
 rmcp.workspace = true
-rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 image.workspace = true
@@ -38,10 +37,12 @@ zcode-cli-core-api.workspace = true
 zcode-cli-domain.workspace = true
 zcode-cli-host.workspace = true
 zcode-cli-net.workspace = true
-zcode-cli-protocol.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[lib]
+doctest = false

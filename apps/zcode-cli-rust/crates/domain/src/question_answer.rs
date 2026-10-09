@@ -71,10 +71,16 @@ impl QuestionInput {
                 answers.insert(q.question.clone(), value.into());
             }
         }
-        if content["answers"].as_object().is_some_and(|a| a.is_empty()) {
+        if content["answers"]
+            .as_object()
+            .is_some_and(serde_json::Map::is_empty)
+        {
             answers.clear();
         }
-        if (answers.is_empty() && !content["answers"].as_object().is_some_and(|a| a.is_empty()))
+        if (answers.is_empty()
+            && !content["answers"]
+                .as_object()
+                .is_some_and(serde_json::Map::is_empty))
             || answers
                 .values()
                 .any(|v| v.as_str().unwrap().trim().is_empty())

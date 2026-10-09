@@ -35,7 +35,7 @@ impl Engine {
             let result = tools.mcp_list(&params, &cancel).await;
             if result
                 .as_ref()
-                .is_err_and(|e| e.is::<ProcessCleanupFailure>())
+                .is_err_and(anyhow::Error::is::<ProcessCleanupFailure>)
             {
                 let _ = sink
                     .send(Event::ToolCleanupFailed(

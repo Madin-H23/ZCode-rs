@@ -9,4 +9,6 @@ publish.workspace = true
 [lints]
 workspace = true
 
-[dependencies]
+[lib]
+test = false
+doctest = false

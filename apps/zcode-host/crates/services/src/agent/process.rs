@@ -131,7 +131,7 @@ impl StderrTail {
     fn lock(&self) -> std::sync::MutexGuard<'_, TailState> {
         self.0
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn push(&self, line: String) {

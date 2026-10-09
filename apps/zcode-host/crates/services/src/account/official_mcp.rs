@@ -301,7 +301,10 @@ impl OfficialMcpCredentials {
                 .unwrap_or("none");
             let log_key = format!("{family}|{target}|{bucket}");
             {
-                let mut last = self.last_log_key.lock().unwrap_or_else(|p| p.into_inner());
+                let mut last = self
+                    .last_log_key
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if last.as_deref() != Some(log_key.as_str()) {
                     *last = Some(log_key);
                     log::info(format!(
@@ -353,7 +356,10 @@ impl OfficialMcpCredentials {
     /// `createOfficialMcpAuthHeadersResolver`：只合并并发请求，不做时间缓存。
     pub async fn resolve_headers(&self) -> Result<Map<String, Value>, &'static str> {
         let future = {
-            let mut slot = self.in_flight.lock().unwrap_or_else(|p| p.into_inner());
+            let mut slot = self
+                .in_flight
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             match slot.as_ref() {
                 Some(existing) => existing.clone(),
                 None => {
@@ -363,7 +369,10 @@ impl OfficialMcpCredentials {
                             .resolve()
                             .await
                             .map(|snapshot| Self::headers(&snapshot));
-                        *this.in_flight.lock().unwrap_or_else(|p| p.into_inner()) = None;
+                        *this
+                            .in_flight
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
                         outcome
                     }
                     .boxed()

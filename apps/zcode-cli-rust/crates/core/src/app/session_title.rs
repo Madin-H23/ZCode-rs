@@ -235,7 +235,7 @@ impl Engine {
             query_source: source.into(),
             provider_id: identity.provider_id.clone(),
             model_id: identity.model_id.clone(),
-            variant: Some(identity.reasoning_level.clone()).filter(|l| !l.is_empty()),
+            variant: Some(identity.reasoning_level).filter(|l| !l.is_empty()),
             agent: "zcode-agent".into(),
             mode: s.mode.as_str().into(),
             task_type: "interactive".into(),

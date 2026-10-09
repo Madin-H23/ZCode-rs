@@ -19,4 +19,6 @@ tokio.workspace = true
 tokio-util.workspace = true
 zcode-cli-core-api.workspace = true
 zcode-cli-domain.workspace = true
-zcode-cli-protocol.workspace = true
+
+[lib]
+doctest = false

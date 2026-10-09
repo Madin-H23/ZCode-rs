@@ -248,7 +248,7 @@ fn expand_record(record: Value, previous: Option<&Value>) -> Value {
     let previous_request = previous
         .and_then(|p| p.get("request"))
         .and_then(Value::as_object);
-    let mut next = request.clone();
+    let mut next = request;
     expand_collection(
         &mut next,
         previous_request,

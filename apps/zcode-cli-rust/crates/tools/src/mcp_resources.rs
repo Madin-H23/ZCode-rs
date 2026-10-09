@@ -130,7 +130,7 @@ pub(super) fn start(tracker: Arc<Tracker>, stop: CancellationToken) {
     let token = uuid::Uuid::new_v4().to_string();
     tokio::spawn(async move {
         let hardware = (
-            std::thread::available_parallelism().map_or(1, |n| n.get()),
+            std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
             tokio::task::spawn_blocking(total_memory_gb)
                 .await
                 .unwrap_or(0),

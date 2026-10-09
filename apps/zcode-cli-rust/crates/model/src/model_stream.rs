@@ -150,7 +150,7 @@ impl Assembly {
         if !output_limit
             && self.text.is_empty()
             && calls.is_empty()
-            && self.usage.as_object().is_none_or(|m| m.is_empty())
+            && self.usage.as_object().is_none_or(serde_json::Map::is_empty)
         {
             return Err(ModelFailure::empty());
         }

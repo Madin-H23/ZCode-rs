@@ -113,7 +113,7 @@ pub fn message(info: &Value, ids: &Identities, next: &str) -> Result<Value> {
         let parent = info["parentID"].as_str().unwrap_or("");
         out["parentID"] = local(&ids.messages, parent, "assistant parent")?.into();
     }
-    if info.get("anchor").is_some_and(|a| a.is_object()) {
+    if info.get("anchor").is_some_and(serde_json::Value::is_object) {
         out["anchor"] = anchor(&info["anchor"], ids)?;
     }
     let mut metadata = match info.get("metadata") {

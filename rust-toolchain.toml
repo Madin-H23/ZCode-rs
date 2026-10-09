@@ -1,0 +1,4 @@
+# 仓库内所有 Rust workspace 共用的工具链（docs/specs/rust-u0-foundation.md §2）。升级单独提交。
+[toolchain]
+channel = "1.95.0"
+components = ["clippy", "rustfmt", "rust-src"]

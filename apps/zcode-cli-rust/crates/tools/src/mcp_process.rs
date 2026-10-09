@@ -90,6 +90,7 @@ pub(super) async fn report_exit(tracker: &Tracker, instance: &str, child: &mut C
 
 impl Watch {
     /// Waits for stdout to end; an exit that no `close` asked for is a crash.
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub fn spawn(self, ended: oneshot::Receiver<()>, child: Arc<Mutex<Option<(Child, u32)>>>) {
         tokio::spawn(async move {
             if ended.await.is_err() || self.closing.load(Ordering::SeqCst) {

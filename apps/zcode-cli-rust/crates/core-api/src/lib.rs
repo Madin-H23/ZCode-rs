@@ -1,3 +1,4 @@
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 mod contract;
 mod contract_events;
 mod contract_tool_error;

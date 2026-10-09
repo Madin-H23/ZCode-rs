@@ -21,6 +21,7 @@ pub(super) fn env_lookup(tools: &WorkspaceTools) -> HashMap<&str, &str> {
         .collect()
 }
 
+#[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
 pub(super) async fn handle(
     tools: &WorkspaceTools,
     method: &str,

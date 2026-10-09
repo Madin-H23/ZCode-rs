@@ -35,7 +35,7 @@ fn normalize(argv: &[String]) -> Option<Vec<&str>> {
             return None;
         }
         if tables.git_value.contains(word) {
-            if argv.get(index).is_none_or(|v| v.is_empty()) {
+            if argv.get(index).is_none_or(std::string::String::is_empty) {
                 return None;
             }
             index += 1;

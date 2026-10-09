@@ -401,14 +401,20 @@ impl BuiltinSource {
 
     /// `refresh({ force })`：同一时刻只有一个刷新在途，并发调用共享结果。
     pub fn refresh(self: &Arc<Self>, force: bool) -> BoxFuture<'static, Result<String, String>> {
-        let mut in_flight = self.in_flight.lock().unwrap_or_else(|p| p.into_inner());
+        let mut in_flight = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(current) = in_flight.as_ref() {
             return current.clone().boxed();
         }
         let this = self.clone();
         let future: BoxFuture<'static, Result<String, String>> = async move {
             let result = this.refresh_once(force).await;
-            *this.in_flight.lock().unwrap_or_else(|p| p.into_inner()) = None;
+            *this
+                .in_flight
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
             result
         }
         .boxed();

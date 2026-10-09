@@ -245,6 +245,7 @@ impl SubagentsService {
     }
 
     /// Host 启动 CLI 前的一次性存储导入（`prepareRuntimeState`）；失败只记 warn。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn prepare_runtime_state(&self) {
         let root = self.user_root().await;
         for failure in migrate_user_markdown(&root).await {
@@ -553,6 +554,7 @@ impl SubagentsService {
         }))
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn set_enabled(&self, params: Value) -> Result<(), RpcError> {
         let id = params
             .get("agentId")
@@ -584,6 +586,7 @@ impl SubagentsService {
         .await
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn set_built_in_override(&self, params: Value) -> Result<(), RpcError> {
         let name = params
             .get("agentName")
@@ -604,6 +607,7 @@ impl SubagentsService {
         .await
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn set_plugin_override(&self, params: Value) -> Result<(), RpcError> {
         let id = params
             .get("agentId")

@@ -500,7 +500,7 @@ pub struct AgentRuntime {
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl AgentRuntime {
@@ -633,6 +633,7 @@ impl AgentRuntime {
     }
 
     /// 取进程但不补推偏好（prepareStorage：Node 直接用 process manager）。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn acquire(
         &self,
         target: &WorkspaceTarget,
@@ -766,6 +767,7 @@ impl AgentRuntime {
     }
 
     /// 在进程的偏好锁内推送当时最新的偏好，直到已推版本等于最新版本。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn ensure_preferences(&self, process: &AgentProcess) -> Result<(), RpcError> {
         loop {
             let latest_version = match &*lock(&self.inner.app_preferences) {

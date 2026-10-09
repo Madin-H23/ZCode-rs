@@ -29,6 +29,35 @@ publish = false
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 
+[workspace.lints.clippy]
+# 规则来源：docs/specs/rust-engineering-practices.md §2.1；三个 Rust workspace 保持同一份列表。
+await_holding_invalid_type = "deny"
+await_holding_lock = "deny"
+disallowed_methods = "deny"
+manual_clamp = "deny"
+manual_filter = "deny"
+manual_find = "deny"
+manual_flatten = "deny"
+manual_map = "deny"
+manual_ok_or = "deny"
+manual_range_contains = "deny"
+manual_retain = "deny"
+manual_strip = "deny"
+manual_unwrap_or = "deny"
+needless_borrow = "deny"
+needless_collect = "deny"
+needless_question_mark = "deny"
+# stdio 是协议通道（Host ↔ CLI、Main ↔ Host），任何打印都会破坏帧；测试中由 clippy.toml 放行。
+print_stderr = "deny"
+print_stdout = "deny"
+redundant_clone = "deny"
+redundant_closure = "deny"
+redundant_closure_for_method_calls = "deny"
+trivially_copy_pass_by_ref = "deny"
+uninlined_format_args = "deny"
+unnecessary_lazy_evaluations = "deny"
+unnecessary_to_owned = "deny"
+
 [workspace.dependencies]
 anyhow = "1"
 async-trait = "0.1"
@@ -112,17 +141,11 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-base64.workspace = true
 clap.workspace = true
-futures-util.workspace = true
-libc.workspace = true
-rusqlite.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
-uuid.workspace = true
-zcode-cli-protocol.workspace = true
 zcode-cli-domain.workspace = true
 zcode-cli-core-api.workspace = true
 zcode-cli-core.workspace = true
@@ -139,7 +162,14 @@ tracing.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+base64.workspace = true
+libc.workspace = true
+rusqlite.workspace = true
 
 [profile.release]
 lto = "thin"
 strip = true
+
+[lib]
+test = false
+doctest = false

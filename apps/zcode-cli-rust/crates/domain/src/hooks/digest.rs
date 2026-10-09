@@ -28,7 +28,7 @@ pub fn js_number(value: f64) -> String {
         let exp = n - 1;
         let sign = if exp < 0 { '-' } else { '+' };
         let head = if k == 1 {
-            digits.clone()
+            digits
         } else {
             format!("{}.{}", &digits[..1], &digits[1..])
         };

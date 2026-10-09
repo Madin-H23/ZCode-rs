@@ -2,6 +2,7 @@
 //!
 //! 逐字节对齐 `packages/rpc/src/serialization.ts`、`channelServer.ts` 与 `protocol.ts`；
 //! 夹具由 `tests/fixtures/gen.ts` 用真实 TS 实现生成。
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 pub mod client;
 pub mod codec;
 pub mod frame;

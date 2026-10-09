@@ -480,7 +480,7 @@ pub fn dump_as(h: &Harness, conn: &rusqlite::Connection, session: &str, file: &s
     let history: Vec<Value> = zcode_cli_rust::domain::node_history::hydrate(&active, &read)
         .entries
         .iter()
-        .map(|e| e.to_node())
+        .map(zcode_cli_rust::domain::node_history::Entry::to_node)
         .collect();
     let resumed = zcode_cli_state::node::resume::resume(conn, session, &read, None)
         .unwrap()

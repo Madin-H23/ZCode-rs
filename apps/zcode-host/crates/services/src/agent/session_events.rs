@@ -128,7 +128,7 @@ impl SessionEvents {
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn forget_requests(&self, workspace_key: &str) {
@@ -253,7 +253,6 @@ impl SessionEvents {
         let workspace_key = target.key();
         let live = {
             let session_id = session_id.clone();
-            let workspace_key = workspace_key.clone();
             self.hub.subscribe_filtered(move |item| {
                 item.workspace_key == workspace_key
                     && item.session_id.as_deref().is_none_or(|id| id == session_id)

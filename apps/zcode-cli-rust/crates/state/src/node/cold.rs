@@ -80,7 +80,11 @@ pub fn history_of(
     let hydrated = node_history::hydrate(rest, artifacts);
     History {
         summary,
-        messages: hydrated.entries.iter().map(|e| e.canonical()).collect(),
+        messages: hydrated
+            .entries
+            .iter()
+            .map(zcode_cli_domain::node_history::Entry::canonical)
+            .collect(),
         sources: hydrated.sources,
         interrupted_tools: hydrated.interrupted_tools,
     }

@@ -48,7 +48,7 @@ impl Projection {
         let tool = text(&payload["toolCallId"]).map(str::to_owned);
         let tool_lane = kind.starts_with("tool_") || kind == "tool_call";
         let intrinsic = if tool_lane {
-            tool.clone().or(part.clone())
+            tool.or(part.clone())
         } else {
             part.clone().or(tool)
         };

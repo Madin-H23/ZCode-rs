@@ -128,7 +128,7 @@ async fn handle(stream: TcpStream, core: HostCore, policy: Arc<Policy>) {
             Ok(meta) => {
                 *granted
                     .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(meta);
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(meta);
                 response.headers_mut().insert(
                     header::SEC_WEBSOCKET_PROTOCOL,
                     HeaderValue::from_static(RPC_SUBPROTOCOL),
@@ -147,7 +147,7 @@ async fn handle(stream: TcpStream, core: HostCore, policy: Arc<Policy>) {
     };
     let Some(meta) = granted
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take()
     else {
         return;

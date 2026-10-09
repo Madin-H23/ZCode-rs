@@ -398,7 +398,7 @@ impl PersonalWriter {
     fn provider_lock(&self, provider: &str) -> Arc<tokio::sync::Mutex<()>> {
         self.provider_tails
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(provider.to_owned())
             .or_default()
             .clone()
@@ -471,6 +471,7 @@ impl PersonalWriter {
         resolved.provider_settings_view(revision)
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn per_provider<R: Send>(
         &self,
         provider_id: &str,
@@ -1444,13 +1445,13 @@ mod tests {
             view["providerOrder"],
             json!(["new-provider-2", "new-provider"])
         );
-        let names: Vec<&str> = view["providers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|p| p["providerName"].as_str())
-            .collect();
-        assert!(names.contains(&"new-provider 2"));
+        assert!(
+            view["providers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["providerName"] == "new-provider 2")
+        );
         let renamed = writer
             .save_provider_overlay(
                 "new-provider-2",

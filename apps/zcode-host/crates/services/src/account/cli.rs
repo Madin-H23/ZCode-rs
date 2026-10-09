@@ -126,7 +126,10 @@ impl AccountConfigSync {
     }
 
     fn slot(&self, process: &Arc<AgentProcess>) -> Arc<tokio::sync::Mutex<Option<String>>> {
-        let mut processes = self.processes.lock().unwrap_or_else(|p| p.into_inner());
+        let mut processes = self
+            .processes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         processes.retain(|_, tracked| {
             tracked
                 .process
@@ -144,6 +147,7 @@ impl AccountConfigSync {
     }
 
     /// `syncAccountProviderConfigToClient`。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn sync(&self, process: &Arc<AgentProcess>, reason: &str) -> Result<(), RpcError> {
         // 原生核心必须显式声明不支持；未声明时照常同步。
         if process
@@ -190,7 +194,7 @@ impl AccountConfigSync {
     pub fn any_process(&self) -> Option<Arc<AgentProcess>> {
         self.processes
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
             .filter_map(|tracked| tracked.process.upgrade())
             .find(|process| !process.client.is_closed())
@@ -205,7 +209,7 @@ impl AccountConfigSync {
                 let processes: Vec<Arc<AgentProcess>> = sync
                     .processes
                     .lock()
-                    .unwrap_or_else(|p| p.into_inner())
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .values()
                     .filter_map(|tracked| tracked.process.upgrade())
                     .filter(|process| !process.client.is_closed())
@@ -238,17 +242,24 @@ impl PendingHeaders {
         let id = self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         self.0
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(key, id);
         id
     }
 
     fn is_current(&self, key: &PendingKey, id: u64) -> bool {
-        self.0.lock().unwrap_or_else(|p| p.into_inner()).get(key) == Some(&id)
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(key)
+            == Some(&id)
     }
 
     fn finish(&self, key: &PendingKey, id: u64) {
-        let mut map = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        let mut map = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if map.get(key) == Some(&id) {
             map.remove(key);
         }
@@ -257,7 +268,7 @@ impl PendingHeaders {
     fn cancel(&self, key: &PendingKey) -> bool {
         self.0
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(key)
             .is_some()
     }
@@ -316,7 +327,7 @@ pub fn register(
         );
     }
     {
-        let pending = pending.clone();
+        let pending = pending;
         extensions.register_notification(
             "interaction/providerRuntimeHeadersCancelled",
             Arc::new(move |context: NotificationContext| {
@@ -358,7 +369,7 @@ pub fn register(
         );
     }
     {
-        let endpoints = endpoints.clone();
+        let endpoints = endpoints;
         extensions.add_env_contributor(Arc::new(move |_target| {
             let (endpoints, telemetry, repo, device_mid) = (
                 endpoints.clone(),

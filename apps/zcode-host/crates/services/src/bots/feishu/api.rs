@@ -137,7 +137,7 @@ impl FeishuApi {
         if let Some((token, expires_at)) = self
             .tokens
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&cache_key)
             .cloned()
             && expires_at > now_ms() + 60_000
@@ -174,7 +174,7 @@ impl FeishuApi {
         };
         self.tokens
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(cache_key, (token.to_owned(), now_ms() + 90 * 60_000));
         Ok(token.to_owned())
     }

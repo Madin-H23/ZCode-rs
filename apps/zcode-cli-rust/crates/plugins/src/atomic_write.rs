@@ -84,6 +84,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn files_are_replaced_and_locks_serialize_per_root() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sub/installed.json");

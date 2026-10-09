@@ -196,7 +196,9 @@ impl Engine {
         anyhow::ensure!(
             !(next.plan_enabled
                 && !previous.plan_enabled
-                && s.goal.as_ref().is_some_and(|g| g.active())),
+                && s.goal
+                    .as_ref()
+                    .is_some_and(zcode_cli_domain::goal::Goal::active)),
             "Plan and Goal cannot be active at the same time."
         );
         s.mode = next.mode;
@@ -208,7 +210,7 @@ impl Engine {
             s.plan_transition = Some(json!({"toolCallId": call, "planEnabled": next.plan_enabled}));
         }
         s.revision += 1;
-        self.node(id, |s, now| s.node_execution_state(now));
+        self.node(id, zcode_cli_domain::session::Session::node_execution_state);
         self.refresh_permissions();
         Ok(true)
     }

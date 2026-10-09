@@ -86,7 +86,7 @@ impl RpcTelemetry {
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 记录一次已完成的调用；累计满一批时立即发出。

@@ -153,6 +153,7 @@ impl Hub {
             BTreeMap::new()
         }
     }
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn prepare(
         &self,
         scope: &Scope<'_>,
@@ -344,6 +345,7 @@ impl Hub {
             .call(&binding.original, args, cancel)
             .await
     }
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn close_session(&self, session: &str, forget: bool) -> Result<()> {
         let _gate = self.gate.lock().await;
         {
@@ -366,17 +368,13 @@ impl Hub {
                 .flatten()
                 .map(|b| b.key.clone())
                 .collect::<BTreeSet<_>>();
-            let keys = state
-                .connections
-                .keys()
-                .filter(|k| !used.contains(*k))
-                .cloned()
-                .collect::<Vec<_>>();
-            keys.into_iter()
-                .filter_map(|k| state.connections.remove(&k))
-                .collect::<Vec<_>>()
+            let (removed, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut state.connections)
+                .into_iter()
+                .partition(|(key, _)| !used.contains(key));
+            state.connections = kept.into_iter().collect();
+            removed
         };
-        for connection in removed {
+        for (_, connection) in removed {
             connection.close().await?;
         }
         Ok(())
@@ -385,6 +383,7 @@ impl Hub {
     pub fn stopped(&self) -> CancellationToken {
         self.stop.clone()
     }
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn shutdown(&self) -> Result<()> {
         self.stop.cancel();
         let _gate = self.gate.lock().await;

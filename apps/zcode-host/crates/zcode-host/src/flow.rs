@@ -39,7 +39,7 @@ impl FlowGauge {
     fn lock(&self) -> std::sync::MutexGuard<'_, (usize, bool)> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 一条消息交给写任务。

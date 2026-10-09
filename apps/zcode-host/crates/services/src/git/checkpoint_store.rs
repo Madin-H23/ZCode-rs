@@ -276,6 +276,7 @@ impl CheckpointStore {
             .join(format!("{checkpoint_id}.json"))
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn save(&self, meta: &CheckpointMeta) -> std::io::Result<()> {
         let _guard = self.io.lock().await;
         let file = self.file(&meta.workspace_path, &meta.checkpoint_id);
@@ -289,6 +290,7 @@ impl CheckpointStore {
     }
 
     /// 读取失败、内容不合法都视为不存在（与 Node 的 `load` 一样返回 null）。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn load(&self, workspace_path: &str, checkpoint_id: &str) -> Option<CheckpointMeta> {
         let _guard = self.io.lock().await;
         let raw = tokio::fs::read_to_string(self.file(workspace_path, checkpoint_id))
@@ -297,6 +299,7 @@ impl CheckpointStore {
         CheckpointMeta::from_value(serde_json::from_str(&raw).ok()?)
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn delete(&self, workspace_path: &str, checkpoint_id: &str) -> std::io::Result<()> {
         let _guard = self.io.lock().await;
         match tokio::fs::remove_file(self.file(workspace_path, checkpoint_id)).await {

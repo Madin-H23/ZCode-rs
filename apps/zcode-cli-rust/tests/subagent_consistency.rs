@@ -50,7 +50,10 @@ impl SessionStore for Store {
     ) -> Result<()> {
         let selected = session.as_ref().is_some_and(|s| match self.stage {
             "child" => s.agent_profile.is_some(),
-            "parent" => s.children.values().any(|t| t.running()),
+            "parent" => s
+                .children
+                .values()
+                .any(zcode_cli_rust::domain::subagent::Task::running),
             _ => s.children.values().any(|t| t.status == "completed"),
         });
         if selected && !self.intercepted.swap(true, Ordering::SeqCst) {

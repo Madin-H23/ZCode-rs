@@ -266,7 +266,7 @@ impl Importer {
     fn lock(&self) -> std::sync::MutexGuard<'_, (HashMap<String, Value>, HashMap<String, Value>)> {
         self.completed
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     async fn ensure_loaded(&self) {
@@ -329,6 +329,7 @@ impl Importer {
     }
 
     /// `persistCompletedImportIndex`：串行写，临时文件 + rename。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn persist_index(&self) -> std::io::Result<()> {
         let _guard = self.index_lock.lock().await;
         let data: Map<String, Value> = self.lock().0.clone().into_iter().collect();
@@ -379,7 +380,7 @@ impl Importer {
             let in_flight = self
                 .in_flight
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             in_flight
                 .get(&key)
                 .or_else(|| in_flight.get(&keyed_share))
@@ -404,7 +405,7 @@ impl Importer {
             let mut in_flight = self
                 .in_flight
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             in_flight.insert(key.clone(), receiver.clone());
             in_flight.insert(keyed_share.clone(), receiver);
         }
@@ -422,7 +423,7 @@ impl Importer {
             let mut in_flight = self
                 .in_flight
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             in_flight.remove(&key);
             in_flight.remove(&keyed_share);
         }

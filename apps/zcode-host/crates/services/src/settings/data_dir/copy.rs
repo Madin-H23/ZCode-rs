@@ -176,7 +176,7 @@ async fn identical(left_path: &str, left: &Metadata, right_path: &str, right: &M
 }
 
 #[cfg(unix)]
-fn special_kind(file_type: &FileType) -> (bool, bool, bool) {
+fn special_kind(file_type: FileType) -> (bool, bool, bool) {
     use std::os::unix::fs::FileTypeExt;
     (
         file_type.is_char_device() || file_type.is_block_device(),
@@ -186,7 +186,7 @@ fn special_kind(file_type: &FileType) -> (bool, bool, bool) {
 }
 
 #[cfg(not(unix))]
-fn special_kind(_file_type: &FileType) -> (bool, bool, bool) {
+fn special_kind(_file_type: FileType) -> (bool, bool, bool) {
     (false, false, false)
 }
 
@@ -339,7 +339,7 @@ impl Copier {
                 .await
                 .map_err(|error| sys_error(&error, "lstat", &src))?;
             let file_type = src_stat.file_type();
-            let (device, socket, fifo) = special_kind(&file_type);
+            let (device, socket, fifo) = special_kind(file_type);
             if file_type.is_dir() {
                 return self.on_dir(&src_stat, dest_stat, &src, &dest).await;
             }

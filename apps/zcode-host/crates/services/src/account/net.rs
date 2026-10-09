@@ -297,7 +297,7 @@ impl SourceHeaders {
         let mut cached = self
             .device_mid
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if cached.is_none() {
             *cached = std::fs::read_to_string(&self.telemetry_state_file)
                 .ok()
@@ -610,9 +610,10 @@ impl ApiClient {
             .inner
             .unauthorized
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(handler);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handler);
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn network_options(&self) -> NetworkOptions {
         let mut cached = self.inner.options.lock().await;
         if let Some(options) = cached.as_ref() {
@@ -649,7 +650,7 @@ impl ApiClient {
             .inner
             .clients
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&key)
         {
             return Ok(client.clone());
@@ -671,7 +672,7 @@ impl ApiClient {
         self.inner
             .clients
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(key, client.clone());
         Ok(client)
     }
@@ -764,7 +765,7 @@ impl ApiClient {
                 .inner
                 .unauthorized
                 .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
             if let Some(handler) = handler {
                 tokio::spawn(handler(url.clone(), headers.clone()));

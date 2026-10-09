@@ -153,15 +153,11 @@ impl ProcessEnv {
 
     /// 删除（Windows 上所有大小写形式）并返回最后一个值。
     pub fn remove(&mut self, key: &str) -> Option<String> {
-        let keys: Vec<String> = self
-            .vars
-            .keys()
-            .filter(|candidate| self.matches(candidate, key))
-            .cloned()
-            .collect();
-        keys.into_iter()
-            .filter_map(|key| self.vars.remove(&key))
-            .last()
+        let (removed, kept): (BTreeMap<_, _>, BTreeMap<_, _>) = std::mem::take(&mut self.vars)
+            .into_iter()
+            .partition(|(candidate, _)| self.matches(candidate, key));
+        self.vars = kept;
+        removed.into_values().last()
     }
 
     pub fn vars(&self) -> &BTreeMap<String, String> {

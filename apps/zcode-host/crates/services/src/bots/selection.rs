@@ -493,7 +493,7 @@ impl Bots {
             marked
         } else {
             // 微信第一层只列供应商，模型放下一层；标题负责说明当前状态，列表不重复“当前”标记。
-            let mut plain = selection.clone();
+            let mut plain = selection;
             if text(&plain, "action") == Some("model.provider.set")
                 && let Some(options) = plain["options"].as_array_mut()
             {

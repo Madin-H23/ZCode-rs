@@ -1,4 +1,5 @@
 //! Isolated stage profiler: pass an empty workspace and HOME, never a user project.
+#![expect(clippy::print_stdout, reason = "开发用示例，结果输出到 stdout")]
 use std::{path::PathBuf, time::Instant};
 use tokio_util::sync::CancellationToken;
 use zcode_cli_rust::{

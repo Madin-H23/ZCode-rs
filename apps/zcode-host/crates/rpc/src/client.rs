@@ -48,7 +48,7 @@ impl Inner {
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Initialize 之前排队，之后直接发出；已关闭时丢弃。

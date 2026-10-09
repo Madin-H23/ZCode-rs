@@ -52,7 +52,7 @@ pub struct TaskLifecycle {
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl TaskLifecycle {
@@ -162,6 +162,7 @@ impl TaskLifecycle {
     }
 
     /// 每个 taskKey 的 drain 串行执行（Node 的 promise 链）。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub(super) fn schedule_drain(
         self: &Arc<Self>,
         target: WorkspaceTarget,

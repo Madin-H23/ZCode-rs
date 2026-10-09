@@ -205,7 +205,7 @@ impl ShellTasks {
         for job in jobs {
             let mut rx = job.state.clone();
             if rx.borrow().is_none() {
-                let _ = rx.wait_for(|v| v.is_some()).await;
+                let _ = rx.wait_for(std::option::Option::is_some).await;
             }
         }
         Ok(())
@@ -218,7 +218,7 @@ impl ShellTasks {
         for job in jobs.values() {
             let mut state = job.state.clone();
             if state.borrow().is_none() {
-                state.wait_for(|result| result.is_some()).await?;
+                state.wait_for(std::option::Option::is_some).await?;
             }
         }
         Ok(())

@@ -152,7 +152,7 @@ done
         CodingPlanSubscription::new(
             account.api.clone(),
             account.account_api.clone(),
-            account.credentials.clone(),
+            account.credentials,
             providers,
         )
     }

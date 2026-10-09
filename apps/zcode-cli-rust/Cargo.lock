@@ -2256,7 +2256,6 @@ dependencies = [
  "uuid",
  "zcode-cli-core-api",
  "zcode-cli-domain",
- "zcode-cli-protocol",
 ]
 
 [[package]]
@@ -2292,7 +2291,6 @@ dependencies = [
  "tracing",
  "zcode-cli-core-api",
  "zcode-cli-domain",
- "zcode-cli-protocol",
 ]
 
 [[package]]
@@ -2305,7 +2303,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "zcode-cli-domain",
- "zcode-cli-protocol",
 ]
 
 [[package]]
@@ -2329,7 +2326,6 @@ dependencies = [
 name = "zcode-cli-headless"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "serde",
  "serde_json",
  "tokio",
@@ -2354,7 +2350,6 @@ dependencies = [
  "uuid",
  "zcode-cli-core-api",
  "zcode-cli-domain",
- "zcode-cli-protocol",
 ]
 
 [[package]]
@@ -2381,7 +2376,6 @@ dependencies = [
  "zcode-cli-domain",
  "zcode-cli-host",
  "zcode-cli-net",
- "zcode-cli-protocol",
 ]
 
 [[package]]
@@ -2439,7 +2433,6 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "clap",
- "futures-util",
  "libc",
  "rusqlite",
  "serde_json",
@@ -2448,7 +2441,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "uuid",
  "zcode-cli-app-server",
  "zcode-cli-core",
  "zcode-cli-core-api",
@@ -2457,7 +2449,6 @@ dependencies = [
  "zcode-cli-host",
  "zcode-cli-model",
  "zcode-cli-net",
- "zcode-cli-protocol",
  "zcode-cli-state",
  "zcode-cli-tools",
  "zcode-cli-tui",
@@ -2477,14 +2468,12 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
- "tokio-util",
  "tracing",
  "url",
  "uuid",
  "zcode-cli-core-api",
  "zcode-cli-domain",
  "zcode-cli-host",
- "zcode-cli-protocol",
 ]
 
 [[package]]
@@ -2502,7 +2491,6 @@ dependencies = [
  "regex",
  "reqwest",
  "rmcp",
- "rustls",
  "serde",
  "serde_json",
  "sha2",
@@ -2521,7 +2509,6 @@ dependencies = [
  "zcode-cli-host",
  "zcode-cli-net",
  "zcode-cli-plugins",
- "zcode-cli-protocol",
 ]
 
 [[package]]

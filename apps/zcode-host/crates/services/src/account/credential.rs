@@ -536,7 +536,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(store.file()).unwrap(), "{not json");
         let backups: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
-            .filter_map(|entry| entry.ok())
+            .filter_map(std::result::Result::ok)
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .filter(|name| name.starts_with("credentials.json.corrupt-") && name.ends_with(".bak"))
             .collect();

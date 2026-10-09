@@ -160,7 +160,7 @@ fn int(value: Option<&Value>, minimum: Option<(i64, bool)>, maximum: Option<i64>
             vec![
                 ("code", J::S("too_big".into())),
                 ("maximum", J::N(MAX_SAFE)),
-                ("note", note.clone()),
+                ("note", note),
                 ("origin", J::S("int".into())),
                 ("inclusive", J::V(Value::Bool(true))),
             ],

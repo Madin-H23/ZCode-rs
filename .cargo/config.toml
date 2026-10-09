@@ -1,0 +1,4 @@
+# 仓库内所有 Rust workspace 共用的构建配置（docs/specs/rust-u0-foundation.md §2）。
+# Windows MSVC 目标静态链接 C 运行时，安装后的二进制不依赖 VC++ 运行库。
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

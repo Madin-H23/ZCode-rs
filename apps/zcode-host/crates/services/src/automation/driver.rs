@@ -214,7 +214,7 @@ impl TaskDriver {
     fn inputs(&self) -> std::sync::MutexGuard<'_, HashMap<(String, String), String>> {
         self.active_inputs
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// 订阅终态；必须在发送输入之前订阅，避免快速完成的轮次漏掉。

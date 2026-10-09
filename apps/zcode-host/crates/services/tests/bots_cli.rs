@@ -124,6 +124,10 @@ async fn serve_mock_model(listener: TcpListener) {
 }
 
 /// 订阅、等到初始快照作为基线，发送一轮输入，收集投影事件直到轮次收口。
+#[expect(
+    clippy::print_stderr,
+    reason = "设置 ZCODE_TEST_DUMP_FRAMES 时输出帧便于排查"
+)]
 async fn run_turn(
     runtime: &AgentRuntime,
     target: &WorkspaceTarget,

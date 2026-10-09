@@ -232,7 +232,7 @@ impl Engine {
         s.reasoning_level = selection.reasoning_level;
         s.thought_levels = levels;
         if changed {
-            self.node(id, |s, now| s.node_model_selection(now));
+            self.node(id, zcode_cli_domain::session::Session::node_model_selection);
             self.window_selected(id);
         }
         Ok(())
@@ -255,7 +255,7 @@ impl Engine {
             self.refresh_catalog()?;
         }
         Ok(
-            json!({"receivedRevision":p["revision"],"providerCount":p["providers"].as_object().map_or(0,|o|o.len()),"status":if received{"received"}else{"unchanged"}}),
+            json!({"receivedRevision":p["revision"],"providerCount":p["providers"].as_object().map_or(0,serde_json::Map::len),"status":if received{"received"}else{"unchanged"}}),
         )
     }
     pub(super) fn refresh_catalog(&mut self) -> Result<()> {

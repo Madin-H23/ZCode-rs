@@ -653,6 +653,7 @@ impl SkillsService {
         }))
     }
 
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn set_enabled(&self, params: Value) -> Result<(), RpcError> {
         let params: WorkspaceParams = parse_params(params)?;
         let skill_id = params.skill_id.unwrap_or_default();

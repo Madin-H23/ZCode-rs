@@ -131,6 +131,7 @@ impl Bots {
     }
 
     /// 串行对齐；只有最新一次刷新会走完。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn refresh_polling(self: &Arc<Self>, kind: Polling) -> anyhow::Result<()> {
         let runtimes = self.polling(kind);
         let generation = runtimes.generation.fetch_add(1, Ordering::SeqCst) + 1;

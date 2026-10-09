@@ -158,11 +158,11 @@ pub fn projection(s: &crate::session::Session, patch: &mut Value) {
         return;
     }
     patch["subagents"] = json!({"revision":s.revision,"childSessionIds":s.children.values().map(|t|&t.child_id).collect::<Vec<_>>(),
-        "running":s.children.values().filter(|t|t.running()).map(|t|t.summary()).collect::<Vec<_>>(),"endedTotal":s.children.values().filter(|t|!t.running()).count()});
+        "running":s.children.values().filter(|t|t.running()).map(Task::summary).collect::<Vec<_>>(),"endedTotal":s.children.values().filter(|t|!t.running()).count()});
     patch["backgroundWorks"].as_array_mut().unwrap().extend(
         s.children
             .values()
             .filter(|t| t.background && (t.running() || !t.notified))
-            .map(|t| t.background_work()),
+            .map(Task::background_work),
     );
 }

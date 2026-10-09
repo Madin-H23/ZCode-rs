@@ -361,7 +361,10 @@ impl StartPlanBilling {
         let url = self.balance_url();
         let key = json!({"authorization": authorization.trim(), "url": url}).to_string();
         let future = {
-            let mut in_flight = self.in_flight.lock().unwrap_or_else(|p| p.into_inner());
+            let mut in_flight = self
+                .in_flight
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if invalidate {
                 in_flight.remove(&key);
             }
@@ -381,7 +384,9 @@ impl StartPlanBilling {
                     let map = this.in_flight.clone();
                     tokio::spawn(async move {
                         tokio::time::sleep(remaining).await;
-                        let mut map = map.lock().unwrap_or_else(|p| p.into_inner());
+                        let mut map = map
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                         if map.get(&evict_key).is_some_and(|(entry, _)| *entry == id) {
                             map.remove(&evict_key);
                         }

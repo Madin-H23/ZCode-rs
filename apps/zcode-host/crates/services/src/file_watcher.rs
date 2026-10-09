@@ -79,7 +79,7 @@ struct SharedWatcher {
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// notify 回调线程上执行：只做路由，不碰 watcher 本身（FSEvents 停止时会 join 回调线程）。

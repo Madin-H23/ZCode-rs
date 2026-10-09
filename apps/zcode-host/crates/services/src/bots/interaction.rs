@@ -734,7 +734,7 @@ impl Bots {
         }
         let mut answer = Map::new();
         answer.insert("action".into(), json!(action));
-        if let Some(content) = content.filter(|content| content.is_object()) {
+        if let Some(content) = content.filter(serde_json::Value::is_object) {
             answer.insert("content".into(), content);
         }
         let target = context_target(&auth.context);
@@ -1271,7 +1271,7 @@ mod tests {
         );
         assert_eq!(
             parse_response_value(&format!("{token} 2")),
-            (Some(token.clone()), "2".into())
+            (Some(token), "2".into())
         );
         assert_eq!(
             parse_response_value("hello world"),

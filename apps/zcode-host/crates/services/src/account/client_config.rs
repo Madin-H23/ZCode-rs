@@ -114,7 +114,10 @@ impl ClientConfig {
             .append_pair("platform", &format!("{}-{}", node_platform(), node_arch()));
         let key = url.to_string();
         let future = {
-            let mut entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+            let mut entries = self
+                .entries
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let entry = entries.entry(key.clone()).or_default();
             if !force_refresh
                 && let (Some(snapshot), Some(expires)) = (&entry.snapshot, entry.expires_at)
@@ -129,7 +132,10 @@ impl ClientConfig {
                     let request_key = key.clone();
                     let future = async move {
                         let result = this.fetch(&request_key).await;
-                        let mut entries = this.entries.lock().unwrap_or_else(|p| p.into_inner());
+                        let mut entries = this
+                            .entries
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                         let entry = entries.entry(request_key).or_default();
                         entry.pending = None;
                         if let Ok(snapshot) = &result {

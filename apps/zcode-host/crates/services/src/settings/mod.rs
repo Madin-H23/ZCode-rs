@@ -153,6 +153,7 @@ impl SettingStore {
     }
 
     /// 在进程内队列和跨进程锁内执行一次读改写。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn locked<T>(
         &self,
         operation: impl AsyncFnOnce() -> anyhow::Result<T>,

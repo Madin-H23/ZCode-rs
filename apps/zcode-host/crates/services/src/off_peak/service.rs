@@ -142,7 +142,7 @@ impl OffPeakService {
     fn lock(&self) -> std::sync::MutexGuard<'_, SyncState> {
         self.sync
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn request_wake(&self) {

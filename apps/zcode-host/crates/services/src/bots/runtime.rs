@@ -74,6 +74,7 @@ impl Bots {
     }
 
     /// 串行对齐；只有最新一次刷新会走完（`createLatestRuntimeRefreshQueue`）。
+    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn refresh_feishu(self: &Arc<Self>) -> anyhow::Result<()> {
         let generation = self.runtimes.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let _turn = self.runtimes.queue.lock().await;

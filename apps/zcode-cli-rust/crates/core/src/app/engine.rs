@@ -203,7 +203,7 @@ impl Engine {
         let mut storage_failed = result
             .as_ref()
             .err()
-            .is_some_and(|e| e.is::<StorageCommitFailure>());
+            .is_some_and(anyhow::Error::is::<StorageCommitFailure>);
         if result.is_err() {
             self.child_updates.clear();
         }
@@ -353,7 +353,7 @@ impl Engine {
         let storage_failed = result
             .as_ref()
             .err()
-            .is_some_and(|e| e.is::<StorageCommitFailure>());
+            .is_some_and(anyhow::Error::is::<StorageCommitFailure>);
         let result = result.map_err(|error| {
             // 失败请求不能发布半途产生的事件。
             self.outbox.clear();

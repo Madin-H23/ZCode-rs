@@ -392,12 +392,13 @@ fn process_tail(file: &Path) -> Tail {
     let tails = TAILS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut tails = tails
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     tails.entry(file.to_owned()).or_default().clone()
 }
 
 /// 在跨进程锁内执行 `operation`。同一进程内对同一路径先 FIFO 排队（tokio Mutex 公平），
 /// 避免几十个调用方同时轮询目录锁形成惊群。
+#[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
 pub async fn with_file_lock<T>(
     file: &Path,
     options: &LockOptions,

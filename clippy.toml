@@ -1,0 +1,16 @@
+# 仓库内所有 Rust workspace 共用的 clippy 配置；clippy 会从 crate 目录向上找到这个文件。
+# 规则来源：docs/specs/rust-engineering-practices.md §2.2。
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-print-in-tests = true
+
+# tokio 的锁 guard 跨 .await 持有时，其他任务会一直等待；std 的 guard 由 await_holding_lock 覆盖。
+# 存量位置标注了 `#[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]`：
+# 在 U2 改为 actor 或缩小临界区后删除（docs/specs/rust-unified-host.md 第 12 节）。
+await-holding-invalid-types = [
+  "tokio::sync::MutexGuard",
+  "tokio::sync::OwnedMutexGuard",
+  "tokio::sync::RwLockReadGuard",
+  "tokio::sync::RwLockWriteGuard",
+]

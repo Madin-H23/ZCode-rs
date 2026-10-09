@@ -89,7 +89,7 @@ impl TaskContext {
     fn lock_targets(&self) -> std::sync::MutexGuard<'_, HashMap<String, WorkspaceTarget>> {
         self.targets
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// `rememberTaskTarget` / `rememberIndexedTaskMeta`。

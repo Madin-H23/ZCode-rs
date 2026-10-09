@@ -10,7 +10,7 @@ impl Engine {
     /// V4 `deleteSession`: closes the runtime session and records the command ACK.
     pub(super) async fn close_session(&mut self, c: &Command) -> Result<Value> {
         ensure!(
-            c.payload.as_object().is_some_and(|p| p.is_empty()),
+            c.payload.as_object().is_some_and(serde_json::Map::is_empty),
             "deleteSession requires an empty payload"
         );
         let id = c.session_id.as_deref().context("Session id required")?;
@@ -83,7 +83,10 @@ impl Engine {
         // TS close 会释放执行资源；必须收齐真正的终态，不能提前 ACK 后让 Shell 继续写文件。
         // 同时消费其他会话事件，避免有界事件通道阻塞取消后的终态投递。
         while self.active.contains_key(id)
-            || self.sessions[id].children.values().any(|t| t.running())
+            || self.sessions[id]
+                .children
+                .values()
+                .any(zcode_cli_domain::subagent::Task::running)
             || self.sessions[id]
                 .background
                 .values()

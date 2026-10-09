@@ -3,6 +3,7 @@
 //! Like the App Server it only talks to the runtime through the transport
 //! contract (`zcode_cli_core_api::{ClientMsg, ServerMsg}`); it never owns
 //! session, model or tool facts.
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 pub mod args;
 mod driver;
 mod output;

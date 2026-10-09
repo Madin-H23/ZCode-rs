@@ -246,7 +246,7 @@ impl Engine {
                     Some(json!({"previousTitle": previous, "source": "custom", "title": title}));
                 s.title_source = "custom".into();
                 s.revision += 1;
-                self.node(&id, |s, now| s.node_title(now));
+                self.node(&id, zcode_cli_domain::session::Session::node_title);
             }
             "setFollowupMode" => {
                 let mode = c.payload["mode"]

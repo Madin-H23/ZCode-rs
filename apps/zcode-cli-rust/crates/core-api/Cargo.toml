@@ -16,4 +16,6 @@ serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 zcode-cli-domain.workspace = true
-zcode-cli-protocol.workspace = true
+
+[lib]
+doctest = false

@@ -122,7 +122,7 @@ pub struct Bots {
 pub(crate) fn guard<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 pub(crate) fn error(message: impl std::fmt::Display) -> RpcError {
