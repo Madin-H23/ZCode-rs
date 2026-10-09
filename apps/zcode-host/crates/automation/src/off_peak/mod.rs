@@ -224,11 +224,17 @@ impl ServiceChannel for GrayOverlay {
     }
 }
 
+/// 安装结果：随 Host 存活的对象，以及交给 Scheduler 的派发器。
+pub struct Installed {
+    pub keepalive: Keepalive,
+    pub dispatcher: Arc<dispatch::OffPeakDispatcher>,
+}
+
 pub fn install(
     area: &Arc<Area>,
     registry: &mut ChannelRegistry,
     router: &mut ControlRouter,
-) -> Option<Keepalive> {
+) -> Option<Installed> {
     let vars = area.context.environment.vars.clone();
     // 真实凭据链（docs/specs/rust-host-integration.md §2.1）：账号栈注入时用它，否则只有 mock。
     let credentials = credentials::CredentialSource::new(
@@ -252,7 +258,7 @@ pub fn install(
             return None;
         }
     };
-    let bridge = area.bridge.clone();
+    let wake = area.scheduler_wake.clone();
     let driver = area.driver.clone();
     let service = OffPeakService::new(
         OffPeakRepo::new(area.tasks_index.clone()),
@@ -264,7 +270,8 @@ pub fn install(
                 .map(|elapsed| elapsed.as_millis() as i64)
                 .unwrap_or_default()
         }),
-        Arc::new(move || bridge.post(json!({"type": "off-peak-scheduler-wake-request"}))),
+        // U4：翻为可派发时直接唤醒 Host 内的 Scheduler，不再经 Main（off-peak-scheduler-wake-request）。
+        Arc::new(move || wake.wake()),
         Some(Arc::new(move |conversation, path, identity| {
             let driver = driver.clone();
             Box::pin(async move {
@@ -293,11 +300,15 @@ pub fn install(
         reverse::register(area, service.clone(), inner);
     }
     let dispatcher = dispatch::OffPeakDispatcher::start(area.clone(), service.clone());
+    // Main 的 Node scheduler 经 Main 转发的派发；Rust 开关下 Main 停止拉起它之后不再有发送方，集成时删除。
     let run = dispatcher.clone();
     router.on(dispatch::OFF_PEAK_RUN, move |message| run.handle(message));
     // 合并 automation 与 agent 两个区域时发现两条推送 updateOffPeakToolPolicy 的写路径（这里的使用前钩子
     // 与 agent runtime 的启动回放）。统一由 agent runtime 在每代 CLI 启动时推送（同 Node 的 replay），
     // 这里只打开门禁；门禁同时让 createSession 带上 offPeakToolEnabled。
     area.agent.extensions().enable_off_peak_tools();
-    Some(Box::new((service, dispatcher)))
+    Some(Installed {
+        keepalive: Box::new((service, dispatcher.clone())),
+        dispatcher,
+    })
 }

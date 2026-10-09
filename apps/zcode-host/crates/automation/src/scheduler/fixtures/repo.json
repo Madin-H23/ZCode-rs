@@ -1,0 +1,2404 @@
+{
+  "source": "scripts/rust-host/scheduler-fixtures.ts",
+  "baseNow": 1791300000000,
+  "ops": [
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at) VALUES ('a-due','a-due','*/5 * * * *','run a-due','null','/tmp/ws-a','/tmp/ws-a',1,1,1791299999000)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at) VALUES ('a-future','a-future','*/5 * * * *','run a-future','null','/tmp/ws-a','/tmp/ws-a',2,1,1791300060000)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,retry_at,dispatch_attempts,dispatch_status) VALUES ('a-retry-wait','a-retry-wait','*/5 * * * *','run a-retry-wait','null','/tmp/ws-a','/tmp/ws-a',3,1,1791299880000,1791300010000,2,'failed_to_dispatch')"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,retry_at,dispatch_attempts,dispatch_status) VALUES ('a-retry-due','a-retry-due','*/5 * * * *','run a-retry-due','null','/tmp/ws-a','/tmp/ws-a',4,1,1791299400000,1791299999999,1,'failed_to_dispatch')"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,enabled,lifecycle_status) VALUES ('a-disabled','a-disabled','*/5 * * * *','run a-disabled','null','/tmp/ws-a','/tmp/ws-a',5,1,1791299999000,0,'paused')"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,running,claimed_at,dispatch_status) VALUES ('a-foreign','a-foreign','*/5 * * * *','run a-foreign','null','/tmp/ws-a','/tmp/ws-a',6,1,1791299999000,1,1791299940000,'claimed')"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,running,claimed_at,dispatch_status) VALUES ('a-stale','a-stale','*/5 * * * *','run a-stale','null','/tmp/ws-a','/tmp/ws-a',7,1,1791299998000,1,1791299399999,'claimed')"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,end_at) VALUES ('a-expired','a-expired','*/5 * * * *','run a-expired','null','/tmp/ws-a','/tmp/ws-a',8,1,1791299999000,1791299999999)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,recurring,schedule_rule,target_task_id,mode,workspace_identity) VALUES ('a-once','a-once','*/5 * * * *','run a-once','null','/tmp/ws-a','/tmp/ws-a',9,1,1791299999500,0,'{\"unit\":\"minute\",\"interval\":5,\"hour\":0,\"minute\":0,\"anchorAt\":1791299700000}','task-1','plan',' id-a ')"
+    },
+    {
+      "op": "claimDue",
+      "now": 1791300000000
+    },
+    {
+      "op": "claimDue",
+      "now": 1791300000000
+    },
+    {
+      "op": "upsertRunClaimed",
+      "run": {
+        "runId": "a-due:1791299999000",
+        "automationId": "a-due",
+        "workspaceKey": "/tmp/ws-a",
+        "scheduledAt": 1791299999000,
+        "trigger": "schedule"
+      },
+      "now": 1791300000001
+    },
+    {
+      "op": "upsertRunClaimed",
+      "run": {
+        "runId": "a-due:1791299999000",
+        "automationId": "a-due",
+        "workspaceKey": "/tmp/ws-a",
+        "scheduledAt": 1791299999000,
+        "trigger": "schedule"
+      },
+      "modelSelection": {
+        "providerId": " p2 ",
+        "modelId": "m2",
+        "options": {}
+      },
+      "now": 1791300000002
+    },
+    {
+      "op": "upsertRunClaimed",
+      "run": {
+        "runId": "a-due:1791299999000",
+        "automationId": "a-due",
+        "workspaceKey": "/tmp/ws-a",
+        "scheduledAt": 1791299999000,
+        "trigger": "schedule"
+      },
+      "modelSelection": {
+        "providerId": "p3",
+        "modelId": "m3"
+      },
+      "now": 1791300000003
+    },
+    {
+      "op": "getRun",
+      "runId": "a-due:1791299999000"
+    },
+    {
+      "op": "markRunDispatch",
+      "runId": "a-due:1791299999000",
+      "status": "dispatched",
+      "sessionId": "s-1"
+    },
+    {
+      "op": "markDispatched",
+      "id": "a-due",
+      "dispatchedAt": 1791300000005,
+      "nextRunAt": 1791300300000
+    },
+    {
+      "op": "upsertRunClaimed",
+      "run": {
+        "runId": "a-retry-due:1791299400000",
+        "automationId": "a-retry-due",
+        "workspaceKey": "/tmp/ws-a",
+        "scheduledAt": 1791299400000,
+        "trigger": "schedule"
+      },
+      "now": 1791300000006
+    },
+    {
+      "op": "markRunDispatch",
+      "runId": "a-retry-due:1791299400000",
+      "status": "failed_to_dispatch",
+      "error": "no model",
+      "now": 1791300000007
+    },
+    {
+      "op": "markDispatchFailed",
+      "id": "a-retry-due",
+      "failedAt": 1791300000008,
+      "error": "no model",
+      "kind": "transient",
+      "nextRunAt": 1791300300000
+    },
+    {
+      "op": "markDispatchFailed",
+      "id": "a-stale",
+      "failedAt": 1791300000009,
+      "error": "fatal",
+      "kind": "permanent",
+      "nextRunAt": null
+    },
+    {
+      "op": "markDispatched",
+      "id": "a-once",
+      "dispatchedAt": 1791300000010,
+      "nextRunAt": 1791300600000
+    },
+    {
+      "op": "markDispatched",
+      "id": "missing",
+      "dispatchedAt": 1791300000010,
+      "nextRunAt": null
+    },
+    {
+      "op": "markDispatchFailed",
+      "id": "missing",
+      "failedAt": 1791300000010,
+      "error": "x",
+      "kind": "transient"
+    },
+    {
+      "op": "releaseClaim",
+      "id": "a-foreign",
+      "now": 1791300000011
+    },
+    {
+      "op": "releaseClaim",
+      "id": "a-future",
+      "now": 1791300000012
+    },
+    {
+      "op": "skipAndReschedule",
+      "params": {
+        "automationId": "a-future",
+        "runId": "a-future:1791299600000",
+        "workspaceKey": "/tmp/ws-a",
+        "scheduledAt": 1791299600000,
+        "reason": "computer_asleep_or_app_not_running",
+        "nextRunAt": 1791300120000
+      },
+      "now": 1791300000013
+    },
+    {
+      "op": "skipAndReschedule",
+      "params": {
+        "automationId": "a-future",
+        "runId": "a-future:1791299600000",
+        "workspaceKey": "/tmp/ws-a",
+        "scheduledAt": 1791299600000,
+        "reason": "again",
+        "nextRunAt": 1791300180000
+      },
+      "now": 1791300000014
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,recurring,max_runs) VALUES ('a-missed-once','a-missed-once','*/5 * * * *','run a-missed-once','null','/tmp/ws-a','/tmp/ws-a',10,1,1791299100000,0,1)"
+    },
+    {
+      "op": "skipAndReschedule",
+      "params": {
+        "automationId": "a-missed-once",
+        "runId": "a-missed-once:1791299100000",
+        "workspaceKey": "/tmp/ws-a",
+        "scheduledAt": 1791299100000,
+        "reason": "computer_asleep_or_app_not_running",
+        "nextRunAt": null,
+        "finalize": true
+      },
+      "now": 1791300000015
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,dispatch_attempts,retry_at,running,claimed_at) VALUES ('a-limit-recurring','a-limit-recurring','*/5 * * * *','run a-limit-recurring','null','/tmp/ws-a','/tmp/ws-a',11,1,1791299999000,4,1791299999999,1,1791300000000)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,recurring,max_runs,dispatch_attempts,retry_at,running,claimed_at) VALUES ('a-limit-once','a-limit-once','*/5 * * * *','run a-limit-once','null','/tmp/ws-a','/tmp/ws-a',12,1,1791299999000,0,3,4,1791299999999,1,1791300000000)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,dispatch_attempts) VALUES ('a-attempt-4','a-attempt-4','*/5 * * * *','run a-attempt-4','null','/tmp/ws-a','/tmp/ws-a',13,1,1791299999000,3)"
+    },
+    {
+      "op": "markDispatchFailed",
+      "id": "a-limit-recurring",
+      "failedAt": 1791300000016,
+      "error": "e5",
+      "kind": "transient",
+      "nextRunAt": 1791300240000
+    },
+    {
+      "op": "markDispatchFailed",
+      "id": "a-limit-once",
+      "failedAt": 1791300000017,
+      "error": "e5",
+      "kind": "transient",
+      "nextRunAt": 1791300240000
+    },
+    {
+      "op": "markDispatchFailed",
+      "id": "a-attempt-4",
+      "failedAt": 1791300000018,
+      "error": "e4",
+      "kind": "transient"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,end_at) VALUES ('a-end','a-end','*/5 * * * *','run a-end','null','/tmp/ws-a','/tmp/ws-a',14,1,1791299999000,1791300100000)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,recurring,max_runs,scheduled_run_count,run_count) VALUES ('a-max3','a-max3','*/5 * * * *','run a-max3','null','/tmp/ws-a','/tmp/ws-a',15,1,1791299999000,0,3,1,4)"
+    },
+    {
+      "op": "markDispatched",
+      "id": "a-end",
+      "dispatchedAt": 1791300000019,
+      "nextRunAt": 1791300200000
+    },
+    {
+      "op": "markDispatched",
+      "id": "a-max3",
+      "dispatchedAt": 1791300000020,
+      "nextRunAt": 1791300050000
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at) VALUES ('a-manual','a-manual','*/5 * * * *','run a-manual','null','/tmp/ws-a','/tmp/ws-a',16,1,1791300900000)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at) VALUES ('a-manual-stale','a-manual-stale','*/5 * * * *','run a-manual-stale','null','/tmp/ws-a','/tmp/ws-a',17,1,1791300900000)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at,running,claimed_at) VALUES ('a-busy','a-busy','*/5 * * * *','run a-busy','null','/tmp/ws-a','/tmp/ws-a',18,1,1791300900000,1,1791299999000)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automations (automation_id,title,cron_expr,prompt,model_selection,workspace_key,workspace_path,created_at,updated_at,next_run_at) VALUES ('a-manual-twice','a-manual-twice','*/5 * * * *','run a-manual-twice','{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}','/tmp/ws-a','/tmp/ws-a',19,1,1791300900000)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automation_runs (run_id, automation_id, workspace_key, scheduled_at, trigger, dispatch_status, attempts, created_at, updated_at) VALUES ('a-manual:manual:1', 'a-manual', '/tmp/ws-a', 1791299999950, 'manual', 'claimed', 0, 1791299999950, 1791299999950)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automation_runs (run_id, automation_id, workspace_key, scheduled_at, trigger, dispatch_status, attempts, created_at, updated_at) VALUES ('a-manual:manual:held', 'a-manual', '/tmp/ws-a', 1791299999960, 'manual', 'claimed', 1, 1791299999960, 1791299999960)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automation_runs (run_id, automation_id, workspace_key, scheduled_at, trigger, dispatch_status, attempts, created_at, updated_at) VALUES ('a-manual-stale:manual:1', 'a-manual-stale', '/tmp/ws-a', 1791299399995, 'manual', 'claimed', 1, 1791299399995, 1791299399995)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automation_runs (run_id, automation_id, workspace_key, scheduled_at, trigger, dispatch_status, attempts, created_at, updated_at) VALUES ('a-busy:manual:1', 'a-busy', '/tmp/ws-a', 1791299999970, 'manual', 'claimed', 0, 1791299999970, 1791299999970)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automation_runs (run_id, automation_id, workspace_key, scheduled_at, trigger, dispatch_status, attempts, created_at, updated_at) VALUES ('a-manual-twice:manual:1', 'a-manual-twice', '/tmp/ws-a', 1791299999980, 'manual', 'claimed', 0, 1791299999980, 1791299999980)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO automation_runs (run_id, automation_id, workspace_key, scheduled_at, trigger, dispatch_status, attempts, created_at, updated_at) VALUES ('a-manual-twice:manual:2', 'a-manual-twice', '/tmp/ws-a', 1791299999990, 'manual', 'claimed', 0, 1791299999990, 1791299999990)"
+    },
+    {
+      "op": "claimManualRuns",
+      "now": 1791300000100
+    },
+    {
+      "op": "claimManualRuns",
+      "now": 1791300000100
+    },
+    {
+      "op": "markManualRunDispatched",
+      "runId": "a-manual:manual:1",
+      "sessionId": "s-m1",
+      "dispatchedAt": 1791300000101
+    },
+    {
+      "op": "settleManualClaim",
+      "id": "a-manual",
+      "runId": "a-manual:manual:1",
+      "ok": true
+    },
+    {
+      "op": "markRunDispatch",
+      "runId": "a-manual-stale:manual:1",
+      "status": "failed_to_dispatch",
+      "error": "boom",
+      "now": 1791300000102
+    },
+    {
+      "op": "settleManualClaim",
+      "id": "a-manual-stale",
+      "runId": "a-manual-stale:manual:1",
+      "ok": false,
+      "now": 1791300000103
+    },
+    {
+      "op": "settleManualClaim",
+      "id": "a-manual-twice",
+      "runId": "missing:manual:x",
+      "ok": false,
+      "now": 1791300000104
+    },
+    {
+      "op": "settleManualClaim",
+      "id": "missing",
+      "runId": "missing:manual:y",
+      "ok": false,
+      "now": 1791300000105
+    },
+    {
+      "op": "claimManualRuns",
+      "now": 1791300000106
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO off_peak_tasks (off_peak_task_id,server_ticket_id,title,prompt,permission_mode,model_selection,workspace_key,workspace_path,status,queued_at,schedulable,created_at,updated_at,started_at,conversation_id) VALUES ('o-run','ticket-o-run','o-run','do o-run','yolo','{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}','/tmp/ws-a','/tmp/ws-a','running',1,1,100,100,50,'c-run')"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO off_peak_tasks (off_peak_task_id,server_ticket_id,title,prompt,permission_mode,model_selection,workspace_key,workspace_path,status,queued_at,schedulable,created_at,updated_at) VALUES ('o-q1','ticket-o-q1','o-q1','do o-q1','yolo','{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}','/tmp/ws-a','/tmp/ws-a','queued',10,1,10,100)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO off_peak_tasks (off_peak_task_id,server_ticket_id,title,prompt,permission_mode,model_selection,workspace_key,workspace_path,status,queued_at,schedulable,created_at,updated_at) VALUES ('o-q2','ticket-o-q2','o-q2','do o-q2','yolo','{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}','/tmp/ws-a','/tmp/ws-a','queued',5,1,20,100)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO off_peak_tasks (off_peak_task_id,server_ticket_id,title,prompt,permission_mode,model_selection,workspace_key,workspace_path,status,queued_at,schedulable,created_at,updated_at,workspace_identity) VALUES ('o-q2b','ticket-o-q2b','o-q2b','do o-q2b','yolo','{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}','/tmp/ws-a','/tmp/ws-a','queued',5,1,15,100,'id-x')"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO off_peak_tasks (off_peak_task_id,server_ticket_id,title,prompt,permission_mode,model_selection,workspace_key,workspace_path,status,queued_at,schedulable,created_at,updated_at) VALUES ('o-hidden','ticket-o-hidden','o-hidden','do o-hidden','yolo','{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}','/tmp/ws-a','/tmp/ws-a','queued',100,0,100,100)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO off_peak_tasks (off_peak_task_id,server_ticket_id,title,prompt,permission_mode,model_selection,workspace_key,workspace_path,status,queued_at,schedulable,created_at,updated_at) VALUES ('o-bad','ticket-o-bad','o-bad','do o-bad','yolo',NULL,'/tmp/ws-a','/tmp/ws-a','queued',2,1,100,100)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO off_peak_tasks (off_peak_task_id,server_ticket_id,title,prompt,permission_mode,model_selection,workspace_key,workspace_path,status,queued_at,schedulable,created_at,updated_at,claim_running,claimed_at) VALUES ('o-foreign','ticket-o-foreign','o-foreign','do o-foreign','yolo','{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}','/tmp/ws-a','/tmp/ws-a','queued',3,1,100,100,1,1791299999000)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO off_peak_tasks (off_peak_task_id,server_ticket_id,title,prompt,permission_mode,model_selection,workspace_key,workspace_path,status,queued_at,schedulable,created_at,updated_at,claim_running,claimed_at) VALUES ('o-stale','ticket-o-stale','o-stale','do o-stale','yolo','{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}','/tmp/ws-a','/tmp/ws-a','queued',4,1,100,100,1,1791299399999)"
+    },
+    {
+      "op": "sql",
+      "sql": "INSERT INTO off_peak_tasks (off_peak_task_id,server_ticket_id,title,prompt,permission_mode,model_selection,workspace_key,workspace_path,status,queued_at,schedulable,created_at,updated_at) VALUES ('o-paused','ticket-o-paused','o-paused','do o-paused','yolo','{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}','/tmp/ws-a','/tmp/ws-a','paused',100,1,100,100)"
+    },
+    {
+      "op": "countActive"
+    },
+    {
+      "op": "recoverInterrupted",
+      "now": 1791300000000
+    },
+    {
+      "op": "recoverInterrupted",
+      "now": 1791300000001
+    },
+    {
+      "op": "countActive"
+    },
+    {
+      "op": "offPeakClaimDue",
+      "now": 1791300000002
+    },
+    {
+      "op": "offPeakClaimDue",
+      "now": 1791300000002
+    },
+    {
+      "op": "markRunning",
+      "id": "o-q2",
+      "update": {
+        "startedAt": 1791300000003,
+        "conversationId": "c-2",
+        "sessionId": "c-2"
+      }
+    },
+    {
+      "op": "markRunning",
+      "id": "o-q2",
+      "update": {
+        "startedAt": 1791300000004
+      }
+    },
+    {
+      "op": "markRunning",
+      "id": "o-run",
+      "update": {
+        "startedAt": 1791300000005,
+        "serverTicketId": "ticket-new"
+      }
+    },
+    {
+      "op": "releaseOffPeakClaim",
+      "id": "o-q1",
+      "error": "boom",
+      "now": 1791300000006
+    },
+    {
+      "op": "releaseOffPeakClaim",
+      "id": "o-q1",
+      "error": "again",
+      "now": 1791300000007
+    },
+    {
+      "op": "releaseOffPeakClaim",
+      "id": "o-q2b",
+      "now": 1791300000008
+    },
+    {
+      "op": "releaseOffPeakClaim",
+      "id": "o-stale",
+      "error": "",
+      "now": 1791300000009
+    },
+    {
+      "op": "countActive"
+    },
+    {
+      "op": "sql",
+      "sql": "UPDATE off_peak_tasks SET claim_running = 1, claimed_at = 1791300000010 WHERE off_peak_task_id IN ('o-q1', 'o-q2b', 'o-stale', 'o-hidden')"
+    },
+    {
+      "op": "settleOffPeak",
+      "id": "o-q1",
+      "ok": false,
+      "error": "gateway busy",
+      "failureKind": "transient",
+      "now": 1791300000011
+    },
+    {
+      "op": "sql",
+      "sql": "UPDATE off_peak_tasks SET claim_running = 1 WHERE off_peak_task_id = 'o-q1'"
+    },
+    {
+      "op": "settleOffPeak",
+      "id": "o-q1",
+      "ok": false,
+      "error": "gateway busy",
+      "failureKind": "transient",
+      "now": 1791300000012
+    },
+    {
+      "op": "sql",
+      "sql": "UPDATE off_peak_tasks SET claim_running = 1 WHERE off_peak_task_id = 'o-q1'"
+    },
+    {
+      "op": "settleOffPeak",
+      "id": "o-q1",
+      "ok": true,
+      "sessionId": "s-q1",
+      "now": 1791300000013
+    },
+    {
+      "op": "settleOffPeak",
+      "id": "o-q2b",
+      "ok": false,
+      "error": "no credentials",
+      "failureKind": "permanent",
+      "now": 1791300000014
+    },
+    {
+      "op": "settleOffPeak",
+      "id": "o-q2b",
+      "ok": false,
+      "error": "late",
+      "failureKind": "permanent",
+      "now": 1791300000015
+    },
+    {
+      "op": "settleOffPeak",
+      "id": "o-q2b",
+      "ok": true,
+      "sessionId": "s-late",
+      "now": 1791300000016
+    },
+    {
+      "op": "settleOffPeak",
+      "id": "o-stale",
+      "ok": true,
+      "sessionId": "",
+      "now": 1791300000017
+    },
+    {
+      "op": "settleOffPeak",
+      "id": "o-hidden",
+      "ok": false,
+      "error": "e",
+      "failureKind": "transient",
+      "now": 1791300000018
+    },
+    {
+      "op": "countActive"
+    }
+  ],
+  "results": [
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": [
+        {
+          "automationId": "a-retry-due",
+          "title": "a-retry-due",
+          "cronExpr": "*/5 * * * *",
+          "prompt": "run a-retry-due",
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "locationKind": "local",
+          "recurring": true,
+          "runCount": 0,
+          "enabled": true,
+          "lifecycleStatus": "active",
+          "nextRunAt": 1791299400000,
+          "dispatchStatus": "claimed",
+          "dispatchAttempts": 1,
+          "retryAt": 1791299999999,
+          "createdAt": 4,
+          "updatedAt": 1
+        },
+        {
+          "automationId": "a-stale",
+          "title": "a-stale",
+          "cronExpr": "*/5 * * * *",
+          "prompt": "run a-stale",
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "locationKind": "local",
+          "recurring": true,
+          "runCount": 0,
+          "enabled": true,
+          "lifecycleStatus": "active",
+          "nextRunAt": 1791299998000,
+          "dispatchStatus": "claimed",
+          "dispatchAttempts": 0,
+          "createdAt": 7,
+          "updatedAt": 1
+        },
+        {
+          "automationId": "a-due",
+          "title": "a-due",
+          "cronExpr": "*/5 * * * *",
+          "prompt": "run a-due",
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "locationKind": "local",
+          "recurring": true,
+          "runCount": 0,
+          "enabled": true,
+          "lifecycleStatus": "active",
+          "nextRunAt": 1791299999000,
+          "dispatchStatus": "claimed",
+          "dispatchAttempts": 0,
+          "createdAt": 1,
+          "updatedAt": 1
+        },
+        {
+          "automationId": "a-once",
+          "title": "a-once",
+          "cronExpr": "*/5 * * * *",
+          "prompt": "run a-once",
+          "mode": "plan",
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "workspaceIdentity": " id-a ",
+          "targetTaskId": "task-1",
+          "locationKind": "local",
+          "recurring": false,
+          "scheduleRule": {
+            "unit": "minute",
+            "interval": 5,
+            "hour": 0,
+            "minute": 0,
+            "anchorAt": 1791299700000
+          },
+          "runCount": 0,
+          "enabled": true,
+          "lifecycleStatus": "active",
+          "nextRunAt": 1791299999500,
+          "dispatchStatus": "claimed",
+          "dispatchAttempts": 0,
+          "createdAt": 9,
+          "updatedAt": 1
+        }
+      ]
+    },
+    {
+      "value": []
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "runId": "a-due:1791299999000",
+        "automationId": "a-due",
+        "workspaceKey": "/tmp/ws-a",
+        "scheduledAt": 1791299999000,
+        "trigger": "schedule",
+        "modelSelection": {
+          "providerId": "p2",
+          "modelId": "m2"
+        },
+        "dispatchStatus": "claimed",
+        "attempts": 2,
+        "createdAt": 1791300000001,
+        "updatedAt": 1791300000003
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": [
+        {
+          "automation": {
+            "automationId": "a-manual-stale",
+            "title": "a-manual-stale",
+            "cronExpr": "*/5 * * * *",
+            "prompt": "run a-manual-stale",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": true,
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791300900000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 17,
+            "updatedAt": 1791300000100
+          },
+          "run": {
+            "runId": "a-manual-stale:manual:1",
+            "automationId": "a-manual-stale",
+            "workspaceKey": "/tmp/ws-a",
+            "scheduledAt": 1791299399995,
+            "trigger": "manual",
+            "dispatchStatus": "claimed",
+            "attempts": 2,
+            "createdAt": 1791299399995,
+            "updatedAt": 1791300000100
+          }
+        },
+        {
+          "automation": {
+            "automationId": "a-manual",
+            "title": "a-manual",
+            "cronExpr": "*/5 * * * *",
+            "prompt": "run a-manual",
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": true,
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791300900000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 16,
+            "updatedAt": 1791300000100
+          },
+          "run": {
+            "runId": "a-manual:manual:1",
+            "automationId": "a-manual",
+            "workspaceKey": "/tmp/ws-a",
+            "scheduledAt": 1791299999950,
+            "trigger": "manual",
+            "dispatchStatus": "claimed",
+            "attempts": 1,
+            "createdAt": 1791299999950,
+            "updatedAt": 1791300000100
+          }
+        },
+        {
+          "automation": {
+            "automationId": "a-manual-twice",
+            "title": "a-manual-twice",
+            "cronExpr": "*/5 * * * *",
+            "prompt": "run a-manual-twice",
+            "modelSelection": {
+              "providerId": "p",
+              "modelId": "m",
+              "options": {
+                "reasoningLevel": "high"
+              }
+            },
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": true,
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791300900000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 19,
+            "updatedAt": 1791300000100
+          },
+          "run": {
+            "runId": "a-manual-twice:manual:1",
+            "automationId": "a-manual-twice",
+            "workspaceKey": "/tmp/ws-a",
+            "scheduledAt": 1791299999980,
+            "trigger": "manual",
+            "dispatchStatus": "claimed",
+            "attempts": 1,
+            "createdAt": 1791299999980,
+            "updatedAt": 1791300000100
+          }
+        }
+      ]
+    },
+    {
+      "value": []
+    },
+    {
+      "value": true
+    },
+    {
+      "value": {
+        "errors": []
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "errors": []
+      }
+    },
+    {
+      "value": {
+        "errors": []
+      }
+    },
+    {
+      "value": {
+        "errors": [
+          "manual claim release skipped: workspaceKey missing automation=missing runId=missing:manual:y"
+        ]
+      }
+    },
+    {
+      "value": [
+        {
+          "automation": {
+            "automationId": "a-manual-twice",
+            "title": "a-manual-twice",
+            "cronExpr": "*/5 * * * *",
+            "prompt": "run a-manual-twice",
+            "modelSelection": {
+              "providerId": "p",
+              "modelId": "m",
+              "options": {
+                "reasoningLevel": "high"
+              }
+            },
+            "workspaceKey": "/tmp/ws-a",
+            "workspacePath": "/tmp/ws-a",
+            "locationKind": "local",
+            "recurring": true,
+            "runCount": 0,
+            "enabled": true,
+            "lifecycleStatus": "active",
+            "nextRunAt": 1791300900000,
+            "dispatchStatus": "idle",
+            "dispatchAttempts": 0,
+            "createdAt": 19,
+            "updatedAt": 1791300000106
+          },
+          "run": {
+            "runId": "a-manual-twice:manual:2",
+            "automationId": "a-manual-twice",
+            "workspaceKey": "/tmp/ws-a",
+            "scheduledAt": 1791299999990,
+            "trigger": "manual",
+            "dispatchStatus": "claimed",
+            "attempts": 1,
+            "createdAt": 1791299999990,
+            "updatedAt": 1791300000106
+          }
+        }
+      ]
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": 1
+    },
+    {
+      "value": 1
+    },
+    {
+      "value": 0
+    },
+    {
+      "value": 0
+    },
+    {
+      "value": [
+        {
+          "offPeakTaskId": "o-run",
+          "serverTicketId": "ticket-o-run",
+          "title": "o-run",
+          "conversationId": "c-run",
+          "prompt": "do o-run",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "status": "queued",
+          "queuedAt": 1,
+          "startedAt": 50,
+          "schedulable": true,
+          "createdAt": 100,
+          "updatedAt": 1791300000000
+        },
+        {
+          "offPeakTaskId": "o-stale",
+          "serverTicketId": "ticket-o-stale",
+          "title": "o-stale",
+          "prompt": "do o-stale",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "status": "queued",
+          "queuedAt": 4,
+          "schedulable": true,
+          "createdAt": 100,
+          "updatedAt": 1791300000000
+        },
+        {
+          "offPeakTaskId": "o-q2b",
+          "serverTicketId": "ticket-o-q2b",
+          "title": "o-q2b",
+          "prompt": "do o-q2b",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "workspaceIdentity": "id-x",
+          "status": "queued",
+          "queuedAt": 5,
+          "schedulable": true,
+          "createdAt": 15,
+          "updatedAt": 100
+        },
+        {
+          "offPeakTaskId": "o-q2",
+          "serverTicketId": "ticket-o-q2",
+          "title": "o-q2",
+          "prompt": "do o-q2",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "status": "queued",
+          "queuedAt": 5,
+          "schedulable": true,
+          "createdAt": 20,
+          "updatedAt": 100
+        },
+        {
+          "offPeakTaskId": "o-q1",
+          "serverTicketId": "ticket-o-q1",
+          "title": "o-q1",
+          "prompt": "do o-q1",
+          "permissionMode": "yolo",
+          "modelSelection": {
+            "providerId": "p",
+            "modelId": "m",
+            "options": {
+              "reasoningLevel": "high"
+            }
+          },
+          "workspaceKey": "/tmp/ws-a",
+          "workspacePath": "/tmp/ws-a",
+          "status": "queued",
+          "queuedAt": 10,
+          "schedulable": true,
+          "createdAt": 10,
+          "updatedAt": 100
+        }
+      ]
+    },
+    {
+      "value": []
+    },
+    {
+      "value": {
+        "offPeakTaskId": "o-q2",
+        "serverTicketId": "ticket-o-q2",
+        "title": "o-q2",
+        "conversationId": "c-2",
+        "sessionId": "c-2",
+        "prompt": "do o-q2",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "running",
+        "queuedAt": 5,
+        "startedAt": 1791300000003,
+        "schedulable": true,
+        "createdAt": 20,
+        "updatedAt": 1791300000003
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "offPeakTaskId": "o-run",
+        "serverTicketId": "ticket-new",
+        "title": "o-run",
+        "conversationId": "c-run",
+        "prompt": "do o-run",
+        "permissionMode": "yolo",
+        "modelSelection": {
+          "providerId": "p",
+          "modelId": "m",
+          "options": {
+            "reasoningLevel": "high"
+          }
+        },
+        "workspaceKey": "/tmp/ws-a",
+        "workspacePath": "/tmp/ws-a",
+        "status": "running",
+        "queuedAt": 1,
+        "startedAt": 50,
+        "schedulable": true,
+        "createdAt": 100,
+        "updatedAt": 1791300000005
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": null
+    },
+    {
+      "value": 2
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "retryAt": {
+          "o-q1": 1791300030011
+        },
+        "attempts": {
+          "o-q1": 1
+        }
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "retryAt": {
+          "o-q1": 1791300060012
+        },
+        "attempts": {
+          "o-q1": 2
+        }
+      }
+    },
+    {
+      "value": null
+    },
+    {
+      "value": {
+        "retryAt": {},
+        "attempts": {}
+      }
+    },
+    {
+      "value": {
+        "retryAt": {},
+        "attempts": {}
+      }
+    },
+    {
+      "value": {
+        "retryAt": {},
+        "attempts": {}
+      }
+    },
+    {
+      "value": {
+        "retryAt": {},
+        "attempts": {}
+      }
+    },
+    {
+      "value": {
+        "retryAt": {},
+        "attempts": {}
+      }
+    },
+    {
+      "value": {
+        "retryAt": {
+          "o-hidden": 1791300030018
+        },
+        "attempts": {
+          "o-hidden": 1
+        }
+      }
+    },
+    {
+      "value": 4
+    }
+  ],
+  "dumps": {
+    "automations": [
+      {
+        "automation_id": "a-attempt-4",
+        "title": "a-attempt-4",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-attempt-4",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791299999000,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "failed_to_dispatch",
+        "dispatch_attempts": 4,
+        "retry_at": 1791300240018,
+        "last_error": "e4",
+        "created_at": 13,
+        "updated_at": 1791300000018
+      },
+      {
+        "automation_id": "a-busy",
+        "title": "a-busy",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-busy",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791300900000,
+        "last_run_at": null,
+        "running": 1,
+        "claimed_at": 1791299999000,
+        "dispatch_status": "idle",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 18,
+        "updated_at": 1
+      },
+      {
+        "automation_id": "a-disabled",
+        "title": "a-disabled",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-disabled",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 0,
+        "lifecycle_status": "paused",
+        "next_run_at": 1791299999000,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "idle",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 5,
+        "updated_at": 1
+      },
+      {
+        "automation_id": "a-due",
+        "title": "a-due",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-due",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 1,
+        "scheduled_run_count": 1,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791300300000,
+        "last_run_at": 1791300000005,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "dispatched",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 1,
+        "updated_at": 1791300000005
+      },
+      {
+        "automation_id": "a-end",
+        "title": "a-end",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-end",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": 1791300100000,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 1,
+        "scheduled_run_count": 1,
+        "enabled": 0,
+        "lifecycle_status": "completed",
+        "next_run_at": null,
+        "last_run_at": 1791300000019,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "dispatched",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 14,
+        "updated_at": 1791300000019
+      },
+      {
+        "automation_id": "a-expired",
+        "title": "a-expired",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-expired",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": 1791299999999,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 0,
+        "lifecycle_status": "completed",
+        "next_run_at": null,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "idle",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 8,
+        "updated_at": 1791300000000
+      },
+      {
+        "automation_id": "a-foreign",
+        "title": "a-foreign",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-foreign",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791299999000,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "idle",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 6,
+        "updated_at": 1791300000011
+      },
+      {
+        "automation_id": "a-future",
+        "title": "a-future",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-future",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791300180000,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "idle",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 2,
+        "updated_at": 1791300000014
+      },
+      {
+        "automation_id": "a-limit-once",
+        "title": "a-limit-once",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-limit-once",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 0,
+        "max_runs": 3,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 0,
+        "lifecycle_status": "failed",
+        "next_run_at": 1791299999000,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "failed_to_dispatch",
+        "dispatch_attempts": 4,
+        "retry_at": 1791299999999,
+        "last_error": "e5",
+        "created_at": 12,
+        "updated_at": 1791300000017
+      },
+      {
+        "automation_id": "a-limit-recurring",
+        "title": "a-limit-recurring",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-limit-recurring",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791300240000,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "idle",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": "e5",
+        "created_at": 11,
+        "updated_at": 1791300000016
+      },
+      {
+        "automation_id": "a-manual",
+        "title": "a-manual",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-manual",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 1,
+        "scheduled_run_count": 0,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791300900000,
+        "last_run_at": 1791300000101,
+        "running": 1,
+        "claimed_at": 1791300000100,
+        "dispatch_status": "idle",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 16,
+        "updated_at": 1791300000101
+      },
+      {
+        "automation_id": "a-manual-stale",
+        "title": "a-manual-stale",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-manual-stale",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791300900000,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "idle",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 17,
+        "updated_at": 1791300000103
+      },
+      {
+        "automation_id": "a-manual-twice",
+        "title": "a-manual-twice",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-manual-twice",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791300900000,
+        "last_run_at": null,
+        "running": 1,
+        "claimed_at": 1791300000106,
+        "dispatch_status": "idle",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 19,
+        "updated_at": 1791300000106
+      },
+      {
+        "automation_id": "a-max3",
+        "title": "a-max3",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-max3",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 0,
+        "max_runs": 3,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 5,
+        "scheduled_run_count": 2,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791300050000,
+        "last_run_at": 1791300000020,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "dispatched",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 15,
+        "updated_at": 1791300000020
+      },
+      {
+        "automation_id": "a-missed-once",
+        "title": "a-missed-once",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-missed-once",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 0,
+        "max_runs": 1,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 0,
+        "lifecycle_status": "completed",
+        "next_run_at": null,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "idle",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 10,
+        "updated_at": 1791300000015
+      },
+      {
+        "automation_id": "a-once",
+        "title": "a-once",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-once",
+        "model": null,
+        "provider": null,
+        "mode": "plan",
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": " id-a ",
+        "target_task_id": "task-1",
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 0,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": "{\"unit\":\"minute\",\"interval\":5,\"hour\":0,\"minute\":0,\"anchorAt\":1791299700000}",
+        "schedule_edited_by_user": 0,
+        "run_count": 1,
+        "scheduled_run_count": 1,
+        "enabled": 0,
+        "lifecycle_status": "completed",
+        "next_run_at": null,
+        "last_run_at": 1791300000010,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "dispatched",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": null,
+        "created_at": 9,
+        "updated_at": 1791300000010
+      },
+      {
+        "automation_id": "a-retry-due",
+        "title": "a-retry-due",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-retry-due",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791299400000,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "failed_to_dispatch",
+        "dispatch_attempts": 2,
+        "retry_at": 1791300060008,
+        "last_error": "no model",
+        "created_at": 4,
+        "updated_at": 1791300000008
+      },
+      {
+        "automation_id": "a-retry-wait",
+        "title": "a-retry-wait",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-retry-wait",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 1,
+        "lifecycle_status": "active",
+        "next_run_at": 1791299880000,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "failed_to_dispatch",
+        "dispatch_attempts": 2,
+        "retry_at": 1791300010000,
+        "last_error": null,
+        "created_at": 3,
+        "updated_at": 1
+      },
+      {
+        "automation_id": "a-stale",
+        "title": "a-stale",
+        "cron_expr": "*/5 * * * *",
+        "prompt": "run a-stale",
+        "model": null,
+        "provider": null,
+        "mode": null,
+        "thought_level": null,
+        "model_selection": "null",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "target_task_id": null,
+        "bot_delivery_target": null,
+        "location_kind": "local",
+        "recurring": 1,
+        "max_runs": null,
+        "end_at": null,
+        "schedule_rule": null,
+        "schedule_edited_by_user": 0,
+        "run_count": 0,
+        "scheduled_run_count": 0,
+        "enabled": 0,
+        "lifecycle_status": "failed",
+        "next_run_at": 1791299998000,
+        "last_run_at": null,
+        "running": 0,
+        "claimed_at": null,
+        "dispatch_status": "failed_to_dispatch",
+        "dispatch_attempts": 0,
+        "retry_at": null,
+        "last_error": "fatal",
+        "created_at": 7,
+        "updated_at": 1791300000009
+      }
+    ],
+    "automation_runs": [
+      {
+        "run_id": "a-busy:manual:1",
+        "automation_id": "a-busy",
+        "workspace_key": "/tmp/ws-a",
+        "scheduled_at": 1791299999970,
+        "trigger": "manual",
+        "model_selection": null,
+        "dispatch_status": "claimed",
+        "outcome": null,
+        "session_id": null,
+        "error": null,
+        "attempts": 0,
+        "created_at": 1791299999970,
+        "updated_at": 1791299999970
+      },
+      {
+        "run_id": "a-due:1791299999000",
+        "automation_id": "a-due",
+        "workspace_key": "/tmp/ws-a",
+        "scheduled_at": 1791299999000,
+        "trigger": "schedule",
+        "model_selection": "{\"providerId\":\"p2\",\"modelId\":\"m2\"}",
+        "dispatch_status": "dispatched",
+        "outcome": null,
+        "session_id": "s-1",
+        "error": null,
+        "attempts": 2,
+        "created_at": 1791300000001,
+        "updated_at": 1791300000003
+      },
+      {
+        "run_id": "a-future:1791299600000",
+        "automation_id": "a-future",
+        "workspace_key": "/tmp/ws-a",
+        "scheduled_at": 1791299600000,
+        "trigger": "schedule",
+        "model_selection": null,
+        "dispatch_status": "skipped",
+        "outcome": null,
+        "session_id": null,
+        "error": "again",
+        "attempts": 0,
+        "created_at": 1791300000013,
+        "updated_at": 1791300000014
+      },
+      {
+        "run_id": "a-manual-stale:manual:1",
+        "automation_id": "a-manual-stale",
+        "workspace_key": "/tmp/ws-a",
+        "scheduled_at": 1791299399995,
+        "trigger": "manual",
+        "model_selection": null,
+        "dispatch_status": "failed_to_dispatch",
+        "outcome": null,
+        "session_id": null,
+        "error": "boom",
+        "attempts": 2,
+        "created_at": 1791299399995,
+        "updated_at": 1791300000102
+      },
+      {
+        "run_id": "a-manual-twice:manual:1",
+        "automation_id": "a-manual-twice",
+        "workspace_key": "/tmp/ws-a",
+        "scheduled_at": 1791299999980,
+        "trigger": "manual",
+        "model_selection": null,
+        "dispatch_status": "claimed",
+        "outcome": null,
+        "session_id": null,
+        "error": null,
+        "attempts": 1,
+        "created_at": 1791299999980,
+        "updated_at": 1791300000100
+      },
+      {
+        "run_id": "a-manual-twice:manual:2",
+        "automation_id": "a-manual-twice",
+        "workspace_key": "/tmp/ws-a",
+        "scheduled_at": 1791299999990,
+        "trigger": "manual",
+        "model_selection": null,
+        "dispatch_status": "claimed",
+        "outcome": null,
+        "session_id": null,
+        "error": null,
+        "attempts": 1,
+        "created_at": 1791299999990,
+        "updated_at": 1791300000106
+      },
+      {
+        "run_id": "a-manual:manual:1",
+        "automation_id": "a-manual",
+        "workspace_key": "/tmp/ws-a",
+        "scheduled_at": 1791299999950,
+        "trigger": "manual",
+        "model_selection": null,
+        "dispatch_status": "dispatched",
+        "outcome": null,
+        "session_id": "s-m1",
+        "error": null,
+        "attempts": 1,
+        "created_at": 1791299999950,
+        "updated_at": 1791300000101
+      },
+      {
+        "run_id": "a-manual:manual:held",
+        "automation_id": "a-manual",
+        "workspace_key": "/tmp/ws-a",
+        "scheduled_at": 1791299999960,
+        "trigger": "manual",
+        "model_selection": null,
+        "dispatch_status": "claimed",
+        "outcome": null,
+        "session_id": null,
+        "error": null,
+        "attempts": 1,
+        "created_at": 1791299999960,
+        "updated_at": 1791299999960
+      },
+      {
+        "run_id": "a-missed-once:1791299100000",
+        "automation_id": "a-missed-once",
+        "workspace_key": "/tmp/ws-a",
+        "scheduled_at": 1791299100000,
+        "trigger": "schedule",
+        "model_selection": null,
+        "dispatch_status": "skipped",
+        "outcome": null,
+        "session_id": null,
+        "error": "computer_asleep_or_app_not_running",
+        "attempts": 0,
+        "created_at": 1791300000015,
+        "updated_at": 1791300000015
+      },
+      {
+        "run_id": "a-retry-due:1791299400000",
+        "automation_id": "a-retry-due",
+        "workspace_key": "/tmp/ws-a",
+        "scheduled_at": 1791299400000,
+        "trigger": "schedule",
+        "model_selection": null,
+        "dispatch_status": "failed_to_dispatch",
+        "outcome": null,
+        "session_id": null,
+        "error": "no model",
+        "attempts": 0,
+        "created_at": 1791300000006,
+        "updated_at": 1791300000007
+      }
+    ],
+    "off_peak_tasks": [
+      {
+        "off_peak_task_id": "o-bad",
+        "server_ticket_id": "ticket-o-bad",
+        "title": "o-bad",
+        "conversation_id": null,
+        "session_id": null,
+        "prompt": "do o-bad",
+        "permission_mode": "yolo",
+        "model": null,
+        "thought_level": null,
+        "model_selection": null,
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "status": "queued",
+        "queued_at": 2,
+        "started_at": null,
+        "ended_at": null,
+        "failure_reason": null,
+        "files_changed": null,
+        "settled_at": null,
+        "history_deleted_at": null,
+        "registered_at": null,
+        "schedulable": 1,
+        "queue_position": null,
+        "next_poll_at": null,
+        "claim_running": 0,
+        "claimed_at": null,
+        "attempt_count": 0,
+        "last_error": null,
+        "created_at": 100,
+        "updated_at": 100
+      },
+      {
+        "off_peak_task_id": "o-foreign",
+        "server_ticket_id": "ticket-o-foreign",
+        "title": "o-foreign",
+        "conversation_id": null,
+        "session_id": null,
+        "prompt": "do o-foreign",
+        "permission_mode": "yolo",
+        "model": null,
+        "thought_level": null,
+        "model_selection": "{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "status": "queued",
+        "queued_at": 3,
+        "started_at": null,
+        "ended_at": null,
+        "failure_reason": null,
+        "files_changed": null,
+        "settled_at": null,
+        "history_deleted_at": null,
+        "registered_at": null,
+        "schedulable": 1,
+        "queue_position": null,
+        "next_poll_at": null,
+        "claim_running": 1,
+        "claimed_at": 1791299999000,
+        "attempt_count": 0,
+        "last_error": null,
+        "created_at": 100,
+        "updated_at": 100
+      },
+      {
+        "off_peak_task_id": "o-hidden",
+        "server_ticket_id": "ticket-o-hidden",
+        "title": "o-hidden",
+        "conversation_id": null,
+        "session_id": null,
+        "prompt": "do o-hidden",
+        "permission_mode": "yolo",
+        "model": null,
+        "thought_level": null,
+        "model_selection": "{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "status": "queued",
+        "queued_at": 100,
+        "started_at": null,
+        "ended_at": null,
+        "failure_reason": null,
+        "files_changed": null,
+        "settled_at": null,
+        "history_deleted_at": null,
+        "registered_at": null,
+        "schedulable": 0,
+        "queue_position": null,
+        "next_poll_at": null,
+        "claim_running": 0,
+        "claimed_at": null,
+        "attempt_count": 1,
+        "last_error": "e",
+        "created_at": 100,
+        "updated_at": 1791300000018
+      },
+      {
+        "off_peak_task_id": "o-paused",
+        "server_ticket_id": "ticket-o-paused",
+        "title": "o-paused",
+        "conversation_id": null,
+        "session_id": null,
+        "prompt": "do o-paused",
+        "permission_mode": "yolo",
+        "model": null,
+        "thought_level": null,
+        "model_selection": "{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "status": "paused",
+        "queued_at": 100,
+        "started_at": null,
+        "ended_at": null,
+        "failure_reason": null,
+        "files_changed": null,
+        "settled_at": null,
+        "history_deleted_at": null,
+        "registered_at": null,
+        "schedulable": 1,
+        "queue_position": null,
+        "next_poll_at": null,
+        "claim_running": 0,
+        "claimed_at": null,
+        "attempt_count": 0,
+        "last_error": null,
+        "created_at": 100,
+        "updated_at": 100
+      },
+      {
+        "off_peak_task_id": "o-q1",
+        "server_ticket_id": "ticket-o-q1",
+        "title": "o-q1",
+        "conversation_id": "s-q1",
+        "session_id": "s-q1",
+        "prompt": "do o-q1",
+        "permission_mode": "yolo",
+        "model": null,
+        "thought_level": null,
+        "model_selection": "{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "status": "running",
+        "queued_at": 10,
+        "started_at": 1791300000013,
+        "ended_at": null,
+        "failure_reason": null,
+        "files_changed": null,
+        "settled_at": null,
+        "history_deleted_at": null,
+        "registered_at": null,
+        "schedulable": 1,
+        "queue_position": null,
+        "next_poll_at": null,
+        "claim_running": 0,
+        "claimed_at": null,
+        "attempt_count": 3,
+        "last_error": null,
+        "created_at": 10,
+        "updated_at": 1791300000013
+      },
+      {
+        "off_peak_task_id": "o-q2",
+        "server_ticket_id": "ticket-o-q2",
+        "title": "o-q2",
+        "conversation_id": "c-2",
+        "session_id": "c-2",
+        "prompt": "do o-q2",
+        "permission_mode": "yolo",
+        "model": null,
+        "thought_level": null,
+        "model_selection": "{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "status": "running",
+        "queued_at": 5,
+        "started_at": 1791300000003,
+        "ended_at": null,
+        "failure_reason": null,
+        "files_changed": null,
+        "settled_at": null,
+        "history_deleted_at": null,
+        "registered_at": null,
+        "schedulable": 1,
+        "queue_position": null,
+        "next_poll_at": null,
+        "claim_running": 0,
+        "claimed_at": null,
+        "attempt_count": 0,
+        "last_error": null,
+        "created_at": 20,
+        "updated_at": 1791300000003
+      },
+      {
+        "off_peak_task_id": "o-q2b",
+        "server_ticket_id": "ticket-o-q2b",
+        "title": "o-q2b",
+        "conversation_id": null,
+        "session_id": null,
+        "prompt": "do o-q2b",
+        "permission_mode": "yolo",
+        "model": null,
+        "thought_level": null,
+        "model_selection": "{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": "id-x",
+        "status": "failed",
+        "queued_at": 5,
+        "started_at": null,
+        "ended_at": 1791300000014,
+        "failure_reason": "no credentials",
+        "files_changed": null,
+        "settled_at": null,
+        "history_deleted_at": null,
+        "registered_at": null,
+        "schedulable": 0,
+        "queue_position": null,
+        "next_poll_at": null,
+        "claim_running": 0,
+        "claimed_at": null,
+        "attempt_count": 1,
+        "last_error": "no credentials",
+        "created_at": 15,
+        "updated_at": 1791300000014
+      },
+      {
+        "off_peak_task_id": "o-run",
+        "server_ticket_id": "ticket-new",
+        "title": "o-run",
+        "conversation_id": "c-run",
+        "session_id": null,
+        "prompt": "do o-run",
+        "permission_mode": "yolo",
+        "model": null,
+        "thought_level": null,
+        "model_selection": "{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "status": "running",
+        "queued_at": 1,
+        "started_at": 50,
+        "ended_at": null,
+        "failure_reason": null,
+        "files_changed": null,
+        "settled_at": null,
+        "history_deleted_at": null,
+        "registered_at": null,
+        "schedulable": 1,
+        "queue_position": null,
+        "next_poll_at": null,
+        "claim_running": 0,
+        "claimed_at": null,
+        "attempt_count": 0,
+        "last_error": null,
+        "created_at": 100,
+        "updated_at": 1791300000005
+      },
+      {
+        "off_peak_task_id": "o-stale",
+        "server_ticket_id": "ticket-o-stale",
+        "title": "o-stale",
+        "conversation_id": null,
+        "session_id": null,
+        "prompt": "do o-stale",
+        "permission_mode": "yolo",
+        "model": null,
+        "thought_level": null,
+        "model_selection": "{\"providerId\":\"p\",\"modelId\":\"m\",\"options\":{\"reasoningLevel\":\"high\"}}",
+        "workspace_key": "/tmp/ws-a",
+        "workspace_path": "/tmp/ws-a",
+        "workspace_identity": null,
+        "status": "running",
+        "queued_at": 4,
+        "started_at": 1791300000017,
+        "ended_at": null,
+        "failure_reason": null,
+        "files_changed": null,
+        "settled_at": null,
+        "history_deleted_at": null,
+        "registered_at": null,
+        "schedulable": 1,
+        "queue_position": null,
+        "next_poll_at": null,
+        "claim_running": 0,
+        "claimed_at": null,
+        "attempt_count": 0,
+        "last_error": null,
+        "created_at": 100,
+        "updated_at": 1791300000017
+      }
+    ]
+  }
+}

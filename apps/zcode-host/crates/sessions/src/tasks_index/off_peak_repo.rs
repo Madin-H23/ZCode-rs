@@ -1,8 +1,8 @@
 //! off_peak_tasks（packages/services/src/session/offPeakTaskRepo.ts）。
 //!
 //! 与 Node Host 和 Main 的 scheduler（Node）共用 tasks-index.sqlite：SQL 原样移植，Rust 是完全
-//! 兼容的写者。只移植 Host 用到的方法；`claimDue`、`markRunning`、`releaseClaim`、
-//! `recoverInterrupted` 由 scheduler 调用。
+//! 兼容的写者。只移植 Host 用到的方法；U4 起 Host 内的 Scheduler 用到的 `claimDue`、`markRunning`、
+//! `releaseClaim`、`recoverInterrupted`、`countActive` 在 off_peak_repo_scheduling.rs。
 use anyhow::{Context as _, anyhow};
 use rusqlite::{Connection, OptionalExtension, Row, named_params};
 use serde_json::{Map, Value, json};
@@ -10,6 +10,10 @@ use serde_json::{Map, Value, json};
 use super::TasksIndex;
 use super::automation_repo::{parse_model_selection, workspace_key};
 use crate::agent::service::uuid_v4;
+
+#[path = "off_peak_repo_scheduling.rs"]
+mod scheduling;
+pub use scheduling::{OFF_PEAK_CLAIM_STALE_MS, RunningUpdate};
 
 pub const TERMINAL_STATUSES: [&str; 3] = ["completed", "failed", "cancelled"];
 const TERMINAL_SQL_LIST: &str = "'completed', 'failed', 'cancelled'";

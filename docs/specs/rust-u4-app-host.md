@@ -47,18 +47,33 @@ Rust Host 从“每个窗口一个进程”改为“每个 App 一个进程”�
 
 ### 2.4 调度
 
-所有者从 Node scheduler 进程改为 Host 内 automation 域的 `Scheduler`（一个任务）。状态机与 `packages/desktop/src/scheduler` 相同：
+所有者从 Node scheduler 进程改为 Host 内 automation 域的 `Scheduler`（一个任务，actor）。状态机与 `packages/desktop/src/scheduler` 相同：
 
-- **轮次**：启动后先回收中断的闲时任务（`recoverInterrupted`），随后立即一轮，之后每 20 s 一轮。同一时刻只有一轮在执行；执行期间收到的唤醒合并为“结束后立即再来一轮”。
-- **唤醒来源**：手动运行入列、闲时任务变为可调度、一次派发结算完成。
-- **一轮的内容**：`claimDue`（事务内把到期且未认领的任务标为认领）→ 逐个处理；`claimManualRuns` → 逐个派发；闲时任务 `claimDue` → 逐个派发；上报执行中的闲时任务数。
-- **misfire**：非重试、且计划时间早于现在超过 5 分钟的任务，记为 skipped（原因 `computer_asleep_or_app_not_running`）并排到下一个周期；一次性任务直接终结。
-- **派发**：直接调用 Host 内已有的派发器（今天处理 `cron-run` / `off-peak-run` 的那段代码），不经 Main。
-- **结算**：成功则记 dispatched 并计算下一次时间；失败按 `transient` / `permanent` 退避或终结；手动运行只累计次数，不推进周期。闲时任务的失败退避表在内存中。
-- **退出**：`dispose` 时释放仍在途的认领。
-- 认领的 SQL 语义与 Node 的 repo 相同（`BEGIN IMMEDIATE`，认领超时后的回收规则不变）。因此同一份 tasks-index 被另一个 App 实例的 Node scheduler 同时使用时，一个任务仍只会被认领一次。
-- 轮询用单调时钟的定时器，到期判断用墙上时钟。休眠唤醒后最迟 20 s 进入下一轮，由 misfire 规则处理错过的窗口。
-- 执行中的闲时任务数变化时，Host 发 `off-peak-active-count` 给 Main，Main 据此维持防休眠（与今天 scheduler 上报的用途相同）。
+- **轮次**：启动后先回收中断的闲时任务（`recoverInterrupted`），随后立即一轮，之后每 20 s 一轮。同一时刻只有一轮在执行；执行期间收到的唤醒合并为“结束后立即再来一轮”；启动完成前收到的唤醒并入第一轮。
+- **唤醒来源**：闲时任务变为可调度（取号即 ready、轮询翻为 ready）、一次 automation 派发结算完成（闲时任务的结算不唤醒，与 Node 相同）。`Scheduler` 的句柄仍提供 `wake()`，但今天没有“手动运行入列”的生产方：`runAutomationNow` 抢锁后由 Host 直接派发（run 的 `attempts = 1`），没有任何 Host 发 `cron-scheduler-wake-request`；`claimManualRuns` 只接手 `attempts = 0` 或 10 分钟未更新（派发方已崩溃）的 manual run。
+- **一轮的内容**：automation `claimDue`（同一事务内先终结 `end_at` 已过的任务、回收超过 10 分钟的认领，再把到期且未认领的任务标为认领）→ 逐个处理；`claimManualRuns` → 逐个派发；闲时任务 `claimDue` → 逐个派发；上报执行中的闲时任务数。一步出错时记 error，本轮其余步骤跳过（已认领未处理的项等认领超时回收）。
+- **misfire**：非重试（`dispatchAttempts = 0`）、且 `nextRunAt ≤ now − 5 min` 的 automation，记为 skipped（原因 `computer_asleep_or_app_not_running`）并排到下一个周期；一次性任务（非循环且 `maxRuns ≤ 1`）直接终结。闲时任务没有 misfire，只顺延。
+- **派发**：直接调用 Host 内已有的派发器（今天处理 `cron-run` / `off-peak-run` 的那段代码），不经 Main。派发在独立任务中执行，结果作为消息回到 `Scheduler` 结算；轮次不等待派发。请求按 Node 的 `cron-run` / `off-peak-run` 形状构造并做同样的校验，校验不通过时与 Node Host 一样不派发、不结算（等认领超时）。
+- **结算**：
+  - automation 成功：run 记 dispatched（回填会话），任务的 `run_count`、`scheduled_run_count` 加一并按派发时间计算下一次；有限次任务达到上限或越过 `end_at` 时转 completed。
+  - automation 失败：run 记 `failed_to_dispatch`；`transient`（Host 派发器的失败一律是 transient）按 30 s × 2^(n−1)、上限 15 min 退避重试，同一 runId 复用；第 5 次失败后循环任务放弃本轮、排到下一次，有限次任务转 failed；`permanent` 直接转 failed。
+  - manual run：成功只累计 `run_count`，不推进周期，也不释放单飞锁（锁由 Host 在会话终态时释放）；失败记 `failed_to_dispatch` 并释放锁。
+  - 闲时任务：成功转 running（`markRunning`，任务已不在 queued 时释放认领）；`permanent` 转 failed；`transient` 释放认领并记一次失败，按 30 s × 2^(n−1)、上限 15 min 在内存退避，不设次数上限（重启即清空）。
+- **退出**：`dispose` 先等当前一轮结束，再释放仍在途的认领（定时 run 复位为 idle，manual run 只释放锁，闲时任务释放认领），在途的派发任务随 `Scheduler` 结束而取消。
+- 认领的 SQL 语义与 Node 的 repo 相同（`BEGIN IMMEDIATE`，认领超时后的回收规则不变）。因此同一份 tasks-index 被另一个 App 实例的 Node scheduler 同时使用时，一个任务仍只会被认领一次。例外是启动回收：`recoverInterrupted` 假设自己是 App 级单例，把所有 running 的闲时任务置回 queued，另一个实例启动时正在执行的闲时任务会被再次派发（Node 相同，不在本期改变）。
+- 轮询用单调时钟的定时器，到期判断用墙上时钟。休眠唤醒后最迟 20 s 进入下一轮，由 misfire 规则处理错过的窗口。时钟与轮询间隔可注入，测试不等待 20 s。
+- 执行中的闲时任务数变化时（启动后的第一次上报总会发出），Host 发 `off-peak-active-count` 给 Main，Main 据此维持防休眠（与今天 scheduler 上报的用途相同）。`Scheduler` 只依赖构造时传入的上报端口；端口与控制消息的接线在 `services::install` 中单独完成。
+
+```text
+Host install 完成 ─► Scheduler::start ─► recoverInterrupted ─► 第一轮
+                                            │
+  闲时任务 ready ─wake()─┐                   ▼
+  automation 结算 ─wake()┼─► Notify（合并）─► 一轮：claimDue → 派发任务（spawn）
+  20 s 单调定时器 ───────┘                   ▲            │ Dispatcher / OffPeakDispatcher
+                                            │            ▼
+                                  结算（写 tasks-index）◄─ 派发结果（JoinSet）
+dispose().await ─► 等当前一轮 ─► 释放在途认领 ─► 取消在途派发
+```
 
 Rust 开关下 Main 不再启动 scheduler 进程，也不再转发 `cron-run` / `off-peak-run`。
 
@@ -178,6 +193,7 @@ sequenceDiagram
 - Rust 测试：
   - 广播按窗口身份扇出（同窗口原样、其他窗口带 `sourceWindowId`）；claim 的先到先得、过期、连接关闭回收。
   - 调度状态机：到期认领、misfire 跳过、一次性任务终结、失败退避与上限、手动运行、闲时任务的回收与退避；两个调度器同时认领时一个任务只派发一次。
+  - 调度用到的 repo 操作（automation 的认领、台账、结算、释放，闲时任务的认领、释放、回收、计数、结算）与 TS repo 对拍：`scripts/rust-host/scheduler-fixtures.ts` 用真实 TS 实现生成 fixture，Rust 逐步复现返回值与表内容。
   - 没有任何连接时，到期的 automation 被派发并结算。
 - 桌面 E2E（Rust 开关）：
   - 进程表中恰好一个 Host，没有 scheduler 进程，没有 CLI 子进程。

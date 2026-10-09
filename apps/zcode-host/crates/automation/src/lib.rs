@@ -5,6 +5,7 @@ pub mod conversation_share;
 pub mod cua_permission;
 pub mod integration;
 pub mod off_peak;
+pub mod scheduler;
 use zcode_host_account::account;
 #[cfg(test)]
 use zcode_host_base::HostEnvironment;
