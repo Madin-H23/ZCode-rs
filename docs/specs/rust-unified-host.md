@@ -637,7 +637,7 @@ flowchart LR
 
 | 编号  | 问题                              | 执行的选项                                                                                                                                                                                               |
 | ----- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D-U6  | replayable 模式的输入队列         | 并入 runtime `CommandInbox`，只有一个队列所有者（U3 B 期）                                                                                                                                               |
+| D-U6  | replayable 模式的输入队列         | 并入 runtime `CommandInbox`，只有一个队列所有者。仓库外的客户端仍在调用 `enqueueTaskCommand` 等三个接口：接口保留，映射到 `CommandInbox`（用户决定，2026-10-10；rust-u3-stage-b.md 3.4）                 |
 | D-U7  | Main 的业务职责是否收回           | 收回 setting 写入、scheduler、BroadcastHub、`taskRealtimeBus`（U4）                                                                                                                                      |
 | D-U9  | Rust runtime 何时成为唯一 runtime | Rust Host 只运行 Rust runtime，缺省在进程内（U3 起，开发开关下）。子进程链路保留为第二种传输（D-U13），不删除。[rust-parity-remaining.md](rust-parity-remaining.md) 的剩余项清零仍是 U8 切换默认前的门槛 |
 | D-U10 | 是否接受单进程的爆炸半径          | 接受，用第 10 节的措施兜底。A 期每个 workspace 一个实例，一个实例的 panic 不影响其他 workspace                                                                                                           |
