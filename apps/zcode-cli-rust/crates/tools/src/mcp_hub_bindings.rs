@@ -1,10 +1,26 @@
 //! A session's bound MCP tools: binding a server's tools and queries over them.
 use super::super::mcp_config::{self, Server};
 use super::super::mcp_connection::Connection;
-use super::{Binding, Hub};
+use super::Hub;
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, sync::Arc};
+
+/// One MCP tool bound for a session.
+#[derive(Clone)]
+pub(super) struct Binding {
+    pub(super) name: String,
+    /// The configured server name (`plugin:<plugin>:<key>` for plugin servers).
+    pub(super) server: String,
+    pub(super) original: String,
+    pub(super) key: String,
+    pub(super) safe: bool,
+    /// Node MCP permission metadata: `readOnlyHint === true` / `destructiveHint === true`.
+    pub(super) read_only: bool,
+    pub(super) destructive: bool,
+    pub(super) definition: Value,
+    pub(super) connection: Arc<Connection>,
+}
 
 impl Hub {
     fn binding<T>(&self, session: &str, name: &str, f: impl FnOnce(&Binding) -> T) -> Option<T> {

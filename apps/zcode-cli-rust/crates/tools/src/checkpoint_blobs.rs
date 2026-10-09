@@ -63,7 +63,7 @@ pub(super) async fn sync_parent(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         let parent = path.parent().context("Missing parent")?.to_owned();
-        tokio::task::spawn_blocking(move || std::fs::File::open(parent)?.sync_all()).await??;
+        zcode_async::blocking(move || std::fs::File::open(parent)?.sync_all()).await??;
     }
     Ok(())
 }

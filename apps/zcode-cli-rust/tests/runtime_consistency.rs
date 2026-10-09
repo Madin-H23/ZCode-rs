@@ -277,6 +277,8 @@ struct Runtime {
     input: mpsc::Sender<Input>,
     output: mpsc::Receiver<Vec<Value>>,
     running: tokio::task::JoinHandle<Result<()>>,
+    /// The scope the engine's tasks belong to; kept for the runtime's lifetime.
+    _tasks: zcode_async::TaskScope,
     store: Arc<Store>,
     model: Arc<Model>,
     tools: Arc<Tools>,
@@ -328,6 +330,7 @@ async fn start_timed(
         tools: tools.clone(),
         clock: Arc::new(Clock(AtomicUsize::new(0))),
     };
+    let tasks = zcode_async::TaskScope::root("test", |_| {});
     let engine = Engine::new(
         "workspace",
         Some(ModelIdentity {
@@ -336,6 +339,7 @@ async fn start_timed(
             reasoning_level: "none".into(),
         }),
         ports,
+        &tasks.spawner(),
     )
     .await
     .unwrap()
@@ -354,6 +358,7 @@ async fn start_timed(
         input,
         output,
         running,
+        _tasks: tasks,
         store,
         model,
         tools,

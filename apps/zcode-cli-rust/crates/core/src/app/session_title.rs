@@ -282,7 +282,7 @@ impl Engine {
             request_auth: None,
         };
         let messages = title::messages(input);
-        tokio::spawn(async move {
+        self.tasks.spawner().spawn("session-title", async move {
             let timeout = std::time::Duration::from_millis(title::TIMEOUT_MS);
             let request = model.complete(messages, &[], &sink, &cancel);
             // 与 run 相同：panic 时也要发出 AuxiliaryDone，否则标题作业永远不结束。

@@ -26,12 +26,15 @@ pub struct ShellTasks {
     pub(super) jobs: Mutex<HashMap<String, HashMap<String, Arc<Job>>>>,
     /// Complete child environment (Node `buildExecutionEnv`).
     pub(super) env: Arc<[(String, String)]>,
+    /// The tool runtime's scope: Bash processes and background jobs.
+    pub(super) tasks: zcode_async::Spawner,
 }
 impl ShellTasks {
-    pub fn new(env: Arc<[(String, String)]>) -> Self {
+    pub fn new(env: Arc<[(String, String)]>, tasks: zcode_async::Spawner) -> Self {
         Self {
             jobs: Mutex::default(),
             env,
+            tasks,
         }
     }
     pub async fn call(

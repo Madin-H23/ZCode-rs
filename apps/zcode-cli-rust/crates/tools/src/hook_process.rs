@@ -183,14 +183,14 @@ async fn execute(
     // 和 Unix 都不会这样；Windows 上仍用 taskkill，只在取消、超时等路径结束进程树。
     let tree = super::tool_process::ProcessTree::uncontained(pid);
     let mut pipe = child.stdin.take().context("Missing hook stdin")?;
-    let writer = tokio::spawn(async move {
+    let writer = zcode_async::owned(async move {
         let written = pipe.write_all(stdin.as_bytes()).await;
         drop(pipe);
         written
     });
     let limit = request.max_output_bytes;
-    let mut out = tokio::spawn(capture(child.stdout.take().unwrap(), limit));
-    let mut err = tokio::spawn(capture(child.stderr.take().unwrap(), limit));
+    let mut out = zcode_async::owned(capture(child.stdout.take().unwrap(), limit));
+    let mut err = zcode_async::owned(capture(child.stderr.take().unwrap(), limit));
     let timer = tokio::time::sleep(request.timeout);
     tokio::pin!(timer);
     let (exit, mut reason) = tokio::select! {biased;

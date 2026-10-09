@@ -134,7 +134,7 @@ pub(super) async fn read(
     let (mime, data, placeholder, mut info) = match media {
         Media::Image(mime) => {
             let bytes = load(path, IMAGE_MAX_INPUT).await?;
-            let work = tokio::task::spawn_blocking(move || prepare(bytes, mime));
+            let work = zcode_async::blocking(move || prepare(bytes, mime));
             let prepared = tokio::select! {
                 _ = cancel.cancelled() => bail!("Cancelled"),
                 result = work => result?.map_err(anyhow::Error::msg)?,

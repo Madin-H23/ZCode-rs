@@ -129,6 +129,7 @@ async fn goal_start_and_verdict_are_durable_barriers_and_failure_stops_the_next_
         for success in [false, true] {
             let (gate, mut gates) = mpsc::unbounded_channel();
             let (calls, mut requests) = mpsc::unbounded_channel();
+            let tasks = zcode_async::TaskScope::root("test", |_| {});
             let engine = Engine::new(
                 "workspace",
                 Some(ModelIdentity {
@@ -155,6 +156,7 @@ async fn goal_start_and_verdict_are_durable_barriers_and_failure_stops_the_next_
                     tools: Arc::new(Tools),
                     clock: Arc::new(Clock(AtomicUsize::new(1))),
                 },
+                &tasks.spawner(),
             )
             .await
             .unwrap();

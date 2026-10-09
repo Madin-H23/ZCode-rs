@@ -6,7 +6,8 @@ pub mod embed;
 pub mod runtime;
 pub mod serve;
 /// The runtime logs through `tracing`; whoever owns the process installs the subscriber.
-pub use zcode_cli_host::{log_retention, logging};
+pub use embed::log_retention;
+pub use zcode_cli_host::logging;
 pub mod adapters {
     pub use zcode_cli_host::{SystemClock, context_source};
     pub use zcode_cli_model::{config, model_protocol, provider, registry};
@@ -60,10 +61,12 @@ pub fn egress() -> anyhow::Result<std::sync::Arc<zcode_cli_net::Egress>> {
 }
 
 /// Workspace tools wired to the process environment's layered configuration,
-/// as the binary does. Used by tests, examples and embedders.
+/// as the binary does; their tasks belong to `tasks`. Used by tests, examples
+/// and embedders.
 pub fn workspace_tools(
     cwd: std::path::PathBuf,
     artifacts: std::path::PathBuf,
+    tasks: &zcode_async::Spawner,
 ) -> anyhow::Result<zcode_cli_tools::WorkspaceTools> {
     let egress = egress()?;
     let config = zcode_cli_host::WorkspaceConfig::new(
@@ -76,5 +79,6 @@ pub fn workspace_tools(
         artifacts,
         std::sync::Arc::new(config),
         egress,
+        tasks,
     ))
 }

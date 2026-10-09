@@ -19,7 +19,7 @@ impl NodeStore {
         self.tx.send(Request::Barrier(tx)).await?;
         rx.await?;
         let path = self.path.clone();
-        tokio::task::spawn_blocking(move || query(&super::usage_query::open(&path)?)).await?
+        zcode_async::blocking(move || query(&super::usage_query::open(&path)?)).await?
     }
 }
 

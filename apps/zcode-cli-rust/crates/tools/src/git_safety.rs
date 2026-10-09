@@ -19,7 +19,7 @@ const MAX_GITDIR_FILE_BYTES: u64 = 32 * 1024;
 /// Runs the blocking checks off the async workers.
 pub(super) async fn unsafe_context(cwd: &Path) -> bool {
     let cwd = cwd.to_owned();
-    tokio::task::spawn_blocking(move || context_unsafe(&cwd))
+    zcode_async::blocking(move || context_unsafe(&cwd))
         .await
         .unwrap_or(true)
 }

@@ -105,8 +105,8 @@ async fn run(git: &Git, args: &[String], cancel: &CancellationToken) -> Result<(
         }
         Err(error) => return Err(error.into()),
     };
-    let stdout = tokio::spawn(read_bounded(child.stdout.take()));
-    let stderr = tokio::spawn(read_bounded(child.stderr.take()));
+    let stdout = zcode_async::owned(read_bounded(child.stdout.take()));
+    let stderr = zcode_async::owned(read_bounded(child.stderr.take()));
     let mut aborted = false;
     let finished = tokio::select! {
         status = child.wait() => Some(status?),

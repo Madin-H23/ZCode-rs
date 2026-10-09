@@ -308,7 +308,7 @@ async fn pages(
     let mut blocks = vec![json!({"type": "text", "text": heading})];
     let mut parts = vec![];
     for (number, data) in rendered {
-        let prepared: Prepared = tokio::task::spawn_blocking(move || prepare(data, "image/jpeg"))
+        let prepared: Prepared = zcode_async::blocking(move || prepare(data, "image/jpeg"))
             .await?
             .map_err(anyhow::Error::msg)?;
         let asset = save(&prepared.data, prepared.mime, path, artifacts).await?;

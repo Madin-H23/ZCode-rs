@@ -146,6 +146,7 @@ async fn check_commit_barrier(continuation: bool) {
     for success in [false, true] {
         let (gate, mut gates) = mpsc::unbounded_channel();
         let (calls, mut requests) = mpsc::unbounded_channel();
+        let tasks = zcode_async::TaskScope::root("test", |_| {});
         let engine = Engine::new(
             "workspace",
             Some(ModelIdentity {
@@ -173,6 +174,7 @@ async fn check_commit_barrier(continuation: bool) {
                 tools: Arc::new(Tools),
                 clock: Arc::new(Clock(AtomicUsize::new(1))),
             },
+            &tasks.spawner(),
         )
         .await
         .unwrap();

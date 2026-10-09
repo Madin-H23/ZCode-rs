@@ -12,20 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 #[path = "mcp_hub_bindings.rs"]
 mod bindings;
-#[derive(Clone)]
-struct Binding {
-    name: String,
-    /// The configured server name (`plugin:<plugin>:<key>` for plugin servers).
-    server: String,
-    original: String,
-    key: String,
-    safe: bool,
-    /// Node MCP permission metadata: `readOnlyHint === true` / `destructiveHint === true`.
-    read_only: bool,
-    destructive: bool,
-    definition: Value,
-    connection: Arc<Connection>,
-}
+use bindings::Binding;
 #[derive(Default)]
 struct State {
     borrowed: BTreeSet<String>,
@@ -50,6 +37,8 @@ pub(super) struct Hub {
     stop: CancellationToken,
     /// Process telemetry of stdio servers (spec rust-m9-usage-logs §6).
     pub telemetry: Arc<super::mcp_telemetry::Tracker>,
+    /// `<tools>/mcp`: the sampler and the connections' tasks end with the hub.
+    tasks: zcode_async::TaskScope,
 }
 impl Hub {
     pub fn inherit(&self, parent: &str, child: &str) {
@@ -61,13 +50,21 @@ impl Hub {
     pub fn new(
         egress: Arc<zcode_cli_net::Egress>,
         sink: Option<super::mcp_telemetry::ProcessSink>,
+        tasks: &zcode_async::Spawner,
     ) -> Self {
+        let (tasks, stop) = (tasks.child("mcp"), CancellationToken::new());
+        let telemetry = Arc::new(super::mcp_telemetry::Tracker::new(sink));
+        // 资源采样依赖运行时；没有 tokio 运行时的构造（单元测试）不采样。采样器随 stop 结束。
+        if tokio::runtime::Handle::try_current().is_ok() {
+            super::mcp_resources::start(&tasks.spawner(), telemetry.clone(), stop.clone());
+        }
         Self {
-            telemetry: Arc::new(super::mcp_telemetry::Tracker::new(sink)),
+            telemetry,
             egress,
             state: Default::default(),
             gate: Default::default(),
-            stop: CancellationToken::new(),
+            stop,
+            tasks,
         }
     }
     pub fn configure(&self, cwd: &Path, session: &str, servers: &Value) -> Result<()> {
@@ -166,7 +163,7 @@ impl Hub {
         let request_cancel = self.stop.child_token();
         let relay_cancel = request_cancel.clone();
         let caller = cancel.clone();
-        let relay = tokio::spawn(async move {
+        let relay = zcode_async::owned(async move {
             caller.cancelled().await;
             relay_cancel.cancel();
         });
@@ -218,9 +215,17 @@ impl Hub {
                     match transport {
                         Ok(transport) => {
                             let telemetry = (&self.telemetry, key.as_str());
-                            Connection::open(&server, transport, scope.official, cancel, telemetry)
-                                .await
-                                .map(|c| Some(Arc::new(c)))
+                            let tasks = self.tasks.spawner();
+                            Connection::open(
+                                &server,
+                                transport,
+                                scope.official,
+                                cancel,
+                                telemetry,
+                                &tasks,
+                            )
+                            .await
+                            .map(|c| Some(Arc::new(c)))
                         }
                         Err(error) => Err(error),
                     }
@@ -378,10 +383,6 @@ impl Hub {
             connection.close().await?;
         }
         Ok(())
-    }
-    /// Cancelled when the hub shuts down (the resource sampler stops with it).
-    pub fn stopped(&self) -> CancellationToken {
-        self.stop.clone()
     }
     #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn shutdown(&self) -> Result<()> {

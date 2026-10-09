@@ -125,15 +125,13 @@ fn total_memory_gb() -> u64 {
     (bytes as f64 / 1024f64.powi(3)).round() as u64
 }
 
-/// Starts the sampler; it stops with `stop`.
-pub(super) fn start(tracker: Arc<Tracker>, stop: CancellationToken) {
+/// Starts the sampler as a task of `tasks`; it stops with `stop`.
+pub(super) fn start(tasks: &zcode_async::Spawner, tracker: Arc<Tracker>, stop: CancellationToken) {
     let token = uuid::Uuid::new_v4().to_string();
-    tokio::spawn(async move {
+    tasks.spawn("mcp-resource-sampler", async move {
         let hardware = (
             std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
-            tokio::task::spawn_blocking(total_memory_gb)
-                .await
-                .unwrap_or(0),
+            zcode_async::blocking(total_memory_gb).await.unwrap_or(0),
         );
         let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + INTERVAL, INTERVAL);
         let mut baseline: HashMap<(String, u32), u64> = HashMap::new();

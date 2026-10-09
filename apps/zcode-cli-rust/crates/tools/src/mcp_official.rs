@@ -55,9 +55,10 @@ pub(super) fn merge_meta(message: &mut Value, payload: Value) {
 }
 
 /// The writer of an official stdio server: messages are queued and written
-/// in order by one task that resolves each message's identity payload.
-/// Dropping the returned sender ends the task and closes stdin.
+/// in order by one task of `tasks` that resolves each message's identity
+/// payload. Dropping the returned sender ends the task and closes stdin.
 pub(super) fn stdio_writer(
+    tasks: &zcode_async::Spawner,
     input: tokio::process::ChildStdin,
     auth: Arc<OfficialAuth>,
     official: Official,
@@ -65,7 +66,7 @@ pub(super) fn stdio_writer(
     let (tx, mut rx) = tokio::sync::mpsc::channel::<ClientJsonRpcMessage>(WRITE_QUEUE);
     let codec = JsonRpcMessageCodec::<Value>::new_with_max_length(MAX_LINE_BYTES);
     let mut writer = FramedWrite::new(input, codec);
-    tokio::spawn(async move {
+    tasks.spawn("mcp-stdio-writer", async move {
         while let Some(message) = rx.recv().await {
             let Ok(mut value) = serde_json::to_value(message) else {
                 break;

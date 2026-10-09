@@ -15,6 +15,9 @@ use tokio_util::sync::CancellationToken;
 pub(super) struct Hooks {
     pub registrations: Arc<[Registration]>,
     pub tools: Arc<dyn ToolPort>,
+    /// The engine's scope: `async` hooks and permission hook chains outlive
+    /// the call that starts them.
+    pub tasks: zcode_async::Spawner,
     pub clock: Arc<dyn Clock>,
     /// Runtime working directory (hook `cwd` and process directory).
     pub cwd: String,
@@ -98,7 +101,7 @@ impl Driver for RunDriver<'_> {
         let sink = self.sink.clone();
         let cancel = self.cancel.clone();
         // async hook 的生命周期独立于本轮：输出不合并，结束时单独上报；仍受本轮取消约束。
-        tokio::spawn(async move {
+        self.hooks.tasks.spawn("hook", async move {
             // panic 时上报失败事件，异步 hook 不会一直显示为运行中。
             let outcome = zcode_async::catch_panic(execute(tools.as_ref(), &dispatch, &cancel))
                 .await

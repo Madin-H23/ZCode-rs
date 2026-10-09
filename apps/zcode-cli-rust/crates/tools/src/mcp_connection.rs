@@ -42,13 +42,15 @@ pub(super) struct Connection {
     process: Option<(Arc<Tracker>, String)>,
 }
 impl Connection {
-    /// `telemetry` is the tracker and this connection's key.
+    /// `telemetry` is the tracker and this connection's key; the connection's
+    /// tasks (stdio writer, SSE reader, exit watch) belong to `tasks`.
     pub async fn open(
         config: &Server,
         transport: Transport,
         auth: &std::sync::Arc<super::official_auth::OfficialAuth>,
         cancel: &CancellationToken,
         telemetry: (&Arc<Tracker>, &str),
+        tasks: &zcode_async::Spawner,
     ) -> Result<Self> {
         let (env, http) = match transport {
             Transport::Stdio(env) => (Some(env), None),
@@ -121,8 +123,12 @@ impl Connection {
                 ended = Some(end);
                 if let Some(official) = &official {
                     // 官方 stdio server：每条出站请求与通知的 _meta 携带本次身份头。
-                    let writer =
-                        super::mcp_official::stdio_writer(input, auth.clone(), official.clone());
+                    let writer = super::mcp_official::stdio_writer(
+                        tasks,
+                        input,
+                        auth.clone(),
+                        official.clone(),
+                    );
                     return serve_client_with_lifecycle_and_ct(
                         client,
                         (writer, reader),
@@ -153,6 +159,7 @@ impl Connection {
                     config,
                     http.context("HTTP client missing")?,
                     cancel,
+                    tasks,
                 )
                 .await?;
                 Ok(
@@ -250,7 +257,7 @@ impl Connection {
                 instance: instance.clone(),
                 closing: connection.closing.clone(),
             }
-            .spawn(ended, connection.child.clone());
+            .spawn(tasks, ended, connection.child.clone());
             connection.process = Some((tracker.clone(), instance));
         }
         Ok(connection)

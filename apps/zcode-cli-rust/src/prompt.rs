@@ -133,8 +133,8 @@ async fn attachments(paths: &[String], cwd: &Path) -> Vec<Value> {
 }
 
 /// First signal: interrupt the run; second: exit at once (Node `once` handlers).
-fn watch_signals(interrupt: watch::Sender<Option<i32>>) {
-    tokio::spawn(async move {
+fn watch_signals(tasks: &zcode_async::Spawner, interrupt: watch::Sender<Option<i32>>) {
+    tasks.spawn("signals", async move {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{SignalKind, signal};
@@ -180,7 +180,10 @@ async fn run(prompt: PromptArgs, cwd: PathBuf) -> anyhow::Result<i32> {
         zcode_cli_host::logging::LogOptions::from_env(&home, |name| std::env::var_os(name));
     let log_dir = log_options.directory.clone();
     let _logs = zcode_cli_host::logging::init(log_options);
-    zcode_cli_host::log_retention::schedule(log_dir);
+    // 实例的任务作用域：在日志之后创建、之前释放，本函数返回时其中剩余的任务被中止。
+    let scope = runtime::instance_scope();
+    let tasks = scope.spawner();
+    zcode_cli_host::log_retention::schedule(&tasks, log_dir);
     tracing::info!(
         target: "zcode::runtime",
         event = "runtime.started",
@@ -190,10 +193,10 @@ async fn run(prompt: PromptArgs, cwd: PathBuf) -> anyhow::Result<i32> {
         "Headless prompt starting"
     );
     let (interrupt_tx, interrupt) = watch::channel(None);
-    watch_signals(interrupt_tx);
+    watch_signals(&tasks, interrupt_tx);
     let data_dir = prompt.data_dir.as_ref().map(PathBuf::from);
     let options = runtime::RuntimeOptions::from_process(home, Some(cwd.clone()), data_dir)?;
-    let ctx = runtime::Context::prepare(options).await?;
+    let ctx = runtime::Context::prepare(options, tasks.clone()).await?;
     let store: std::sync::Arc<dyn zcode_cli_core_api::SessionStore> =
         std::sync::Arc::new(ctx.node_store().await?);
     let config = prompt.config.as_ref().map(PathBuf::from);
@@ -219,7 +222,7 @@ async fn run(prompt: PromptArgs, cwd: PathBuf) -> anyhow::Result<i32> {
     };
     let (to, input) = mpsc::channel(64);
     let (output, mut from) = mpsc::channel(64);
-    let actor = tokio::spawn(engine.serve(input, output, CancellationToken::new()));
+    let actor = zcode_async::owned(engine.serve(input, output, CancellationToken::new()));
     let mut io = headless::Io {
         stdout: tokio::io::stdout(),
         stderr: tokio::io::stderr(),

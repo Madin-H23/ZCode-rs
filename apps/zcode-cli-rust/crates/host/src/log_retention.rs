@@ -88,8 +88,15 @@ pub async fn cleanup(dir: &Path, today: NaiveDate, retention_days: u64) -> Clean
     result
 }
 
-/// Runs [`cleanup`] once after [`STARTUP_DELAY`] in the background.
-pub fn schedule(dir: PathBuf) {
+/// Runs [`cleanup`] once after [`STARTUP_DELAY`] as a task of `tasks`; it
+/// does not run if the scope ends first.
+pub fn schedule(tasks: &zcode_async::Spawner, dir: PathBuf) {
+    tasks.spawn("log-retention", delayed(dir));
+}
+
+/// Records the schedule and returns the delayed [`cleanup`] for the caller to
+/// run in the background.
+pub fn delayed(dir: PathBuf) -> impl Future<Output = ()> + Send + 'static {
     tracing::info!(
         target: "zcode::logging",
         event = "log.retention.cleanup.scheduled",
@@ -97,10 +104,10 @@ pub fn schedule(dir: PathBuf) {
         retention_days = RETENTION_DAYS,
         "Log retention cleanup scheduled"
     );
-    tokio::spawn(async move {
+    async move {
         tokio::time::sleep(STARTUP_DELAY).await;
         cleanup(&dir, chrono::Local::now().date_naive(), RETENTION_DAYS).await;
-    });
+    }
 }
 
 #[cfg(test)]

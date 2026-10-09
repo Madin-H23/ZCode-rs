@@ -85,13 +85,13 @@ pub(super) async fn run(
     let pid = child.id().context("Missing child pid")?;
     let tree = ProcessTree::contain(&child, pid);
     let overflow = CancellationToken::new();
-    let mut out = tokio::spawn(capture(
+    let mut out = zcode_async::owned(capture(
         child.stdout.take().unwrap(),
         path.with_extension("stdout"),
         combined.clone(),
         overflow.clone(),
     ));
-    let mut err = tokio::spawn(capture(
+    let mut err = zcode_async::owned(capture(
         child.stderr.take().unwrap(),
         path.with_extension("stderr"),
         combined.clone(),

@@ -60,18 +60,16 @@ impl Sink {
 
     /// Start a writer task over `writer`. Like [`Sink::stdout`]: each batch is
     /// written then flushed once, the caller never blocks, unwritten bytes count
-    /// as backlog, and a write failure cancels the runtime.
-    pub fn writer<W>(
-        mut writer: W,
-        cancel: CancellationToken,
-    ) -> (Self, tokio::task::JoinHandle<()>)
+    /// as backlog, and a write failure cancels the runtime. The returned handle
+    /// owns the task (dropping it stops the writer); see [`crate::finish_task`].
+    pub fn writer<W>(mut writer: W, cancel: CancellationToken) -> (Self, zcode_async::OwnedTask<()>)
     where
         W: AsyncWrite + Unpin + Send + 'static,
     {
         let (tx, mut rx) = mpsc::unbounded_channel::<Vec<String>>();
         let backlog = Arc::new(AtomicUsize::new(0));
         let pending = backlog.clone();
-        let task = tokio::spawn(async move {
+        let task = zcode_async::owned(async move {
             while let Some(batch) = rx.recv().await {
                 let bytes = batch.iter().map(|line| line.len() + 1).sum::<usize>();
                 let written = async {

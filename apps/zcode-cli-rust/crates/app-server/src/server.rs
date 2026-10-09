@@ -46,7 +46,8 @@ pub(super) struct Server {
 }
 
 /// Run the App Server over `runtime`, reading parsed wire input and writing to `sink`.
-/// Returns the runtime's result after it stops and its output is drained.
+/// Returns the runtime's result after it stops and its output is drained. On
+/// every path, the runtime has stopped before this returns.
 pub async fn serve<F, Fut>(runtime: F, mut input: mpsc::Receiver<Input>, sink: Sink) -> Result<()>
 where
     F: FnOnce(mpsc::Receiver<ClientMsg>, mpsc::Sender<Vec<ServerMsg>>) -> Fut,
@@ -54,7 +55,7 @@ where
 {
     let (client_tx, client_rx) = mpsc::channel(RUNTIME_CHANNEL);
     let (server_tx, mut server_rx) = mpsc::channel(RUNTIME_CHANNEL);
-    let running = tokio::spawn(runtime(client_rx, server_tx));
+    let running = zcode_async::owned(runtime(client_rx, server_tx));
     let mut server = Server {
         sink,
         delivery: Delivery::default(),
@@ -66,33 +67,45 @@ where
     };
     let mut drain = tokio::time::interval(std::time::Duration::from_millis(100));
     drain.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        // 订阅者缓冲的刷新窗口（spec rust-m8-delivery §5）；拥塞期间由 drain 恢复。
-        let due = server.delivery.next_due().filter(|_| !server.congested);
-        let flush_at = due.map_or_else(tokio::time::Instant::now, tokio::time::Instant::from_std);
-        tokio::select! {
-            biased;
-            batch = server_rx.recv() => match batch {
-                Some(batch) => server.on_runtime(batch).await?,
-                None => {
-                    server.flush_final().await?;
-                    break;
-                }
-            },
-            _ = tokio::time::sleep_until(flush_at), if due.is_some() => server.flush().await?,
-            permit = client_tx.reserve(), if !server.to_runtime.is_empty() => match permit {
-                Ok(permit) => permit.send(server.to_runtime.pop_front().expect("queue is not empty")),
-                // runtime 已停止接收；剩余请求没有 owner，等待其输出关闭后退出。
-                Err(_) => server.to_runtime.clear(),
-            },
-            message = input.recv(), if server.input_open && server.to_runtime.len() < MAX_QUEUED_REQUESTS => match message {
-                Some(message) => server.on_input(message).await?,
-                None => server.end_input(),
-            },
-            _ = drain.tick(), if server.congested => server.relieve().await?,
+    let served = async {
+        loop {
+            // 订阅者缓冲的刷新窗口（spec rust-m8-delivery §5）；拥塞期间由 drain 恢复。
+            let due = server.delivery.next_due().filter(|_| !server.congested);
+            let flush_at =
+                due.map_or_else(tokio::time::Instant::now, tokio::time::Instant::from_std);
+            tokio::select! {
+                biased;
+                batch = server_rx.recv() => match batch {
+                    Some(batch) => server.on_runtime(batch).await?,
+                    None => {
+                        server.flush_final().await?;
+                        return Ok::<(), anyhow::Error>(());
+                    }
+                },
+                _ = tokio::time::sleep_until(flush_at), if due.is_some() => server.flush().await?,
+                permit = client_tx.reserve(), if !server.to_runtime.is_empty() => match permit {
+                    Ok(permit) => permit.send(server.to_runtime.pop_front().expect("queue is not empty")),
+                    // runtime 已停止接收；剩余请求没有 owner，等待其输出关闭后退出。
+                    Err(_) => server.to_runtime.clear(),
+                },
+                message = input.recv(), if server.input_open && server.to_runtime.len() < MAX_QUEUED_REQUESTS => match message {
+                    Some(message) => server.on_input(message).await?,
+                    None => server.end_input(),
+                },
+                _ = drain.tick(), if server.congested => server.relieve().await?,
+            }
         }
     }
-    running.await?
+    .await;
+    // 修复：输出写入失败（对端关闭、stdout 断管）时这里原来直接返回，丢弃 runtime 的句柄，Engine
+    // 在实例结束之后继续运行——取消 run、回收工具进程树、提交中断态都发生在实例之外；二进制随即
+    // 退出时，这段收口被直接打断，TERM 不响应的后代进程留了下来。现在先关闭两条通道（runtime
+    // 看到输入结束、输出关闭，照常收口），等它结束后再返回。
+    drop(client_tx);
+    drop(server_rx);
+    let stopped = running.await;
+    served?;
+    stopped?
 }
 
 pub(super) fn response(id: RequestId, result: Result<Value, RuntimeError>) -> String {

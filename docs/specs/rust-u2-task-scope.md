@@ -4,7 +4,7 @@
 
 ## 1. 要解决的问题
 
-Host 有约 139 处、runtime 有约 32 处直接的 `tokio::spawn`。它们的共同问题：
+Host 有约 139 处直接的 `tokio::spawn`，runtime 有约 44 处 `tokio::spawn` / `spawn_blocking`。它们的共同问题：
 
 - **没有归属**。连接断开、workspace 关闭、runtime 实例结束之后，它们派生的任务是否还在运行，只能靠每处自己保存句柄或取消令牌来保证。U3 把 runtime 放进 Host 进程之后，已经出现过一次泄漏：Engine 循环 panic 后 run 任务仍在请求模型（rust-u3-single-process.md 2.5）。
 - **panic 无声**。tokio 只结束出错的任务；没有人 await 它的句柄时，没有日志，等待它结果的一方永远等不到。
@@ -12,11 +12,14 @@ Host 有约 139 处、runtime 有约 32 处直接的 `tokio::spawn`。它们的�
 
 ## 2. 规则
 
-1. 每个任务属于一个作用域。作用域有唯一的所有者；所有者释放作用域时，其中仍在运行的任务被中止。任务不能比它的作用域活得更久。
+1. 每个任务有唯一的所有者：一个作用域，或者它自己的句柄。
+   - **作用域**：作用域有唯一的所有者；所有者释放作用域时，其中仍在运行的任务被中止。任务不能比它的作用域活得更久。丢弃这种任务的句柄不影响任务。
+   - **句柄**（`OwnedTask`）：只用于在同一个函数里启动、等待的结构化任务（并发读子进程的 stdout 与 stderr、函数内 `select!` 的辅助任务）。丢弃句柄即中止任务；移动句柄即转移所有权。句柄的持有者本身属于某个作用域，所以这种任务同样不会比作用域活得更久。
+   - 同步的阻塞调用（`spawn_blocking(...).await`）用 `blocking`：调用方等待它的结果；丢弃这个 future 只是不再等待，已经开始的阻塞工作无法停止。
 2. 作用域可以有子作用域。关闭或释放父作用域，等同于关闭或释放所有子作用域。
 3. 任务有名字（静态字符串，说明它在做什么）。panic 被捕获并交给根作用域的上报函数（作用域路径、任务名、panic 信息），等待该任务结果的一方得到错误，而不是一直等待。
 4. 关闭作用域分三步：发出取消信号 → 在给定的宽限期内等任务自行结束 → 中止剩余任务并返回它们的名字。关闭之后在这个作用域上启动的任务不会运行，其句柄立即得到“作用域已关闭”。
-5. `tokio::spawn` 与 `tokio::task::spawn_blocking` 只允许出现在 `zcode-async` 内。各 crate 迁移完成后由 `clippy.toml` 的 `disallowed-methods` 强制；迁移期间按 crate 逐个开启。
+5. `tokio::spawn` 与 `tokio::task::spawn_blocking` 只允许出现在 `zcode-async` 内。`clippy.toml` 由所有 Rust workspace 共用，Host 迁移完成后再由它的 `disallowed-methods` 强制；在那之前，runtime（`apps/zcode-cli-rust` 的 `crates/` 与 `src/`）由 `scripts/check-zcode-cli-rust-boundaries.mjs` 扫描非测试代码强制，例外文件逐个列出（见 4.1）。
 
 ## 3. 接口（`zcode-async`）
 
@@ -51,7 +54,19 @@ pub struct Task<T> { /* … */ }
 impl<T> Future for Task<T> { type Output = Result<T, TaskError>; }
 pub enum TaskError { Panicked(Panicked), Aborted, ScopeClosed }
 pub struct TaskPanic { pub scope: String, pub task: &'static str, pub message: String }
+
+/// 由句柄拥有的任务：丢弃句柄即中止任务，移动句柄即转移所有权。
+pub fn owned<F>(future: F) -> OwnedTask<F::Output>;
+pub struct OwnedTask<T> { /* … */ }
+impl<T> OwnedTask<T> { pub fn abort(&self); pub fn is_finished(&self) -> bool; }
+/// panic 变成 `TaskError::Panicked`，不向等待方传播；被中止时为 `TaskError::Aborted`。
+impl<T> Future for OwnedTask<T> { type Output = Result<T, TaskError>; }
+/// 在阻塞线程池里运行 `work` 并等待结果；panic 变成 `TaskError::Panicked`。
+/// 丢弃返回的 future 只是不再等待：已经开始的阻塞工作会一直运行到结束。
+pub async fn blocking<F, T>(work: F) -> Result<T, TaskError>;
 ```
+
+- `OwnedTask` 的 panic 只交给等待它的一方，不经作用域的上报函数（它没有作用域）；从不被等待、只会被中止的辅助任务不应包含可能 panic 的逻辑。
 
 - `spawn_blocking` 的任务无法被中止（线程里的同步代码不会让出）；关闭时它们计入“仍在运行”，宽限期过后不再等待。
 - 作用域内部状态用 `std::sync::Mutex` 保护，不跨 await 持有。
@@ -68,11 +83,51 @@ pub struct TaskPanic { pub scope: String, pub task: &'static str, pub message: S
 
 runtime 内部的任务（run、标题、hook、辅助模型请求）属于它所在实例的作用域：Engine 结束（包括 panic 之后的收口）时关闭。
 
+### 4.1 runtime 实例
+
+一个 runtime 实例（一个 App Server 或一次 `-p`）有一个根作用域 `runtime`，由拥有实例的入口创建：二进制的 `main.rs` / `prompt.rs`，嵌入时是 `embed::spawn` 启动的实例任务（作用域随实例任务结束、出错、panic 或被中止而释放）。`Spawner` 经构造参数显式向下传递：入口 → `Context`（`runtime.rs`）→ 会话存储、`WorkspaceTools`、`Engine`。没有全局或 `OnceLock`。
+
+| 作用域              | 所有者                                    | 任务                                                                                                          | 何时关闭                                                                                      |
+| ------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `runtime`           | 入口（实例任务 / 二进制入口）             | `stdio-reader`（嵌入）、`signals`、`log-retention`（二进制）、`session-store`（阻塞）                         | 实例结束时释放                                                                                |
+| `runtime/engine`    | `Engine`                                  | `run`、`hook`、`permission-hooks`、`session-title`、`auxiliary`、`usage-query`、`mcp-query`、`plugin-request` | `wind_down` 的收口完成之后 `close`（宽限期覆盖工具进程的 TERM→KILL）；Engine 被释放时随之释放 |
+| `runtime/tools`     | `WorkspaceTools`（各 workspace 视图共用） | `bash`（前台进程，可能转入后台）、`bash-background`                                                           | 随工具运行时释放                                                                              |
+| `runtime/tools/mcp` | MCP hub                                   | `mcp-resource-sampler`、`mcp-stdio-writer`、`mcp-exit-watch`、`mcp-sse`                                       | 随 hub 释放                                                                                   |
+
+- 任务做的事、取消令牌与关闭顺序不变（`Engine::wind_down`、`tools.shutdown()`、工具进程的 TERM→KILL）；作用域是附加的一层：有序收口之后仍在运行的任务，在作用域关闭或释放时被中止。原来为保证发出终态而用 `catch_panic` 包住的任务体保持不变，作用域的捕获是第二道保险。
+- 由句柄拥有的结构化任务：子进程输出的并发读取（Bash、hooks、插件 git）、hook 的 stdin 写入、MCP prepare 的取消转发、App Server 里运行 Engine 的任务、嵌入时的协议输出写入任务。读取子进程输出的句柄在结束进程树期间保持存活，管道一直被排空。
+- App Server 在任何返回路径上都先关闭它与 Engine 之间的两条通道，再等 Engine 结束（Engine 看到输入结束、输出关闭，照常收口）。原来输出写入失败时它直接返回、丢弃 Engine 的句柄，Engine 的收口发生在实例之外；二进制随即退出时收口被打断。
+- 例外：`src/embed.rs` 保留两处 `tokio::spawn`。实例任务本身（Host 需要 `JoinHandle<anyhow::Result<()>>`），以及嵌入方进程级的日志清理（`log_retention::schedule`）；Host 把自己的 `Spawner` 传给 runtime 之后去掉。
+- 嵌入方从 `Embedded::tasks` 读取实例中仍在运行的任务名（只读），用于关闭日志与测试。
+
+实例结束时的顺序（嵌入时；二进制入口相同，只是没有外层的实例任务）：
+
+```mermaid
+sequenceDiagram
+    participant I as 实例任务（拥有 runtime）
+    participant A as App Server
+    participant E as Engine（拥有 runtime/engine）
+    participant W as WorkspaceTools（拥有 runtime/tools）
+    I->>A: app_server(options, tasks, …)
+    A->>E: owned(engine.serve)
+    Note over E: EOF、cancel、存储失败或 Engine 循环 panic
+    E->>E: wind_down：取消 run 与辅助请求，cancel_session，等 run 结束
+    E->>W: shutdown()：后台 Bash 走完 TERM→KILL，MCP 停止
+    E->>E: close runtime/engine（宽限 3.5 s，超时的被中止并记 warn）
+    E-->>A: 返回；Engine 被释放，runtime/tools 与 runtime/tools/mcp 随之释放
+    A-->>I: 返回（任何路径都先等 Engine 结束）
+    I->>I: finish_task(输出写入任务)
+    I->>I: 释放 runtime：中止 stdio-reader 等剩余任务
+    Note over I: 嵌入方中止实例任务时，任务的 future 被丢弃，runtime 及其子作用域一并释放
+```
+
 迁移顺序：先让每个 service 从组装根拿到自己的 `Spawner`，把直接的 `tokio::spawn` 换成 `spawner.spawn("…", …)`；寿命比 service 短的任务（连接、实例、会话）再收进更小的作用域。迁移不改变任务做的事。
 
 ## 5. 验收
 
 - `zcode-async` 的测试：panic 上报且句柄得到错误；释放作用域中止任务；`close` 的三步（自行结束的不算中止，超时的被中止并列出）；关闭后启动的任务不运行；子作用域随父作用域关闭；任务结束后不再出现在 `running` 里。
-- Host 与 runtime 的非测试代码中，`tokio::spawn` / `spawn_blocking` 只出现在 `zcode-async`，由 clippy 强制。
+- `zcode-async` 的测试还覆盖 `owned` 与 `blocking`：丢弃句柄中止任务；panic 变成错误；结果原样返回；移动后的句柄让任务继续运行。
+- Host 与 runtime 的非测试代码中，`tokio::spawn` / `spawn_blocking` 只出现在 `zcode-async`（runtime 由边界脚本强制，例外见 4.1；Host 迁移后由 clippy 强制）。
+- runtime 嵌入测试（`apps/zcode-cli-rust/tests/embed.rs`）：实例因 EOF、Engine panic 或被嵌入方中止而结束之后，实例中没有仍在运行的任务；中止实例时，运行中的 run、标题请求与后台 Bash 任务随之结束（模型请求关闭、后台进程被回收）。
 - Host 退出时日志里列出被中止的任务；正常退出时这个列表为空或只含已知的常驻任务。
 - 现有测试与桌面 E2E 全部通过。

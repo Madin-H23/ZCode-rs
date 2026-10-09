@@ -81,8 +81,15 @@ fn directory(workspace: &str) -> &str {
 
 impl NodeStore {
     /// Opens and migrates the Node database; `artifacts` is Node's artifact
-    /// root, `media_cache` Rust's own cache of prepared request media.
-    pub async fn open(path: PathBuf, artifacts: PathBuf, media_cache: PathBuf) -> Result<Self> {
+    /// root, `media_cache` Rust's own cache of prepared request media. The
+    /// worker thread belongs to `tasks` and ends when the last clone of the
+    /// store is dropped.
+    pub async fn open(
+        path: PathBuf,
+        artifacts: PathBuf,
+        media_cache: PathBuf,
+        tasks: &zcode_async::Spawner,
+    ) -> Result<Self> {
         let attachments = super::input_attachments::Backing {
             root: artifacts.clone(),
             cache: media_cache,
@@ -93,7 +100,7 @@ impl NodeStore {
         let (tx, rx) = mpsc::channel(64);
         let (ready_tx, ready_rx) = oneshot::channel();
         let database = path.clone();
-        tokio::task::spawn_blocking(move || {
+        tasks.spawn_blocking("session-store", move || {
             match open::open(&path, open::MIGRATION_LOCK_WAIT, &mut |_| {}) {
                 Ok(conn) => {
                     let _ = ready_tx.send(Ok(()));

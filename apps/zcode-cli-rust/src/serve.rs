@@ -24,13 +24,15 @@ pub struct AppServerOptions {
 
 /// Serves the App protocol until the input ends or `cancel` fires. `output` is
 /// dropped on return, so the caller can then wait for its writer to drain.
+/// `tasks` is the instance's scope ([`crate::runtime::instance_scope`]).
 pub async fn app_server(
     options: AppServerOptions,
+    tasks: &zcode_async::Spawner,
     mut input: mpsc::Receiver<Input>,
     mut output: Sink,
     cancel: CancellationToken,
 ) -> Result<()> {
-    let ctx = Context::prepare(options.runtime).await?;
+    let ctx = Context::prepare(options.runtime, tasks.clone()).await?;
     // 会话存储只有 Node 的库（spec rust-m11-node-storage §2.1）。
     let path = ctx.node_database().await?.database;
     let attempt = zcode_cli_host::id();

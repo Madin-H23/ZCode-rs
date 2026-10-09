@@ -165,7 +165,7 @@ impl Engine {
                 .as_ref()
                 .and_then(|e| e.request_auth.clone()),
         };
-        tokio::spawn(async move {
+        self.tasks.spawner().spawn("run", async move {
             // run 任务 panic 时 tokio 只结束这个任务，Finished 永远不会发出：会话停在 running，
             // Engine 关闭时也会一直等它。把 panic 转成本轮失败，保证终态一定发出。
             let result = zcode_async::catch_panic(super::agent_loop::run(
@@ -237,6 +237,7 @@ impl Engine {
             registrations: self.hooks.user.clone(),
             admission: None,
             tools: scope.tools.clone(),
+            tasks: self.tasks.spawner(),
             clock: self.clock.clone(),
             cwd: scope.workspace.path.clone(),
             turn_id: turn.into(),
