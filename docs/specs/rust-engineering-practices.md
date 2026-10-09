@@ -2,7 +2,7 @@
 
 日期：2026-10-09。来源：对 `~/bearspace/codex/codex-rs`（`633ab19`）的调研，并与 `apps/zcode-host`、`apps/zcode-cli-rust` 的现状逐项对照。适用范围：[rust-unified-host.md](rust-unified-host.md) 的 U0 起，`rust/` 下的所有 crate；U0 之前，先在两个现有 Cargo workspace 中落地。
 
-每条实践都写明四件事：做法、Codex 出处、我们的现状、落地阶段。只收录在我们的决策下（单进程、一个 Engine、TS/zod 为契约来源，见 rust-unified-host.md 第 14 节）能落地的做法。不借鉴的做法和理由放在第 9 节。
+每条实践都写明四件事：做法、Codex 出处、我们的现状、落地阶段。只收录在我们的决策下（单进程、每个 workspace 一个 runtime 实例、TS/zod 为契约来源，见 rust-unified-host.md 第 14 节）能落地的做法。不借鉴的做法和理由放在第 9 节。
 
 ## 1. 总览
 

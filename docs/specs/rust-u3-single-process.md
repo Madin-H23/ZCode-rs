@@ -21,7 +21,7 @@ A 期每个 workspace key 一个 runtime 实例（一个 Engine），另加 plug
 
 - Host 按 workspace key 归属帧、发生命周期事件、记代次、做惰性重启；实例粒度不变，这些语义全部保留。
 - 一个实例的 panic 或致命错误只结束这个实例，其他 workspace 不受影响，等同于今天一个 CLI 进程崩溃。
-- “一个 Engine 管所有 workspace”（rust-unified-host.md D-U12）需要改 Host 的帧归属与生命周期，放到 B 期与投递合并一起评估，届时以 rust-unified-host.md 14.1 的测量为依据。
+- 这也是最终形态：是否改为一个 Engine 管所有 workspace 已讨论并决定不改（rust-unified-host.md 14.1）。
 
 ### 2.2 链路
 

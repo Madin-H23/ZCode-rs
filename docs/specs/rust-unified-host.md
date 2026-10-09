@@ -1,6 +1,6 @@
 # Rust 单进程 Host：顶层架构规划
 
-日期：2026-10-09（第一版）。基线：`feat/rust-host` / `f8b5087`。状态：规划。D-U1、D-U2、D-U3、D-U8、D-U12 已定（2026-10-09），其余待定，见第 14 节。
+日期：2026-10-09（第一版）。基线：`feat/rust-host` / `f8b5087`。状态：规划。已定与待定的决策见第 14 节。
 
 本文接续 [rust-host.md](rust-host.md) 第 9 节“本计划之后”，并扩大范围：
 
@@ -229,7 +229,7 @@ pub struct RuntimeEnv { /* vars、paths、proxy、ca、platform */ }
 ```mermaid
 flowchart TB
     P["进程：HostCore"] --> PR["Profile（用户级）<br/>settings、credentials、account、providers、扩展目录"]
-    PR --> E["Engine（唯一的 runtime actor）"]
+    PR --> E["Engine（每个本地 workspace 一个 runtime 实例）"]
     E --> W1["Scope（本地 workspace，key = identity.trim() || path）<br/>项目配置、权限、sessions-index"]
     PR --> W2["WorkspaceRoute::Remote（remote:ssh:…）<br/>指向 RemoteLink"]
     W1 --> S1["Session<br/>CommandInbox、runId、SessionLog"]
@@ -239,7 +239,7 @@ flowchart TB
 
 ```rust
 pub enum WorkspaceRoute {
-    /// 本地 workspace 由唯一的 Engine 持有，按 key 定位 Scope。
+    /// 本地 workspace 由它自己的 runtime 实例（一个 Engine）持有。
     Local { engine: EngineHandle, key: WorkspaceKey },
     /// 远端 workspace 归远端 Host 所有；本地只做路由。
     Remote { link: RemoteLinkHandle, remote_key: WorkspaceKey },
@@ -256,7 +256,7 @@ pub struct ConnectionMeta {
 
 - **Profile** 是显式的值，不是进程全局。今天每个进程只有一个 Profile；Web 将来要支持多用户时，只需同时持有多个 Profile。
 - **扩展的私有状态** 挂在对应作用域上，采用类型化的 map。这样 goal、todo 等扩展不需要往 `Session` 上加字段（今天约 77 个公开字段）。（Codex：`ExtensionData`。）
-- **runtime 只有一个 `Engine` actor**（D-U12）。它按 workspace key 持有 Scope，并持有所有已加载的会话；下文状态表和时序图中的“Engine”都指它。它的约束与兜底见 14.1。
+- **每个本地 workspace 一个 runtime 实例**（D-U12），都在 Host 进程内；一个实例里是一个 `Engine` actor，持有该 workspace 已加载的会话。下文状态表和时序图中的“Engine”指会话所在 workspace 的那个实例。见 14.1。
 
 ### 6.3 Gateway：方法表、串行范围与投递
 
@@ -521,13 +521,13 @@ sequenceDiagram
 
 今天 CLI 崩溃只影响一个 workspace；合并以后，Host 崩溃会影响所有窗口、workspace、远端链路和 Bot。应对措施：
 
-| 层面   | 措施                                                                                                                                                                                                                                                            |
-| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 代码   | workspace 级 lints：`unwrap_used`、`expect_used` 先设为 warn，存量清零后改为 deny；`await_holding_lock`，以及 clippy.toml 的 `await-holding-invalid-types`；使用不会中毒的锁或明确的中毒策略，避免一次 panic 通过锁传染到所有 workspace                         |
-| 运行时 | `TaskScope` 边界处捕获 panic：run 任务 panic → 该会话 `Finished{error}`；Engine 循环 panic → 按 14.1 重建 Engine，进程、连接、远端链路和 Bot 不受影响；handler panic → `[202]` Fault；只有 HostCore 自身的不变量被破坏时才退出进程。必须保持 `panic = "unwind"` |
-| 资源   | CPU 密集的工作（搜索、diff、图片缩放）放到 `spawn_blocking` 或专用线程池；会话按 LRU 卸载（沿用 8 个 / 16 MiB）；Scope 按空闲淘汰；暴露 tokio 事件循环延迟指标                                                                                                  |
-| 进程   | 工具、MCP stdio 服务和 hooks 本来就是子进程。runtime 所在的进程异常退出时，它们由账本加启动清扫回收，Linux 与 Windows 另有系统机制（D-U15，[rust-tool-process-reaping.md](rust-tool-process-reaping.md)）                                                       |
-| 恢复   | Main 自动重启（D2）；会话从库冷加载；客户端按 epoch 走快照恢复                                                                                                                                                                                                  |
+| 层面   | 措施                                                                                                                                                                                                                                                                                                                |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 代码   | workspace 级 lints：`unwrap_used`、`expect_used` 先设为 warn，存量清零后改为 deny；`await_holding_lock`，以及 clippy.toml 的 `await-holding-invalid-types`；使用不会中毒的锁或明确的中毒策略，避免一次 panic 通过锁传染到所有 workspace                                                                             |
+| 运行时 | `TaskScope` 边界处捕获 panic：run 任务 panic → 该会话 `Finished{error}`；Engine 循环 panic → 该 workspace 的实例收口后结束，下一次请求时重启（14.1），进程、连接、其他 workspace、远端链路和 Bot 不受影响；handler panic → `[202]` Fault；只有 HostCore 自身的不变量被破坏时才退出进程。必须保持 `panic = "unwind"` |
+| 资源   | CPU 密集的工作（搜索、diff、图片缩放）放到 `spawn_blocking` 或专用线程池；会话按 LRU 卸载（沿用 8 个 / 16 MiB）；Scope 按空闲淘汰；暴露 tokio 事件循环延迟指标                                                                                                                                                      |
+| 进程   | 工具、MCP stdio 服务和 hooks 本来就是子进程。runtime 所在的进程异常退出时，它们由账本加启动清扫回收，Linux 与 Windows 另有系统机制（D-U15，[rust-tool-process-reaping.md](rust-tool-process-reaping.md)）                                                                                                           |
+| 恢复   | Main 自动重启（D2）；会话从库冷加载；客户端按 epoch 走快照恢复                                                                                                                                                                                                                                                      |
 
 ### 10.2 已接受的输入要持久化
 
@@ -595,7 +595,7 @@ flowchart LR
 | U3   | A 期已完成：Host 进程内运行 runtime（每个 workspace 一个实例），进程内是缺省；合并 U4 之前 25 个桌面 E2E 场景通过；对比测量见 [报告](../reports/rust-u3-embedded-runtime.md)。B 期按 D-U13 修订：投递逻辑的抽取已完成；进行中：结构隔离、三种构建形态、单二进制多入口；原计划中让 Host 依赖 runtime 内部的步骤取消 | [rust-u3-single-process.md](rust-u3-single-process.md)、[rust-u3-stage-b.md](rust-u3-stage-b.md)、[rust-host-cli-boundary.md](rust-host-cli-boundary.md) |
 | U4   | 已完成并在 Electron 里验证（在合并 Gateway 之前的提交上）：一个 App 一个 Rust Host；28 个桌面 E2E 场景在进程内 runtime 下通过，包括多窗口、没有窗口时的调度、设置读写、崩溃重启；Node Host 路径 5 个场景通过。进行中：合并 Gateway 之后重跑全部 E2E                                                                | [rust-u4-app-host.md](rust-u4-app-host.md)                                                                                                               |
 
-用户已决定、尚未实现：工具进程的回收（D-U15）、一个 Engine（D-U12）、输入队列的映射（D-U6）。
+用户已决定、正在实现：工具进程的回收（D-U15）、输入队列的映射（D-U6）、Host 与 CLI 的隔离及 `cli` 入口（D-U13、D-U14）。
 
 **不做中间发布（D-U8）。** U0–U7 都是开发里程碑，不是发布版本：
 
@@ -607,32 +607,32 @@ flowchart LR
 
 ## 13. 风险
 
-| #   | 风险                                                                                                                   | 应对                                                                              |
-| --- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| K1  | 爆炸半径扩大                                                                                                           | 第 10 节；U3 的验收包含 panic 隔离                                                |
-| K2  | 开发期两条线并存：发布版 Node Host，开发开关后的 Rust Host                                                             | 不发布中间形态（D-U8）；每个开发开关写明下线阶段；差分测试始终以 Node Host 为基准 |
-| K3  | U2 的拆分与并行分支冲突                                                                                                | 集中窗口加功能冻结；用 `git mv` 保留历史；先移动，再改接口                        |
-| K4  | 单二进制远端的平台矩阵：glibc 与 musl、arm64、老内核，以及杀毒软件误报                                                 | Linux 用 musl 静态链接；部署前先 probe；Windows 与 macOS 签名                     |
-| K5  | SSH 认证方式多，本机难以覆盖                                                                                           | D-U3；E2E 环境准备多种 sshd 配置                                                  |
-| K6  | 过渡期 `packages/server` 仍有用户                                                                                      | U6 之前保留 TS server，两条路径共用 wire 夹具                                     |
-| K7  | 一个 Engine 承载所有 workspace：慢操作会让所有会话排队；Engine 循环的故障会中断所有会话；Engine 的工作最多只用到一个核 | 14.1 的约束与兜底；U3 实测；不达标时退到“每个 workspace 一个 Engine”              |
-| K8  | relay 协议依赖外部团队                                                                                                 | U7 只依赖 U2，可以最后排期；在此之前保留现有挂接点                                |
-| K9  | 内部 API 来源翻转（D-U5）会牵动 UI                                                                                     | 放到 U9，按领域推进；legacy 映射可以长期保留                                      |
+| #   | 风险                                                                                                               | 应对                                                                                     |
+| --- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| K1  | 爆炸半径扩大                                                                                                       | 第 10 节；U3 的验收包含 panic 隔离                                                       |
+| K2  | 开发期两条线并存：发布版 Node Host，开发开关后的 Rust Host                                                         | 不发布中间形态（D-U8）；每个开发开关写明下线阶段；差分测试始终以 Node Host 为基准        |
+| K3  | U2 的拆分与并行分支冲突                                                                                            | 集中窗口加功能冻结；用 `git mv` 保留历史；先移动，再改接口                               |
+| K4  | 单二进制远端的平台矩阵：glibc 与 musl、arm64、老内核，以及杀毒软件误报                                             | Linux 用 musl 静态链接；部署前先 probe；Windows 与 macOS 签名                            |
+| K5  | SSH 认证方式多，本机难以覆盖                                                                                       | D-U3；E2E 环境准备多种 sshd 配置                                                         |
+| K6  | 过渡期 `packages/server` 仍有用户                                                                                  | U6 之前保留 TS server，两条路径共用 wire 夹具                                            |
+| K7  | 多个 runtime 实例在同一个进程里：各自连同一个会话库、各自轮询 provider 配置；一个实例的 panic 只影响它的 workspace | 14.1；实测每个实例约 2–4 MiB、冷启动约 17 ms（docs/reports/rust-u3-embedded-runtime.md） |
+| K8  | relay 协议依赖外部团队                                                                                             | U7 只依赖 U2，可以最后排期；在此之前保留现有挂接点                                       |
+| K9  | 内部 API 来源翻转（D-U5）会牵动 UI                                                                                 | 放到 U9，按领域推进；legacy 映射可以长期保留                                             |
 
 ## 14. 决策
 
 **已定**（2026-10-09，用户确认）
 
-| 编号  | 问题                          | 决定                                                                                                                                                                                                                          |
-| ----- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D-U1  | Host 进程归谁                 | App 的子进程，每个 App 一个。HostCore 不区分启动方式，用户级 daemon 以后作为另一种启动方式补上                                                                                                                                |
-| D-U2  | 远端运行什么                  | 完整 Host（同一个二进制 `zcode serve --stdio`），远端拥有会话。`Environment` 抽象保留，将来可以支持“只做远程执行”                                                                                                             |
-| D-U3  | SSH 怎么实现                  | 系统 OpenSSH 加 askpass。复用用户的 `~/.ssh/config`、agent、ProxyJump、known_hosts；现有 ssh2 的配置项要迁移。替换 rust-host D8 的 TS 连接器                                                                                  |
-| D-U8  | 是否先发布中间形态            | 不先发布 R7，也不发布任何中间形态。按最终设计做，U8 一次切换；第 12 节的阶段只是开发里程碑                                                                                                                                    |
-| D-U12 | runtime 的 actor 粒度         | 一个 Engine 管所有本地 workspace（2026-10-10 再次确认）。会话库路径与网络策略只认用户级配置；Host 自己产生 workspace 的生命周期事件，Engine 增加“重置某个 workspace”的操作。见 [rust-u3-one-engine.md](rust-u3-one-engine.md) |
-| D-U13 | Host 与 CLI 的代码关系        | 结构上隔离，能分开编译：各自成 workspace，Host 只经一个 crate、只用 CLI 的公开入口；边界是 App 协议，进程内与子进程两种链路都保留。见 [rust-host-cli-boundary.md](rust-host-cli-boundary.md)                                  |
-| D-U14 | 合并后的二进制怎么当 CLI 用   | 同一个二进制多入口：`cli` 子命令（或以 CLI 的名字运行）时与独立 CLI 行为完全相同。见 rust-host-cli-boundary.md 3.4                                                                                                            |
-| D-U15 | Host 异常退出后工具进程的回收 | 账本加启动清扫，另加 Linux 的 PDEATHSIG 与 Windows 的 Job Object（2026-10-10）。见 [rust-tool-process-reaping.md](rust-tool-process-reaping.md)                                                                               |
+| 编号  | 问题                          | 决定                                                                                                                                                                                         |
+| ----- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-U1  | Host 进程归谁                 | App 的子进程，每个 App 一个。HostCore 不区分启动方式，用户级 daemon 以后作为另一种启动方式补上                                                                                               |
+| D-U2  | 远端运行什么                  | 完整 Host（同一个二进制 `zcode serve --stdio`），远端拥有会话。`Environment` 抽象保留，将来可以支持“只做远程执行”                                                                            |
+| D-U3  | SSH 怎么实现                  | 系统 OpenSSH 加 askpass。复用用户的 `~/.ssh/config`、agent、ProxyJump、known_hosts；现有 ssh2 的配置项要迁移。替换 rust-host D8 的 TS 连接器                                                 |
+| D-U8  | 是否先发布中间形态            | 不先发布 R7，也不发布任何中间形态。按最终设计做，U8 一次切换；第 12 节的阶段只是开发里程碑                                                                                                   |
+| D-U12 | runtime 的 actor 粒度         | 每个本地 workspace 一个 runtime 实例，都在 Host 进程内（2026-10-10 最终决定）。此前定过“一个 Engine 管所有 workspace”，核算改动量与实测后改回，理由见 14.1                                   |
+| D-U13 | Host 与 CLI 的代码关系        | 结构上隔离，能分开编译：各自成 workspace，Host 只经一个 crate、只用 CLI 的公开入口；边界是 App 协议，进程内与子进程两种链路都保留。见 [rust-host-cli-boundary.md](rust-host-cli-boundary.md) |
+| D-U14 | 合并后的二进制怎么当 CLI 用   | 同一个二进制多入口：`cli` 子命令（或以 CLI 的名字运行）时与独立 CLI 行为完全相同。见 rust-host-cli-boundary.md 3.4                                                                           |
+| D-U15 | Host 异常退出后工具进程的回收 | 账本加启动清扫，另加 Linux 的 PDEATHSIG 与 Windows 的 Job Object（2026-10-10）。见 [rust-tool-process-reaping.md](rust-tool-process-reaping.md)                                              |
 
 **按推荐执行**（2026-10-09 开始实施前已告知用户，未提出异议）
 
@@ -651,54 +651,33 @@ flowchart LR
 | D-U4 | 远端会话在断线后是否继续存活 | ① 保持现状；② 远端 daemon 加 stdio ↔ UDS 转发                     | **先 ①**，U5 之后再评估 ②                                                                                           |
 | D-U5 | 内部 API 以哪边为来源        | ① Rust 方法表为来源，生成 TS 类型；② 继续以 zod 为来源，生成 Rust | **①，从 U9 开始**。行为全部在 Rust 里，类型应该和行为放在一起（Codex 的做法）。V4 命令的 zod 来源在 U9 之前保持不变 |
 
-### 14.1 D-U12：一个 Engine 管所有 workspace
+### 14.1 D-U12：每个本地 workspace 一个 runtime 实例
 
-**含义。** runtime 只有一个 `Engine` actor，也就是一个 tokio 任务加一个收件箱。它按 workspace key 持有 Scope，并持有所有已加载的会话。所有请求、所有 run 回报的事件，以及定时刷新，都按到达顺序在这一个循环里处理。模型流式输出和工具执行跑在各自的 run 任务里，不占这个循环。这与进行中的 workspace-scope 工作一致。
+**含义。** Host 进程内，每个本地 workspace key 对应一个 runtime 实例（一条链路、一个 `Engine` actor），另有 plugin-management 与 mcp-status 两个控制面实例。这是 U3 A 期落地并经桌面 E2E 验证的形态（[rust-u3-single-process.md](rust-u3-single-process.md) 2.1）。
 
-**代价**（相对于每个 workspace 或每个会话一个 actor）
+**决定的经过。** 2026-10-09 定为“一个 Engine 管所有 workspace”，2026-10-10 再次讨论后改为本形态：
 
-| 方面 | 影响                                                                            |
-| ---- | ------------------------------------------------------------------------------- |
-| 排队 | 任何一个会话的慢操作，都会让所有 workspace 的所有会话排队                       |
-| 故障 | Engine 循环 panic 或因致命错误退出时，所有会话都会中断（进程本身还在）          |
-| 多核 | Engine 循环的工作同一时刻只在一个线程上跑；run 任务和工具执行不受影响，仍可并行 |
+| 方面   | 每个 workspace 一个实例（采用）                                                                 | 一个 Engine 管所有 workspace                                                                                         |
+| ------ | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 改动   | 无，已实现                                                                                      | runtime 要把 MCP、预算改为按 workspace 分开，新增“重置 workspace”；Host 要改实例管理、生命周期事件、帧归属、超时处理 |
+| 故障   | 一个实例的 Engine 循环 panic 只影响它的 workspace                                               | 中断所有本地 workspace 正在运行的会话                                                                                |
+| 配置   | 项目级的 `storage`、`network` 照常生效                                                          | 只能认用户级，或再做一层按 workspace 的支持                                                                          |
+| 代价   | 每多一个 workspace 约 2–4 MiB、冷启动约 17 ms；各实例各自连同一个会话库、各自轮询 provider 配置 | 一个连接、一次轮询                                                                                                   |
+| 与边界 | 一条链路对应一个实例，进程内与子进程两种链路相同（D-U13）                                       | 同样成立                                                                                                             |
 
-**约束与兜底**
+数字来自 [docs/reports/rust-u3-embedded-runtime.md](../reports/rust-u3-embedded-runtime.md)（8 个 workspace 同时流式，纯文本负载；没有覆盖工具执行与长时间运行）。
 
-1. **循环里不 await 慢操作。** 准备附件、冷加载会话、读配置文件、provider 注册表刷新时读文件，这类可能变慢的工作都放到循环外的任务里做，完成后把结果作为消息送回循环。循环里只剩内存操作和向存储写线程提交。U1 先盘点循环中现有的 await（`engine.rs` 约 47 处），逐个归类。
-2. **Engine 的监督与重建。** Engine 任务属于 HostCore 的 `TaskScope`。它 panic 或因致命错误退出时，按下图重建；进程、连接、远端链路和 Bot 都不受影响。重建次数设上限，超过后向客户端报告 runtime 不可用，不进入重启循环。
-3. **共享资源不中毒。** provider、MCP 连接池、工具运行时这些跨 workspace 的资源，用 actor、ArcSwap 或不会中毒的锁（见 10.1）。
-4. **可度量。** 暴露 Engine 每条消息的处理耗时直方图和收件箱长度。
+**约束**
 
-```mermaid
-sequenceDiagram
-    participant TS as HostCore TaskScope
-    participant E as Engine（旧）
-    participant R as run 任务与工具进程
-    participant G as Gateway
-    participant E2 as Engine（新）
-    E--xTS: panic / 致命错误退出
-    TS->>R: 取消旧 Engine 的全部 run，回收工具进程树
-    TS->>G: 所有活跃会话发 Finished{error}；标记需要 resync
-    TS->>E2: 用同一组共享服务重建，会话按需从库冷加载（新 epoch）
-    G->>E2: 恢复转发请求
-    Note over G,E2: 客户端以旧 base 订阅时 epoch 不符，走快照恢复
-```
-
-旧 Engine 的 run 必须先全部取消、工具进程树回收完毕，新 Engine 才能开始接收请求。这样同一个会话不会同时有两个所有者。
-
-**验收**（U3）
-
-- N 个 workspace 同时流式时，控制 RPC p95 ≤ 20 ms；一个会话处理大附件时，其他会话 Stop 的延迟不受影响；
-- 注入 Engine panic：所有会话收到 `Finished{error}`，Engine 重建，客户端快照恢复，进程与连接保持；
-- 注入 run 任务 panic：只有该会话结束。
-
-**退路。** U3 实测不达标时，先改为每个 workspace 一个 Engine。Engine 本来就按 key 划分 Scope，这一步改动小；会话级 actor 只作为最后的选择。
+1. 实例之间不共享可变状态；以进程内标记的锁 owner（插件事务、hook 信任存储、设备 id）按实例登记（rust-u1-runtime-library.md 第 6 节）。
+2. 实例的每个任务都属于实例的任务作用域，实例结束时全部结束（rust-u2-task-scope.md）。
+3. Engine 循环 panic 时先收口再结束实例，Host 在下一次请求时重启它，代次加一（rust-u3-single-process.md 2.5）。
+4. run 任务 panic 只让这一轮失败。
 
 ## 15. 与现有规格和规则的关系
 
 - [rust-host.md](rust-host.md)：第 9 节“本计划之后”由本文接替；R0–R6 的产出与决策继续有效。R7 不单独执行，默认切换、打包与签名并入 U8（D-U8）；D1（每窗口一个 Host）在 U4 改为每 App 一个；D8（TS 连接器）在 U5 由系统 OpenSSH 取代（D-U3）。
-- [rust-cli-architecture.md](rust-cli-architecture.md) 的“Workspace 作用域”一节（进行中）是 U1 的起点。本文沿用其中“一个 Engine 按 key 持有作用域”的结构（D-U12），规则不变。
+- [rust-cli-architecture.md](rust-cli-architecture.md) 的“Workspace 作用域”一节（进行中）是 U1 的起点。本文沿用其中“Engine 按 key 持有作用域”的结构（D-U12），规则不变。
 - AGENTS.md 需要在对应阶段更新：
   - “Desktop app 通过 stdio 与 Agent 通信”：U3；
   - “每个窗口使用一个 window-scoped Local Host”“远程 workspace 由窗口内的连接注册表管理”：U4、U5；
