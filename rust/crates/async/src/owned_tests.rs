@@ -65,7 +65,7 @@ async fn a_moved_handle_keeps_the_task_alive() {
     let (release, released) = tokio::sync::oneshot::channel::<u8>();
     let task = owned(async move { released.await.unwrap_or(0) });
     // 句柄移进另一个任务：所有权随之转移，原来的作用域结束不影响它。
-    let holder = owned(async move { task.await });
+    let holder = owned(task);
     tokio::task::yield_now().await;
     assert!(!holder.is_finished());
     release.send(7).unwrap();
@@ -78,7 +78,7 @@ async fn a_moved_handle_keeps_the_task_alive() {
         let _guard = guard;
         std::future::pending::<()>().await;
     });
-    let holder = owned(async move { inner.await });
+    let holder = owned(inner);
     tokio::task::yield_now().await;
     assert!(!dropped.load(Ordering::SeqCst));
     drop(holder);
