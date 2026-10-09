@@ -76,7 +76,7 @@ pub(super) async fn handle(
         egress: tools.egress.clone(),
     };
     let git = super::plugin_io::git(&tools.egress);
-    let home_text = home.to_string_lossy();
+    let home_text = super::plugin_io::home(&tools.egress);
     let context = Context {
         ports: plugins::ports::Ports {
             storage: &storage,

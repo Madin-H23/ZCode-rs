@@ -162,10 +162,9 @@ async fn normal_leader_exit_reaps_workers_that_hold_output_pipes() {
 #[tokio::test]
 async fn bash_commands_lead_a_new_session_without_the_runtime_terminal() {
     let root = tempfile::tempdir().unwrap();
-    let tools = Arc::new(zcode_cli_rust::workspace_tools(
-        root.path().into(),
-        root.path().join("artifacts"),
-    ));
+    let tools = Arc::new(
+        zcode_cli_rust::workspace_tools(root.path().into(), root.path().join("artifacts")).unwrap(),
+    );
     let job = tokio::spawn({
         let tools = tools.clone();
         async move {

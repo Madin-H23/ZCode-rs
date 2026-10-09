@@ -67,7 +67,7 @@ async fn refresh(
         egress: tools.egress.clone(),
     };
     let git = super::plugin_io::git(&tools.egress);
-    let home_text = home.to_string_lossy();
+    let home_text = super::plugin_io::home(&tools.egress);
     // 刷新超时必须中止底层网络与进程，否则旧操作会继续改写目录快照。
     let refresh_cancel = cancel.child_token();
     let context = plugins::market_admin::Context {

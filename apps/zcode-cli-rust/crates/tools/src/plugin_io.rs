@@ -87,3 +87,13 @@ pub(super) fn git(egress: &Egress) -> Git {
         env: zcode_cli_net::tool_env(env.vars(), &NetworkPolicy::default(), cfg!(windows)),
     }
 }
+
+/// Node `process.env.HOME` (empty when unset). Plugin sources and templates see
+/// exactly what Node sees; this is not the storage home (`zcode_kit::paths::home_dir`).
+pub(super) fn home(egress: &Egress) -> String {
+    egress
+        .runtime_env()
+        .get("HOME")
+        .unwrap_or_default()
+        .to_owned()
+}

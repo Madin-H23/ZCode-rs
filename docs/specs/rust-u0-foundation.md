@@ -103,7 +103,7 @@ Node 一致，Node 与 Rust 交替写同一个文件时，Node 的过期临时�
 
 迁移（其余）：
 
-- CLI 的 5 份 `home()`（`src/lib.rs`、`src/runtime.rs`、`tools/src/extension_config.rs`、`tools/src/plugin_io.rs`、`host/src/storage_paths.rs`）改用 `paths::home_dir()`：`app-server` 与 `-p` 在入口解析一次（日志初始化之前），失败时报错退出；`storage_paths::resolve` 改为接收这个 home。`~` 展开统一用 `expand_home`，各调用处原有的相对路径基准不变（storage 相对 cwd，extension 配置相对各自的 base）；裸 `~` 现在展开为 home（以前被当作名为 `~` 的相对路径）。`plugin_io::home` 以前只读运行时环境里的 `HOME`（Windows 上通常为空），现在同样走 `home_dir()`。`lib.rs` 的 `egress()` / `workspace_tools()` 改为返回 `Result`。
+- CLI 的 4 份用于定位数据目录的 `home()`（`src/lib.rs`、`src/runtime.rs`、`tools/src/extension_config.rs`、`host/src/storage_paths.rs`）改用 `paths::home_dir()`：`app-server` 与 `-p` 在入口解析一次（日志初始化之前），失败时报错退出；`storage_paths::resolve` 改为接收这个 home。`~` 展开统一用 `expand_home`，各调用处原有的相对路径基准不变（storage 相对 cwd，extension 配置相对各自的 base）；裸 `~` 现在展开为 home（以前被当作名为 `~` 的相对路径）。`tools/src/plugin_io.rs` 的 `home()` 不迁移：它是交给插件来源与模板的 Node `process.env.HOME`（未设置时为空），不是数据目录，保持与 Node 一致。`lib.rs` 的 `egress()` / `workspace_tools()` 改为返回 `Result`。
 - Host `HostEnvironment::capture` 用 `home_dir_with` 读捕获的环境快照（仍先 trim），缺失时退回系统用户数据库，返回 `io::Result`；`main.rs` 在启动时传播错误。
 - CLI `ModelConfig.api_key_value` 与 `headers` 的值改为 `RedactedString`。
 - CLI `host/src/logging.rs`：新日志文件以 0600 创建，旧文件打开时收紧到 0600（Unix）；字符串字段、消息与错误文本写入前经 `redact_secrets`（原有的按字段名脱敏保留）；退出时的 Flush 若发现丢弃过日志行，写一行 `logging.lines_dropped` warn 记录数量（队列满时由临时线程等待空位，仍以 1 s 为上限）。
