@@ -12,18 +12,20 @@
 
 以下命令从仓库根目录执行：
 
-| 用途             | 命令                                      |
-| ---------------- | ----------------------------------------- |
-| 类型检查         | `pnpm typecheck`                          |
-| Lint             | `pnpm lint` / `pnpm lint:fix`             |
-| 格式检查         | `pnpm fmt:check`                          |
-| 桌面开发         | `pnpm dev:desktop`                        |
-| Web 开发         | `pnpm dev:web`                            |
-| 提交前检查       | `pnpm verify:pre-push`（Lint 与架构检查） |
-| 架构检查         | `pnpm architecture:check --changed`       |
-| 模块阅读包       | `pnpm architecture:context <module-id>`   |
-| 未使用依赖与导出 | `pnpm knip`                               |
-| 导出引用查询     | `pnpm dep:refs --list-exports <file>`     |
+| 用途                 | 命令                                      |
+| -------------------- | ----------------------------------------- |
+| 类型检查             | `pnpm typecheck`                          |
+| Lint                 | `pnpm lint` / `pnpm lint:fix`             |
+| 格式检查             | `pnpm fmt:check`                          |
+| 桌面开发             | `pnpm dev:desktop`                        |
+| Web 开发             | `pnpm dev:web`                            |
+| 提交前检查           | `pnpm verify:pre-push`（Lint 与架构检查） |
+| 架构检查             | `pnpm architecture:check --changed`       |
+| 模块阅读包           | `pnpm architecture:context <module-id>`   |
+| 未使用依赖与导出     | `pnpm knip`                               |
+| 导出引用查询         | `pnpm dep:refs --list-exports <file>`     |
+| Rust 静态检查        | `pnpm check:rust`                         |
+| Rust 基础 crate 测试 | `pnpm test:rust`                          |
 
 测试入口以目标包当前的 `package.json` 和实际测试文件为准，不假定存在统一的单测或 E2E 命令。
 
@@ -33,6 +35,7 @@
 - `packages/services`：业务服务；`packages/rpc`：RPC 框架。
 - `packages/shared`：共享协议与类型；`packages/client`：Agent 客户端 SDK。
 - `apps/zcode-cli`：Agent CLI 与运行时。
+- `apps/zcode-cli-rust`：Rust agent runtime；`apps/zcode-host`：Rust Host；`rust/`：两者共用的 Rust 基础 crate（`zcode-kit`、`zcode-async`、`zcode-proc`），通过路径依赖引用。
 - `CONTEXT.md`：插件商店领域词汇；修改相关 UI 前阅读。
 - `DESIGN.md`：UI 设计规范；修改 UI 前阅读。
 
@@ -49,7 +52,15 @@
 
 ## Rust
 
-- 架构与迁移路线见 `docs/specs/rust-unified-host.md`，工程实践见 `docs/specs/rust-engineering-practices.md`。改动遵守其中的分层、依赖方向和唯一入口规则。
+- 架构与迁移路线见 `docs/specs/rust-unified-host.md`，工程实践见 `docs/specs/rust-engineering-practices.md`，基础 crate 与护栏见 `docs/specs/rust-u0-foundation.md`。改动遵守其中的分层、依赖方向和唯一入口规则。
+- 工具链由仓库根 `rust-toolchain.toml` 固定；`clippy.toml`、`deny.toml`、`.cargo/config.toml` 也在仓库根，三个 workspace 共用。`pnpm check:rust` 与测试脚本依赖 `cargo-nextest`、`cargo-deny`、`cargo-shear`，缺失时脚本会给出安装命令。
+- 测试用 `cargo nextest run --workspace`：`apps/zcode-cli-rust` 的根 `Cargo.toml` 同时是一个 package，不加 `--workspace` 时 cargo 只处理根包。
+- 唯一入口（由 `clippy.toml` 的 `disallowed-methods` 或评审保证）：
+  - 子进程只经 `zcode_proc::command` / `std_command` 创建；结束进程树用 `zcode_proc::tree` 与 Windows `zcode_proc::job`。
+  - Node 风格的“临时文件 + rename”原子写用 `zcode_kit::fs::atomic_write`；数据目录的 home 用 `zcode_kit::paths::home_dir`，不得回落到空路径或 cwd。
+  - 秘密值用 `zcode_kit::secret::RedactedString`，日志中的值经 `zcode_kit::redact::redact_secrets`。
+  - spawn 出去、负责发出终态或回复的任务用 `zcode_async::catch_panic` 兜住 panic。
+- 不新增 `#[expect(clippy::await_holding_invalid_type)]`：现有标注是待 U2 清理的存量。
 - 编码约定：
   - 调用处要能看懂参数含义：不用 `bool` 或含义不明的 `Option` 作位置参数，改用枚举、newtype 或具名方法。
   - `match` 尽量穷尽，不写 `_ =>` 通配分支。

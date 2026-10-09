@@ -585,6 +585,14 @@ flowchart LR
 | U8   | M    | • 默认启用；6 个平台的打包与签名<br>• 删除 Node Host、Node server bundle 和桌面包内的 TS CLI（D-U9）<br>• 更新 AGENTS.md（第 15 节）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | • 全平台 E2E 矩阵<br>• 冷启动、常驻 RSS、流式 CPU 都不比 Node Host（当时的发布版）差，实测写入 `docs/reports/`                                                                                                                       |
 | U9   | 持续 | • `zcode-api` 生成 TS 客户端，UI 按领域逐步离开 legacy 映射（D-U5）<br>• runtime 扩展化：goal、todo、title 等移出核心                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 按领域验收                                                                                                                                                                                                                           |
 
+**进度（2026-10-09）**：U0 第 1、2 步已在 `feat/rust-u0-foundation` 完成，见 [rust-u0-foundation.md](rust-u0-foundation.md)。包括：
+
+- 护栏：工具链、lints、nextest、cargo-deny、cargo-shear、PR CI；
+- 三个基础 crate：`zcode-kit`、`zcode-async`、`zcode-proc`；
+- 缺陷 B1–B7 的修复。
+
+U0 的其余部分（应用 crate 迁入 `rust/`、net / sqlite / git / observe 的抽取、测试 harness）尚未开始。
+
 **不做中间发布（D-U8）。** U0–U7 都是开发里程碑，不是发布版本：
 
 - U8 之前，发布版保持 Node Host 加 TS CLI 不变；Rust 一侧只在开发开关后运行。
