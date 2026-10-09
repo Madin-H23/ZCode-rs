@@ -42,6 +42,10 @@ import {
 export { WSL_USER_MAX_LENGTH, isValidWslUser, wslUserSchema } from "./wslUserValidation.js";
 export { zcodeTaskModeSchema } from "./zcode-task-mode-schema.js";
 import { wslUserSchema } from "./wslUserValidation.js";
+import {
+  appSettingsPatchSchema as appSettingsPatchFieldsSchema,
+  appSettingsSchema as appSettingsSnapshotSchema,
+} from "./validationAppSettings.js";
 export {
   appSettingsOccupationEnum,
   appSettingsPatchSchema,
@@ -469,6 +473,8 @@ export type HostResourceUsageSnapshotRequestMessage = z.infer<
 
 // Rust Host 专用控制消息（docs/specs/rust-host-r0.md §4.1）。Node Host 不接收，所以不并入下面的联合。
 const rustHostCapabilitySchema = z.string().regex(/^[0-9a-f]{64}$/);
+/** 主窗口的窗口 id（`webContents.id`，与 BroadcastHub 的 `sourceWindowId` 同值，从 1 开始）。 */
+const hostWindowIdSchema = z.number().int().min(1);
 export const hostIssueAttachmentEndpointMessageSchema = z
   .object({
     type: z.literal("issue-attachment-endpoint"),
@@ -478,6 +484,8 @@ export const hostIssueAttachmentEndpointMessageSchema = z
     clientMode: z.enum(["desktop-continuous", "web-remote-replayable"]),
     // 远端 scope 的签发规则见 docs/specs/rust-host-remote.md §2.4。
     scope: windowHostAttachmentScopeSchema,
+    // App 级 Host 记下连接所属的主窗口（docs/specs/rust-u4-app-host.md §2.2）；不属于窗口的 attachment 省略。
+    windowId: hostWindowIdSchema.optional(),
   })
   .strict();
 export type HostIssueAttachmentEndpointMessage = z.infer<
@@ -522,6 +530,74 @@ export const hostAttachmentEndpointIssuedResponseSchema = z.discriminatedUnion("
 export type HostAttachmentEndpointIssuedResponse = z.infer<
   typeof hostAttachmentEndpointIssuedResponseSchema
 >;
+
+// U4 App 级 Rust Host 的控制消息（docs/specs/rust-u4-app-host.md §4.1）。Node Host 不收发。
+/**
+ * `setting-write` 的 patch：字段与 setting channel 的 `update` 参数相同（AppSettings 的部分字段）；
+ * JSON 没有 undefined，值为 `null` 表示清除该字段。非 null 的值按 `appSettingsPatchSchema` 校验。
+ */
+const hostSettingWritePatchSchema = z.record(z.string(), z.unknown()).superRefine((patch, ctx) => {
+  const keys = Object.keys(patch);
+  if (keys.length === 0) {
+    ctx.addIssue({ code: "custom", message: "setting-write patch must not be empty" });
+    return;
+  }
+  const knownFields = appSettingsPatchFieldsSchema.shape;
+  const values: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (!Object.hasOwn(knownFields, key)) {
+      ctx.addIssue({ code: "custom", path: [key], message: "unknown setting field" });
+      continue;
+    }
+    if (patch[key] !== null) values[key] = patch[key];
+  }
+  const parsed = appSettingsPatchFieldsSchema.safeParse(values);
+  if (parsed.success) return;
+  for (const issue of parsed.error.issues)
+    ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
+});
+export const hostSettingWriteMessageSchema = z
+  .object({
+    type: z.literal("setting-write"),
+    requestId: nonEmptyStringSchema,
+    patch: hostSettingWritePatchSchema,
+  })
+  .strict();
+export type HostSettingWriteMessage = z.infer<typeof hostSettingWriteMessageSchema>;
+export const hostSettingWriteResultResponseSchema = z
+  .object({
+    type: z.literal("setting-write-result"),
+    requestId: nonEmptyStringSchema,
+    ok: z.boolean(),
+    error: z.string().optional(),
+  })
+  .strict();
+export const hostSettingChangedResponseSchema = z
+  .object({
+    type: z.literal("setting-changed"),
+    // 与 setting channel 的 `get` 返回值相同的完整快照；先要求是对象，避免 preprocess 把缺失补成默认值。
+    setting: z.record(z.string(), z.unknown()).transform((value, ctx) => {
+      const parsed = appSettingsSnapshotSchema.safeParse(value);
+      if (parsed.success) return parsed.data;
+      for (const issue of parsed.error.issues)
+        ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
+      return z.NEVER;
+    }),
+  })
+  .strict();
+export const hostOffPeakActiveCountResponseSchema = z
+  .object({
+    type: z.literal("off-peak-active-count"),
+    count: z.number().int().nonnegative(),
+  })
+  .strict();
+/** App 级 Rust Host → Main 的 U4 控制消息；不在 `hostResponseMessageSchema` 里，Node 路径不会解析到。 */
+export const rustAppHostControlResponseSchema = z.discriminatedUnion("type", [
+  hostSettingWriteResultResponseSchema,
+  hostSettingChangedResponseSchema,
+  hostOffPeakActiveCountResponseSchema,
+]);
+export type RustAppHostControlResponse = z.infer<typeof rustAppHostControlResponseSchema>;
 
 export const hostIncomingMessageSchema = z.discriminatedUnion("type", [
   z
@@ -878,6 +954,8 @@ export const hostBotRemoteWorkspaceReconnectRequestResponseSchema = z.object({
   workspacePath: nonEmptyStringSchema,
   workspaceIdentity: nonEmptyStringSchema,
   target: remoteTargetSchema,
+  // App 级 Rust Host：发起连接的主窗口（docs/specs/rust-u4-app-host.md §2.7）；Node Host 不带。
+  windowId: hostWindowIdSchema.optional(),
 });
 
 export const hostBotRemoteWorkspaceConnectionStatusRequestResponseSchema = z.object({
@@ -967,6 +1045,8 @@ export const hostBrowserExecuteRequestResponseSchema = z.object({
   clientMode: z.enum(["desktop-continuous", "web-remote-replayable"]).optional(),
   sessionContext: z.enum(["live", "cached"]).optional(),
   command: browserCommandSchema,
+  // App 级 Rust Host：发起调用的连接所属的主窗口（docs/specs/rust-u4-app-host.md §2.2）；Node Host 不带。
+  windowId: hostWindowIdSchema.optional(),
 });
 
 export const hostLocalMediaPreviewPathAuthorizeRequestResponseSchema = z
