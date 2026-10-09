@@ -109,9 +109,10 @@ impl Engine {
         }
         s.revision += 1;
         let ack = command.map(|c| (c.key(), c.ack("accepted", s.revision, None)));
+        let workspace = s.workspace.clone();
         if s.rows.is_empty() && s.messages.is_empty() && s.shared_context.is_none() {
             self.store
-                .discard_draft(&self.workspace, id, ack.clone())
+                .discard_draft(&workspace, id, ack.clone())
                 .await
                 .context(StorageCommitFailure)?;
         } else {
@@ -124,41 +125,69 @@ impl Engine {
         self.hooks.without.remove(id);
         self.session_access.remove(id);
         self.closed.insert(id.into());
-        self.publish_index(id, None)?;
+        self.publish_index(&workspace, id, None)?;
         Ok(ack.map(|(key, ack)| {
             self.acks.insert(key, ack.clone());
             ack
         }))
     }
 
+    /// Makes session `id` resident, from the store when needed. A request that
+    /// names no workspace addresses the default one: a resident session is
+    /// served as is, a stored one only loads from the default workspace.
     pub(super) async fn ensure_session(&mut self, id: &str) -> Result<()> {
-        if self.sessions.contains_key(id) {
+        self.ensure_session_in(id, None).await
+    }
+
+    /// [`Self::ensure_session`] for a request that names `workspace` (or a
+    /// child that inherits its parent's): only a session of that workspace key
+    /// is accepted, resident or stored. The session keeps its stored key and path.
+    pub(super) async fn ensure_session_in(
+        &mut self,
+        id: &str,
+        workspace: Option<&crate::contract::Workspace>,
+    ) -> Result<()> {
+        if let Some(session) = self.sessions.get(id) {
+            ensure!(
+                workspace.is_none_or(|w| w.key == session.workspace),
+                "Session unavailable"
+            );
             self.touch_session(id);
             return Ok(());
         }
+        // 未指明 workspace 的请求属于缺省 workspace：冷加载不越过 workspace 边界（同路径不同
+        // identity 的会话与订阅隔离），其他 workspace 的会话要由请求或父会话指明。
+        let key = workspace.map_or(self.default_workspace.as_str(), |w| w.key.as_str());
         let mut session = self
             .store
-            .load_session(&self.workspace, id)
+            .load_session(Some(key), id)
             .await?
             .context("Session unavailable")?;
         ensure!(
-            session.workspace == self.workspace && session.context.offset <= session.messages.len(),
+            session.context.offset <= session.messages.len(),
             "Invalid persisted session boundary"
         );
+        let workspace = Self::session_workspace(&session);
+        self.open_scope(&workspace).await?;
+        // 修复：删除工作区锁后，启动时扫描并恢复全部未完成的文件回退事务会碰到其他进程正在
+        // 进行的事务；改为会话被本进程加载（Host owner/lease 保证唯一 live runtime）时只恢复它自己的。
+        self.tools
+            .recover_rewind(id, session.rewind_committed.as_deref())
+            .await?;
         session.validate_history()?;
         session.recover(self.clock.id(), self.clock.now());
         super::file_changes::import(&mut session, self.tools.as_ref()).await;
         self.seed_context_window(&mut session);
         super::file_changes::hydrate(&mut session, self.tools.as_ref(), None).await?;
         self.store
-            .commit_receipt(&self.workspace, Some(&mut session), None)
+            .commit_receipt(&workspace.key, Some(&mut session), None)
             .await
             .context(StorageCommitFailure)?;
         let summary = (session.listed && !session.archived).then(|| session.summary());
         self.sessions.insert(id.into(), session);
         self.touch_session(id);
         self.closed.remove(id);
-        self.publish_index(id, summary)
+        self.publish_index(&workspace.key, id, summary)
     }
 
     pub(super) async fn conversation_query(

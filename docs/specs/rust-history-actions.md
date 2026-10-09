@@ -20,7 +20,7 @@ Write/Edit 在实际修改前保存有内容 hash 的原始字节 checkpoint，�
 
 App 的文件入口依赖 `turnHeader.fileChanges` 和 `actions.canRewindFiles`，终态必须持久化这些投影，不能只在 user/assistant 行声明能力。`v4/conversation/fileChanges` 按目标所属轮聚合每个路径的 first-before → final-after，并返回 diff、写入次数和工具名称；已恢复轮显示 reverted。冷加载只修复缺失摘要，不在启动时读取所有会话或备份。详细 diff 按需读取，超过 RPC 预算时保留准确统计、省略 patches。
 
-`editUserQuery.workspaceMode=rewind` 先预检且要求没有 unsafe/ignored 并至少有一个 safe 文件。取消执行并收齐子工具终态后，在统一文件写入门内再次校验并恢复；会话截断提交失败则回滚本次恢复。使用持久化恢复 journal，处理进程在文件与数据库两个提交之间退出的情况；恢复时发现新外部修改也不能覆盖。
+`editUserQuery.workspaceMode=rewind` 先预检且要求没有 unsafe/ignored 并至少有一个 safe 文件。取消执行并收齐子工具终态后，在统一文件写入门内再次校验并恢复；会话截断提交失败则回滚本次恢复。使用持久化恢复 journal，处理进程在文件与数据库两个提交之间退出的情况；恢复时发现新外部修改也不能覆盖。未完成的 journal 在该会话被加载进进程时恢复，启动时不扫描其他会话（没有进程锁，会话归属由 Host owner/lease 保证，见 [rust-cli-architecture.md](rust-cli-architecture.md)「Workspace 作用域」规则 5）。
 
 ```mermaid
 sequenceDiagram

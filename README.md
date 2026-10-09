@@ -98,7 +98,7 @@ apps/zcode-cli-rust/target/debug/zcode-cli-rust app-server --stdio \
   --data-dir "$PWD/.zcode-runtime/rust"
 ```
 
-App Server 的 stdout 只输出协议帧，诊断信息写入 stderr。`--cwd` 指定工作区；`--data-dir` 只放工作区 owner 锁与 Rust 工具缓存，默认 `~/.zcode/rust`。会话与 Node 共用数据库，默认 `~/.zcode/cli/db/db.sqlite`，路径可由存储配置覆盖；仅设置 `--data-dir` 不会隔离会话库。也可以直接使用 Cargo：
+App Server 的 stdout 只输出协议帧，诊断信息写入 stderr。`--cwd` 指定缺省工作区（请求可以指向其他工作区）；`--data-dir` 只放 Rust 工具缓存，默认 `~/.zcode/rust`。会话与 Node 共用数据库，默认 `~/.zcode/cli/db/db.sqlite`，路径可由存储配置覆盖；仅设置 `--data-dir` 不会隔离会话库。也可以直接使用 Cargo：
 
 ```sh
 cargo run --locked --manifest-path apps/zcode-cli-rust/Cargo.toml -- \

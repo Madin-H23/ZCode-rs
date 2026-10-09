@@ -16,8 +16,10 @@ const CANCELLABLE: [Method; 5] = [
 
 impl Engine {
     pub(super) async fn start_plugin_request(&mut self, request: &Call) -> Result<()> {
-        self.validate_workspace(&request.params)?;
+        // 插件请求按请求的 workspace 解析配置与项目插件（TS CLI 相同），不限于进程 cwd。
+        let workspace = self.request_workspace(&request.params)?;
         ensure!(self.auxiliary.len() < 16, "Too many auxiliary requests");
+        self.open_scope(&workspace).await?;
         let mut params = request.params.clone();
         // 带 sessionId 的引用目录返回该会话冻结的目录（会话不存在即失败，不回退 workspace）。
         if request
@@ -26,7 +28,8 @@ impl Engine {
             .starts_with("plugins/referenceCatalog")
             && let Some(id) = params["sessionId"].as_str().map(str::to_owned)
         {
-            self.ensure_session(&id).await?;
+            let named = self.named_workspace(&params)?;
+            self.ensure_session_in(&id, named.as_ref()).await?;
             let catalog = self.session_plugin_catalog(&id).await?;
             params["frozenCatalog"] = serde_json::Value::Array(catalog.to_vec());
         }
@@ -54,6 +57,7 @@ impl Engine {
                 operation: None,
                 plugin_operation,
                 title: None,
+                workspace: workspace.clone(),
             },
         );
         let sink = EventSink {
@@ -63,7 +67,7 @@ impl Engine {
             origin: crate::contract::RequestOrigin::detached(self.clock.id()),
             request_auth: None,
         };
-        let tools = self.tools.clone();
+        let tools = self.scope(&workspace.key)?.tools.clone();
         let method = request.method;
         tokio::spawn(async move {
             let result = tools

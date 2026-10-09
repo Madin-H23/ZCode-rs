@@ -39,8 +39,9 @@ impl Engine {
         if let Some(catalog) = &session.runtime.plugin_catalog {
             return Ok(catalog.clone());
         }
+        // 目录按会话所属 workspace 的插件配置构建。
         let catalog: Arc<[Value]> = self
-            .tools
+            .session_tools(id)?
             .plugin_catalog(&CancellationToken::new())
             .await?
             .into();

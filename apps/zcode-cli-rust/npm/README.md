@@ -18,7 +18,7 @@ npx @mbears/zcode-rs@0.1.0 app status
 
 从原图标正常打开仍然是内置 CLI。回退方法：完整退出当前 App，再从原图标启动。不会给原图标安装永久切换设置。未知 App 版本拒绝启动；升级 App 后先等待相应兼容版本。远端 SSH/WSL runtime 不随本地切换。
 
-工作区路径当前要求使用真实路径，不能使用指向同一目录的符号链接别名。3.14.3 Host 不显式传原始 `--cwd`，这类路径可能导致 Rust workspace identity mismatch。已发现该限制的测试记录必须随发布保留。
+0.1.0 的 Rust CLI 要求工作区使用真实路径：3.14.3 Host 不显式传原始 `--cwd`，符号链接别名会导致 Rust workspace identity mismatch。已发现该限制的测试记录必须随发布保留。之后的 Rust CLI 按请求参数解析 workspace（进程 cwd 只是缺省值），别名路径作为它自己的 workspace key 服务，不再报 mismatch。
 
 Rust 的功能范围见仓库 `apps/zcode-cli-rust/README.md`；能启动不代表已实现内置 CLI 的全部功能。平台包提供下载选择，不代表所有平台已经通过实机验收。
 

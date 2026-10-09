@@ -4,7 +4,10 @@ use anyhow::{Context as _, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
 use zcode_cli_core::Engine;
-use zcode_cli_core_api::{ModelIdentity, ModelPort, ModelRegistry, RuntimePorts, SessionStore};
+use zcode_cli_core_api::{
+    ModelIdentity, ModelPort, ModelRegistry, RuntimePorts, SessionStore, Workspace, WorkspacePorts,
+    WorkspaceSource,
+};
 use zcode_cli_domain::config::ConfigSnapshot;
 use zcode_cli_host::{SystemClock, WorkspaceConfig, WorkspaceContext};
 use zcode_cli_model::{config::ModelConfig, provider::HttpModel, registry::Registry};
@@ -149,8 +152,25 @@ impl Context {
                     None
                 }
             };
+        let tools = Arc::new(WorkspaceTools::new(
+            self.cwd.clone(),
+            self.data_dir.join("tool-results"),
+            self.workspace_config.clone(),
+            self.egress.clone(),
+        ));
+        // 进程 cwd 只是缺省 workspace；请求可以指向任意 workspace（spec rust-cli-architecture）。
+        let workspace = Workspace {
+            key: self.workspace.clone(),
+            path: self.requested_cwd.to_string_lossy().into_owned(),
+        };
+        let workspaces = Arc::new(Workspaces {
+            home: self.home.clone(),
+            desktop,
+            runtime_env: self.runtime_env.clone(),
+            tools: tools.clone(),
+        });
         let engine = Engine::new(
-            self.workspace.clone(),
+            workspace,
             identity,
             RuntimePorts {
                 context: Arc::new(WorkspaceContext::new(
@@ -161,16 +181,12 @@ impl Context {
                 )),
                 store,
                 model,
-                tools: Arc::new(WorkspaceTools::new(
-                    self.cwd.clone(),
-                    self.data_dir.join("tool-results"),
-                    self.workspace_config.clone(),
-                    self.egress.clone(),
-                )),
+                tools,
                 clock: Arc::new(SystemClock),
             },
         )
         .await?
+        .with_workspaces(workspaces)
         .with_question_timing(question_timing.0, question_timing.1)
         .with_permission_config(&self.startup_config.config["permission"])
         .with_anomaly_guard(&self.startup_config.config["modelAnomalyGuard"])
@@ -178,7 +194,7 @@ impl Context {
             &self.startup_config.config["hooks"],
             &self.startup_config.user_path,
         )
-        .with_registry(registry, self.requested_cwd.to_string_lossy().into_owned());
+        .with_registry(registry);
         Ok(match trust_store {
             Some(store) => engine.with_workspace_trust(
                 store,
@@ -186,6 +202,44 @@ impl Context {
                 Some(env!("CARGO_PKG_VERSION").into()),
             ),
             None => engine,
+        })
+    }
+}
+
+/// Opens the workspaces requests name (spec rust-cli-architecture, Workspace
+/// 作用域): each reads its own layered configuration and gets a view of the
+/// startup tool runtime rooted at its path.
+struct Workspaces {
+    home: PathBuf,
+    desktop: bool,
+    runtime_env: Arc<RuntimeEnv>,
+    tools: Arc<WorkspaceTools>,
+}
+
+#[async_trait::async_trait]
+impl WorkspaceSource for Workspaces {
+    async fn open(&self, workspace: &Workspace) -> Result<WorkspacePorts> {
+        let requested = PathBuf::from(&workspace.path);
+        // 与启动 workspace 相同：配置按给定路径分层解析，文件与命令用解析后的真实路径。
+        // 路径不存在时不阻断（列表、索引仍可用），工具使用时按各自规则失败。
+        let root = std::path::absolute(&requested)?;
+        let cwd = tokio::fs::canonicalize(&requested)
+            .await
+            .unwrap_or_else(|_| root.clone());
+        let config = Arc::new(WorkspaceConfig::new(
+            root,
+            self.home.clone(),
+            self.runtime_env.vars().to_vec(),
+        ));
+        Ok(WorkspacePorts {
+            context: Arc::new(WorkspaceContext::new(
+                cwd.clone(),
+                self.home.clone(),
+                self.desktop,
+                self.runtime_env.vars().into(),
+            )),
+            tools: Arc::new(self.tools.scoped(workspace, cwd, config.clone())),
+            config,
         })
     }
 }

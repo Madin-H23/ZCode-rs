@@ -42,9 +42,11 @@ impl Engine {
         let (now, revision) = (self.clock.now(), s.revision);
         let child = self.new_session_id();
         // 子会话与父会话的命令事实由同一个 fork 包事务写入；载体只承载这批写入。
+        // 子会话属于父会话的 workspace；载体只用于提交，库中行由 Fork 写入复制父会话。
+        let workspace = self.sessions[&parent].workspace.clone();
         let mut carrier = Session::new(
             child.clone(),
-            self.workspace.clone(),
+            workspace.clone(),
             String::new(),
             String::new(),
             String::new(),
@@ -56,16 +58,14 @@ impl Engine {
         let mut ack = c.ack("accepted", revision, None);
         ack["result"] = json!({"type": "createSelectionSideSession", "sessionId": child});
         self.store
-            .commit_receipt(
-                &self.workspace,
-                Some(&mut carrier),
-                Some((c.key(), ack.clone())),
-            )
+            .commit_receipt(&workspace, Some(&mut carrier), Some((c.key(), ack.clone())))
             .await
             .context(StorageCommitFailure)?;
         self.durable_acks.insert(c.key());
         self.acks.insert(c.key(), ack.clone());
-        self.ensure_session(&child).await?;
+        // 子会话由 Fork 写入复制父会话的 workspace，按它加载。
+        let workspace = Self::session_workspace(&self.sessions[&parent]);
+        self.ensure_session_in(&child, Some(&workspace)).await?;
         self.tools.inherit_session(&parent, &child).await?;
         let followup = self.sessions[&parent].followup_mode.clone();
         self.sessions.get_mut(&child).unwrap().followup_mode = followup;

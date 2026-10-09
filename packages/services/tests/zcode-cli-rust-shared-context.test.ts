@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { z } from "zod";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
@@ -116,15 +117,26 @@ test("Shared references and provenance reject forged fields, cross-session IDs a
         );
       assert(["rejected", "error"].includes(outcome), `${JSON.stringify(refs)} -> ${outcome}`);
     }
-    const wrongWorkspace = {
+    // 导入落在请求的 workspace（TS CLI 相同）：会话属于 identity "other"，
+    // 不进入本进程缺省 workspace（同路径、无 identity）的会话列表。
+    const otherWorkspace = {
       sessionId: "cross",
       workspace: { workspacePath: f.cwd, workspaceIdentity: "other", workspaceKey: "other" },
       importedHistory: sharedHistory(),
     };
-    await assert.rejects(
-      h.client.request("session/create", wrongWorkspace, zcodeSessionStateSnapshotSchema),
-      /identity mismatch/,
+    const cross = await h.client.request(
+      "session/create",
+      otherWorkspace,
+      zcodeSessionStateSnapshotSchema,
     );
+    assert.equal(cross.session.workspace.workspaceKey, "other");
+    assert.equal(cross.session.workspace.workspaceIdentity, "other");
+    const local = await h.client.request(
+      "session/list",
+      { workspace: { workspacePath: f.cwd, workspaceKey: f.cwd } },
+      z.object({ sessions: z.array(z.object({ sessionId: z.string() }).passthrough()) }),
+    );
+    assert(!local.sessions.some((session) => session.sessionId === "cross"));
     const s = await sharedSnapshot(h);
     assert.equal(s.sharedContextImport.status, "pending");
     const discard = h.envelope("discardSharedContext", "shared-A", { contextId: " context-A " });

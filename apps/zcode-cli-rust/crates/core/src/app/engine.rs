@@ -55,23 +55,28 @@ pub struct Engine {
     pub(super) uploads: crate::domain::attachment_upload::Uploads,
     pub(super) auxiliary: BTreeMap<String, super::auxiliary::Auxiliary>,
     pub(super) registry: Option<Arc<dyn crate::contract::ModelRegistry>>,
-    pub(super) workspace_path: String,
-    pub(super) workspace: String,
+    /// Key of the startup workspace, the default for requests naming none.
+    pub(super) default_workspace: String,
+    /// Open workspaces by key (spec rust-cli-architecture, Workspace 作用域).
+    pub(super) scopes: BTreeMap<String, super::workspace_scope::Scope>,
+    /// Opens workspaces other than the startup one; `None` serves only that.
+    pub(super) workspaces: Option<Arc<dyn crate::contract::WorkspaceSource>>,
+    pub(super) scope_clock: u64,
     pub(super) config: Option<ModelIdentity>,
     pub(super) store: Arc<dyn SessionStore>,
     pub(super) model: Option<Arc<dyn ModelPort>>,
-    pub(super) context: Arc<dyn crate::contract::ContextPort>,
+    /// Startup workspace's tool port; views share session-keyed tool state, so
+    /// process-wide operations (cancel, evict, shutdown, checkpoints) use it.
     pub(super) tools: Arc<dyn ToolPort>,
     pub(super) clock: Arc<dyn RuntimeClock>,
     pub(super) sessions: BTreeMap<String, Session>,
-    pub(super) index: BTreeMap<String, Value>,
     pub(super) closed: std::collections::BTreeSet<String>,
     pub(super) session_access: BTreeMap<String, u64>,
     pub(super) access_seq: u64,
     pub(super) durable_acks: std::collections::BTreeSet<String>,
     pub(super) acks: BTreeMap<String, Value>,
     pub(super) active: BTreeMap<String, Active>,
-    /// Mode fallbacks, project and session rules, config lists.
+    /// Session grants; project inputs live in each workspace scope.
     pub(super) permissions: super::permissions::Permissions,
     /// Input options handed from admission to run start, keyed by (session, turn).
     pub(super) submissions: BTreeMap<(String, String), super::submission::Submission>,
@@ -79,10 +84,6 @@ pub struct Engine {
     pub(super) waiters: super::waiters::Waiters,
     /// Open delivery topics and their subscriber count; a conversation topic pins its session.
     pub(super) interest: BTreeMap<String, usize>,
-    pub(super) epoch: String,
-    pub(super) index_seq: u64,
-    pub(super) index_log: crate::domain::topic_log::TopicLog,
-    pub(super) config_seq: u64,
     pub(super) outbox: Vec<ServerMsg>,
     pub(super) auto_resolution_preference: bool,
     pub(super) question_timing: (u64, u64),
@@ -92,16 +93,17 @@ pub struct Engine {
     pub(super) event_rx: mpsc::Receiver<RunEvent>,
     /// User config hooks and workspace hook trust.
     pub(super) hooks: super::workspace_trust::HookState,
-    pub(super) anomaly_guard: crate::domain::model_anomaly::Guard,
     /// Generated session titles (Node enables them for protocol sessions only).
     pub(super) titles: bool,
 }
 impl Engine {
+    /// An engine whose default workspace is `workspace` (a plain path is local).
     pub async fn new(
-        workspace: String,
+        workspace: impl Into<crate::contract::Workspace>,
         config: Option<ModelIdentity>,
         ports: RuntimePorts,
     ) -> Result<Self> {
+        let workspace = workspace.into();
         let RuntimePorts {
             context,
             store,
@@ -109,21 +111,16 @@ impl Engine {
             tools,
             clock,
         } = ports;
-        // 仅未完成的文件事务需要冷读对应 session；普通启动仍然只读取 metadata 索引。
-        for id in tools.pending_rewinds().await? {
-            let session = store.load_session(&workspace, &id).await?;
-            if let Some(session) = session {
-                tools
-                    .recover_rewind(&id, session.rewind_committed.as_deref())
-                    .await?;
-            }
-        }
-        let index = store.load_index(&workspace).await?;
-        let permissions = super::permissions::Permissions::from_settings(
-            &store.project_settings(&workspace).await?,
-        );
         let (events, event_rx) = mpsc::channel(128);
-        tools.attach_events(events.clone(), &workspace);
+        // 修复：此前把 workspace key 当作路径传入，远端 identity 进程的官方 MCP 身份头
+        // workspacePath 会变成 identity 字符串；这里传真实路径。
+        tools.attach_events(events.clone(), &workspace.path);
+        // 未完成的文件回退事务在会话被加载时恢复（ensure_session），启动只读取 metadata 索引。
+        let ports = super::workspace_scope::ScopePorts::startup(context, tools.clone());
+        let epoch = clock.id();
+        let default =
+            super::workspace_scope::Scope::startup(&workspace, store.as_ref(), ports, epoch)
+                .await?;
         Ok(Self {
             telemetry: Default::default(),
             ttft: crate::domain::local_ttft::Recorder::new(clock.id()),
@@ -132,16 +129,16 @@ impl Engine {
             uploads: Default::default(),
             auxiliary: BTreeMap::new(),
             registry: None,
-            workspace_path: workspace.clone(),
-            workspace,
+            default_workspace: workspace.key.clone(),
+            scopes: BTreeMap::from([(workspace.key, default)]),
+            workspaces: None,
+            scope_clock: 0,
             config,
             store,
             model,
             tools,
             clock: clock.clone(),
-            context,
             sessions: BTreeMap::new(),
-            index,
             closed: Default::default(),
             session_access: Default::default(),
             access_seq: 0,
@@ -149,13 +146,9 @@ impl Engine {
             acks: BTreeMap::new(),
             active: BTreeMap::new(),
             submissions: BTreeMap::new(),
-            permissions,
+            permissions: Default::default(),
             waiters: Default::default(),
             interest: BTreeMap::new(),
-            epoch: clock.id(),
-            index_seq: 0,
-            index_log: crate::domain::topic_log::TopicLog::index(),
-            config_seq: 0,
             outbox: vec![],
             auto_resolution_preference: true,
             headless: false,
@@ -163,7 +156,6 @@ impl Engine {
             events,
             event_rx,
             hooks: Default::default(),
-            anomaly_guard: Default::default(),
             titles: false,
         })
     }
@@ -273,8 +265,9 @@ impl Engine {
                 && !storage_failed
             {
                 session.recover(self.clock.id(), self.clock.now());
+                let workspace = session.workspace.clone();
                 self.store
-                    .commit_receipt(&self.workspace, Some(session), None)
+                    .commit_receipt(&workspace, Some(session), None)
                     .await?;
             }
         }
@@ -285,7 +278,7 @@ impl Engine {
         let token = call.token;
         // 这些请求在后台完成，稍后以同一 token 回复；这里只回复启动失败。
         let deferred = match call.method {
-            Method::McpList => Some(self.start_mcp_query(&call)),
+            Method::McpList => Some(self.start_mcp_query(&call).await),
             method if method.is_plugin() => Some(self.start_plugin_request(&call).await),
             Method::UsageStats
             | Method::LegacyUsageStats

@@ -4,9 +4,12 @@ use anyhow::{Result, bail};
 use serde_json::{Value, json};
 impl Engine {
     pub(super) async fn create(&mut self, c: Command) -> Result<Value> {
-        if c.session_id.is_some() || c.payload["workspaceId"] != self.workspace {
+        if c.session_id.is_some() {
             bail!("Workspace identity mismatch");
         }
+        // 会话属于 payload 的 workspace（TS resolveWorkspaceRefFromId），不限于进程 cwd。
+        let workspace = self.workspace_of_id(c.payload["workspaceId"].as_str().unwrap_or(""))?;
+        self.open_scope(&workspace).await?;
         let config = self.select(&c.payload["config"], None)?;
         self.validate_selection(&c.payload["config"])?;
         let mut first = c.payload.get("firstInput").cloned();
@@ -20,17 +23,17 @@ impl Engine {
         }
         let mut session = Session::new(
             self.new_session_id(),
-            self.workspace.clone(),
+            workspace.key.clone(),
             config.provider_id.clone(),
             config.model_id.clone(),
             config.reasoning_level.clone(),
             self.clock.id(),
             self.clock.now(),
         );
-        session.workspace_path = Some(self.workspace_path.clone());
-        session.workspace_directory = Some(self.workspace_path.clone());
+        session.workspace_path = Some(workspace.path.clone());
+        session.workspace_directory = Some(workspace.path.clone());
         // Node 初始模式：创建参数 → 项目偏好 → 配置文件 permission.mode → build。
-        let state = self.initial_execution_state(&c.payload["config"]);
+        let state = self.initial_execution_state(&workspace.key, &c.payload["config"]);
         session.mode = state.mode;
         session.plan_enabled = state.plan_enabled;
         if let Some(mode) = c.payload["config"]["followupMode"].as_str() {
@@ -39,10 +42,13 @@ impl Engine {
         let id = session.id.clone();
         if let Some(input) = &mut first {
             let selected = self.select(input, Some(config.clone()))?;
-            session.attachments = self.prepare_attachments(&id, input, &selected).await?;
+            session.attachments = self
+                .prepare_attachments((&id, &workspace.path), input, &selected)
+                .await?;
         }
         if let Some(servers) = c.payload.get("mcpServers") {
-            self.tools.configure_mcp(&id, servers).await?;
+            let tools = self.scope(&workspace.key)?.tools.clone();
+            tools.configure_mcp(&id, servers).await?;
         }
         self.sessions.insert(id.clone(), session);
         self.apply_selection(&id, config)?;

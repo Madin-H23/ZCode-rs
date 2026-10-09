@@ -19,7 +19,7 @@ impl Engine {
             .is_some_and(|session| self.sessions.contains_key(&session));
         let ack = self
             .store
-            .lookup_ack_live(&self.workspace, key, live)
+            .lookup_ack_live(&self.default_workspace, key, live)
             .await?;
         if let Some(ack) = &ack {
             self.acks.insert(key.into(), ack.clone());
@@ -32,7 +32,7 @@ impl Engine {
         if let Some(clock) = self.ttft_clock_probe(p)? {
             return Ok(clock);
         }
-        self.validate_workspace(p)?;
+        self.named_workspace(p)?;
         let keys = p["commands"].as_array().context("Command keys required")?;
         ensure!(
             !keys.is_empty() && keys.len() <= 64,
@@ -49,19 +49,27 @@ impl Engine {
         Ok(json!({"results":results}))
     }
     pub(super) async fn read_cold_session(&self, p: &Value) -> Result<Value> {
-        self.validate_workspace(p)?;
+        // 只读请求 workspace（未指明时为缺省 workspace）的会话；常驻会话按 id 服务。
+        let named = self.named_workspace(p)?;
         let id = p["sessionId"].as_str().context("Session id required")?;
-        if self.sessions.contains_key(id) {
+        if let Some(session) = self.sessions.get(id) {
+            ensure!(
+                named.as_ref().is_none_or(|w| w.key == session.workspace),
+                "Session unavailable"
+            );
             return self.read_session(p);
         }
         ensure!(!self.closed.contains(id), "Session unavailable");
+        let key = named
+            .as_ref()
+            .map_or(self.default_workspace.as_str(), |w| w.key.as_str());
         let mut session = self
             .store
-            .load_session(&self.workspace, id)
+            .load_session(Some(key), id)
             .await?
             .context("Session unavailable")?;
         ensure!(
-            session.workspace == self.workspace && session.context.offset <= session.messages.len(),
+            session.context.offset <= session.messages.len(),
             "Invalid persisted session boundary"
         );
         // Host 索引观察只生成临时只读投影，不激活 runtime，不改历史或订阅 epoch。
@@ -111,6 +119,7 @@ impl Engine {
             }
             count -= 1;
             bytes = bytes.saturating_sub(size);
+            // 工具状态按会话 id 存放、各 workspace 视图共享，启动视图即可回收。
             self.tools.evict_session(&id).await?;
             self.sessions.remove(&id);
             self.hooks.sessions.remove(&id);
@@ -136,6 +145,7 @@ impl Engine {
         }
         self.child_updates
             .retain(|_, watch| watch.receiver_count() > 0 || watch.borrow().running());
+        self.trim_scopes();
         Ok(())
     }
     pub(super) async fn persist(&mut self, id: &str, ack: Option<(String, Value)>) -> Result<()> {
@@ -164,8 +174,12 @@ impl Engine {
         if let Some((key, _)) = self.sessions.get(id).and_then(|s| s.creation_ack.as_ref()) {
             keys.push(key.clone());
         }
+        let workspace = self
+            .sessions
+            .get(id)
+            .map_or_else(|| self.default_workspace.clone(), |s| s.workspace.clone());
         self.store
-            .commit_receipt(&self.workspace, self.sessions.get_mut(id), ack)
+            .commit_receipt(&workspace, self.sessions.get_mut(id), ack)
             .await
             .context(StorageCommitFailure)?;
         self.durable_acks.extend(keys);

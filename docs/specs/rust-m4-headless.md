@@ -88,7 +88,7 @@ sequenceDiagram
 - `--continue`：`session/list {workspace}` 中无 `parentSessionId`、`updatedAt` 最大的会话；没有时 `Error: No resumable session found for <cwd>`。
 - `--resume` 的会话不存在：`Error: Session not found: <id>`（Engine 的恢复错误原样输出）。
 - Host 反向请求（如 `interaction/requestProviderRuntimeHeaders`）一律以 `null` 应答，与 Host 返回错误时相同（登录属 P2）。
-- 工作区锁与 app-server 相同：同一工作区已有 Rust runtime 时失败退出（`Workspace runtime is already owned or cannot be locked`）。Node CLI 允许并发，这是差异。
+- 没有工作区锁，与 Node CLI 相同：同一工作区可以同时有其他 Rust runtime。已接受的风险：`--resume` 对桌面正在运行的会话没有保护（[rust-m11-node-storage.md](rust-m11-node-storage.md) §9）。
 
 ### 3.2 无头权限（Node `createHeadlessPermissionBroker`）
 

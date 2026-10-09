@@ -16,15 +16,10 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
 
-/// Engine-owned permission inputs.
+/// Engine-owned session permission inputs; each workspace scope owns its
+/// project inputs (`workspace_scope::ProjectPermissions`).
 #[derive(Default)]
 pub(super) struct Permissions {
-    pub config: policy::Config,
-    /// Config file `permission.mode`, the last fallback for new sessions.
-    pub config_mode: Option<String>,
-    pub project_rules: Arc<Ruleset>,
-    /// Project preference written by `switchCollaborationMode`.
-    pub project_mode: Option<String>,
     /// Session grants (Node `PermissionService.sessionRules`), per root session.
     pub session_rules: BTreeMap<String, Arc<Ruleset>>,
 }
@@ -84,32 +79,15 @@ pub(super) fn summarize(message: &str) -> String {
     out + "..."
 }
 
-impl Permissions {
-    /// Project rules and mode preference from the workspace settings; the
-    /// config file part comes from `Engine::with_permission_config`.
-    pub fn from_settings(settings: &BTreeMap<(String, String), Value>) -> Self {
-        let setting = |key: &str| settings.get(&("permission".to_owned(), key.to_owned()));
-        Self {
-            project_rules: Arc::new(
-                setting("ruleset")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
-                    .unwrap_or_default(),
-            ),
-            project_mode: setting("mode")
-                .and_then(|v| v["mode"].as_str())
-                .map(str::to_owned),
-            ..Self::default()
-        }
-    }
-}
-
 impl Engine {
-    /// Node initial mode: create config → project preference → config file → build.
-    pub(super) fn initial_execution_state(&self, config: &Value) -> ExecutionState {
+    /// Node initial mode: create config → project preference → config file →
+    /// build, with the project inputs of workspace `key`.
+    pub(super) fn initial_execution_state(&self, key: &str, config: &Value) -> ExecutionState {
+        let project = self.scope(key).map(|s| &s.permissions).ok();
         let mode = config["mode"]
             .as_str()
-            .or(self.permissions.project_mode.as_deref())
-            .or(self.permissions.config_mode.as_deref());
+            .or(project.and_then(|p| p.project_mode.as_deref()))
+            .or(project.and_then(|p| p.config_mode.as_deref()));
         ExecutionState::resolve(
             mode,
             config["planEnabled"].as_bool(),
@@ -160,12 +138,16 @@ impl Engine {
             .sessions
             .get(id)
             .is_some_and(|s| s.needs_plan_exit_reminder);
+        // 会话按所属 workspace 的项目配置与规则判定，不用进程 cwd 的。
+        let scope = self
+            .session_scope(id)
+            .unwrap_or_else(|_| self.default_scope());
         // 与 Node 一致：内置 Explore 使用全新的默认策略；其余子代理共享根会话的授权与配置。
         let policy = if self.is_explore(id) {
             policy::Policy::default()
         } else {
             policy::Policy {
-                config: self.permissions.config.clone(),
+                config: scope.permissions.config.clone(),
                 session_rules: self
                     .permissions
                     .session_rules
@@ -178,8 +160,8 @@ impl Engine {
             state,
             plan_exit_pending,
             policy,
-            project_rules: self.permissions.project_rules.clone(),
-            working_directory: self.workspace_path.clone(),
+            project_rules: scope.permissions.project_rules.clone(),
+            working_directory: scope.workspace.path.clone(),
             headless: self.headless,
         })
     }
@@ -235,14 +217,15 @@ impl Engine {
     pub(super) async fn set_mode(&mut self, id: &str, mode: &str) -> Result<()> {
         self.apply_execution_state(id, Some(mode), None, None)?;
         let applied = self.sessions[id].mode.as_str();
-        if self.permissions.project_mode.as_deref() != Some(applied) {
+        let key = self.sessions[id].workspace.clone();
+        if self.scope(&key)?.permissions.project_mode.as_deref() != Some(applied) {
             let value = json!({"mode": applied});
             match self
                 .store
-                .save_project_setting(&self.workspace, "permission", "mode", &value)
+                .save_project_setting(&key, "permission", "mode", &value)
                 .await
             {
-                Ok(()) => self.permissions.project_mode = Some(applied.into()),
+                Ok(()) => self.scope_mut(&key)?.permissions.project_mode = Some(applied.into()),
                 Err(error) => tracing::warn!(
                     target: "zcode::permission",
                     event = "permission.mode_preference_failed",

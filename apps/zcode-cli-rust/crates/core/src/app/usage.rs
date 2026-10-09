@@ -140,6 +140,7 @@ impl Engine {
                 operation: None,
                 plugin_operation: None,
                 title: None,
+                workspace: self.default_scope().workspace.clone(),
             },
         );
         let sink = EventSink {

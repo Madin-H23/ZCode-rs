@@ -90,11 +90,6 @@ async fn app_server(args: AppServerArgs) -> Result<()> {
     if args.prepare_storage {
         stdio::storage_prepare(&path, &mut input, &mut output).await?;
     }
-    let _owner = if args.prepare_storage {
-        None
-    } else {
-        Some(zcode_cli_state::lock_workspace(ctx.data_dir.clone(), ctx.workspace.clone()).await?)
-    };
     output.send_values(vec![progress("checking", 1)]).await?;
     let store: Arc<dyn SessionStore> = match ctx.node_store().await {
         Ok(store) => Arc::new(store),

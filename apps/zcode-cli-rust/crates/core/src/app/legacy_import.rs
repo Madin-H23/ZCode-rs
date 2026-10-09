@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 impl Engine {
     pub(super) async fn import_claude(&mut self, p: &Value) -> Result<Value> {
-        let workspace = self.legacy_workspace(p)?;
+        let (root, workspace) = self.legacy_workspace(p).await?;
         let (selection, model_given) = self.legacy_model(p.get("model"))?;
         let id = p["sessionId"]
             .as_str()
@@ -22,12 +22,19 @@ impl Engine {
         if !self.sessions.contains_key(&id)
             && self
                 .store
-                .load_session(&self.workspace, &id)
+                .load_session(Some(&root.key), &id)
                 .await?
                 .is_some()
         {
-            self.ensure_session(&id).await?;
+            self.ensure_session_in(&id, Some(&root)).await?;
         }
+        // 覆盖导入只能落在同一 workspace 的会话上。
+        ensure!(
+            self.sessions
+                .get(&id)
+                .is_none_or(|s| s.workspace == root.key),
+            "Session already exists in another workspace"
+        );
         // 与 Node 一致允许覆盖活跃会话（Host 的历史修复依赖这一点），但不在运行中改写历史。
         ensure!(
             self.sessions.get(&id).is_none_or(|s| !s.running()),
@@ -39,7 +46,7 @@ impl Engine {
         let mut session = previous.clone().unwrap_or_else(|| {
             let mut s = Session::new(
                 id.clone(),
-                self.workspace.clone(),
+                root.key.clone(),
                 String::new(),
                 String::new(),
                 String::new(),
@@ -49,11 +56,11 @@ impl Engine {
             s.trace_id = Some(self.clock.id());
             s
         });
-        session.workspace_path = Some(self.workspace_path.clone());
-        session.workspace_directory = Some(self.workspace_path.clone());
+        session.workspace_path = Some(root.path.clone());
+        session.workspace_directory = Some(root.path.clone());
         session.epoch = self.clock.id();
         // Node 以 app.getMode() 记录：plan 记为 build，plan 开关不随导入保存。
-        let state = self.initial_execution_state(&json!({"mode": p["mode"]}));
+        let state = self.initial_execution_state(&root.key, &json!({"mode": p["mode"]}));
         session.mode = state.mode;
         session.plan_enabled = false;
         // 档位按导入前绑定的模型判定（Node 在恢复解绑模型之前应用 thoughtLevel）。
@@ -78,10 +85,11 @@ impl Engine {
             ..Default::default()
         };
         if let Some(servers) = p.get("mcpServers") {
-            self.tools.configure_mcp(&id, servers).await?;
+            let tools = self.scope(&root.key)?.tools.clone();
+            tools.configure_mcp(&id, servers).await?;
         }
         self.store
-            .commit_receipt(&self.workspace, Some(&mut session), None)
+            .commit_receipt(&root.key, Some(&mut session), None)
             .await
             .context(StorageCommitFailure)?;
         let summary = session.summary();
@@ -89,7 +97,7 @@ impl Engine {
         self.touch_session(&id);
         self.closed.remove(&id);
         self.publish(&id, vec![])?;
-        self.publish_index(&id, Some(summary))?;
+        self.publish_index(&root.key, &id, Some(summary))?;
         self.legacy_snapshot(&id)
     }
 }

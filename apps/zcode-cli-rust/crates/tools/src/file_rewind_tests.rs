@@ -1,4 +1,10 @@
 use super::*;
+/// Whether the session's rewind journal is still on disk (recovery pending).
+async fn journaled(root: &Path) -> bool {
+    tokio::fs::try_exists(journal_path(root, "session"))
+        .await
+        .unwrap()
+}
 async fn fixture() -> (tempfile::TempDir, Vec<FileCheckpoint>, Arc<Mutex<()>>) {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("source.txt");
@@ -36,7 +42,7 @@ async fn journal_recovers_crash_on_each_side_of_the_database_commit_and_keeps_ra
             b"\xef\xbb\xbforiginal\r\n"
         );
         drop(tx); // 模拟进程在文件恢复之后、数据库提交前后退出。
-        assert_eq!(pending(root.path()).await.unwrap(), vec!["session"]);
+        assert!(journaled(root.path()).await);
         recover(root.path(), "session", committed.then_some("op"), gate)
             .await
             .unwrap();
@@ -48,7 +54,7 @@ async fn journal_recovers_crash_on_each_side_of_the_database_commit_and_keeps_ra
                 b"changed\r\n".as_slice()
             }
         );
-        assert!(pending(root.path()).await.unwrap().is_empty());
+        assert!(!journaled(root.path()).await);
         #[cfg(unix)]
         if committed {
             assert_eq!(
@@ -81,7 +87,7 @@ async fn recovery_never_overwrites_external_modification_and_keeps_journal() {
         tokio::fs::read(&changes[0].path).await.unwrap(),
         b"external"
     );
-    assert_eq!(pending(root.path()).await.unwrap(), vec!["session"]);
+    assert!(journaled(root.path()).await);
     tokio::fs::write(&changes[0].path, b"\xef\xbb\xbforiginal\r\n")
         .await
         .unwrap();

@@ -47,7 +47,7 @@ fn goal(r: &Resume) -> Option<Goal> {
     Some(goal)
 }
 
-/// The runtime session of `r` in `workspace` (the identity the engine owns).
+/// The runtime session of `r` under its stored workspace key `workspace`.
 pub fn session(workspace: &str, r: Resume, epoch: String) -> Session {
     let row = &r.session;
     let selection = r.model_selection.clone().unwrap_or(Value::Null);

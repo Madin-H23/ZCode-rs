@@ -22,9 +22,8 @@ pub trait ToolPort: Send + Sync {
     ) -> Result<(Option<String>, String)> {
         anyhow::bail!("File checkpoints unavailable")
     }
-    async fn pending_rewinds(&self) -> Result<Vec<String>> {
-        Ok(vec![])
-    }
+    /// Settles `session`'s unfinished file rewind, if any, when the session is
+    /// loaded into this process (`committed` is its stored commit token).
     async fn recover_rewind(&self, _session: &str, _committed: Option<&str>) -> Result<()> {
         Ok(())
     }

@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { spawn } from "node:child_process";
-import { once } from "node:events";
-import { fixture, binary } from "./zcode-cli-rust-fixture.js";
+import { fixture } from "./zcode-cli-rust-fixture.js";
 import {
   TopicWireFrameAssembler,
   conversationTopicFrameSchema,
@@ -73,7 +71,7 @@ test("Rust queues execute FIFO, require CAS, and keep drained and first-input cr
   }
 });
 
-test("Rust owner lock prevents a second process recovering active work; EOF closes pending tools", async () => {
+test("Two Rust processes on one cwd coexist and serve their own sessions; EOF closes pending tools", async () => {
   const f = await fixture();
   try {
     const h = f.start();
@@ -83,19 +81,19 @@ test("Rust owner lock prevents a second process recovering active work; EOF clos
     await h.wait((m) =>
       m.params?.frame?.payload?.deltas?.some((d: any) => d.row?.toolName === "Bash"),
     );
-    const other = spawn(
-      binary,
-      ["app-server", "--stdio", "--cwd", f.cwd, "--data-dir", f.dataDir],
-      { env: { ...process.env, ZCODE_WORKSPACE_IDENTITY: "" } },
-    );
-    const exit = once(other, "close");
-    let error = "";
-    other.stdout.resume();
-    other.stderr.on("data", (chunk) => {
-      error += chunk;
-    });
-    assert.deepEqual(await exit, [1, null]);
-    assert.match(error, /already owned/);
+    // 不再有工作区锁（与 TS CLI 相同，会话归属由 Host owner/lease 保证）：同一 cwd 与
+    // data-dir 的第二个进程正常启动，并独立完成自己的会话。
+    const other = f.start();
+    const otherId = await other.create();
+    assert.notEqual(otherId, id);
+    await other.subscribe(`conversation/${otherId}`);
+    await other.command(other.envelope("sendText", otherId, { text: "hello" }));
+    await other.completed(otherId);
+    assert.deepEqual(other.schemaErrors, []);
+    await other.close();
+    // 第一个进程的运行未被打扰：Bash 仍在执行。
+    const running = await h.rows(id);
+    assert.equal(running.rows.find((r) => r.kind === "toolCall")?.status, "running");
     await h.close();
     const recovered = f.start();
     await recovered.subscribe(`conversation/${id}`);

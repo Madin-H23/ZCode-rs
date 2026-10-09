@@ -1,6 +1,6 @@
 use super::Engine;
 use crate::contract::{Method, RuntimeError};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 impl Engine {
     fn execution_capabilities(&self) -> Value {
@@ -12,22 +12,9 @@ impl Engine {
         json!({"executionCapabilities":self.execution_capabilities(),"configOptions":if options.is_empty(){vec![]}else{vec![json!({"id":"model","name":"Model","type":"select","currentValue":self.config.as_ref().map(|c|c.model_id.as_str()).unwrap_or(""),"options":options})]},"slashCommands":[{"name":"compact","description":"Compact conversation context","source":"builtin"}]})
     }
 
-    pub(super) fn validate_workspace(&self, p: &Value) -> Result<()> {
-        if let Some(workspace) = p.get("workspace") {
-            let key = workspace["workspaceIdentity"]
-                .as_str()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .or_else(|| workspace["workspacePath"].as_str())
-                .context("Workspace required")?;
-            if key != self.workspace {
-                bail!("Workspace identity mismatch");
-            }
-        }
-        Ok(())
-    }
     pub(super) fn query(&mut self, method: Method, p: &Value) -> Result<Value> {
-        self.validate_workspace(p)?;
+        // 查询类请求可以指向任意 workspace（TS CLI 相同）；这里只校验引用形状。
+        self.named_workspace(p)?;
         match method {
             Method::WorkspaceCancelGenerateText => {
                 let operation = p["operationId"].as_str().context("Operation id required")?;

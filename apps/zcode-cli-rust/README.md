@@ -15,7 +15,7 @@ crate 边界见 [架构规格](../../docs/specs/rust-cli-architecture.md)：`pro
 - TodoRead/TodoWrite 保存会话任务清单，投影 App 工作计划摘要；支持全量替换/清空、冷恢复与压缩后读取（与 Node 共用 `todo` 表）。进度提示按当前 TS 的十轮间隔注入，TodoWrite 保持顺序提交屏障。
 - 会话创建、重命名、历史读取、FIFO 输入/compact 维护队列、队列编辑、held queue 保留/清空发送、sendQueuedNow、stop 和幂等 ACK 查询。
 - 手动 /compact、自动预算压缩、超限后的单次反应式压缩、旧工具结果 microcompact；摘要边界与时间线同事务保存，完整历史保留；每次请求刷新根 AGENTS.md。
-- 会话只存 Node 的 `db.sqlite`（记录格式与 Node 逐字节一致）；崩溃中断恢复、workspace identity 隔离、进程 owner 锁、旧 run 事件丢弃。
+- 会话只存 Node 的 `db.sqlite`（记录格式与 Node 逐字节一致）；崩溃中断恢复、workspace identity 隔离、旧 run 事件丢弃。workspace 由请求给出（进程 cwd 只是缺省值），同一 cwd 可以同时运行多个进程；会话归属由 Host owner/lease 保证，不加进程锁（[架构 spec](../../docs/specs/rust-cli-architecture.md)「Workspace 作用域」）。
 - V4 conversation/sessions-index/workspace-config 投影、desktop/mobile 独立订阅、分片校验、有界增量回放、snapshot 恢复和流控。
 - App 原生存储准备、能力协商和显式 runtime 选择。
 - 直接读取 App Provider Registry、个人设置及账号 overlay；热更新、模型/档位切换、每请求 Host 鉴权、连通性测试和 workspace 文本生成/取消。
@@ -123,7 +123,7 @@ apps/zcode-cli-rust/target/debug/zcode-cli-rust app-server --stdio \
 
 stdout 仅输出 NDJSON；stderr 为诊断。`--prepare-storage` 使用原 Host 握手，不调用模型。未提供 Registry 文件路径或显式 config 时，只读原生历史。运行队列不跨进程恢复，command query 明确标记未执行输入被丢弃。
 
-会话存储与 Node 共用同一个库（默认 `~/.zcode/cli/db/db.sqlite`，按 Node 的分层配置 `storage.dir`、`storage.sessionDbPath` 与 `ZCODE_SESSION_DB_PATH` 解析），产物（附件快照、工具结果媒体、checkpoint）在 `<storage.dir>/cli/artifacts`。Node 与 Rust 可交替打开同一会话继续对话，不做导入、备份或反向同步；`--data-dir`（默认 `~/.zcode/rust`）只放工作区 owner 锁与 Rust 工具缓存。记录格式、冷加载规则与已知差异见 [rust-m11-node-storage](../../docs/specs/rust-m11-node-storage.md)。
+会话存储与 Node 共用同一个库（默认 `~/.zcode/cli/db/db.sqlite`，按 Node 的分层配置 `storage.dir`、`storage.sessionDbPath` 与 `ZCODE_SESSION_DB_PATH` 解析），产物（附件快照、工具结果媒体、checkpoint）在 `<storage.dir>/cli/artifacts`。Node 与 Rust 可交替打开同一会话继续对话，不做导入、备份或反向同步；`--data-dir`（默认 `~/.zcode/rust`）只放 Rust 工具缓存。记录格式、冷加载规则与已知差异见 [rust-m11-node-storage](../../docs/specs/rust-m11-node-storage.md)。
 
 切回 Node 时取消 runtime override 即可，Node 直接读取 Rust 写入的会话。P0 实现与验收见 [spec](../../docs/specs/rust-app-p0.md) 和 [报告](../../docs/reports/rust-app-p0.md)。
 

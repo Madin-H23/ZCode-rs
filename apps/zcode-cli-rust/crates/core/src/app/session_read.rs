@@ -68,11 +68,9 @@ impl Engine {
         if !s.reasoning_level.is_empty() {
             thought["current"] = s.reasoning_level.clone().into();
         }
-        let mut info = json!({"sessionId":s.id,"workspace":{"workspacePath":self.workspace_path,"workspaceKey":s.workspace},"sessionKind":s.task_type,"title":s.title,"titleSource":s.title_source,"mode":s.mode,"status":status,"createdAt":s.created_at,"updatedAt":s.updated_at});
-        if s.workspace != self.workspace_path {
-            // workspace key 的本地路径 fallback 不是远端 identity，不能把本地任务投影成远端。
-            info["workspace"]["workspaceIdentity"] = s.workspace.clone().into();
-        }
+        // 会话自己的 workspace：key 的本地路径 fallback 不是远端 identity，不能把本地任务投影成远端。
+        let workspace = Self::session_workspace(s);
+        let mut info = json!({"sessionId":s.id,"workspace":workspace.to_ref(),"sessionKind":s.task_type,"title":s.title,"titleSource":s.title_source,"mode":s.mode,"status":status,"createdAt":s.created_at,"updatedAt":s.updated_at});
         if let Some(selected) = &selected {
             info["model"] = selected.clone();
         }
@@ -109,7 +107,7 @@ impl Engine {
         if let Some(retry) = &s.api_retry {
             runtime["apiRetry"] = json!({"kind":"api_retry","attempt":retry.attempt,"maxRetries":retry.max_attempts.saturating_sub(1),"retryDelayMs":retry.next_retry_at.saturating_sub(self.clock.now()),"errorStatus":null,"error":retry.reason_code});
         }
-        let mut messages = crate::domain::legacy_snapshot::messages(s, &self.workspace_path);
+        let mut messages = crate::domain::legacy_snapshot::messages(s, &workspace.path);
         if let Some(limit) = limit {
             let start = messages.len().saturating_sub(limit as usize);
             messages.drain(..start);

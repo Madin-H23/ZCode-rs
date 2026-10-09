@@ -9,19 +9,24 @@ use tokio_util::sync::CancellationToken;
 
 impl Engine {
     pub(super) async fn skill_catalog(&mut self, p: &Value) -> Result<Value> {
-        self.validate_workspace(p)?;
+        let workspace = self.request_workspace(p)?;
         let Some(id) = p["sessionId"].as_str() else {
+            // 无会话的目录按请求的 workspace 发现（项目技能来自该 workspace）。
+            self.open_scope(&workspace).await?;
             return Ok(self
+                .scope(&workspace.key)?
                 .tools
+                .clone()
                 .discover_skills(&CancellationToken::new())
                 .await?
                 .response("workspace"));
         };
         ensure!(!self.closed.contains(id), "Session unavailable");
-        self.ensure_session(id).await?;
+        let named = self.named_workspace(p)?;
+        self.ensure_session_in(id, named.as_ref()).await?;
         if self.sessions[id].skills.is_none() {
             let catalog = self
-                .tools
+                .session_tools(id)?
                 .discover_skills(&CancellationToken::new())
                 .await?;
             self.sessions.get_mut(id).unwrap().skills = Some(catalog);

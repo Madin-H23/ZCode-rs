@@ -9,7 +9,7 @@ use crate::{
         session_runtime::{Persistence, RuntimeOptions, ToolFilter},
     },
 };
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 pub(super) fn params_error(error: ParamsError) -> anyhow::Error {
@@ -103,16 +103,19 @@ impl Engine {
         }
     }
 
-    /// The single workspace this runtime serves; the params ref is echoed as given.
-    pub(super) fn legacy_workspace(&self, p: &Value) -> Result<Value> {
-        let workspace = &p["workspace"];
-        let path = workspace["workspacePath"].as_str().unwrap_or("");
-        let key = workspace["workspaceIdentity"].as_str().unwrap_or(path);
-        ensure!(
-            key == self.workspace && path == self.workspace_path,
-            "Workspace identity mismatch"
-        );
-        Ok(workspace.clone())
+    /// The workspace the params name, with its scope open, and the params ref
+    /// echoed as given.
+    pub(super) async fn legacy_workspace(
+        &mut self,
+        p: &Value,
+    ) -> Result<(crate::contract::Workspace, Value)> {
+        let workspace = self.request_workspace(p)?;
+        self.open_scope(&workspace).await?;
+        let echoed = p
+            .get("workspace")
+            .cloned()
+            .unwrap_or_else(|| workspace.to_ref());
+        Ok((workspace, echoed))
     }
 
     /// Node create-time model validation, then `setModel("provider/model")`, which
@@ -169,24 +172,24 @@ impl Engine {
     }
 
     async fn create_legacy_session(&mut self, p: &Value) -> Result<Value> {
-        let workspace = self.legacy_workspace(p)?;
+        let (root, workspace) = self.legacy_workspace(p).await?;
         let (selection, model_given) = self.legacy_model(p.get("model"))?;
         let id = format!("sess_{}", self.clock.id());
         let mut session = Session::new(
             id.clone(),
-            self.workspace.clone(),
+            root.key.clone(),
             selection.provider_id.clone(),
             selection.model_id.clone(),
             selection.reasoning_level.clone(),
             self.clock.id(),
             self.clock.now(),
         );
-        session.workspace_path = Some(self.workspace_path.clone());
-        session.workspace_directory = Some(self.workspace_path.clone());
+        session.workspace_path = Some(root.path.clone());
+        session.workspace_directory = Some(root.path.clone());
         session.trace_id = Some(self.clock.id());
         session.parent_id = p["parentSessionId"].as_str().map(str::to_owned);
         // Node 初始模式：创建参数 → 项目偏好 → 配置文件 → build；不写项目偏好。
-        let state = self.initial_execution_state(&json!({"mode": p["mode"]}));
+        let state = self.initial_execution_state(&root.key, &json!({"mode": p["mode"]}));
         session.mode = state.mode;
         session.plan_enabled = state.plan_enabled;
         session.runtime = RuntimeOptions {
@@ -203,7 +206,8 @@ impl Engine {
             ..Default::default()
         };
         if let Some(servers) = p.get("mcpServers") {
-            self.tools.configure_mcp(&id, servers).await?;
+            let tools = self.scope(&root.key)?.tools.clone();
+            tools.configure_mcp(&id, servers).await?;
         }
         self.sessions.insert(id.clone(), session);
         self.apply_selection(&id, selection)?;
@@ -222,7 +226,12 @@ impl Engine {
             code: -32004,
             message: format!("Session not found: {id}"),
         };
-        let stored = self.store.load_session(&self.workspace, &id).await?;
+        // 只恢复请求 workspace（未指明时为缺省 workspace）的会话，key 不一致按不存在处理。
+        let named = self.named_workspace(&p)?;
+        let key = named
+            .as_ref()
+            .map_or(self.default_workspace.clone(), |w| w.key.clone());
+        let stored = self.store.load_session(Some(&key), &id).await?;
         let stored = stored.ok_or_else(missing)?;
         if stored.archived {
             return Err(RuntimeError::Fault {
@@ -231,9 +240,9 @@ impl Engine {
             }
             .into());
         }
-        self.ensure_session(&id).await?;
+        self.ensure_session_in(&id, named.as_ref()).await?;
         if let Some(servers) = p.get("mcpServers") {
-            self.tools.configure_mcp(&id, servers).await?;
+            self.session_tools(&id)?.configure_mcp(&id, servers).await?;
         }
         let rebuilt = self.rebuilt_workspace(&id);
         let s = self.sessions.get_mut(&id).unwrap();
@@ -264,15 +273,6 @@ impl Engine {
     }
 
     pub(super) fn rebuilt_workspace(&self, id: &str) -> Value {
-        let s = &self.sessions[id];
-        let path = s
-            .workspace_path
-            .clone()
-            .unwrap_or_else(|| self.workspace_path.clone());
-        let mut workspace = json!({"workspacePath": path, "workspaceKey": s.workspace});
-        if s.workspace != path {
-            workspace["workspaceIdentity"] = s.workspace.clone().into();
-        }
-        workspace
+        Self::session_workspace(&self.sessions[id]).to_ref()
     }
 }

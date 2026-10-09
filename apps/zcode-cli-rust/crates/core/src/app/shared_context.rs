@@ -13,24 +13,29 @@ use serde_json::{Value, json};
 impl Engine {
     pub(super) async fn import_shared_context(&mut self, value: &Value) -> Result<Value> {
         let mut input = Import::parse(value)?;
-        ensure!(
-            input.workspace.identity() == self.workspace
-                && input.workspace.workspace_path == self.workspace_path,
-            "Workspace identity mismatch"
+        // 导入的会话属于请求的 workspace（TS CLI 相同），不限于进程 cwd。
+        let workspace = crate::contract::Workspace::new(
+            input.workspace.workspace_identity.as_deref(),
+            input.workspace.workspace_path.clone(),
         );
+        self.open_scope(&workspace).await?;
         let id = input.session_id.take().unwrap_or_else(|| self.clock.id());
         let history = &mut input.imported_history;
         history.provenance.validate(&id, &history.markdown)?;
         if !self.sessions.contains_key(&id)
             && self
                 .store
-                .load_session(&self.workspace, &id)
+                .load_session(Some(&workspace.key), &id)
                 .await?
                 .is_some()
         {
-            self.ensure_session(&id).await?;
+            self.ensure_session_in(&id, Some(&workspace)).await?;
         }
         if let Some(session) = self.sessions.get(&id) {
+            ensure!(
+                session.workspace == workspace.key,
+                "Session already exists in another workspace"
+            );
             let prior = session
                 .shared_context
                 .as_ref()
@@ -59,15 +64,15 @@ impl Engine {
         };
         let mut session = Session::new(
             id.clone(),
-            self.workspace.clone(),
+            workspace.key.clone(),
             config.provider_id,
             config.model_id,
             config.reasoning_level,
             self.clock.id(),
             history.created_at.unwrap_or_else(|| self.clock.now()),
         );
-        session.workspace_path = Some(self.workspace_path.clone());
-        session.workspace_directory = Some(self.workspace_path.clone());
+        session.workspace_path = Some(workspace.path.clone());
+        session.workspace_directory = Some(workspace.path.clone());
         session.parent_id = input.parent_session_id;
         session.trace_id = Some(self.clock.id());
         session.title = history.title.clone();
@@ -128,10 +133,11 @@ impl Engine {
             );
         }
         if let Some(servers) = &input.mcp_servers {
-            self.tools.configure_mcp(&id, &json!(servers)).await?;
+            let tools = self.scope(&workspace.key)?.tools.clone();
+            tools.configure_mcp(&id, &json!(servers)).await?;
         }
         self.store
-            .commit_receipt(&self.workspace, Some(&mut session), None)
+            .commit_receipt(&workspace.key, Some(&mut session), None)
             .await
             .context(StorageCommitFailure)?;
         self.sessions.insert(id.clone(), session);

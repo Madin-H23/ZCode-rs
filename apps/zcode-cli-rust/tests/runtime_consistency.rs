@@ -325,7 +325,7 @@ async fn start_timed(
         clock: Arc::new(Clock(AtomicUsize::new(0))),
     };
     let engine = Engine::new(
-        "workspace".into(),
+        "workspace",
         Some(ModelIdentity {
             provider_id: "p".into(),
             model_id: "m".into(),

@@ -28,9 +28,9 @@ impl SessionStore for Store {
     async fn lookup_ack(&self, _: &str, _: &str) -> Result<Option<Value>> {
         Ok(None)
     }
-    async fn load_session(&self, workspace: &str, id: &str) -> Result<Option<Session>> {
+    async fn load_session(&self, workspace: Option<&str>, id: &str) -> Result<Option<Session>> {
         Ok(self
-            .load(workspace)
+            .load(workspace.unwrap_or("workspace"))
             .await?
             .0
             .into_iter()
@@ -146,7 +146,7 @@ async fn check_commit_barrier(continuation: bool) {
         let (gate, mut gates) = mpsc::unbounded_channel();
         let (calls, mut requests) = mpsc::unbounded_channel();
         let engine = Engine::new(
-            "workspace".into(),
+            "workspace",
             Some(ModelIdentity {
                 provider_id: "p".into(),
                 model_id: "m".into(),

@@ -41,8 +41,9 @@ impl Engine {
             return Ok(c.ack("rejected", s.revision, Some("guard.queueFull")));
         }
         let selected = self.select(&c.payload, Some(self.session_selection(&id)?))?;
+        let root = self.session_scope(&id)?.workspace.path.clone();
         let assets = self
-            .prepare_attachments(&id, &mut c.payload, &selected)
+            .prepare_attachments((&id, &root), &mut c.payload, &selected)
             .await?;
         c.payload["modelSelection"] = json!({"providerId":selected.provider_id,"modelId":selected.model_id,"options":{"reasoningLevel":selected.reasoning_level}});
         if let Some(reason) = self.apply_held_queue(&id, &c.payload)? {

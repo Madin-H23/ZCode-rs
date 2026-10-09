@@ -1,12 +1,8 @@
-use super::{
-    tool_files::{FileState, FileTools},
-    tool_shell::ShellTasks,
-};
+use super::tool_files::FileTools;
 use crate::contract::{EventSink, ToolOutput, ToolPort};
 use anyhow::{Result, bail};
 use serde_json::Value;
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
-use tokio::sync::Mutex;
+use std::{path::PathBuf, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
 pub(super) use super::tool_args::{
@@ -14,23 +10,21 @@ pub(super) use super::tool_args::{
 };
 use zcode_cli_domain::hooks::HookEvent;
 
+/// The tool port of one workspace: a view of the process tool runtime rooted
+/// at `cwd` (spec rust-cli-architecture, Workspace 作用域). Views share every
+/// piece of state, which is keyed by session; only the root, configuration
+/// and official MCP workspace differ.
 pub struct WorkspaceTools {
     pub(super) cwd: PathBuf,
     pub(super) config: Arc<dyn crate::contract::ConfigSource>,
-    artifacts: PathBuf,
-    reads: Mutex<HashMap<String, Arc<Mutex<FileState>>>>,
-    // File writes from different sessions share one commit gate; reads remain concurrent.
-    writes: Arc<Mutex<()>>,
-    shell: ShellTasks,
-    mcp: super::mcp_hub::Hub,
     /// Complete child environment shared by shell tools and hooks.
     pub(super) env: Arc<[(String, String)]>,
-    web: super::web_fetch::WebFetcher,
     /// Network egress of plugin management (marketplace and archive downloads).
     pub(super) egress: Arc<zcode_cli_net::Egress>,
-    /// MCP process notifications until the engine takes them.
-    process_events:
-        std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<(&'static str, Value)>>>,
+    pub(super) artifacts: PathBuf,
+    /// Official MCP identity headers name this view's workspace.
+    pub(super) official: Arc<super::official_auth::OfficialAuth>,
+    pub(super) shared: Arc<super::tool_runtime::Shared>,
 }
 impl WorkspaceTools {
     fn session_artifacts(&self, session: &str) -> PathBuf {
@@ -39,32 +33,13 @@ impl WorkspaceTools {
             <sha2::Sha256 as sha2::Digest>::digest(session.as_bytes())
         ))
     }
-    pub fn new(
-        cwd: PathBuf,
-        artifacts: PathBuf,
-        config: Arc<dyn crate::contract::ConfigSource>,
-        egress: Arc<zcode_cli_net::Egress>,
-    ) -> Self {
-        let env = egress.tool_env();
-        let (sink, events) = tokio::sync::mpsc::unbounded_channel();
-        let mcp = super::mcp_hub::Hub::new(cwd.clone(), config.clone(), egress.clone(), Some(sink));
-        // 资源采样依赖运行时；没有 tokio 运行时的构造（单元测试）不采样。
-        if tokio::runtime::Handle::try_current().is_ok() {
-            super::mcp_resources::start(mcp.telemetry.clone(), mcp.stopped());
-        }
-        Self {
-            shell: ShellTasks::new(env.clone()),
-            env,
-            web: super::web_fetch::WebFetcher::new(egress.clone()),
-            mcp,
-            process_events: std::sync::Mutex::new(Some(events)),
-            egress,
-            config,
-            cwd,
-            artifacts,
-            reads: Mutex::new(HashMap::new()),
-            writes: Arc::new(Mutex::new(())),
-        }
+    fn hub(&self) -> (&super::mcp_hub::Hub, super::mcp_hub::Scope<'_>) {
+        let scope = super::mcp_hub::Scope {
+            cwd: &self.cwd,
+            config: self.config.as_ref(),
+            official: &self.official,
+        };
+        (&self.shared.mcp, scope)
     }
     pub async fn call(
         &self,
@@ -89,9 +64,12 @@ impl WorkspaceTools {
         }
         let artifacts = self.session_artifacts(session);
         match name {
-            name if name.starts_with("mcp__") => self.mcp.call(session, name, args, cancel).await,
+            name if name.starts_with("mcp__") => {
+                self.shared.mcp.call(session, name, args, cancel).await
+            }
             "Read" | "Write" | "Edit" => {
                 let state = self
+                    .shared
                     .reads
                     .lock()
                     .await
@@ -105,7 +83,7 @@ impl WorkspaceTools {
                     artifacts: &artifacts,
                     env: &self.env,
                     state: &state,
-                    writes: &self.writes,
+                    writes: &self.shared.writes,
                 };
                 files.call(name, args, cancel).await
             }
@@ -126,7 +104,8 @@ impl WorkspaceTools {
                 Ok(ToolOutput::text(entries.join("\n")))
             }
             "Bash" | "TaskOutput" | "TaskStop" => {
-                self.shell
+                self.shared
+                    .shell
                     .call((&self.cwd, &artifacts), session, name, args, sink, cancel)
                     .await
             }
@@ -140,10 +119,10 @@ impl ToolPort for WorkspaceTools {
     fn process_events(
         &self,
     ) -> Option<tokio::sync::mpsc::UnboundedReceiver<(&'static str, Value)>> {
-        self.process_events.lock().unwrap().take()
+        self.shared.process_events.lock().unwrap().take()
     }
     fn child_processes(&self) -> Vec<Value> {
-        self.mcp.telemetry.processes()
+        self.shared.mcp.telemetry.processes()
     }
     async fn file_changes(
         &self,
@@ -158,11 +137,14 @@ impl ToolPort for WorkspaceTools {
     ) -> Result<(Option<String>, String)> {
         super::file_checkpoints::import(&self.artifacts, before, after).await
     }
-    async fn pending_rewinds(&self) -> Result<Vec<String>> {
-        super::file_rewind::pending(&self.artifacts).await
-    }
     async fn recover_rewind(&self, session: &str, committed: Option<&str>) -> Result<()> {
-        super::file_rewind::recover(&self.artifacts, session, committed, self.writes.clone()).await
+        super::file_rewind::recover(
+            &self.artifacts,
+            session,
+            committed,
+            self.shared.writes.clone(),
+        )
+        .await
     }
     async fn rewind_preview(
         &self,
@@ -181,7 +163,7 @@ impl ToolPort for WorkspaceTools {
             session,
             token,
             changes,
-            self.writes.clone(),
+            self.shared.writes.clone(),
         )
         .await
     }
@@ -202,7 +184,7 @@ impl ToolPort for WorkspaceTools {
         super::agent_profiles::discover(&self.cwd, &config.config, cancel).await
     }
     async fn inherit_session(&self, parent: &str, child: &str) -> Result<()> {
-        self.mcp.inherit(parent, child);
+        self.shared.mcp.inherit(parent, child);
         Ok(())
     }
     async fn agent_output(&self, session: &str, text: &str) -> Result<String> {
@@ -218,10 +200,11 @@ impl ToolPort for WorkspaceTools {
         Ok(path.to_string_lossy().into_owned())
     }
     async fn configure_mcp(&self, session: &str, servers: &Value) -> Result<()> {
-        self.mcp.configure(session, servers)
+        self.shared.mcp.configure(&self.cwd, session, servers)
     }
     async fn mcp_list(&self, params: &Value, cancel: &CancellationToken) -> Result<Value> {
-        self.mcp.list(params, cancel).await
+        let (hub, scope) = self.hub();
+        hub.list(&scope, params, cancel).await
     }
     async fn plugin_hooks(&self, cancel: &CancellationToken) -> Result<Vec<(HookEvent, Value)>> {
         super::plugin_requests::hooks(self, cancel).await
@@ -230,7 +213,7 @@ impl ToolPort for WorkspaceTools {
         super::plugin_requests::catalog(self, cancel).await
     }
     fn mcp_inventory(&self, session: &str) -> Vec<(String, Vec<String>)> {
-        self.mcp.inventory(session)
+        self.shared.mcp.inventory(session)
     }
     async fn persist_result(&self, session: &str, call_id: &str, content: &str) -> Result<String> {
         super::result_file::persist(&self.session_artifacts(session), call_id, content).await
@@ -240,7 +223,7 @@ impl ToolPort for WorkspaceTools {
         events: tokio::sync::mpsc::Sender<crate::contract::RunEvent>,
         workspace_path: &str,
     ) {
-        self.mcp.official.attach(events, workspace_path);
+        self.official.attach(events, workspace_path);
     }
     async fn plugins(
         &self,
@@ -260,19 +243,20 @@ impl ToolPort for WorkspaceTools {
         cancel: &CancellationToken,
     ) -> Result<Vec<Value>> {
         let mut definitions = self.definitions();
-        definitions.extend(self.mcp.definitions(session, cancel).await?);
+        let (hub, scope) = self.hub();
+        definitions.extend(hub.definitions(&scope, session, cancel).await?);
         Ok(definitions)
     }
     fn concurrent_safe_scoped(&self, session: &str, name: &str) -> bool {
-        self.concurrent_safe(name) || self.mcp.safe(session, name)
+        self.concurrent_safe(name) || self.shared.mcp.safe(session, name)
     }
     fn mcp_annotations(&self, session: &str, name: &str) -> Option<Value> {
-        self.mcp.hints(session, name)
+        self.shared.mcp.hints(session, name)
     }
     async fn evict_session(&self, session: &str) -> Result<()> {
-        self.shell.close_session(session).await?;
-        self.reads.lock().await.remove(session);
-        self.mcp.close_session(session, false).await
+        self.shared.shell.close_session(session).await?;
+        self.shared.reads.lock().await.remove(session);
+        self.shared.mcp.close_session(session, false).await
     }
     async fn discover_skills(
         &self,
@@ -298,7 +282,7 @@ impl ToolPort for WorkspaceTools {
         name: &str,
         _args: &Value,
     ) -> crate::domain::permission::ToolCapability {
-        if let Some((read_only, destructive)) = self.mcp.annotations(session, name) {
+        if let Some((read_only, destructive)) = self.shared.mcp.annotations(session, name) {
             return crate::domain::permission::ToolCapability::mcp(read_only, destructive);
         }
         crate::domain::permission::tool_capability(name)
@@ -362,7 +346,7 @@ impl ToolPort for WorkspaceTools {
             .await
     }
     async fn take_reads(&self, session: &str) -> Vec<crate::domain::compact_ptl::ReadView> {
-        let state = self.reads.lock().await.remove(session);
+        let state = self.shared.reads.lock().await.remove(session);
         match state {
             Some(state) => state.lock().await.views.take(),
             None => vec![],
@@ -377,19 +361,19 @@ impl ToolPort for WorkspaceTools {
         cancel: &CancellationToken,
     ) -> Result<crate::domain::web::Fetched> {
         let artifacts = self.session_artifacts(&request.session);
-        self.web.fetch(request, &artifacts, cancel).await
+        self.shared.web.fetch(request, &artifacts, cancel).await
     }
     async fn cancel_session(&self, session: &str, task: Option<&str>) -> Result<()> {
-        self.shell.cancel(session, task).await
+        self.shared.shell.cancel(session, task).await
     }
     async fn close_session(&self, session: &str) -> Result<()> {
-        self.shell.close_session(session).await?;
-        self.reads.lock().await.remove(session);
-        self.mcp.close_session(session, true).await?;
+        self.shared.shell.close_session(session).await?;
+        self.shared.reads.lock().await.remove(session);
+        self.shared.mcp.close_session(session, true).await?;
         Ok(())
     }
     async fn shutdown(&self) -> Result<()> {
-        self.shell.shutdown().await?;
-        self.mcp.shutdown().await
+        self.shared.shell.shutdown().await?;
+        self.shared.mcp.shutdown().await
     }
 }

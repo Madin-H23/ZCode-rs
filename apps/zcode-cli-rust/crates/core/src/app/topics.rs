@@ -17,9 +17,19 @@ impl Engine {
     pub(super) async fn open_topic(&mut self, p: &Value) -> Result<Value> {
         let topic = topic_param(p)?;
         if let Some(id) = topic.strip_prefix("conversation/") {
-            self.ensure_session(id).await?;
+            // 订阅带 workspace 时只接受该 workspace 的会话（同路径不同 identity 隔离）。
+            let named = self.named_workspace(p)?;
+            self.ensure_session_in(id, named.as_ref()).await?;
         }
-        // 先取快照再计数：快照失败（如 workspace 不匹配）不能留下 pin。
+        // 列表与配置话题按话题中的 workspace id 打开作用域（任意 workspace，TS CLI 相同）。
+        if let Some(id) = topic
+            .strip_prefix("sessions-index/")
+            .or_else(|| topic.strip_prefix("workspace-config/"))
+        {
+            let workspace = self.workspace_of_id(id)?;
+            self.open_scope(&workspace).await?;
+        }
+        // 先取快照再计数：快照失败不能留下 pin。
         let state = self.topic_snapshot_value(p)?;
         *self.interest.entry(topic.to_owned()).or_default() += 1;
         Ok(state)
@@ -61,38 +71,31 @@ impl Engine {
             }));
         }
         if let Some(workspace) = topic.strip_prefix("sessions-index/") {
-            if workspace != self.workspace {
-                bail!("Workspace identity mismatch");
-            }
-            let replay = resumable(&self.epoch).and_then(|seq| {
-                let deltas = self.index_log.replay(&self.epoch, seq, self.index_seq)?;
+            // 打开的话题钉住作用域；未打开过的 workspace 不能直接取快照。
+            let scope = self.scope(workspace)?;
+            let replay = resumable(&scope.epoch).and_then(|seq| {
+                let deltas = scope.index_log.replay(&scope.epoch, seq, scope.index_seq)?;
                 Some((seq, deltas))
             });
-            return Ok(reply(&self.epoch, self.index_seq, replay, || {
-                self.index_snapshot()
+            return Ok(reply(&scope.epoch, scope.index_seq, replay, || {
+                index_snapshot(scope)
             }));
         }
         if let Some(workspace) = topic.strip_prefix("workspace-config/") {
-            if workspace != self.workspace {
-                bail!("Workspace identity mismatch");
-            }
+            let scope = self.scope(workspace)?;
             // 整体替换态：只有水位对齐时才续传，否则快照（两者等价）。
-            let replay = resumable(&self.epoch)
-                .filter(|seq| *seq == self.config_seq)
+            let replay = resumable(&scope.epoch)
+                .filter(|seq| *seq == scope.config_seq)
                 .map(|seq| (seq, vec![]));
-            return Ok(reply(&self.epoch, self.config_seq, replay, || {
-                self.config_snapshot()
+            return Ok(reply(&scope.epoch, scope.config_seq, replay, || {
+                self.config_snapshot(scope)
             }));
         }
         bail!("Unsupported topic")
     }
 
-    fn index_snapshot(&self) -> Value {
-        json!({"protocolVersion":1,"workspaceId":self.workspace,"logEpoch":self.epoch,"sessions":self.index.values().collect::<Vec<_>>()})
-    }
-
-    fn config_snapshot(&self) -> Value {
-        json!({"protocolVersion":1,"workspaceId":self.workspace,"logEpoch":self.epoch,"config":self.workspace_config()})
+    fn config_snapshot(&self, scope: &super::workspace_scope::Scope) -> Value {
+        json!({"protocolVersion":1,"workspaceId":scope.workspace.key,"logEpoch":scope.epoch,"config":self.workspace_config()})
     }
 
     fn watched(&self, topic: &str) -> bool {
@@ -112,8 +115,13 @@ impl Engine {
         }
         // 纯文本增量不改变列表事实；lastActivityAt 在下一个语义边界随摘要一并发布，
         // 避免每个流式分片都推送一帧 sessions-index。
-        let summary =
-            (!text_only).then(|| (session.listed && !session.archived, session.summary()));
+        let summary = (!text_only).then(|| {
+            (
+                session.workspace.clone(),
+                session.listed && !session.archived,
+                session.summary(),
+            )
+        });
         if !deltas.is_empty() {
             let from = session.seq;
             session.seq += deltas.len() as u64;
@@ -138,57 +146,75 @@ impl Engine {
             }
         }
         match summary {
-            Some((listed, summary)) => self.publish_index(id, listed.then_some(summary)),
+            Some((workspace, listed, summary)) => {
+                self.publish_index(&workspace, id, listed.then_some(summary))
+            }
             None => Ok(()),
         }
     }
 
-    pub(super) fn publish_index(&mut self, id: &str, summary: Option<Value>) -> Result<()> {
+    /// Upserts (`Some`) or removes a session in workspace `key`'s sessions-index.
+    pub(super) fn publish_index(
+        &mut self,
+        key: &str,
+        id: &str,
+        summary: Option<Value>,
+    ) -> Result<()> {
+        let watched = self.watched(&format!("sessions-index/{key}"));
+        let scope = self.scope_mut(key)?;
         // 与 Node summariesEqual 一致：摘要未变化不推进 seq，也不产生帧。
         // 删除保持幂等广播：从未入索引的草稿关闭时，客户端仍需收到移除事实。
         if summary
             .as_ref()
-            .is_some_and(|summary| self.index.get(id) == Some(summary))
+            .is_some_and(|summary| scope.index.get(id) == Some(summary))
         {
             return Ok(());
         }
         let delta = match summary {
             Some(summary) => {
-                self.index.insert(id.into(), summary.clone());
+                scope.index.insert(id.into(), summary.clone());
                 json!({"op":"session.upserted","session":summary})
             }
             None => {
-                self.index.remove(id);
+                scope.index.remove(id);
                 json!({"op":"session.removed","sessionId":id})
             }
         };
-        let from = self.index_seq;
-        self.index_seq += 1;
+        let from = scope.index_seq;
+        scope.index_seq += 1;
+        let to = scope.index_seq;
         let deltas = sized(vec![delta]);
-        self.index_log
-            .record(&self.epoch, from, self.index_seq, deltas.clone());
-        if self.watched(&format!("sessions-index/{}", self.workspace)) {
+        scope
+            .index_log
+            .record(&scope.epoch, from, to, deltas.clone());
+        if watched {
             self.outbox
                 .push(ServerMsg::Event(RuntimeEvent::IndexChanged {
-                    workspace: self.workspace.clone(),
+                    workspace: key.into(),
                     from,
-                    to: self.index_seq,
+                    to,
                     deltas,
                 }));
         }
         Ok(())
     }
 
-    /// Configuration changed; `config_seq` has already advanced.
+    /// The model catalog changed: every workspace's config topic advances.
     pub(super) fn publish_config(&mut self) {
-        if self.watched(&format!("workspace-config/{}", self.workspace)) {
-            let snapshot = self.config_snapshot();
-            self.outbox
-                .push(ServerMsg::Event(RuntimeEvent::ConfigChanged {
-                    workspace: self.workspace.clone(),
-                    seq: self.config_seq,
-                    snapshot,
-                }));
+        let keys: Vec<String> = self.scopes.keys().cloned().collect();
+        for key in keys {
+            let scope = self.scopes.get_mut(&key).unwrap();
+            scope.config_seq += 1;
+            if self.watched(&format!("workspace-config/{key}")) {
+                let scope = &self.scopes[&key];
+                let snapshot = self.config_snapshot(scope);
+                self.outbox
+                    .push(ServerMsg::Event(RuntimeEvent::ConfigChanged {
+                        workspace: key,
+                        seq: scope.config_seq,
+                        snapshot,
+                    }));
+            }
         }
     }
 
@@ -207,8 +233,9 @@ impl Engine {
                     snapshot: session.snapshot(),
                 }));
         }
-        let summary = self.sessions[id].summary();
-        self.publish_index(id, Some(summary))
+        let session = &self.sessions[id];
+        let (key, summary) = (session.workspace.clone(), session.summary());
+        self.publish_index(&key, id, Some(summary))
     }
 
     /// The conversation topic ends (session deleted); drop its pin and subscriptions.
@@ -225,6 +252,10 @@ impl Engine {
             .keys()
             .filter_map(|topic| topic.strip_prefix("conversation/"))
     }
+}
+
+fn index_snapshot(scope: &super::workspace_scope::Scope) -> Value {
+    json!({"protocolVersion":1,"workspaceId":scope.workspace.key,"logEpoch":scope.epoch,"sessions":scope.index.values().collect::<Vec<_>>()})
 }
 
 /// `resume` carries the retained deltas after `from` (the client's base).

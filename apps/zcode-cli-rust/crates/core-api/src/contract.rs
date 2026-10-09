@@ -94,7 +94,9 @@ pub trait SessionStore: Send + Sync {
         anyhow::bail!("Session listing unavailable")
     }
     /// Load one persisted conversation without activating a runtime or enumerating other history.
-    async fn load_session(&self, _workspace: &str, _id: &str) -> Result<Option<Session>> {
+    /// `workspace` restricts it to that workspace key; `None` loads the session of any
+    /// workspace, which keeps its stored key and path.
+    async fn load_session(&self, _workspace: Option<&str>, _id: &str) -> Result<Option<Session>> {
         anyhow::bail!("Single session loading unavailable")
     }
     /// Node `listSessionSubagents`' stored facts of `parent`; `None` without a
@@ -339,48 +341,10 @@ pub trait AuthPort: Send + Sync {
 
 pub use zcode_cli_domain::config::ConfigSnapshot;
 
-/// Layered zcode configuration for one workspace. Implementations reload files on
-/// every call (Node reloads at each entry point); consumers only read snapshots.
-#[async_trait]
-pub trait ConfigSource: Send + Sync {
-    async fn load(&self) -> Result<Arc<ConfigSnapshot>>;
-    /// Switches one project hook in `<cwd>/.zcode/config.json` if its
-    /// declaration still has the reviewed digest. `Err` is a reason code.
-    async fn set_workspace_hook_enabled(
-        &self,
-        _toggle: HookToggle,
-    ) -> std::result::Result<(), &'static str> {
-        Err("workspace_hooks_config_write_failed")
-    }
-}
+pub use crate::contract_workspace::{
+    ConfigSource, ContextPort, HookToggle, Workspace, WorkspacePorts, WorkspaceSource,
+};
 
-/// A reviewed project hook declaration to switch (Node
-/// `writeWorkspaceHookConfiguredToggle`).
-pub struct HookToggle {
-    pub path: String,
-    pub event: zcode_cli_domain::hooks::HookEvent,
-    pub relative_path: String,
-    pub discovery_order: usize,
-    pub matcher_index: usize,
-    pub hook_index: usize,
-    pub digest: String,
-    pub resolved_timeout_ms: u64,
-    pub resolved_max_output_bytes: u64,
-    pub enabled: bool,
-}
-
-#[async_trait]
-pub trait ContextPort: Send + Sync {
-    fn desktop(&self) -> bool;
-    async fn snapshot(
-        &self,
-        cancel: &CancellationToken,
-    ) -> Result<zcode_cli_domain::prompt::PromptSnapshot>;
-    async fn instructions(
-        &self,
-        cancel: &CancellationToken,
-    ) -> Result<Vec<zcode_cli_domain::prompt::InstructionSource>>;
-}
 pub struct RuntimePorts {
     pub context: Arc<dyn ContextPort>,
     pub store: Arc<dyn SessionStore>,

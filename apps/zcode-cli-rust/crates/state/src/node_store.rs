@@ -23,7 +23,7 @@ pub(super) enum Request {
     Index(String, Reply<BTreeMap<String, Value>>),
     Ack(String, bool, Reply<Option<Value>>),
     List(ListParams, Reply<Vec<SessionListing>>),
-    Load(String, String, Reply<Option<Session>>),
+    Load(Option<String>, String, Reply<Option<Session>>),
     Settings(String, Reply<Settings>),
     SaveSetting(String, (String, String), Value, Reply<()>),
     Commit(String, Vec<Write>, CommitReply),
@@ -147,7 +147,7 @@ impl Worker {
                     let _ = reply.send(self.list(&params));
                 }
                 Request::Load(workspace, id, reply) => {
-                    let _ = reply.send(self.load(&workspace, &id));
+                    let _ = reply.send(self.load(workspace.as_deref(), &id));
                 }
                 Request::Settings(workspace, reply) => {
                     let _ = reply.send(self.settings(&workspace));
@@ -226,13 +226,14 @@ impl Worker {
             .collect())
     }
 
-    /// Node `resumeFromStore` for this workspace's session; queued inputs do
-    /// not survive a restart (`discarded/session_resumed`).
-    fn load(&self, workspace: &str, id: &str) -> Result<Option<Session>> {
+    /// Node `resumeFromStore`; with `workspace` only a session of that key.
+    /// Queued inputs do not survive a restart (`discarded/session_resumed`).
+    fn load(&self, workspace: Option<&str>, id: &str) -> Result<Option<Session>> {
         let Some(row) = sessions::get(&self.conn, id)? else {
             return Ok(None);
         };
-        if listing::workspace_key(&row) != workspace {
+        let key = listing::workspace_key(&row).to_owned();
+        if workspace.is_some_and(|w| w != key) {
             return Ok(None);
         }
         let root: &Path = &self.artifacts;
@@ -255,7 +256,7 @@ impl Worker {
                 now,
             )?;
         }
-        Ok(Some(load::session(workspace, resumed, crate::id())))
+        Ok(Some(load::session(&key, resumed, crate::id())))
     }
 
     fn settings(&self, workspace: &str) -> Result<Settings> {
