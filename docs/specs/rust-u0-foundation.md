@@ -134,10 +134,39 @@ pub mod shell {
     /// cmd.exe 的完整参数 `/d /s /c "<text>"`（纯函数，全平台可测）；hooks 选用 cmd.exe 时也用它。
     pub fn cmd_exe_arguments(text: &str) -> String;
 }
-pub mod group {
+/// 只在 crate 内使用（2026-10-10 起不公开，见下文 ledger）。
+#[cfg(unix)]
+mod group {
     /// 让子进程成为新会话与新进程组的首进程（Unix `setsid`，EPERM 时退回 `setpgid(0, 0)`），
-    /// 与 Node `spawn({detached: true})` 一致。不与 `process_group(..)` 同用。Windows 无操作（由 Job 负责）。
-    pub fn isolate(command: &mut tokio::process::Command);
+    /// 与 Node `spawn({detached: true})` 一致。不与 `process_group(..)` 同用。
+    pub(crate) fn isolate(command: &mut tokio::process::Command);
+}
+/// 工具进程树（Bash、hooks、MCP stdio）的唯一启动入口与账本（rust-tool-process-reaping.md 2.5）。
+pub mod ledger {
+    /// 一个 runtime 实例一个；open 时在进程级登记表登记实例，最后一个克隆释放时注销。
+    pub struct Ledger;
+    impl Ledger {
+        pub fn open(dir: PathBuf) -> Self;
+        /// Unix：清扫账本，每个实例一次（rust-tool-process-reaping.md 2.2）。Windows 无操作。
+        pub async fn sweep(&self);
+        /// 先等清扫结束，再隔离、启动、写记录（Unix）或加入 Job（Windows）。
+        pub async fn spawn(&self, command: &mut Command, purpose: Purpose,
+            isolation: Isolation, containment: Containment) -> io::Result<Tracked>;
+    }
+    pub enum Purpose { Bash, Hook, Mcp }
+    /// Unix：Session = setsid（Bash、hooks），Group = process_group(0)（MCP）。
+    pub enum Isolation { Session, Group }
+    /// Windows：OwnJob = 每棵树一个 Job（Bash），ProcessJob = 进程级 Job，结束用 taskkill（hooks、MCP）。
+    pub enum Containment { OwnJob, ProcessJob }
+    pub struct Tracked;
+    impl Tracked {
+        pub fn child(&mut self) -> &mut Child;
+        pub fn pid(&self) -> u32;
+        /// Unix：tree::terminate，成功后删除记录。Windows：Job::terminate 或 taskkill /T /F。
+        pub async fn terminate(&mut self, shutdown: tree::Shutdown) -> anyhow::Result<()>;
+        /// 根进程已回收、其余进程有意保留（hooks 正常结束）：删除记录。
+        pub async fn release(self);
+    }
 }
 pub mod tree {
     /// 两个平台都可用；Windows 上两种方式相同（Job / taskkill 没有 TERM 阶段）。
@@ -180,6 +209,11 @@ Windows 上的行为变化（CI 的 Windows job 验证 `zcode-proc` 本身；应
 - Bash 工具：根进程退出后，`taskkill /PID <根> /T` 已找不到根进程，后台后代会遗留；Job 不依赖父子关系，现在一起结束，与 Unix 一致。
 - hooks 不加入 Job：Job 在 hook 运行结束时被 drop，会连带结束 hook 留下的后台进程（如 `start /b` 启动并重定向了输出的进程），而原来的 Windows 行为和 Unix 都不会这样。为不引入这个行为变化，hooks 继续用 `taskkill /T /F`。
 - runtime 进程崩溃时，系统关闭 Job 句柄，正在运行的 Bash 工具进程树一起结束。
+
+2026-10-10 起（[rust-tool-process-reaping.md](rust-tool-process-reaping.md)，D-U15）：Bash、hooks、MCP stdio 的进程树都经 `ledger::Ledger::spawn` 启动，`tools/src/tool_process.rs` 的 `ProcessTree` 由 `ledger::Tracked` 取代，`group::isolate` 不再公开。上面描述的结束方式与时机不变。新增：
+
+- Unix 上每棵树写一条账本记录，runtime 实例启动时清扫：上一个所在进程被强杀的 runtime 留下的树在这里结束。
+- Windows 上 hooks 与 MCP stdio 加入进程级 Job，只随本进程结束（hooks 结束时仍不结束它们留下的进程）。
 
 ### 3.5 唯一入口规则（本期启用）
 
