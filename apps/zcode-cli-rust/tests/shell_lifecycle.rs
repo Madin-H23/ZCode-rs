@@ -29,6 +29,14 @@ impl Drop for Cleanup {
         }
     }
 }
+/// 整棵树已确认结束：账本里不剩这条命令的记录（docs/specs/rust-tool-process-reaping.md 2.1）。
+fn no_record_left(root: &Path) {
+    let ledger = root.join("artifacts/processes");
+    let left: Vec<_> = std::fs::read_dir(ledger)
+        .map(|entries| entries.map(|entry| entry.unwrap().file_name()).collect())
+        .unwrap_or_default();
+    assert_eq!(left, Vec::<std::ffi::OsString>::new());
+}
 async fn stopped(pid: i32) {
     tokio::time::timeout(Duration::from_secs(2), async {
         while unsafe { libc::kill(pid, 0) } == 0 {
@@ -81,6 +89,7 @@ async fn cancellation_honors_term_cleanup_and_retains_output() {
         "cleaned"
     );
     stopped(leader).await;
+    no_record_left(root.path());
 }
 
 #[tokio::test]
@@ -116,6 +125,7 @@ async fn cancellation_reaps_term_ignoring_job_control_descendants() {
     assert_eq!(result.data["status"], "cancelled");
     stopped(child).await;
     stopped(leader).await;
+    no_record_left(root.path());
 }
 
 #[tokio::test]
@@ -149,6 +159,7 @@ async fn timeout_reaps_cross_group_workers_without_explicit_cancellation() {
     assert_eq!(result.data["cancelled"], false);
     stopped(leader).await;
     stopped(child).await;
+    no_record_left(root.path());
 }
 
 #[tokio::test]
@@ -181,6 +192,7 @@ async fn normal_leader_exit_reaps_workers_that_hold_output_pipes() {
     assert_eq!(result.data["stdout"], "leader-finished");
     stopped(leader).await;
     stopped(child).await;
+    no_record_left(root.path());
 }
 
 #[tokio::test]

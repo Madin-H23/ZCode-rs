@@ -17,11 +17,12 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use std::{collections::BTreeSet, process::Stdio, time::Duration};
-use tokio::{process::Child, sync::Mutex};
+use tokio::sync::Mutex;
 use tokio_util::{
     codec::{FramedRead, FramedWrite},
     sync::CancellationToken,
 };
+use zcode_proc::ledger::{Containment, Isolation, Ledger, Purpose, Tracked};
 
 type Service = RunningService<RoleClient, ClientConfig>;
 /// How to reach one server: a child process environment or an HTTP client.
@@ -35,7 +36,7 @@ pub(super) struct Connection {
     pub modern: bool,
     timeout: Duration,
     service: Mutex<Option<Service>>,
-    child: Arc<Mutex<Option<(Child, u32)>>>,
+    child: Arc<Mutex<Option<Tracked>>>,
     /// A `close` is under way: the process end that follows is not a crash.
     closing: Arc<AtomicBool>,
     /// The process telemetry of a stdio server (spec rust-m9-usage-logs §6).
@@ -43,14 +44,15 @@ pub(super) struct Connection {
 }
 impl Connection {
     /// `telemetry` is the tracker and this connection's key; the connection's
-    /// tasks (stdio writer, SSE reader, exit watch) belong to `tasks`.
+    /// tasks (stdio writer, SSE reader, exit watch) belong to `tasks`, and a
+    /// stdio server's process tree is started through `processes`.
     pub async fn open(
         config: &Server,
         transport: Transport,
         auth: &std::sync::Arc<super::official_auth::OfficialAuth>,
         cancel: &CancellationToken,
         telemetry: (&Arc<Tracker>, &str),
-        tasks: &zcode_async::Spawner,
+        (tasks, processes): (&zcode_async::Spawner, &Ledger),
     ) -> Result<Self> {
         let (env, http) = match transport {
             Transport::Stdio(env) => (Some(env), None),
@@ -100,16 +102,23 @@ impl Connection {
                     .stdout(Stdio::piped())
                     .stderr(Stdio::null())
                     .kill_on_drop(true);
-                #[cfg(unix)]
-                command.process_group(0);
                 if let Some(env) = config.raw["env"].as_object() {
                     command.envs(env.iter().map(|(k, v)| (k, v.as_str().unwrap())));
                 }
-                let mut child = command.spawn().context("process_start_failed")?;
-                let pid = child.id().context("process_start_failed")?;
-                let input = child.stdin.take().unwrap();
-                let output = child.stdout.take().unwrap();
-                owned = Some((child, pid));
+                // Unix 上自成进程组（仍在 runtime 的会话里，与原来相同）；Windows 上放进进程级 Job，
+                // 结束方式仍是 taskkill。账本记录让 runtime 所在进程被强杀后，下次启动能结束它。
+                let mut child = processes
+                    .spawn(
+                        &mut command,
+                        Purpose::Mcp,
+                        Isolation::Group,
+                        Containment::ProcessJob,
+                    )
+                    .await
+                    .context("process_start_failed")?;
+                let input = child.child().stdin.take().unwrap();
+                let output = child.child().stdout.take().unwrap();
+                owned = Some(child);
                 // SDK 默认读行无界；使用有界 codec，坏帧立即断开而非无限缓存或跳过。
                 let reader = FramedRead::new(
                     output,
@@ -230,7 +239,7 @@ impl Connection {
         let modern = service
             .peer_info()
             .is_some_and(|i| i.protocol_version >= ProtocolVersion::V_2026_07_28);
-        let pid = owned.as_ref().map(|(_, pid)| *pid);
+        let pid = owned.as_ref().map(Tracked::pid);
         let mut connection = Self {
             peer: service.peer().clone(),
             tools: vec![],
@@ -357,8 +366,8 @@ impl Connection {
         let crashed = self.peer.is_transport_closed() && !self.closing.swap(true, Ordering::SeqCst);
         self.closing.store(true, Ordering::SeqCst);
         if let Some((tracker, instance)) = &self.process {
-            if crashed && let Some((child, _)) = self.child.lock().await.as_mut() {
-                super::mcp_process::report_exit(tracker, instance, child).await;
+            if crashed && let Some(child) = self.child.lock().await.as_mut() {
+                super::mcp_process::report_exit(tracker, instance, child.child()).await;
             }
             tracker.closed(instance);
         }
@@ -372,10 +381,10 @@ impl Connection {
         Ok(())
     }
 }
-async fn cleanup_child(child: &mut Option<(Child, u32)>) -> Result<()> {
-    if let Some((mut child, pid)) = child.take()
-        && let Err(error) = super::tool_process::ProcessTree::uncontained(pid)
-            .terminate(&mut child, super::tool_process::Shutdown::Graceful)
+async fn cleanup_child(child: &mut Option<Tracked>) -> Result<()> {
+    if let Some(mut child) = child.take()
+        && let Err(error) = child
+            .terminate(super::tool_process::Shutdown::Graceful)
             .await
     {
         use std::io::Write;

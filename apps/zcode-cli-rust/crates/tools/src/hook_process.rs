@@ -9,6 +9,7 @@ use tokio::{
     process::Command,
 };
 use tokio_util::sync::CancellationToken;
+use zcode_proc::ledger::{Containment, Isolation, Ledger, Purpose};
 
 /// Node `mkdtemp(tmpdir()/zcode-hook-)`, removed after the run.
 struct TempDir(Option<PathBuf>);
@@ -49,9 +50,10 @@ impl Drop for TempDir {
     }
 }
 
+/// `(env, processes)`：子进程的完整环境，以及启动进程树时写记录的账本（工具运行时共用）。
 pub(super) async fn run(
     request: HookProcess,
-    env: &[(String, String)],
+    spawn: (&[(String, String)], &Ledger),
     cancel: &CancellationToken,
 ) -> Result<Exec> {
     let dir = TempDir::new().await?;
@@ -60,7 +62,7 @@ pub(super) async fn run(
         .await
         .context("Cannot write hook transcript")?;
     let stdin = input::stdin(&request.input, &transcript.to_string_lossy());
-    let result = execute(&request, env, stdin, cancel).await;
+    let result = execute(&request, spawn, stdin, cancel).await;
     dir.remove().await;
     result
 }
@@ -148,7 +150,7 @@ fn exec(status: &str, error: Option<String>) -> Exec {
 
 async fn execute(
     request: &HookProcess,
-    env: &[(String, String)],
+    (env, processes): (&[(String, String)], &Ledger),
     stdin: String,
     cancel: &CancellationToken,
 ) -> Result<Exec> {
@@ -165,12 +167,22 @@ async fn execute(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    // 与 Bash 工具相同（B7）：新会话，不继承控制终端；Windows 上 spawn 后加入 Job。
-    zcode_proc::group::isolate(&mut command);
     #[cfg(windows)]
     command.creation_flags(0x0800_0000);
-    let mut child = match command.spawn() {
-        Ok(child) => child,
+    // 与 Bash 工具相同（B7）：新会话，不继承控制终端。
+    // hooks 不用自己的 Job：hook 正常结束时 Job 被 drop 会连带结束它留下的后台进程，而 Windows 原来
+    // 和 Unix 都不会这样。Windows 上放进进程级 Job（只随 runtime 所在的进程结束），仍用 taskkill，
+    // 只在取消、超时等路径结束进程树。
+    let mut tree = match processes
+        .spawn(
+            &mut command,
+            Purpose::Hook,
+            Isolation::Session,
+            Containment::ProcessJob,
+        )
+        .await
+    {
+        Ok(tree) => tree,
         Err(error) => {
             return Ok(exec(
                 "spawn_error",
@@ -178,25 +190,21 @@ async fn execute(
             ));
         }
     };
-    let pid = child.id().context("Missing hook pid")?;
-    // hooks 不加入 Job：hook 正常结束时 Job 被 drop 会连带结束它留下的后台进程，而 Windows 原来
-    // 和 Unix 都不会这样；Windows 上仍用 taskkill，只在取消、超时等路径结束进程树。
-    let tree = super::tool_process::ProcessTree::uncontained(pid);
-    let mut pipe = child.stdin.take().context("Missing hook stdin")?;
+    let mut pipe = tree.child().stdin.take().context("Missing hook stdin")?;
     let writer = zcode_async::owned(async move {
         let written = pipe.write_all(stdin.as_bytes()).await;
         drop(pipe);
         written
     });
     let limit = request.max_output_bytes;
-    let mut out = zcode_async::owned(capture(child.stdout.take().unwrap(), limit));
-    let mut err = zcode_async::owned(capture(child.stderr.take().unwrap(), limit));
+    let mut out = zcode_async::owned(capture(tree.child().stdout.take().unwrap(), limit));
+    let mut err = zcode_async::owned(capture(tree.child().stderr.take().unwrap(), limit));
     let timer = tokio::time::sleep(request.timeout);
     tokio::pin!(timer);
     let (exit, mut reason) = tokio::select! {biased;
         _=cancel.cancelled()=>(None,"cancelled"),
         _=&mut timer=>(None,"timed_out"),
-        status=child.wait()=>(Some(status?),"completed"),
+        status=tree.child().wait()=>(Some(status?),"completed"),
     };
     let drained = async {
         let streams = async { tokio::join!(&mut out, &mut err) };
@@ -213,7 +221,7 @@ async fn execute(
                 return Ok(result);
             }
         }
-        tree.terminate(&mut child, super::tool_process::Shutdown::Graceful)
+        tree.terminate(super::tool_process::Shutdown::Graceful)
             .await?;
         tokio::time::timeout(Duration::from_secs(1), &mut streams)
             .await
@@ -230,6 +238,8 @@ async fn execute(
             return Err(error);
         }
     };
+    // 根进程已回收：它有意留下的后台进程照旧运行，账本记录删除（已结束整棵树时记录已经删除）。
+    tree.release().await;
     let text = |captured: std::result::Result<std::io::Result<Vec<u8>>, _>| -> String {
         match captured {
             Ok(Ok(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),

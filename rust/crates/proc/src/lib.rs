@@ -5,15 +5,18 @@
 //! U1 起在这里注入运行时环境。
 //!
 //! - [`shell`]：跑一段 shell 文本（Unix `/bin/bash -c`，Windows `cmd.exe /d /s /c`）。
-//! - [`group`]：让子进程自成新会话与进程组，脱离控制终端。
 //! - [`ledger`]：runtime 的工具进程树（Bash、hooks、MCP stdio）的唯一启动入口：自成会话或进程组，
 //!   Unix 上写账本记录，所在进程被强杀后由下一个 runtime 实例清扫；Windows 上放进随本进程结束的 Job。
 //! - [`tree`]：Unix 上按身份追踪并结束整棵进程树。
 //! - `job`（Windows）：Job Object，整棵树随 Job 一起结束。
+//!
+//! 让子进程自成会话的 `group::isolate` 不公开：自成会话的树只能经 [`ledger::Ledger::spawn`] 启动，
+//! 不会漏写记录。
 
 use std::ffi::OsStr;
 
-pub mod group;
+#[cfg(unix)]
+mod group;
 #[cfg(windows)]
 pub mod job;
 pub mod ledger;

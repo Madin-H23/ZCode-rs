@@ -96,7 +96,7 @@ impl Watch {
         self,
         tasks: &zcode_async::Spawner,
         ended: oneshot::Receiver<()>,
-        child: Arc<Mutex<Option<(Child, u32)>>>,
+        child: Arc<Mutex<Option<zcode_proc::ledger::Tracked>>>,
     ) {
         tasks.spawn("mcp-exit-watch", async move {
             if ended.await.is_err() || self.closing.load(Ordering::SeqCst) {
@@ -106,8 +106,8 @@ impl Watch {
             if self.closing.load(Ordering::SeqCst) {
                 return;
             }
-            if let Some((child, _)) = guard.as_mut() {
-                report_exit(&self.tracker, &self.instance, child).await;
+            if let Some(child) = guard.as_mut() {
+                report_exit(&self.tracker, &self.instance, child.child()).await;
             }
         });
     }
