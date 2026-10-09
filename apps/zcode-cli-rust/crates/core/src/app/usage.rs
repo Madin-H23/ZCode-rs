@@ -153,15 +153,21 @@ impl Engine {
         let store = self.store.clone();
         let now = self.clock.now() as i64;
         tokio::spawn(async move {
-            let result = if stats {
-                app_snapshot(store.as_ref(), &p, now).await
-            } else {
-                let session = p["sessionId"].as_str().unwrap_or_default();
-                store
-                    .task_usage(session)
-                    .await
-                    .map(|rows| usage::task_usage(session, &rows))
+            let query = async {
+                if stats {
+                    app_snapshot(store.as_ref(), &p, now).await
+                } else {
+                    let session = p["sessionId"].as_str().unwrap_or_default();
+                    store
+                        .task_usage(session)
+                        .await
+                        .map(|rows| usage::task_usage(session, &rows))
+                }
             };
+            // panic 时按查询失败回复，用量查询的调用方不会永远挂起。
+            let result = zcode_async::catch_panic(query)
+                .await
+                .unwrap_or_else(|panicked| Err(super::panicked("usage", panicked)));
             let result = result.map_err(|error| {
                 tracing::warn!(
                     target: "zcode::runtime",

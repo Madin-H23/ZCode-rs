@@ -112,6 +112,7 @@ libc = "0.2"
 tempfile = "3"
 zcode-cli-protocol = { path = "crates/protocol" }
 zcode-cli-domain = { path = "crates/domain" }
+zcode-async = { path = "../../rust/crates/async" }
 zcode-cli-bash-parse = { path = "crates/bash-parse" }
 zcode-cli-bash = { path = "crates/bash" }
 zcode-cli-plugins = { path = "crates/plugins" }

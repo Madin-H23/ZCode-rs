@@ -100,3 +100,16 @@ mod file_rewind;
 mod file_changes;
 
 mod background_events;
+
+/// spawn 出去、负责发出终态的任务 panic 时调用：记录一次 error 日志，并返回该任务按失败处理时
+/// 使用的错误（任务随后照常发出失败终态）。
+fn panicked(task: &'static str, panicked: zcode_async::Panicked) -> anyhow::Error {
+    tracing::error!(
+        target: "zcode::runtime",
+        event = "task.panicked",
+        task,
+        message = %panicked.message,
+        "Runtime task panicked"
+    );
+    anyhow::Error::new(panicked)
+}

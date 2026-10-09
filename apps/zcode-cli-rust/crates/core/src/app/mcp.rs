@@ -32,7 +32,10 @@ impl Engine {
         let tools = self.scope(&workspace.key)?.tools.clone();
         let params = request.params.clone();
         tokio::spawn(async move {
-            let result = tools.mcp_list(&params, &cancel).await;
+            // panic 时按配置失败回复，mcp/list 的调用方不会永远挂起。
+            let result = zcode_async::catch_panic(tools.mcp_list(&params, &cancel))
+                .await
+                .unwrap_or_else(|panicked| Err(super::panicked("mcp", panicked)));
             if result
                 .as_ref()
                 .is_err_and(anyhow::Error::is::<ProcessCleanupFailure>)

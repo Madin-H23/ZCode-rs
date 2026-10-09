@@ -87,7 +87,14 @@ impl Engine {
             request_auth: None,
         };
         tokio::spawn(async move {
-            let result=model.complete(messages,&tools,&sink,&cancel).await.map(|out|{
+            // panic 时照常回复失败，等待这个辅助请求的调用方不会永远挂起。
+            let output = zcode_async::catch_panic(model.complete(messages, &tools, &sink, &cancel))
+                .await
+                .unwrap_or_else(|panicked| {
+                    super::panicked("auxiliary", panicked);
+                    Err(ModelFailure::new("internal_error", false))
+                });
+            let result=output.map(|out|{
                 if connectivity {return json!({"success":true});}
                 // Node 返回完整的 ModelUsage（cache、reasoning、serverToolUse），没有用量时省略。
                 let mut result = json!({"text":out.message["content"].as_str().unwrap_or(""),"selection":{"providerId":selected.provider_id,"modelId":selected.model_id,"options":{"reasoningLevel":selected.reasoning_level}},"finishReason":if out.output_limit{"length"}else if out.calls.is_empty(){"stop"}else{"tool-calls"}});

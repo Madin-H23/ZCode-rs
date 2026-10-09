@@ -2244,6 +2244,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcode-async"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+]
+
+[[package]]
 name = "zcode-cli-app-server"
 version = "0.1.0"
 dependencies = [
@@ -2289,6 +2296,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "zcode-async",
  "zcode-cli-core-api",
  "zcode-cli-domain",
 ]

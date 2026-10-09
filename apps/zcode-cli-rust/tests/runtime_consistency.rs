@@ -261,6 +261,9 @@ impl ToolPort for Tools {
         if name == "CleanupFailure" {
             return Err(zcode_cli_core_api::ProcessCleanupFailure.into());
         }
+        if name == "Panic" {
+            panic!("injected tool panic");
+        }
         if n == 1 {
             anyhow::bail!("injected tool failure");
         }
@@ -970,4 +973,35 @@ async fn todo_state_and_result_commits_gate_next_tools_and_recover_actual_result
         assert_eq!(runtime.tools.calls.load(Ordering::SeqCst), 0);
         assert!(runtime.commits.try_recv().is_err());
     }
+}
+
+/// run 任务 panic（这里由工具执行触发）时仍要发出终态：会话离开 running，Engine 照常响应 EOF 并退出。
+#[tokio::test]
+async fn a_panicking_run_still_reaches_a_terminal_phase() {
+    let mut runtime = start(vec![call(0, "Panic")], None).await;
+    let mut phases = Vec::new();
+    loop {
+        let commit = receive(&mut runtime.commits).await;
+        let phase = commit.phase.clone();
+        commit.permit.send(true).unwrap();
+        phases.push(phase.clone());
+        if phase != "running" && phases.iter().any(|p| p == "running") {
+            break;
+        }
+    }
+    assert_eq!(phases.last().map(String::as_str), Some("error"));
+    runtime.input.send(Input::Eof).await.unwrap();
+    let mut commits = runtime.commits;
+    let drain = tokio::spawn(async move {
+        while let Some(commit) = commits.recv().await {
+            let _ = commit.permit.send(true);
+        }
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(3), runtime.running)
+        .await
+        .expect("Engine must not wait forever for the panicked run")
+        .unwrap()
+        .unwrap();
+    drop(runtime.store);
+    drain.await.unwrap();
 }

@@ -166,7 +166,9 @@ impl Engine {
                 .and_then(|e| e.request_auth.clone()),
         };
         tokio::spawn(async move {
-            let result = super::agent_loop::run(
+            // run 任务 panic 时 tokio 只结束这个任务，Finished 永远不会发出：会话停在 running，
+            // Engine 关闭时也会一直等它。把 panic 转成本轮失败，保证终态一定发出。
+            let result = zcode_async::catch_panic(super::agent_loop::run(
                 model.as_ref(),
                 tools.as_ref(),
                 context.as_ref(),
@@ -174,8 +176,9 @@ impl Engine {
                 turn_hooks,
                 &sink,
                 &cancel,
-            )
-            .await;
+            ))
+            .await
+            .unwrap_or_else(|panicked| Err(super::panicked("run", panicked)));
             let model_failure = result
                 .as_ref()
                 .err()

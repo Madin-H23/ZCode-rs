@@ -70,13 +70,15 @@ impl Engine {
         let tools = self.scope(&workspace.key)?.tools.clone();
         let method = request.method;
         tokio::spawn(async move {
-            let result = tools
-                .plugins(method.as_str(), &params, &cancel, &sink)
-                .await
-                .map_err(|error| RuntimeError::Fault {
-                    message: format!("{error:#}"),
-                    code: None,
-                });
+            // panic 时照常回复错误，插件请求的调用方不会永远挂起。
+            let result =
+                zcode_async::catch_panic(tools.plugins(method.as_str(), &params, &cancel, &sink))
+                    .await
+                    .unwrap_or_else(|panicked| Err(super::panicked("plugins", panicked)))
+                    .map_err(|error| RuntimeError::Fault {
+                        message: format!("{error:#}"),
+                        code: None,
+                    });
             let _ = sink.send(Event::AuxiliaryReply { result }).await;
         });
         Ok(())

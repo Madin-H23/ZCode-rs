@@ -285,6 +285,15 @@ impl Engine {
         tokio::spawn(async move {
             let timeout = std::time::Duration::from_millis(title::TIMEOUT_MS);
             let request = model.complete(messages, &[], &sink, &cancel);
+            // 与 run 相同：panic 时也要发出 AuxiliaryDone，否则标题作业永远不结束。
+            let request = async {
+                zcode_async::catch_panic(request)
+                    .await
+                    .unwrap_or_else(|panicked| {
+                        super::panicked("title", panicked);
+                        Err(ModelFailure::new("internal_error", false))
+                    })
+            };
             let result = match tokio::time::timeout(timeout, request).await {
                 Ok(result) => result.map(|out| {
                     json!({"text": out.message["content"], "calls": out.calls.len(),
