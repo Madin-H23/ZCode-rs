@@ -10,11 +10,16 @@ use tokio::task::{JoinError, JoinHandle};
 use tokio_util::sync::CancellationToken;
 use zcode_cli_rust::{embed, runtime::RuntimeOptions, serve::AppServerOptions};
 
+use zcode_host_kit::log;
+
 use super::process::{Exit, Link, Outcome};
 
-/// 取消后等 runtime 自行收口（取消运行、回收工具进程树、提交中断状态）的时间；超出后中止任务。
-/// 与子进程链路“等 1.8 s → TERM → 等 2 s”的总预算相当。
-const DRAIN_WAIT: Duration = Duration::from_millis(3800);
+/// 取消后等 runtime 自行收口（取消运行、回收工具进程树、提交中断状态）的上限。
+///
+/// 收口的每一步都有自己的期限（工具进程的 TERM → KILL、任务作用域的关闭），正常情况下远小于这个
+/// 值。子进程链路可以在 3.8 s 后直接杀进程，因为操作系统会回收它的一切；进程内的实例被中止时，
+/// 尚未走完 TERM → KILL 的工具进程树不会再有人回收，所以这里宁可多等：只有收口本身卡住时才中止。
+const WIND_DOWN_LIMIT: Duration = Duration::from_secs(20);
 
 /// 启动一个 runtime 实例所需的事实；`env` 就是子进程链路传给 CLI 的那份环境。
 pub struct Start<'a> {
@@ -68,6 +73,7 @@ pub fn start(start: Start<'_>) -> std::io::Result<Link> {
         exit: Exit::Embedded(Running {
             task: Some(embedded.task),
             cancel: embedded.cancel,
+            tasks: embedded.tasks,
             outcome: None,
         }),
     })
@@ -92,6 +98,8 @@ pub fn init_logging(
 pub struct Running {
     task: Option<JoinHandle<anyhow::Result<()>>>,
     cancel: CancellationToken,
+    /// 实例的任务作用域的只读视图：中止时记下还在运行的任务。
+    tasks: embed::Tasks,
     outcome: Option<Outcome>,
 }
 
@@ -109,15 +117,21 @@ impl Running {
         })
     }
 
-    /// 请求实例收口并等它结束；超过 [`DRAIN_WAIT`] 仍未结束时中止任务。
+    /// 请求实例收口并等它结束；超过 [`WIND_DOWN_LIMIT`] 仍未结束时中止任务。
     pub async fn terminate(&mut self) {
         self.cancel.cancel();
         let Some(task) = self.task.as_mut() else {
             return;
         };
-        let joined = match tokio::time::timeout(DRAIN_WAIT, &mut *task).await {
+        let joined = match tokio::time::timeout(WIND_DOWN_LIMIT, &mut *task).await {
             Ok(joined) => joined,
             Err(_) => {
+                // 收口卡住：中止实例。它的任务随作用域一起被中止，此刻还没结束的工具进程可能残留。
+                log::error(format!(
+                    "embedded runtime did not wind down within {} s; aborting, still running: {:?}",
+                    WIND_DOWN_LIMIT.as_secs(),
+                    self.tasks.running()
+                ));
                 task.abort();
                 task.await
             }
