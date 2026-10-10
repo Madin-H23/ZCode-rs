@@ -258,19 +258,22 @@ impl SubagentsService {
         outcome.map_err(|error| fsx::error(format!("{error:#}")))
     }
 
-    /// Host 启动 CLI 前的一次性存储导入（`prepareRuntimeState`）；失败只记 warn。
+    /// Host 启动 CLI 前的一次性存储导入（`prepareRuntimeState`）；失败只记 warn。整段在 owner 任务里：
+    /// 每次启动 CLI 都会调用，Markdown 与状态文件的迁移都只有这一个进程内写入方。
     pub async fn prepare_runtime_state(&self) {
-        let root = self.user_root().await;
-        for failure in migrate_user_markdown(&root).await {
-            log::warn(format!(
-                "用户 Subagent Markdown 迁移失败，保留原文件 path={} error={}",
-                failure.0, failure.1
-            ));
-        }
-        if let Err(error) = self
-            .serialized(|service| async move { service.migrate_state_file().await })
-            .await
-        {
+        let result = self
+            .serialized(|service| async move {
+                let root = service.user_root().await;
+                for failure in migrate_user_markdown(&root).await {
+                    log::warn(format!(
+                        "用户 Subagent Markdown 迁移失败，保留原文件 path={} error={}",
+                        failure.0, failure.1
+                    ));
+                }
+                service.migrate_state_file().await
+            })
+            .await;
+        if let Err(error) = result {
             log::warn(format!("Subagent 状态文件迁移失败: {}", error.message));
         }
     }
