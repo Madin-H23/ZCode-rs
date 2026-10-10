@@ -64,6 +64,15 @@ const facts: Record<string, Json> = {
     durationMs: 12.5,
   },
   streamChunk: { ...base, kind: "stream.chunk", channel: "text", chunkLength: 4, firstChunk: true },
+  streamChunkMerged: {
+    ...base,
+    kind: "stream.chunk",
+    channel: "thought",
+    chunkLength: 40,
+    firstChunk: false,
+    chunkCount: 12,
+    lastChunkAgeMs: 0,
+  },
   toolLifecycle: {
     ...base,
     kind: "tool.lifecycle",
@@ -170,6 +179,21 @@ const cases: Array<{ name: string; schema: SchemaName; input: unknown }> = [
     name: "fact unknown key",
     schema: "conversationTelemetryFact",
     input: { ...facts.streamChunk, text: "secret" },
+  },
+  {
+    name: "fact chunk count zero",
+    schema: "conversationTelemetryFact",
+    input: { ...facts.streamChunkMerged, chunkCount: 0 },
+  },
+  {
+    name: "fact chunk age negative",
+    schema: "conversationTelemetryFact",
+    input: { ...facts.streamChunkMerged, lastChunkAgeMs: -1 },
+  },
+  {
+    name: "fact chunk age fraction",
+    schema: "conversationTelemetryFact",
+    input: { ...facts.streamChunkMerged, lastChunkAgeMs: 1.5 },
   },
   {
     name: "fact hostname with port",

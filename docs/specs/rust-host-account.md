@@ -65,6 +65,7 @@
 5. **内置配置的 Active / CDN 刷新**（`provider-node` `EndpointScopedZCodeBuiltinSource`）：
    - Active 路径 `<appConfigDir>/runtime/provider/<platform>/<appVersion>/endpoint-<sha256(origin) 前 32 位>/zcode-builtin.json`，`platform` 同 `resolveClientConfigPlatform`（如 `darwin-aarch64`，支持 `ZCODE_TEST_*` 覆盖），origin 为 2.2 的当前端点。Endpoint 切换即换一份 Active，不读上一 Endpoint 的缓存。
    - 读取：Bundled 与 Active 中 revision 较新者胜出；同 revision 内容不同时 Bundled 胜出；必要时在 `<active>.lock/` 锁内原子替换 Active（0600）。Active 物化失败时退回 Bundled。registry revision 为 `zcode-builtin:<revision>:<sha256(Active 绝对路径)>`，CLI 的 `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` 指向同一 Active 路径（spawn 前等首轮物化）。
+   - 轮询：`provider-config-poll` 每秒先比 Bundled、当前 Endpoint 的 Active 与个人配置的元数据，变了才读（每 60 秒兜底读一次，[rust-provider-config-poll.md](rust-provider-config-poll.md)）。
    - 刷新：启动时一次、之后每 60 秒检查；`provider-settings.refresh` 强制刷新。经同目录 `zcode-builtin-refresh.json` 控制文件（锁内读写）合并多进程：租约 30 秒，成功后 1 小时、失败指数退避（1 分钟起，上限 1 小时）才再下载；网络期间不持锁。下载先读 `<origin>/api/v1/client/configs?app_version&platform` 的 `builtin_provider_config_json`（只接受无凭据 https URL），再取 Release；不跟随重定向、正文上限 10MB、总预算 20 秒。revision 更高才写入（`updated`），相同内容 `unchanged`，更低 `stale`，同 revision 不同内容报错并退避。
 
 ### 2.5 CLI 集成

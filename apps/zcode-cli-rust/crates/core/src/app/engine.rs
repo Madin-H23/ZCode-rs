@@ -47,6 +47,8 @@ pub(super) struct Active {
 pub struct Engine {
     /// The live telemetry normalizer (spec rust-m9-usage-logs §5).
     pub(super) telemetry: crate::domain::telemetry::Normalizer,
+    /// `stream.chunk` facts held for their window (spec rust-m9-usage-logs §5.7).
+    pub(super) chunk_window: crate::domain::telemetry::ChunkWindow,
     /// Local TTFT records and their clock (spec rust-m9-usage-logs §7).
     pub(super) ttft: crate::domain::local_ttft::Recorder,
     pub(super) ttft_clock: super::local_ttft::TtftClock,
@@ -131,6 +133,7 @@ impl Engine {
                 .await?;
         Ok(Self {
             telemetry: Default::default(),
+            chunk_window: Default::default(),
             ttft: crate::domain::local_ttft::Recorder::new(clock.id()),
             ttft_clock: Default::default(),
             child_updates: BTreeMap::new(),
@@ -183,11 +186,13 @@ impl Engine {
         let serving = async {
             loop {
                 let question_delay = self.question_delay();
+                let chunks_due = self.chunk_window.deadline();
                 tokio::select! {
                     _=async {if let Some(delay)=question_delay {tokio::time::sleep(delay).await} else {std::future::pending::<()>().await}}=>{self.advance_questions().await?;self.flush(&output).await?;},
                     _=cancel.cancelled()=>break,
                     message=input.recv()=>match message {
-                        Some(ClientMsg::Request{token,method,params})=>self.request(Call{token,method,params},&output).await?,
+                        // 请求失败时 outbox 会被清空：暂存的分片事实先发出去（spec rust-m9-usage-logs §5.7）。
+                        Some(ClientMsg::Request{token,method,params})=>{self.send_held_chunks();self.flush(&output).await?;self.request(Call{token,method,params},&output).await?},
                         Some(ClientMsg::HostReply{id,result})=> self.host_reply(id, result),
                         Some(ClientMsg::TopicReleased{topic})=>{self.release_topic(&topic);self.trim_resident().await?;},
                         Some(ClientMsg::ConnectionClosed{connection})=>{self.uploads.clear_connection(&connection);self.trim_resident().await?;},
@@ -201,6 +206,7 @@ impl Engine {
                     Some((method, params))=async {match process_events.as_mut() {Some(rx)=>rx.recv().await, None=>std::future::pending().await}}=>{
                         self.outbox.push(ServerMsg::HostNotification{method,params});self.flush(&output).await?;
                     },
+                    _=async {match chunks_due {Some(at)=>tokio::time::sleep_until(at.into()).await, None=>std::future::pending::<()>().await}}=>{self.send_due_chunks();self.flush(&output).await?;},
                     _=refresh.tick()=>{
                         self.uploads.prune(self.clock.now());if self.ttft.active() {self.ttft_tick();self.flush(&output).await?;}
                         if let Some(registry) = &self.registry && registry.refresh(None).await.unwrap_or(false) { self.refresh_catalog()?; self.flush(&output).await?; }

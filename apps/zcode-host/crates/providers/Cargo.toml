@@ -21,6 +21,7 @@ url.workspace = true
 zcode-shared.workspace = true
 zcode-async.workspace = true
 zcode-host-kit.workspace = true
+zcode-kit.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

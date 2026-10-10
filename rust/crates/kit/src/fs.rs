@@ -1,4 +1,5 @@
-//! 原子写（docs/specs/rust-u0-foundation.md §3.2，缺陷 B6）。
+//! 原子写（docs/specs/rust-u0-foundation.md §3.2，缺陷 B6），以及轮询读文件前比元数据的
+//! [`FileStamp`] / [`ChangeGate`]（docs/specs/rust-provider-config-poll.md）。
 //!
 //! 唯一的“临时文件 + rename”实现：同目录 `create_new` 临时文件 → 写入 → `sync_all` → rename
 //! （目标被短暂占用时按调用方给的表重试）→ fsync 父目录（Unix，尽力而为）。任一步失败都删除
@@ -14,6 +15,9 @@ use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+mod stamp;
+pub use stamp::{ChangeGate, FileStamp};
 
 /// 目标文件的权限。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

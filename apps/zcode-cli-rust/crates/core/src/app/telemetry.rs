@@ -1,6 +1,7 @@
 //! Live session events as telemetry (spec rust-m9-usage-logs §5): every Node
 //! `SessionEvent` the Engine observes becomes a `computer-use/operation-event`
-//! and a `v4/telemetry/event` fact. Hydration never calls in here.
+//! and a `v4/telemetry/event` fact; `stream.chunk` facts are merged per
+//! window (§5.7). Hydration never calls in here.
 use super::Engine;
 use crate::contract::Event;
 use crate::contract::ServerMsg;
@@ -51,20 +52,49 @@ impl Engine {
         }
     }
 
-    /// The operation event and the fact of `event`; the fact is returned for local TTFT.
+    /// The operation event and the fact of `event`; the fact is returned for
+    /// local TTFT, which sees every chunk. Chunk facts go out through the
+    /// window (spec rust-m9-usage-logs §5.7); anything else first releases
+    /// what it holds, so notifications keep the order of the events.
     fn emit_telemetry(&mut self, event: &telemetry::Event, runtime: &Runtime) -> Option<Value> {
+        let now = tokio::time::Instant::now().into_std();
         if let Some(params) = telemetry::computer_use(event) {
+            let held = self.chunk_window.flush(now);
+            self.push_facts(held);
             self.outbox.push(ServerMsg::HostNotification {
                 method: "computer-use/operation-event",
                 params,
             });
         }
         let fact = self.telemetry.normalize(event, runtime)?;
-        self.outbox.push(ServerMsg::HostNotification {
-            method: "v4/telemetry/event",
-            params: fact.clone(),
-        });
+        let out = self.chunk_window.admit(fact.clone(), now);
+        self.push_facts(out);
         Some(fact)
+    }
+
+    /// The held chunk facts whose window closed (the Engine wakes for them).
+    pub(super) fn send_due_chunks(&mut self) {
+        let due = self
+            .chunk_window
+            .due(tokio::time::Instant::now().into_std());
+        self.push_facts(due);
+    }
+
+    /// Every held chunk fact, before a request whose failure clears the outbox.
+    pub(super) fn send_held_chunks(&mut self) {
+        let held = self
+            .chunk_window
+            .flush(tokio::time::Instant::now().into_std());
+        self.push_facts(held);
+    }
+
+    fn push_facts(&mut self, facts: Vec<Value>) {
+        for params in facts {
+            self.outbox.push(ServerMsg::HostNotification {
+                method: "v4/telemetry/event",
+                params,
+            });
+        }
     }
 
     /// The parent's copy of a child's tool or permission event (Node

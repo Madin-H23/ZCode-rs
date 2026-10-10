@@ -4,10 +4,12 @@
 //! events are Node `SessionEvent`s by their wire type and payload; nothing
 //! here reads a transcript, so hydration never produces facts.
 mod bounded;
+mod chunks;
 mod facts;
 mod tools;
 
 use bounded::{BoundedMap, BoundedSet};
+pub use chunks::ChunkWindow;
 use serde_json::{Map, Value, json};
 
 /// One live Node `SessionEvent`.

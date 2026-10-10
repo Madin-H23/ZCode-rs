@@ -57,6 +57,10 @@ pub mod fs {
         pub parent: ParentDir,               // Existing | Create（create_dir_all）
         pub rename_retry: &'static [Duration], // PermissionDenied / ResourceBusy / Windows 32、33 时依次等待后重试
     }
+    /// 轮询读文件前比元数据（rust-provider-config-poll.md）：路径、是否存在、长度、mtime，Unix 另加 dev + inode 与 ctime。
+    pub struct FileStamp; // of(path).await
+    /// 轮询方独占的闸门：指纹与上次记录相同且不满兜底间隔时不读；读取结果可沿用时 record。
+    pub struct ChangeGate; // new(full_read_every)、should_read(&stamps, now)、record(stamps, now)
 }
 pub mod paths {
     /// HOME → USERPROFILE → 系统用户数据库（Unix getpwuid_r）；空值视为未设置；都拿不到时报错，绝不返回空路径。

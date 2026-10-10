@@ -117,6 +117,11 @@ const streamChunkFactSchema = z
     assistantMessageId: z.string().min(1).optional(),
     partId: z.string().min(1).optional(),
     parentToolCallId: z.string().min(1).optional(),
+    // Rust runtime 把同一段流的后续增量按 250 ms 窗口合并成一条（docs/specs/rust-m9-usage-logs.md §5.7）：
+    // chunkCount 是合并的增量数（缺省 1），chunkLength 是它们的长度之和；lastChunkAgeMs 是最新增量到
+    // runtime 发出这条的毫秒数（缺省 0），消费方据此还原该增量的到达时刻。Node runtime 不发这两个字段。
+    chunkCount: z.number().int().positive().optional(),
+    lastChunkAgeMs: z.number().int().nonnegative().optional(),
   })
   .strict();
 

@@ -1526,9 +1526,13 @@ export class ConversationTelemetrySupervisor {
       }
 
       case "stream.chunk": {
+        // Rust runtime 把同一段流的后续增量按 250 ms 窗口合并成一条，lastChunkAgeMs 是其中最新增量
+        // 到发出这条的间隔（docs/specs/rust-m9-usage-logs.md §5.7）。用它还原该增量的到达时刻，首字、
+        // step 边界、正文尾包与流式停顿的口径不变；首个与边界分片立即单独发出，Node 的事实都不带这个字段。
+        const chunkAt = receivedAt - (fact.lastChunkAgeMs ?? 0);
         lifecycle.legacyFirstTokenObserved = true;
         if (foregroundAtReceipt && lifecycle.foregroundFirstTokenAt === null) {
-          lifecycle.foregroundFirstTokenAt = receivedAt;
+          lifecycle.foregroundFirstTokenAt = chunkAt;
         }
         const legacyEvent = {
           type: fact.channel === "thought" ? "agent_thought_chunk" : "agent_message_chunk",
@@ -1548,12 +1552,12 @@ export class ConversationTelemetrySupervisor {
             event: legacyEvent,
             activeInputId: lifecycle.sourceCommandId,
             clientMode: "desktop-continuous",
-            now: receivedAt,
+            now: chunkAt,
           }),
         );
         if (foregroundAtReceipt) {
           recordStreamChunkArrival(lifecycle.taskKey, {
-            now: receivedAt,
+            now: chunkAt,
             talkId: fact.sessionId,
             waitingTool: false,
             model: getActivePromptModelName(lifecycle.taskKey),

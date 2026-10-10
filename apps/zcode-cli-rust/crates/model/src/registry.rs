@@ -1,4 +1,7 @@
 //! Existing App provider files, resolved once per configuration revision.
+//!
+//! The Engine refreshes every second; the files are only read when their
+//! metadata changed or a minute passed (spec rust-provider-config-poll).
 use super::registry_rules::{resolve, validate_account};
 use crate::contract::{ModelIdentity, ModelPort, ModelRegistry};
 use anyhow::{Context, Result, ensure};
@@ -8,7 +11,13 @@ use std::{
     collections::BTreeMap,
     path::PathBuf,
     sync::{Arc, RwLock},
+    time::{Duration, Instant},
 };
+use zcode_kit::fs::{ChangeGate, FileStamp};
+
+/// Unchanged metadata still re-reads the files this often (writes that keep
+/// size, mtime and ctime within one timestamp tick; Windows has no ctime).
+const FULL_READ_EVERY: Duration = Duration::from_secs(60);
 
 pub(super) type ModelKey = (String, String, String);
 #[derive(Default)]
@@ -24,9 +33,15 @@ pub(super) struct Snapshot {
 pub struct Registry {
     builtin: PathBuf,
     personal: PathBuf,
-    account: tokio::sync::Mutex<Option<Value>>,
+    inputs: tokio::sync::Mutex<Inputs>,
     snapshot: RwLock<Snapshot>,
     egress: Arc<zcode_cli_net::Egress>,
+}
+/// What a refresh reads besides the files, under the one serial refresh entry.
+struct Inputs {
+    account: Option<Value>,
+    /// Metadata of the files before the last successful read.
+    files: ChangeGate,
 }
 impl Registry {
     /// The provider files named by the runtime's environment snapshot (the
@@ -55,7 +70,10 @@ impl Registry {
         Self {
             builtin: egress.base_dir().join(builtin),
             personal: egress.base_dir().join(personal),
-            account: Default::default(),
+            inputs: tokio::sync::Mutex::new(Inputs {
+                account: None,
+                files: ChangeGate::new(FULL_READ_EVERY),
+            }),
             snapshot: Default::default(),
             egress,
         }
@@ -64,7 +82,7 @@ impl Registry {
 #[async_trait::async_trait]
 impl ModelRegistry for Registry {
     async fn received_account(&self) -> Option<Value> {
-        self.account.lock().await.clone()
+        self.inputs.lock().await.account.clone()
     }
     fn model_options(&self) -> Vec<Value> {
         self.snapshot.read().unwrap().options.clone()
@@ -94,11 +112,30 @@ impl ModelRegistry for Registry {
     #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     async fn refresh(&self, update: Option<Value>) -> Result<bool> {
         // 配置刷新共用一个串行入口；迟到的文件读取不能覆盖新账号事实。
-        let mut account = self.account.lock().await;
+        let mut inputs = self.inputs.lock().await;
+        let polled = update.is_none();
         if let Some(next) = update {
             validate_account(&next)?;
-            *account = Some(next);
+            inputs.account = Some(next);
         }
+        // 先取元数据再读：读的过程中文件再变，下一轮元数据就不同。轮询时元数据没变就不读、不算哈希；
+        // 账号更新总是读。读失败不记录，下一轮照常重读（与每轮都读时相同）。
+        let stamps = vec![
+            FileStamp::of(&self.builtin).await,
+            FileStamp::of(&self.personal).await,
+        ];
+        let now = Instant::now();
+        if polled && !inputs.files.should_read(&stamps, now) {
+            return Ok(false);
+        }
+        let changed = self.load(inputs.account.as_ref()).await?;
+        inputs.files.record(stamps, now);
+        Ok(changed)
+    }
+}
+impl Registry {
+    /// Reads both files; resolves a new snapshot when they or the account changed.
+    async fn load(&self, account: Option<&Value>) -> Result<bool> {
         let builtin = tokio::fs::read(&self.builtin)
             .await
             .context("Cannot read builtin provider config")?;
@@ -116,7 +153,7 @@ impl ModelRegistry for Registry {
         let mut hash = Sha256::new();
         hash.update(&builtin);
         hash.update(&personal);
-        hash.update(serde_json::to_vec(&*account)?);
+        hash.update(serde_json::to_vec(&account)?);
         let signature = hash.finalize().to_vec();
         if self.snapshot.read().unwrap().signature == signature {
             return Ok(false);
@@ -137,13 +174,13 @@ impl ModelRegistry for Registry {
                 .as_u64()
                 .context("Invalid builtin revision")?
         );
-        if let Some(account) = &*account
+        if let Some(account) = account
             && account["basedOnZCodeBuiltinRevision"] != revision
         {
             return Ok(false);
         }
         let egress = self.egress.clone();
-        let account_value = account.clone().unwrap_or_else(|| json!({}));
+        let account_value = account.cloned().unwrap_or_else(|| json!({}));
         let mut next = zcode_async::blocking(move || {
             resolve(
                 &builtin["config"],

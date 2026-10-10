@@ -2,7 +2,8 @@
 //!
 //! 数据源：Main 在 InitLocal 给的内置配置文件，与 `<appConfigDir>/provider_config.json`。
 //! 两个文件内容变化（每秒轮询，与 TS 的 personal 文件轮询节奏相同）时重新解析，revision 加一，
-//! 并触发两个 channel 的 `onDidChange`。未登录：account provider 一律不可用。
+//! 并触发两个 channel 的 `onDidChange`。轮询先比文件元数据，没变就不读（每分钟兜底读一次，
+//! docs/specs/rust-provider-config-poll.md）。未登录：account provider 一律不可用。
 //!
 //! 任务（docs/specs/rust-u2-task-scope.md §6.1）都在构造时给的作用域里：轮询 `provider-config-poll` 与
 //! 内置配置的远端刷新 `builtin-config-refresh` 是常驻任务；personal 文件的写入由 owner 任务
@@ -14,16 +15,36 @@ pub mod resolve;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use zcode_async::Spawner;
 use zcode_host_kit::{EventHub, Overflow, Reply, RpcError, Serial, ServiceBuilder, log};
+use zcode_kit::fs::{ChangeGate, FileStamp};
 
 use resolve::Resolved;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// 元数据不变时两次读取之间的最长间隔：兜住元数据看不出的改写（同一时间粒度内、长度不变的原地改写；
+/// Windows 没有 inode 与 ctime）。
+const FULL_READ_EVERY: Duration = Duration::from_secs(60);
+
+/// 一次读取的结果能否沿用到文件下次变化：读文件出错（不存在除外）或 Active 物化失败时，下一轮照常重读。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Settled,
+    Retry,
+}
+
+impl Outcome {
+    fn and(self, other: Outcome) -> Outcome {
+        match (self, other) {
+            (Outcome::Settled, Outcome::Settled) => Outcome::Settled,
+            (Outcome::Retry, _) | (_, Outcome::Retry) => Outcome::Retry,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct ProviderRuntime {
@@ -97,7 +118,7 @@ fn builtin_revision_of(builtin: &Value, path: Option<&Path>) -> String {
     }
 }
 
-async fn read_json(path: &Path) -> (Vec<u8>, Value) {
+async fn read_json(path: &Path) -> (Vec<u8>, Value, Outcome) {
     match tokio::fs::read(path).await {
         Ok(bytes) => {
             let value = serde_json::from_slice::<Value>(&bytes).unwrap_or_else(|error| {
@@ -107,16 +128,17 @@ async fn read_json(path: &Path) -> (Vec<u8>, Value) {
                 ));
                 Value::Null
             });
-            (bytes, value)
+            (bytes, value, Outcome::Settled)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            (Vec::new(), Value::Null, Outcome::Settled)
         }
         Err(error) => {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                log::warn(format!(
-                    "cannot read provider config {}: {error}",
-                    path.display()
-                ));
-            }
-            (Vec::new(), Value::Null)
+            log::warn(format!(
+                "cannot read provider config {}: {error}",
+                path.display()
+            ));
+            (Vec::new(), Value::Null, Outcome::Retry)
         }
     }
 }
@@ -221,13 +243,13 @@ impl ProviderRuntime {
         );
     }
 
-    async fn read_builtin(&self) -> (Vec<u8>, Value, Option<PathBuf>) {
+    async fn read_builtin(&self) -> (Vec<u8>, Value, Option<PathBuf>, Outcome) {
         let Some(bundled) = self.inner.builtin_file.clone() else {
-            return (Vec::new(), Value::Null, None);
+            return (Vec::new(), Value::Null, None, Outcome::Settled);
         };
         let Some(source) = self.builtin_source() else {
-            let (bytes, value) = read_json(&bundled).await;
-            return (bytes, value, Some(bundled));
+            let (bytes, value, outcome) = read_json(&bundled).await;
+            return (bytes, value, Some(bundled), outcome);
         };
         match source.read().await {
             Ok(read) => {
@@ -238,13 +260,33 @@ impl ProviderRuntime {
                     .write()
                     .unwrap_or_else(std::sync::PoisonError::into_inner) =
                     read.materialized.then(|| read.path.clone());
-                (read.bytes, value, Some(read.path))
+                let outcome = if read.materialized {
+                    Outcome::Settled
+                } else {
+                    Outcome::Retry
+                };
+                (read.bytes, value, Some(read.path), outcome)
             }
             Err(error) => {
                 log::warn(format!("ZCode Built-in 配置不可用: {error}"));
-                (Vec::new(), Value::Null, Some(bundled))
+                (Vec::new(), Value::Null, Some(bundled), Outcome::Retry)
             }
         }
+    }
+
+    /// 轮询读取的输入文件：随包内置配置、当前 Endpoint 的 Active、个人配置（顺序固定）。
+    async fn input_stamps(&self) -> Vec<FileStamp> {
+        let mut paths = Vec::with_capacity(3);
+        paths.extend(self.inner.builtin_file.clone());
+        if let Some(source) = self.builtin_source() {
+            paths.extend(source.active_path().await);
+        }
+        paths.push(self.inner.personal_file.clone());
+        let mut stamps = Vec::with_capacity(paths.len());
+        for path in &paths {
+            stamps.push(FileStamp::of(path).await);
+        }
+        stamps
     }
 
     pub fn personal_file(&self) -> &Path {
@@ -253,8 +295,29 @@ impl ProviderRuntime {
 
     /// 重新读取两个文件；内容变化时重新解析并通知。返回当前快照。
     pub async fn reload(&self) -> (u64, Arc<Resolved>) {
-        let (builtin_bytes, builtin, builtin_path) = self.read_builtin().await;
-        let (personal_bytes, personal) = read_json(&self.inner.personal_file).await;
+        self.load().await.0
+    }
+
+    /// 一轮轮询：输入文件的元数据（含 Endpoint 决定的 Active 路径）与上次读取时相同就不读；
+    /// 返回这一轮是否读了文件。元数据在读之前取：读的过程中文件再变，下一轮元数据就不同。
+    async fn poll(&self, gate: &mut ChangeGate) -> bool {
+        let stamps = self.input_stamps().await;
+        let now = Instant::now();
+        if !gate.should_read(&stamps, now) {
+            return false;
+        }
+        match self.load().await.1 {
+            Outcome::Settled => gate.record(stamps, now),
+            Outcome::Retry => {}
+        }
+        true
+    }
+
+    async fn load(&self) -> ((u64, Arc<Resolved>), Outcome) {
+        let (builtin_bytes, builtin, builtin_path, builtin_outcome) = self.read_builtin().await;
+        let (personal_bytes, personal, personal_outcome) =
+            read_json(&self.inner.personal_file).await;
+        let outcome = builtin_outcome.and(personal_outcome);
         // 路径也进签名：Endpoint 切换后即使内容相同，registry revision（含路径哈希）也要更新。
         let mut signature = builtin_path
             .as_ref()
@@ -267,7 +330,7 @@ impl ProviderRuntime {
         {
             let state = self.lock_read();
             if state.revision > 0 && state.signature == signature {
-                return (state.revision, state.resolved.clone());
+                return ((state.revision, state.resolved.clone()), outcome);
             }
         }
         // 格式不对（schemaVersion 不是 1）的文件按空配置处理，与 TS 仓库读取失败时一致。
@@ -306,7 +369,7 @@ impl ProviderRuntime {
         if builtin_changed {
             self.inner.builtin_changed.emit(());
         }
-        snapshot
+        (snapshot, outcome)
     }
 
     /// 用缓存的两层配置与当前账号层重新解析，revision 加一并通知。
@@ -413,16 +476,18 @@ impl ProviderRuntime {
         self.reload().await
     }
 
-    /// 后台轮询文件变化（常驻任务）；作用域关闭时结束。
+    /// 后台轮询文件变化（常驻任务）；作用域关闭时结束。闸门只属于这个循环：显式的 [`Self::reload`]
+    /// （`provider-settings.refresh`、个人配置写入、CDN 更新、首读）总是读文件。
     pub fn start_polling(&self) {
         let runtime = self.clone();
         drop(
             self.inner
                 .spawner
                 .spawn_resident("provider-config-poll", async move {
+                    let mut gate = ChangeGate::new(FULL_READ_EVERY);
                     loop {
                         tokio::time::sleep(POLL_INTERVAL).await;
-                        runtime.reload().await;
+                        runtime.poll(&mut gate).await;
                     }
                 }),
         );
@@ -515,20 +580,5 @@ pub fn model_selection_service(runtime: ProviderRuntime) -> ServiceBuilder {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn revision_increases_only_when_files_change() {
-        let dir = tempfile::tempdir().unwrap();
-        let personal = dir.path().join("provider_config.json");
-        let runtime =
-            ProviderRuntime::new(&zcode_host_base::testing::spawner(), None, personal.clone());
-        assert_eq!(runtime.snapshot().await.0, 1);
-        assert_eq!(runtime.reload().await.0, 1);
-        let mut changes = Box::pin(runtime.changes().subscribe());
-        std::fs::write(&personal, r#"{"schemaVersion":1,"config":{}}"#).unwrap();
-        assert_eq!(runtime.reload().await.0, 2);
-        assert_eq!(changes.next().await, Some(()));
-    }
-}
+#[path = "providers_tests.rs"]
+mod tests;

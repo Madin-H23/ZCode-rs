@@ -306,6 +306,24 @@
       "valid": true
     },
     {
+      "name": "fact streamChunkMerged",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "stream.chunk",
+        "channel": "thought",
+        "chunkLength": 40,
+        "firstChunk": false,
+        "chunkCount": 12,
+        "lastChunkAgeMs": 0
+      },
+      "valid": true
+    },
+    {
       "name": "fact toolLifecycle",
       "schema": "conversationTelemetryFact",
       "input": {
@@ -448,6 +466,60 @@
         "chunkLength": 4,
         "firstChunk": true,
         "text": "secret"
+      },
+      "valid": false
+    },
+    {
+      "name": "fact chunk count zero",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "stream.chunk",
+        "channel": "thought",
+        "chunkLength": 40,
+        "firstChunk": false,
+        "chunkCount": 0,
+        "lastChunkAgeMs": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "fact chunk age negative",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "stream.chunk",
+        "channel": "thought",
+        "chunkLength": 40,
+        "firstChunk": false,
+        "chunkCount": 12,
+        "lastChunkAgeMs": -1
+      },
+      "valid": false
+    },
+    {
+      "name": "fact chunk age fraction",
+      "schema": "conversationTelemetryFact",
+      "input": {
+        "version": 1,
+        "eventId": "e1",
+        "eventSeq": 3,
+        "occurredAt": 1.5,
+        "sessionId": "s1",
+        "kind": "stream.chunk",
+        "channel": "thought",
+        "chunkLength": 40,
+        "firstChunk": false,
+        "chunkCount": 12,
+        "lastChunkAgeMs": 1.5
       },
       "valid": false
     },
