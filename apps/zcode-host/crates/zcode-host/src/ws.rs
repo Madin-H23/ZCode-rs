@@ -5,18 +5,23 @@
 //! 每条 WebSocket 二进制消息承载 `SocketProtocol` 字节流，读端按字节流重组。
 //!
 //! transport 只做握手、鉴权与分帧（docs/specs/rust-u2-gateway.md §2.1）：已鉴权的连接交给 Gateway，
-//! 同一个任务里并发地读（完整 rpc 消息 → `Inbound`）和写（`Outbound` → WebSocket 帧）。
+//! 同一个任务里并发地读（完整 rpc 消息 → `Inbound`）和写（`Outbound` → WebSocket 帧）。Gateway 关闭
+//! 连接时，Close 帧带上它给出的原因（§2.6）。
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
+use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode, header};
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use zcode_host_core::{AttachmentMeta, HostCore};
-use zcode_host_gateway::Connection;
+use zcode_host_gateway::{CloseReason, Connection};
 use zcode_host_kit::log;
 use zcode_host_rpc::{FrameReader, frame};
 
@@ -29,6 +34,30 @@ const MAX_CONNECTIONS: usize = 64;
 /// 连接被 Gateway 关闭后发送 WebSocket Close 的时限。对端可能已经不读（挂起的界面进程、越过出站上限），
 /// 发送缓冲写满时 Close 永远写不出去；到时直接断开 TCP，不让 socket 任务一直挂着。
 const CLOSE_FRAME_GRACE: Duration = Duration::from_secs(1);
+/// Close 发出之后等对端回 Close 的时限。对端要先读完排在 Close 前面的数据（刚从卡顿中恢复的 Renderer
+/// 可能有几 MB），所以比发送的时限长；正常的对端几毫秒内就回应。
+const CLOSE_REPLY_GRACE: Duration = Duration::from_secs(5);
+
+type Socket = WebSocketStream<TcpStream>;
+
+/// Gateway 关闭原因 → WebSocket Close（docs/specs/rust-u2-gateway.md §2.6 的表）。状态码在应用自定义
+/// 范围 4000–4999；Renderer 只按状态码判断（4001 表示 Host 仍在运行，可以重新接入）。
+/// 对端发起的关闭与写失败不带自己的原因（None）。
+fn close_frame(reason: CloseReason) -> Option<CloseFrame> {
+    let code = match reason {
+        CloseReason::OutboundBacklog => 4001,
+        CloseReason::Detached => 4002,
+        CloseReason::ScopeUnavailable => 4003,
+        CloseReason::ScopeClosed => 4004,
+        CloseReason::HostShutdown => 4005,
+        CloseReason::InternalError => 1011,
+        CloseReason::PeerClosed | CloseReason::TransportFailed => return None,
+    };
+    Some(CloseFrame {
+        code: CloseCode::from(code),
+        reason: reason.as_str().into(),
+    })
+}
 
 pub struct Policy {
     host: String,
@@ -171,28 +200,30 @@ async fn handle(stream: TcpStream, core: HostCore, policy: Arc<Policy>) {
     let (mut sink, mut source) = socket.split();
     // 读：重组出完整的 rpc 消息交给 Gateway。入站队列满时在这里等待，socket 随之不再被读（TCP 背压）。
     // 结束时（对端关闭、读错误、Gateway 已关闭连接）释放 `inbound`，Gateway 随之按顺序收口。
+    // Gateway 关闭连接时交回读端：关闭握手还要用它读到对端的 Close。
     let reading = async move {
         let mut frames = FrameReader::default();
         loop {
             let item = tokio::select! {
                 item = source.next() => item,
-                () = inbound.closed() => return,
+                () = inbound.closed() => return Some(source),
             };
             match item {
                 Some(Ok(Message::Binary(data))) => {
                     frames.push(&data);
                     while let Some(message) = frames.next_message() {
                         if inbound.send(message).await.is_err() {
-                            return;
+                            return Some(source);
                         }
                     }
                 }
-                Some(Ok(Message::Close(_)) | Err(_)) | None => return,
+                Some(Ok(Message::Close(_)) | Err(_)) | None => return None,
                 Some(Ok(_)) => {}
             }
         }
     };
     // 写：按出站队列的顺序发送，发完一条报告一次（积压水位由 Gateway 计算）。写失败时关闭连接。
+    // 队列关闭后返回 Gateway 给出的关闭原因；写失败时为 None（socket 已不可写）。
     let writing = async {
         while let Some(message) = outbound.next().await {
             let size = message.len();
@@ -202,11 +233,41 @@ async fn handle(stream: TcpStream, core: HostCore, policy: Arc<Policy>) {
                 .is_err()
             {
                 outbound.close();
-                return;
+                return None;
             }
             outbound.written(size);
         }
-        let _ = tokio::time::timeout(CLOSE_FRAME_GRACE, sink.close()).await;
+        outbound.close_reason()
     };
-    tokio::join!(reading, writing);
+    let (source, reason) = tokio::join!(reading, writing);
+    if let Some(reason) = reason {
+        close(sink, source, reason).await;
+    }
+    // 关闭握手结束后才释放 `outbound`：Gateway 的 shutdown 据此知道 Close 已经发出。
+    drop(outbound);
+}
+
+/// 关闭握手。Gateway 关闭的连接：发带原因的 Close，然后继续读（丢弃收到的数据），直到对端回 Close
+/// 或断开。对端发起的关闭：只回应对端的 Close。
+///
+/// 修复原因（docs/specs/rust-u2-gateway.md §2.6）：之前发完不带原因的 Close 就释放 socket。Renderer
+/// 无法区分“Host 关闭了这条连接、自己仍在运行”与“Host 已退出”；而且对端还有没读完的数据时直接关闭
+/// socket，TCP 会以 RST 结束，对端可能丢掉还没读到的 Close 帧。
+async fn close(
+    mut sink: SplitSink<Socket, Message>,
+    source: Option<SplitStream<Socket>>,
+    reason: CloseReason,
+) {
+    let Some(frame) = close_frame(reason) else {
+        let _ = tokio::time::timeout(CLOSE_FRAME_GRACE, sink.close()).await;
+        return;
+    };
+    let sent = tokio::time::timeout(CLOSE_FRAME_GRACE, sink.send(Message::Close(Some(frame))));
+    if !matches!(sent.await, Ok(Ok(()))) {
+        return;
+    }
+    if let Some(mut source) = source {
+        let drained = async { while let Some(Ok(_)) = source.next().await {} };
+        let _ = tokio::time::timeout(CLOSE_REPLY_GRACE, drained).await;
+    }
 }

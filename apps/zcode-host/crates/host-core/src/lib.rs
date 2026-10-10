@@ -36,10 +36,17 @@ const DETACH_SERVICE_PORT: &str = "detach-service-port";
 /// capability 有效期（rust-host-r0.md §3）。
 pub const CAPABILITY_TTL: Duration = Duration::from_secs(30);
 
+/// Host 退出时等各连接收口、transport 发完 Close 的时限（docs/specs/rust-u2-gateway.md §2.4）。
+/// 与 WebSocket transport 发 Close 的时限相同：对端不读时不让 dispose 一直等。
+const CONNECTION_CLOSE_GRACE: Duration = Duration::from_secs(1);
+
 #[derive(Debug, Clone)]
 pub struct HostConfig {
     pub ws_port: u16,
     pub environment: HostEnvironment,
+    /// 每条连接的出站队列阈值；产品构建总是 `OutboundLimits::default()`，调试构建的测试可以调小上限
+    /// （docs/specs/rust-u2-gateway.md §2.6）。
+    pub outbound_limits: OutboundLimits,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,11 +91,7 @@ impl HostCore {
             ));
         });
         let telemetry = rpc_telemetry::RpcTelemetry::new(control.clone(), scope.spawner());
-        let gateway = Gateway::new(
-            scope.spawner(),
-            telemetry.clone(),
-            OutboundLimits::default(),
-        );
+        let gateway = Gateway::new(scope.spawner(), telemetry.clone(), config.outbound_limits);
         Self {
             inner: Arc::new(Inner {
                 config,
@@ -189,9 +192,13 @@ impl HostCore {
         ));
     }
 
-    /// Host 退出前冲刷 RPC 遥测并回收子进程（CLI 进程树）；未初始化时只冲刷遥测。最后关闭根作用域：
-    /// 连接、transport 与启动任务被中止，列进日志（rust-u2-task-scope.md §5）。
+    /// Host 退出：先关闭全部连接（docs/specs/rust-u2-gateway.md §2.4），再冲刷 RPC 遥测并回收子进程
+    /// （CLI 进程树）；未初始化时只冲刷遥测。最后关闭根作用域：还没结束的连接、transport 与启动任务
+    /// 被中止，列进日志（rust-u2-task-scope.md §5）。
     pub async fn shutdown(&self) {
+        // 先以 HostShutdown 关闭全部连接并等 transport 发出 Close，再停止 service：Renderer 收到
+        // 4005 而不是 transport 任务被中止后的 1006；连接按正常路径收口时 service 还在。
+        self.inner.gateway.shutdown(CONNECTION_CLOSE_GRACE).await;
         self.inner.telemetry.shutdown();
         let installed = self
             .inner
@@ -465,6 +472,7 @@ mod remote_scope_tests {
             HostConfig {
                 ws_port: 4242,
                 environment: zcode_host_services::HostEnvironment::default(),
+                outbound_limits: OutboundLimits::default(),
             },
             sink.clone(),
         );

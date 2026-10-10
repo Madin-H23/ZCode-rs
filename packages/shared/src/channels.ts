@@ -506,6 +506,17 @@ export const InternalChannels = {
 /** Rust Host WebSocket 的 rpc 子协议；capability 以 `zcode-cap.<hex>` 作为第二个子协议传递。 */
 export const RUST_HOST_RPC_SUBPROTOCOL = "zcode-rpc.v1";
 export const RUST_HOST_CAPABILITY_SUBPROTOCOL_PREFIX = "zcode-cap.";
+/**
+ * Rust Host 主动关闭 WebSocket 时 Close 帧的状态码（docs/specs/rust-u2-gateway.md §2.6，与 Host 的
+ * `ws.rs` 一致）。只有 `outboundBacklog` 表示 Host 仍在运行、窗口应重新接入（rust-host-resilience.md §2.5）。
+ */
+export const RUST_HOST_CLOSE_CODES = {
+  outboundBacklog: 4001,
+  detached: 4002,
+  scopeUnavailable: 4003,
+  scopeClosed: 4004,
+  hostShutdown: 4005,
+} as const;
 
 /** @deprecated `/ws` 已忽略该头；保留常量仅供旧客户端兼容。 */
 export const ZCODE_RPC_CLIENT_MODE_HEADER = "x-zcode-rpc-client-mode";

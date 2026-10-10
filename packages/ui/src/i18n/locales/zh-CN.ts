@@ -114,6 +114,12 @@ const zhCN: Record<string, string> = {
   "startup.hostConnection.failedHelp":
     "本地服务多次意外退出。可以重新加载以再次启动，或退出后重新打开 ZCode。",
   "startup.hostConnection.reload": "重新加载",
+  "startup.hostConnection.reattachHelp":
+    "窗口长时间没有响应，本地服务断开了它的连接。窗口马上会重新加载。",
+  "startup.hostConnection.reattachAttempt": "第 {attempt}/{max} 次重新连接",
+  "startup.hostConnection.closed": "与 ZCode 服务的连接多次中断",
+  "startup.hostConnection.closedHelp":
+    "窗口多次长时间没有响应，本地服务断开了它的连接。可以重新加载窗口，或退出后重新打开 ZCode。",
   "startup.database.checking": "正在检查历史数据",
   "startup.database.waiting_for_lock": "数据库正被其他进程使用，正在等待",
   "startup.database.migrating": "正在升级历史数据",

@@ -120,6 +120,12 @@ const enUS: Record<string, string> = {
   "startup.hostConnection.failedHelp":
     "The local service stopped repeatedly. Reload to start it again, or exit and reopen ZCode.",
   "startup.hostConnection.reload": "Reload",
+  "startup.hostConnection.reattachHelp":
+    "This window stopped responding for a while, so the local service closed its connection. The window will reload shortly.",
+  "startup.hostConnection.reattachAttempt": "Reconnect attempt {attempt} of {max}",
+  "startup.hostConnection.closed": "The connection to ZCode services keeps closing",
+  "startup.hostConnection.closedHelp":
+    "This window repeatedly stopped responding, so the local service closed its connection. Reload the window, or exit and reopen ZCode.",
   "startup.database.checking": "Checking history",
   "startup.database.waiting_for_lock": "Waiting for another window to prepare data",
   "startup.database.migrating": "Upgrading history",

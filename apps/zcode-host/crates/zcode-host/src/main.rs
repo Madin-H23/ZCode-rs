@@ -31,6 +31,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use zcode_host_control::{HostToMain, LogLevel, encode_line, parse_main_to_host};
 use zcode_host_core::{ControlOutcome, ControlSink, HostConfig, HostCore};
+use zcode_host_gateway::OutboundLimits;
 use zcode_host_kit::log;
 use zcode_host_services::HostEnvironment;
 
@@ -96,8 +97,42 @@ fn capture_environment() -> Result<HostEnvironment> {
     HostEnvironment::capture(std::env::vars()).context("capture host environment")
 }
 
+/// 测试用的出站上限（docs/specs/rust-u2-gateway.md §2.6）：只在调试构建中编译，发布构建忽略这个变量。
+#[cfg(debug_assertions)]
+const DEBUG_OUTBOUND_HARD_LIMIT: &str = "ZCODE_HOST_DEBUG_OUTBOUND_HARD_LIMIT";
+
+/// 出站队列阈值，以及要在日志通道就绪后记下的说明（覆盖了上限，或变量的值无效）。
+#[cfg(debug_assertions)]
+fn outbound_limits(environment: &HostEnvironment) -> (OutboundLimits, Option<String>) {
+    let mut limits = OutboundLimits::default();
+    let Some(value) = environment.vars.get(DEBUG_OUTBOUND_HARD_LIMIT) else {
+        return (limits, None);
+    };
+    match value.trim().parse::<usize>() {
+        Ok(bytes) if bytes > 0 => {
+            limits.hard_limit = bytes;
+            let note = format!(
+                "{DEBUG_OUTBOUND_HARD_LIMIT}={bytes} (debug build): connections close above {bytes} queued bytes"
+            );
+            (limits, Some(note))
+        }
+        _ => (
+            limits,
+            Some(format!(
+                "ignoring {DEBUG_OUTBOUND_HARD_LIMIT}={value:?}: expected a positive byte count"
+            )),
+        ),
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn outbound_limits(_environment: &HostEnvironment) -> (OutboundLimits, Option<String>) {
+    (OutboundLimits::default(), None)
+}
+
 async fn run(args: Args) -> Result<()> {
     let environment = capture_environment()?;
+    let (outbound_limits, outbound_note) = outbound_limits(&environment);
     // 进程内 runtime 的日志（docs/specs/rust-u3-single-process.md §2.2）；guard 存活到进程退出。
     #[cfg(feature = "embedded-runtime")]
     let _runtime_logs =
@@ -115,6 +150,7 @@ async fn run(args: Args) -> Result<()> {
         HostConfig {
             ws_port: port,
             environment,
+            outbound_limits,
         },
         Arc::new(StdoutControl(control_tx.clone())),
     );
@@ -127,6 +163,9 @@ async fn run(args: Args) -> Result<()> {
     // 结构化日志经控制通道交给 Main 实时落盘；Main 收到首条结构化日志后不再缓存 stderr。
     log::set_sink(Box::new(StdoutControl(control_tx.clone())));
     log::info(format!("listening on 127.0.0.1:{port}"));
+    if let Some(note) = outbound_note {
+        log::warn(note);
+    }
 
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     loop {

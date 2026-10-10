@@ -35,8 +35,11 @@ impl Gateway {
     /// 接入一条已鉴权的连接。transport 把收到的完整 rpc 消息写进 `Connection::inbound`，
     /// 从 `Connection::outbound` 取出要发送的消息，每发完一条调用 `written`；结束读取时释放 `inbound`。
     pub fn connect(&self, meta: AttachmentMeta, channels: ChannelSource) -> Connection;
-    /// `detach-service-port`：关闭该 attachment 的全部连接。
+    /// `detach-service-port`：关闭该 attachment 的全部连接（原因 `Detached`）。
     pub fn close_attachment(&self, attachment_id: &str) -> usize;
+    /// Host 退出：以 `HostShutdown` 关闭全部连接，之后接入的连接立即关闭；等各 transport 发完 Close
+    /// 并释放 `Outbound`，至多 `grace`（2.6）。
+    pub async fn shutdown(&self, grace: Duration);
     /// 诊断：当前连接（id、attachment 元数据、出站积压）。
     pub fn connections(&self) -> Vec<ConnectionInfo>;
 }
@@ -51,8 +54,16 @@ impl Outbound {
     /// 下一条要发送的消息；连接关闭后为 None。只有一个消费者。
     pub async fn next(&self) -> Option<Vec<u8>>;
     pub fn written(&self, bytes: usize);
-    /// transport 写失败：关闭这条连接。
+    /// transport 写失败：关闭这条连接（原因 `TransportFailed`）。
     pub fn close(&self);
+    /// 出站队列关闭的原因；`next` 返回 None 之后一定是 Some。transport 据此告诉对端（2.6）。
+    pub fn close_reason(&self) -> Option<CloseReason>;
+}
+/// Gateway 关闭一条连接的原因（2.6）。第一个关闭出站队列的触发决定原因，之后不再改变。
+pub enum CloseReason { OutboundBacklog, InternalError, Detached, ScopeUnavailable, ScopeClosed, HostShutdown, PeerClosed, TransportFailed }
+impl CloseReason {
+    /// 机器可读的短原因（WebSocket Close 帧的 reason），如 `outbound-backlog`。
+    pub fn as_str(self) -> &'static str;
 }
 /// channel 表的来源：本地 scope 等 Host 就绪，远端 scope 等对应 workspace 接入；None 时不发 `[200]` 就关闭。
 pub type ChannelSource = Pin<Box<dyn Future<Output = Option<Channels>> + Send>>;
@@ -123,7 +134,7 @@ pub trait CallObserver: Send + Sync { fn call_finished(&self, channel: &str, met
 - **终端输出按连接流控**（`crates/workspace/src/terminal/flow.rs`）：读某个终端输出（`onDynamicData`）的连接里只要有一条处于 saturated，Host 就暂停读这个终端的 PTY；这些连接都 drained（或关闭、取消订阅）后恢复。PTY 缓冲写满后 shell 里的进程写阻塞，与真实终端相同；Ctrl+C 走输入方向，不受影响。连接先 saturated、后订阅时立即暂停。子进程退出后不再暂停，剩余输出照常读完。
   - 原因（2026-10-10 桌面 E2E）：PTY 读多快就入队多快，而 Renderer 渲染终端输出只有每秒几 MB。终端里运行 `yes`，积压每秒涨约 40–50 MB，8–11 s 越过上限，Gateway 关闭窗口的连接（调试与发布构建都会）；Gateway 之前的 Host 不关闭，但内存无界增长（24 s 到 1.2 GB）。
   - 其余事件源（文件监听等）仍不受约束，由上限兜底。
-- 上限关闭之后：Renderer 把连上之后的任何关闭都当成 Host 退出，显示“正在重连”并等待 Main 重启 Host；而 Host 仍在运行，Main 不会重启，窗口停在这一页，只能退出（`packages/desktop/src/renderer/src/hostConnectionLost.tsx`）。用户已决定恢复方式（§4），实现中。
+- 上限关闭之后：Host 在 WebSocket Close 中给出原因 `outbound-backlog`，Renderer 重新加载页面、重新接入同一个 Host，见 2.6。修复前 Renderer 把连上之后的任何关闭都当成 Host 退出，显示“正在重连”并等待 Main 重启 Host；而 Host 仍在运行，Main 不会重启，窗口停在这一页，只能退出（桌面 E2E `gateway-backlog` 在终端输出有流控之前发现）。
 
 ### 2.4 连接关闭
 
@@ -131,14 +142,15 @@ pub trait CallObserver: Send + Sync { fn call_finished(&self, channel: &str, met
 
 任务与作用域：
 
-| 任务                         | 作用域                 | 说明                                                                                                               |
-| ---------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `connection`（连接循环）     | `host`                 | 执行上面的收口；不在连接作用域里，否则会中止自己                                                                   |
-| `call`、`listen`             | `host/connection:<id>` | 作用域由连接循环持有                                                                                               |
-| `socket`（WebSocket 读与写） | `host/websocket`       | 出站队列关闭后发 WebSocket Close（至多等 1 s：对端可能已经不读）并结束；对端断开时释放 `inbound`，Gateway 随之收口 |
+| 任务                         | 作用域                 | 说明                                                                                                                                                                                                                      |
+| ---------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connection`（连接循环）     | `host`                 | 执行上面的收口；不在连接作用域里，否则会中止自己                                                                                                                                                                          |
+| `call`、`listen`             | `host/connection:<id>` | 作用域由连接循环持有                                                                                                                                                                                                      |
+| `socket`（WebSocket 读与写） | `host/websocket`       | 出站队列关闭后发 WebSocket Close，状态码与原因见 2.6；正在写的那条消息写完才发 Close（至多等 1 s：对端可能已经不读），再等对端回 Close（至多 5 s），然后结束，释放 `Outbound`。对端断开时释放 `inbound`，Gateway 随之收口 |
 
-- 关闭的触发：transport 释放 `inbound`（对端断开）、`close_attachment`（Main 的 `detach-service-port`）、出站队列越过上限、transport 写失败（`Outbound::close`）、`Channels::closed`（远端 scope 的会话断开）。多个触发同时到达时只收口一次。
-- 连接循环被中止（Host 退出时关闭根作用域）时：排队的调用离队，出站队列关闭，连接作用域被释放（其中的任务被中止）。此时不调用 `connection_closed`：Host 正在退出。
+- 关闭的触发：transport 释放 `inbound`（对端断开）、`close_attachment`（Main 的 `detach-service-port`）、出站队列越过上限、transport 写失败（`Outbound::close`）、`Channels::closed`（远端 scope 的会话断开）、拿不到 channel 表、Host 退出（`Gateway::shutdown`）。每个触发对应一个关闭原因（2.6）。多个触发同时到达时只收口一次，原因取第一个关闭出站队列的触发。
+- Host 退出（Main 的 `dispose` 或控制通道关闭）：`HostCore::shutdown` 先调用 `Gateway::shutdown`，以 `HostShutdown` 关闭全部连接（在关闭开关上写下原因，各连接循环随之按上面的顺序收口），之后接入的连接直接以同一原因关闭；等这些连接循环收口完、transport 发完 Close 并释放 `Outbound`，至多 1 s（对端不读时 transport 自己的时限更长，Host 不等它）；然后才停止各 service、关闭根作用域。等待期间连接循环照常收口（含 `connection_closed`，与窗口先于 Host 关闭时相同）；关闭根作用域时还没收口完的连接循环被中止，不再调用 `connection_closed`。修复前 Host 退出时直接关闭根作用域，socket 任务随之被中止，Renderer 收不到 Close，只看到 1006。
+- 连接循环没有走完收口就结束（被中止，或循环自身 panic）：排队的调用离队，出站队列以 `InternalError` 关闭（已经关闭的保持原来的原因），连接作用域被释放（其中的任务被中止），不调用 `connection_closed`。循环自身 panic 只会来自没有隔离的 channel 回调（例如 `connection_flow`），属于缺陷，panic 交给作用域上报。
 - handler panic：调用任务回 `[202]`（`<channel>.<method> failed: internal error in the Rust Host`），释放通道，再把 panic 交还给作用域上报（Host 日志 error：`task panicked: scope=host/connection:<id> task=call: …`）。`serial_key`、`listen` 或 `call` 返回 future 之前的同步部分 panic 时，连接循环回 `[202]`（订阅则不应答）并记 error 日志，循环继续。
 
 ### 2.5 状态所有者
@@ -148,6 +160,7 @@ pub trait CallObserver: Send + Sync { fn call_finished(&self, channel: &str, met
 | 根作用域 `host`                          | `HostCore`                                       |
 | 连接表、连接作用域                       | Gateway                                          |
 | 出站队列与水位                           | Gateway（每连接）                                |
+| 连接的关闭原因                           | Gateway（每连接，第一个触发写入，2.6）           |
 | 终端输出的暂停（哪些连接在读、是否暂停） | `workspace` 的 `terminal` 服务（每个终端一个门） |
 | 串行键的队列                             | Gateway（Host 级）                               |
 | capability 签发与兑换                    | `host-core`（不变）                              |
@@ -171,6 +184,31 @@ sequenceDiagram
     Q-->>T: 按入队顺序发送；积压越过水位时通知 channel
 ```
 
+### 2.6 关闭原因与 WebSocket Close
+
+用户决定（2026-10-10）：Host 主动关闭连接时在 WebSocket Close 中给出原因；Renderer 据此区分“Host 还在，重新接入”与“Host 已退出”（rust-host-resilience.md §2.5）。
+
+- Gateway 为每条连接记一个关闭原因（`CloseReason`）：第一个触发写入，之后不再改变；出站队列关闭时带上它，transport 在 `Outbound::next` 返回 None 之后用 `Outbound::close_reason` 读取。原因经 Gateway 的接口交给 transport，transport 不解析日志、不自行推断。
+- WebSocket transport 把原因映射为 Close 帧：状态码在应用自定义范围 4000–4999（RFC 6455 §7.4.2），reason 是下表的短 ASCII 串（机器可读，诊断用；Renderer 只按状态码判断）。
+- 发送顺序：出站队列关闭时还没发送的消息丢弃；正在写的那一条写完后发 Close（至多等 1 s：对端可能不读），然后继续读 socket（丢弃收到的数据），直到对端回 Close 或断开，才释放 TCP（至多等 5 s：对端要先读完排在 Close 前面的数据）。修复依据：对端还有没读完的数据时直接关闭 socket，TCP 会以 RST 结束，对端可能丢掉还没读到的 Close 帧，只看到 1006。
+
+| 触发                                                                    | `CloseReason`      | 状态码 | reason              | 此时的 Host      | Renderer 怎么做（窗口的连接，rust-host-resilience.md §2.5）                                                           |
+| ----------------------------------------------------------------------- | ------------------ | ------ | ------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 出站积压越过上限（2.3）                                                 | `OutboundBacklog`  | 4001   | `outbound-backlog`  | 运行中           | **重新接入**：重新加载页面，接入同一个 Host；有次数上限                                                               |
+| `close_attachment`（Main 的 `detach-service-port`）                     | `Detached`         | 4002   | `detached`          | 运行中           | 不重新接入。Main 主动断开，之后是否接入由 Main 决定（今天只用于释放远端 scope 的 route，Renderer 已不再使用这条连接） |
+| 拿不到 channel 表（远端 scope 接入失败；本地 scope 在 Host 就绪前退出） | `ScopeUnavailable` | 4003   | `scope-unavailable` | 运行中或正在退出 | 不重新接入。远端 scope：远端 workspace 的重连由 Main 的远端会话管理器负责；本地 scope：按 Host 退出处理（等待 Main）  |
+| `Channels::closed`（远端 scope 的会话断开）                             | `ScopeClosed`      | 4004   | `scope-closed`      | 运行中           | 同上                                                                                                                  |
+| Host 退出（`Gateway::shutdown`）                                        | `HostShutdown`     | 4005   | `host-shutdown`     | 正在退出         | 不重新接入，按 Host 退出处理：显示“正在重连”，等待 Main（App 退出时窗口随之关闭；意外退出由 Main 重启后 reload）      |
+| 连接循环没有走完收口（被中止或 panic，2.4）                             | `InternalError`    | 1011   | `internal-error`    | 运行中或正在退出 | 不重新接入（原因不明，自动重连可能循环），按 Host 退出处理                                                            |
+| transport 释放 `inbound`（对端发了 Close 或断开）                       | `PeerClosed`       | —      | —                   | 运行中           | 对端发起的关闭：transport 只回应对端的 Close，不带自己的原因                                                          |
+| transport 写失败（`Outbound::close`）                                   | `TransportFailed`  | —      | —                   | 运行中           | socket 已不可写，不发 Close；Renderer 看到 1006，按 Host 退出处理                                                     |
+
+- Host 退出时（2.4）先关闭全部连接再停止 service：Renderer 收到 4005，而不是 socket 任务被中止后的 1006。两者在 Renderer 上的处理相同；4005 只让日志能区分“Host 正常退出”与“连接异常断开”。
+- 不新增 Main 的控制消息：重新接入走页面 reload，dom-ready 时 Main 为页面签发新的一次性 endpoint（rust-u4-app-host.md §2.1，与手动 reload 相同的路径）。
+- Main 的 MessagePort 桥（手机远控、Bot 运行时，`rustHostPortBridge.ts`）收到任何 Close 都关闭端口，不变。Node Host 不用 WebSocket，不受影响。
+
+**测试用的上限（只在调试构建中编译）**：Host 环境里有 `ZCODE_HOST_DEBUG_OUTBOUND_HARD_LIMIT=<字节数>`（正整数）时，出站上限改为这个值，高低水位不变。用于桌面 E2E 与集成测试真实触发越过上限的关闭；值小于高水位时 saturated 不会发生，流控不介入，越过上限更快。发布构建不含这段代码，环境变量被忽略。Host 启动时记一条 warn 说明已覆盖。
+
 ## 3. 验收
 
 - 测试（`zcode-host-gateway`）：
@@ -178,16 +216,17 @@ sequenceDiagram
   - 排队中的调用被取消后不执行；连接关闭后它排队的调用不执行，其他连接同一键的调用继续。
   - 水位边沿与今天相同；越过上限时只关闭这一条连接。
   - `connection_closed` 恰好一次，且晚于该连接所有调用任务的结束。
+  - 关闭原因（2.6）：每种触发（越过上限、`close_attachment`、拿不到 channel 表、`Channels::closed`、`shutdown`、对端断开、写失败）在 `Outbound::close_reason` 上得到对应的原因；多个触发时第一个生效；`shutdown` 之后接入的连接直接以 `HostShutdown` 关闭；`shutdown` 等连接收口、transport 释放 `Outbound`，至多到时限。
+- 集成测试（`crates/zcode-host/tests/close_reasons.rs`，真实二进制与 WebSocket）：调试构建以 `ZCODE_HOST_DEBUG_OUTBOUND_HARD_LIMIT` 设一个小上限，客户端不读、连续请求大应答，之后读到 Close 4001 `outbound-backlog`；`detach-service-port` 得到 4002 `detached`；`dispose` 得到 4005 `host-shutdown`，然后 Host 退出。
 - 测试（`zcode-host-workspace` 的 `terminal`）：读终端输出的连接 saturated 时 PTY 不再被读（输出停止、写端阻塞），drained 后输出继续到结束；其他连接 saturated 不影响它；saturated 的连接关闭后恢复。
-- 桌面 E2E `gateway-backlog`：终端里运行 `yes` 一段时间，窗口的连接不被关闭，Ctrl+C 之后终端与对话都可用；Renderer 卡住数秒期间的多轮大输出完整显示。`gateway-ordering`：忙碌会话里连续发送的两条消息按发送顺序排队、按顺序执行；另一个会话流式输出期间应答权限与提问。`gateway-detach`：流式中途销毁窗口，Host 上它的连接被收口，run 继续，另一个窗口跟到结束；`resilience-reload` 另查 reload 后旧页面的连接被收口。每个场景结束时 harness 断言 Host 日志没有任务 panic 与越过上限的关闭。
+- 桌面 E2E `gateway-backlog`：终端里运行 `yes` 一段时间，窗口的连接不被关闭，Ctrl+C 之后终端与对话都可用；Renderer 卡住数秒期间的多轮大输出完整显示。`gateway-ordering`：忙碌会话里连续发送的两条消息按发送顺序排队、按顺序执行；另一个会话流式输出期间应答权限与提问。`gateway-detach`：流式中途销毁窗口，Host 上它的连接被收口，run 继续，另一个窗口跟到结束；`resilience-reload` 另查 reload 后旧页面的连接被收口。`gateway-close-recovery`：以测试用的小上限启动，Renderer 卡住时终端大量输出，连接以 4001 关闭；窗口自己重新加载，接入同一个 Host（pid 不变），对话完整，没有停在“正在重连”；连续越过上限时自动重新接入有上限，之后显示“连接多次中断”页，点“重新加载”恢复（rust-host-resilience.md §2.5）。每个场景结束时 harness 断言 Host 日志没有任务 panic 与越过上限的关闭。
 - `tokio::spawn` 不出现在 `zcode-host-gateway`、`host-core` 与 `zcode-host` 中（任务都在作用域里）：`scripts/rust/check-host-spawns.mjs`（`pnpm check:rust` 的一步）扫描这三个 crate 的非测试代码，也禁止取运行时句柄自行 spawn。其余 crate 迁移后加入它的列表。
 - 现有测试、`pnpm test:rust-host`、桌面 E2E 全部通过；控制 RPC 的延迟测试（`control_latency`）不退化。
 
 ## 4. 本期不做
 
-| 项                                                                              | 去向与原因                                                                                                                                     |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| 方法表宏（参数与结果类型、能力检查、向 TS 导出）与 `zcode-gateway-legacy`       | U9（D-U5：从 U9 起以 Rust 方法表为契约来源）。在那之前契约来源仍是 TS，40 个 channel 继续由各 service 用 `ServiceBuilder` 注册                 |
-| 按连接能力过滤方法（手机默认不能用终端等）                                      | U7                                                                                                                                             |
-| 投递策略对象（`Continuous` / `Replayable`）与两份 delivery 的合并               | U3 B 期，与进程内类型化链路一起做                                                                                                              |
-| 上限关闭后的 Renderer 恢复（Host 主动关闭连接时重新接入，而不是等待 Host 重启） | 用户决定（2026-10-10）：Host 关闭连接时在 WebSocket Close 中给出原因，Renderer 据此重新加载页面、重新接入同一个 Host，不等待 Host 重启。实现中 |
+| 项                                                                        | 去向与原因                                                                                                                     |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 方法表宏（参数与结果类型、能力检查、向 TS 导出）与 `zcode-gateway-legacy` | U9（D-U5：从 U9 起以 Rust 方法表为契约来源）。在那之前契约来源仍是 TS，40 个 channel 继续由各 service 用 `ServiceBuilder` 注册 |
+| 按连接能力过滤方法（手机默认不能用终端等）                                | U7                                                                                                                             |
+| 投递策略对象（`Continuous` / `Replayable`）与两份 delivery 的合并         | U3 B 期，与进程内类型化链路一起做                                                                                              |

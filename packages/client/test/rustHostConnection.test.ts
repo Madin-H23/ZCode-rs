@@ -7,9 +7,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import test from "node:test";
-import { createWebSocketServiceConnection } from "../src/index.js";
+import {
+  createWebSocketServiceConnection,
+  type WebSocketConnectionCloseEvent,
+} from "../src/index.js";
 import {
   RUST_HOST_CAPABILITY_SUBPROTOCOL_PREFIX,
+  RUST_HOST_CLOSE_CODES,
   RUST_HOST_RPC_SUBPROTOCOL,
   databaseStartupStateSchema,
   hostAttachmentEndpointIssuedResponseSchema,
@@ -172,6 +176,55 @@ test("pending calls are rejected as soon as the Host goes away", async () => {
     const pending = connection.services.settingService.get();
     host.child.kill();
     await assert.rejects(pending, /Service connection closed/);
+  } finally {
+    host.child.kill();
+  }
+});
+
+/**
+ * Host 主动关闭连接时 Close 帧带状态码与原因（docs/specs/rust-u2-gateway.md §2.6）：Renderer 的客户端在
+ * onClose 里拿到的值与 `RUST_HOST_CLOSE_CODES` 一致（防止两侧定义漂移）。越过出站上限（4001）需要调试
+ * 构建的小上限，见 crates/zcode-host/tests/close_reasons.rs 与桌面 E2E gateway-close-recovery。
+ */
+test("the Host names why it closed a connection in the WebSocket Close frame", async () => {
+  const host = await startedHost();
+  try {
+    await initialize(host);
+    const closed = async (attachmentId: string, trigger: () => void) => {
+      host.send({
+        type: "issue-attachment-endpoint",
+        requestId: `issue-${attachmentId}`,
+        attachmentId,
+        clientMode: "desktop-continuous",
+        scope: { kind: "local" },
+      });
+      const issued = hostAttachmentEndpointIssuedResponseSchema.parse(await host.next());
+      if (!issued.ok) throw new Error(issued.error);
+      let resolveClose!: (event: WebSocketConnectionCloseEvent) => void;
+      const event = new Promise<WebSocketConnectionCloseEvent>((resolve) => {
+        resolveClose = resolve;
+      });
+      const connection = await createWebSocketServiceConnection(issued.url, {
+        protocols: protocols(issued.capability),
+        onClose: resolveClose,
+      });
+      // 连接已就绪（[200] 之后的调用有应答）再触发关闭。
+      await connection.services.settingService.get();
+      trigger();
+      return event;
+    };
+    const detached = await closed("detach-ts", () =>
+      host.send({ type: "detach-service-port", attachmentId: "detach-ts" }),
+    );
+    assert.deepEqual(
+      { code: detached.code, reason: detached.reason },
+      { code: RUST_HOST_CLOSE_CODES.detached, reason: "detached" },
+    );
+    const shutdown = await closed("dispose-ts", () => host.send({ type: "dispose" }));
+    assert.deepEqual(
+      { code: shutdown.code, reason: shutdown.reason },
+      { code: RUST_HOST_CLOSE_CODES.hostShutdown, reason: "host-shutdown" },
+    );
   } finally {
     host.child.kill();
   }
