@@ -167,8 +167,9 @@ impl ProviderRuntime {
             .inner
             .builtin_source
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(builtin::BuiltinSource::new(bundled, environment));
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(
+            builtin::BuiltinSource::new(&self.inner.spawner, bundled, environment),
+        );
     }
 
     fn builtin_source(&self) -> Option<Arc<builtin::BuiltinSource>> {
