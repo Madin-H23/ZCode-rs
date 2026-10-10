@@ -171,7 +171,7 @@ sequenceDiagram
 - 本地 Anthropic Messages 模型（流式与非流式、cache 读写与 `server_tool_use` 用量）；共用 Provider Registry 形态的 HOME（`scripts/zcode-cli-rust-interop-runtime.mjs`）。
 - 场景：普通轮、Bash 工具轮、WebSearch（内部搜索请求）、模型 400 失败、流式中停止、手动压缩、子代理。每个场景一个新会话，Node 与 Rust 各用一个临时库。
 - 比较：三张表的行按记录对象（来源或工具名）排序后逐字段比较；会话、轮次、消息、trace、span、调用 id 按首次出现替换为占位，时刻与时长只比较是否为空，`*_json` 解析后比较。
-- 同时比较两边的 `v4/telemetry/event` 与 `computer-use/operation-event`（§5，`scripts/zcode-cli-rust-telemetry-diff.mjs`）与每个会话的 v4 `usage` 补丁、压缩标记（§4）。
+- 同时比较两边的 `v4/telemetry/event` 与 `computer-use/operation-event`（§5，`scripts/zcode-cli-rust-telemetry-diff.mjs`）与每个会话的 v4 `usage` 补丁、压缩标记（§4）。比较前两边都把同一会话里同一段流的连续 `stream.chunk` 合成一条（`chunkLength` 相加，去掉 `chunkCount`、`lastChunkAgeMs`），因为 Rust 按窗口合并（§5.7），条数随时间变化。
 - 环境：临时根目录先 realpath，两边都以 `SHELL=/bin/bash` 启动，并在用户配置里抑制官方内置插件 `browser-use`（Node 在空 HOME 中播种并默认启用它，技能清单、会话指引与 `mcp__node_repl__js` 会进入请求前缀；浏览器工具单独对齐）。工作区 realpath 与登录 shell 名是单列的环境对齐项，不是统计差异。
 - 已知差异（脚本列出、不计数）：标题的 `provider_metadata_json`（§2.6）；breakdown 中工具定义的字符数（§4.3）；Rust 在 run 结束时重发本轮全部行，压缩标记因此多一次相同的 upsert。
 - 场景：普通轮、Bash、WebSearch、模型失败、停止、手动压缩、子代理、工具失败（Read 不存在的文件）、子代理内 Bash、Write 后 Edit、会话级 stdio MCP server 崩溃、build 模式下允许与拒绝权限。2026-09-25 的结果：9 个场景三张表逐字段一致（差异 0）；M9.4 之后 v4 `usage` 补丁序列（水位、窗口、阈值、cache、breakdown 的提示词与消息类别、累计值）与压缩标记（前后 token、`summaryRef`）也逐字段一致。
@@ -284,6 +284,7 @@ sequenceDiagram
 - Node 在流式输出时就调度并启动可并发的只读工具，其 scheduled / started 事实可能早于请求完成；Rust 在请求完成后执行工具。
 - Bash 不带 `firstOutputMs`（Node 只在流式进度计时存在时带，短命令同样没有）。
 - 没有 `workflow.lifecycle` 与 CronCreate 的 `automationId`：Rust 没有动态工作流与定时任务工具。
+- `stream.chunk` 按 250 ms 窗口合并（§5.7）；Node 每个增量一条。
 
 ### 5.5 修复
 
@@ -297,8 +298,69 @@ sequenceDiagram
 ### 5.6 验收
 
 - 单元测试：归一化器（命令关联、首块、请求身份队列、工具名缓存与性能白名单、权限、子代理、压缩）、computer-use 映射、Bash 命令分类。
-- 集成测试（`zcode-cli-rust-telemetry.test.ts`）：一轮工具调用的通知全部通过共享的 strict schema。
+- 集成测试（`zcode-cli-rust-telemetry.test.ts`）：一轮工具调用的通知全部通过共享的 strict schema；分片合并见 §5.7.5。
 - 差分脚本（§3）：12 个场景（新增子代理内 Bash、Write 后 Edit、权限允许）的事实流与 computer-use 事件逐字段一致（id、时刻、时长为占位；`memoryEnabled`、标题 `transport` 与只读工具的提前交错为已知差异）。
+
+### 5.7 `stream.chunk` 按窗口合并
+
+2026-10-10。依据：`docs/reports/rust-app-performance-2026-10-10.md`“流式 CPU 为什么持平”：每个模型增量一条 `stream.chunk`，4 路流式时约 190 条/s 到 Renderer，占它收到消息的 65–90%；Rust Host 的遥测路径（归一化、校验、转发）约占 Host CPU 的 10–15%。
+
+#### 5.7.1 消费方需要什么
+
+- 唯一的消费方是 Renderer 的 `ConversationTelemetrySupervisor`（`packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts` 的 `case "stream.chunk"`）。它不读 `chunkLength`、`partId`、`occurredAt`；`firstChunk` 只用于确认前缓冲满时先丢普通分片。它不逐条上报分片，用的是**每个分片到达 Renderer 的时刻**（`receivedAt`），以及 `channel`、`assistantMessageId`、`parentToolCallId`：
+  - 首字：首个分片的到达时刻（`perf_ui_first_token`、`message_completion.time_to_first_token`）；
+  - agent step 的边界：思考分片开 reasoning step，正文分片关 reasoning、开 generation step（`messageTelemetry.ts` `recordAgentStepTelemetryEvent`）；
+  - 正文尾包：最后一个正文分片的到达时刻，终态时算 `generationTailFinalizeMs`；
+  - 流式停顿：前台会话相邻两个分片的到达间隔超过 3 s 时上报 `perf_ui_stream_stall`（`uiPerfArmsTelemetry.ts` `recordStreamChunkArrival`）。
+- Rust Host 与 Node Host 只做 strict 校验与按 workspace 转发（只给 `desktop-continuous` 连接）；Main 收不到原始事实；`zcode-server-cli` 的 `taskActivityTracker` 只看 `turn.started` / `turn.terminal`；Node runtime 每个增量一条（不改）。进程内的本地首字（§7）用每个增量的事件与事实，在合并之前，不受影响。
+
+结论：消费方要的是首个分片、边界分片与停顿前最后一个分片的到达时刻，可以由“边界分片立即发 + 合并事实带上最后一个分片距发出的时长”还原；没有指标需要逐个分片。
+
+#### 5.7.2 规则
+
+所有者是 Engine（唯一发送者），状态在 `domain::telemetry::ChunkWindow`，按会话一份：
+
+1. 一个分片事实**立即单独发出**（形状不变）的条件，满足其一即可：`firstChunk` 为 true；本会话上一次发出的遥测不是同一段流的分片（同一段流指除 `eventId`、`eventSeq`、`occurredAt`、`chunkLength`、`firstChunk` 与合并时加的 `chunkCount`、`lastChunkAgeMs` 外字段全同，即同一轮次、命令、通道、assistant 消息、part 与父调用；换通道、换消息、中间夹了别的事实都算新的一段）；本会话 250 ms 内没有发过分片事实。
+2. 否则并入本会话暂存的一条：`chunkCount` 加一，`chunkLength` 相加，`eventId`、`eventSeq`、`occurredAt` 取最新的分片。
+3. 暂存的一条在以下时刻发出，带 `chunkCount`（≥ 1）与 `lastChunkAgeMs`（最新分片到发出的毫秒数）：本会话上次发出分片事实后满 250 ms（Engine 为此定时醒来）；本会话来了另一段流的分片之前；任何其他事实或 `computer-use/operation-event` 发出之前（所有会话暂存的都先发，按开始暂存的先后）；Engine 处理请求之前（请求失败时 outbox 会被清空，不能带走暂存的分片）。
+4. Engine 收口（wind down）期间不发任何通知，暂存的与其他事件一样丢弃。
+
+```mermaid
+sequenceDiagram
+  participant M as 模型流
+  participant E as Engine（ChunkWindow）
+  participant R as Renderer（Supervisor）
+  M->>E: 首个分片（t0）
+  E->>R: stream.chunk firstChunk（立即）
+  M->>E: 分片 t0+20 … t0+240
+  Note over E: 同一段流、250 ms 内：并入暂存
+  E->>R: stream.chunk chunkCount=12, lastChunkAgeMs=10（t0+250 定时发出）
+  M->>E: 最后的分片（t0+260 … t0+300）
+  M->>E: 请求完成
+  E->>R: 暂存的 stream.chunk（先于其他事实）
+  E->>R: model.request.status / usage.delta / turn.terminal
+  Note over R: 分片时刻 = 收到时刻 − lastChunkAgeMs
+```
+
+#### 5.7.3 为什么指标不变
+
+- 首字与 step 边界的分片总是立即单独发出，到达时刻与以前相同。
+- 暂存的分片彼此相隔不到 250 ms，第一个距上一个发出的分片不到 500 ms，所以 3 s 以上的停顿不会落在暂存里；停顿后的分片距上次发出已超过 250 ms，立即发出。停顿的起点是暂存那条的到达时刻减 `lastChunkAgeMs`。
+- Renderer 用 `收到时刻 − (lastChunkAgeMs ?? 0)` 作为分片时刻（首字、step、正文尾包、停顿都用它）。差别只是这条事实与原来那个分片各自的传输延迟不同，与以前分片之间的抖动同量级。Node 的事实没有这个字段，行为不变。
+- 已知差别：前台判定（`foregroundAtReceipt`）按暂存那条到达时算，最多晚 250 ms，只影响切换前台前后那一小段分片是否计入停顿追踪；暂存的分片可能晚于其他会话的分片发出，没有消费方依赖跨会话的分片顺序。
+
+#### 5.7.4 协议
+
+`packages/shared/src/zcode-protocol-v4/telemetry.ts` 的 `stream.chunk` 增加两个可选字段（strict schema 不变）：`chunkCount`（正整数，这条事实合并的增量数，缺省为 1）、`lastChunkAgeMs`（非负整数，最新增量到 runtime 发出这条的毫秒数，缺省为 0）。Rust Host 的校验（`apps/zcode-host/crates/sessions/src/agent/schema.rs`）与对拍样本同步。Node runtime 不发这两个字段，新旧 Host 都接受它的事实；旧版 Host 收到 Rust runtime 合并的那几条会按未知字段丢弃（远端 server 比桌面新时），首字与边界分片不受影响。
+
+一路 20 ms 一段的流，分片事实从约 50 条/s 降到约 4 条/s（加上每个边界一条）。实测（2026-10-10，release、B 配置、4 个 workspace 各一路 20 ms 一段的流、Playwright 连着、20 s 窗口，与只含供应商轮询改动的 Host 交错 3 + 3 次，单核 %）：Host 6.7–6.8 → 4.7–5.0，network service 2.2–2.3 → 0.9–1.0，Main 4.6–5.0 → 2.5–2.8（主要是 CDP 按帧转发的测量开销），Renderer 33.1–35.6 → 31.4–33.4（在单次读数的噪声范围内），合计 58.3–63.7 → 51.2–53.1。
+
+#### 5.7.5 验收
+
+- 单元测试（`domain/src/telemetry/chunks_tests.rs`）：一段 20 ms 间隔的流的事实条数与每条的 `chunkCount`、`chunkLength`、`lastChunkAgeMs`；首个分片、换通道、换消息、静默 250 ms 后、其他事实之后的分片立即发出；其他事实（请求完成、成功 / 中断 / 失败的终态）之前先发暂存；定时发出；多会话各自暂存、按顺序发出。
+- 集成测试（`zcode-cli-rust-telemetry.test.ts`）：真实进程、本地流式模型（25 ms 一个增量）。正常完成、流式中停止、流中出错三种情况下，事实全部通过 strict schema，`chunkLength` 之和等于 runtime 收到的正文长度，`chunkCount` 之和不超过增量数（模型适配层本身会把 16 ms 内的增量并成一个事件），条数不到增量数的一半且至少有一条合并的，首条是 `firstChunk` 且不带新字段，最后一条分片事实早于 `turn.terminal`，之后不再有分片事实。实测 30 个增量发出 5 条。
+- 差分脚本（§3）：两边按同一段流合并分片后比较，2026-10-10 全部场景差异为 0。
+- Renderer（`packages/ui/test/conversationTelemetryStreamChunks.test.ts`）：合并事实按 `lastChunkAgeMs` 还原分片时刻后，停顿上报的 `stall_ms`、首字与正文尾包与逐个分片时相同（去掉还原时这个测试失败）。
 
 ## 6. MCP 进程遥测（M9.6）
 

@@ -421,6 +421,9 @@ const STREAM_CHUNK: &[Field] = fact!(
     opt("assistantMessageId", NONEMPTY),
     opt("partId", NONEMPTY),
     opt("parentToolCallId", NONEMPTY),
+    // Rust runtime 按窗口合并的分片（docs/specs/rust-m9-usage-logs.md §5.7）。
+    opt("chunkCount", PINT),
+    opt("lastChunkAgeMs", UINT),
 );
 
 const TOOL_LIFECYCLE: &[Field] = fact!(

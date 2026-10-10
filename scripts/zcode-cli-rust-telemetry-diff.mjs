@@ -94,8 +94,53 @@ function canonicalOrder(facts) {
   return out;
 }
 
+/** The `stream.chunk` members that differ between the facts of one stream. */
+const PER_CHUNK = new Set([
+  "eventId",
+  "eventSeq",
+  "occurredAt",
+  "chunkLength",
+  "firstChunk",
+  "chunkCount",
+  "lastChunkAgeMs",
+]);
+
+/**
+ * Rust merges a session's chunk facts per 250 ms window and Node sends one per delta (spec
+ * rust-m9-usage-logs §5.7), so the count depends on timing. Both sides merge the consecutive chunk
+ * facts of one stream of a session into the first (lengths summed); any other notification of the
+ * session, a first chunk or another stream starts a new one.
+ */
+function mergeChunks(facts) {
+  const identity = (fact) =>
+    JSON.stringify(
+      Object.entries(fact)
+        .filter(([key]) => !PER_CHUNK.has(key))
+        .sort(([a], [b]) => a.localeCompare(b)),
+    );
+  const open = new Map();
+  const out = [];
+  for (const fact of facts) {
+    if (fact.kind !== "stream.chunk") {
+      open.delete(fact.sessionId);
+      out.push(fact);
+      continue;
+    }
+    const run = open.get(fact.sessionId);
+    if (run && !fact.firstChunk && identity(run) === identity(fact)) {
+      run.chunkLength += fact.chunkLength;
+      continue;
+    }
+    const { chunkCount: _count, lastChunkAgeMs: _age, ...first } = fact;
+    open.set(fact.sessionId, first);
+    out.push(first);
+  }
+  return out;
+}
+
 /** Facts with ids, times and durations as placeholders (`eventSeq` keeps only its order). */
-export function normalizeFacts(facts, roots = []) {
+export function normalizeFacts(input, roots = []) {
+  const facts = mergeChunks(input);
   const ids = new Map();
   const counters = {};
   const id = (member, value) => {
