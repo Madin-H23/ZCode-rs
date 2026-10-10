@@ -1,0 +1,7 @@
+{
+  "defaultCatalog": "Available agent types and the tools they have access to:\n- general-purpose: General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you. (Tools: *)\n- Explore: Read-only search agent for broad fan-out searches - when answering means sweeping many files, directories, or naming conventions and you only need the conclusion, not the file dumps. It reads excerpts rather than whole files, so it locates code; it doesn't review or audit it. Specify search breadth: \"medium\" for moderate exploration, \"very thorough\" for multiple locations and naming conventions. (Tools: Glob, Grep, Read, Bash, WebFetch, WebSearch, TodoWrite)",
+  "header": "Available agent types and the tools they have access to:",
+  "withoutTools": ["- ", ": ", ""],
+  "withTools": ["- ", ": ", " (Tools: ", ")"],
+  "exploreTools": "Glob, Grep, Read, Bash, WebFetch, WebSearch, TodoWrite"
+}
