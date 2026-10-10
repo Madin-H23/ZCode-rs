@@ -229,6 +229,7 @@ async fn logged_in_coding_plan_drives_off_peak_requests() {
 
     // 取号：Node offPeakServerClient 的头（来源头 + 双凭证 + request id），origin 来自 ZCODE_BASE_URL。
     let client = ServerClient::new(
+        &zcode_host_services::testing::spawner(),
         vars.clone(),
         source.clone(),
         Some(account.api.source_headers().clone()),

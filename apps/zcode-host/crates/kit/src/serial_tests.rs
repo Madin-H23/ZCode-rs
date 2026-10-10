@@ -97,3 +97,50 @@ async fn closing_the_scope_stops_the_owner() {
     );
     assert_eq!(serial.run(async { 1 }).await, Err(Stopped));
 }
+
+/// `run_cancellable`：提交方放弃时，已经开始的工作在等待点被丢弃，排队中的不再执行；后面的工作照常。
+#[tokio::test]
+async fn cancellable_jobs_are_abandoned_with_their_submitter() {
+    let scope = scope();
+    let serial = Serial::start(&scope.spawner(), "inbound", 8);
+    let (started_tx, started) = tokio::sync::oneshot::channel();
+    let (dropped, queued_ran) = (
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
+    struct Flag(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for Flag {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let running = {
+        let (serial, flag) = (serial.clone(), Flag(dropped.clone()));
+        owned(async move {
+            serial
+                .run_cancellable(async move {
+                    let _flag = flag;
+                    let _ = started_tx.send(());
+                    std::future::pending::<()>().await;
+                })
+                .await
+        })
+    };
+    started.await.unwrap();
+    let queued = {
+        let (serial, ran) = (serial.clone(), queued_ran.clone());
+        owned(async move {
+            serial
+                .run_cancellable(async move {
+                    ran.store(true, std::sync::atomic::Ordering::SeqCst);
+                })
+                .await
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    drop(queued);
+    drop(running);
+    assert_eq!(serial.run(async { 3 }).await, Ok(3));
+    assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(!queued_ran.load(std::sync::atomic::Ordering::SeqCst));
+}

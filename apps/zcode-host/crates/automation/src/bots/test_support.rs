@@ -650,7 +650,8 @@ pub fn bots_with_remote(
         .unwrap();
     }
     let bots = Bots::new(BotsDeps {
-        repo: BotsRepo::new(config_dir.clone()),
+        spawner: zcode_host_base::testing::spawner(),
+        repo: BotsRepo::new(&zcode_host_base::testing::spawner(), config_dir.clone()),
         credentials: CredentialStore::new(
             &zcode_host_base::testing::spawner(),
             &config_dir,

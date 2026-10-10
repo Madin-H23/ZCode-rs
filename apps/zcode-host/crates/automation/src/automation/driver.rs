@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::{Stream, StreamExt};
 use serde_json::{Map, Value, json};
+use zcode_async::Spawner;
 use zcode_host_kit::{EventHub, Overflow, RpcError, log};
 
 use crate::agent::extensions::UseReason;
@@ -140,7 +141,9 @@ fn command_error(kind: &str, ack: &Value, context: &str) -> RpcError {
 }
 
 impl TaskDriver {
+    /// 观察 sessions-index 的常驻任务 `task-driver-observe` 在 `spawner` 的作用域里。
     pub fn start(
+        spawner: &Spawner,
         agent: AgentRuntime,
         tasks: Arc<TaskService>,
         observer: &SessionsIndexObserver,
@@ -156,14 +159,14 @@ impl TaskDriver {
         });
         let mut events = Box::pin(observer.events().subscribe());
         let weak = Arc::downgrade(&driver);
-        tokio::spawn(async move {
+        drop(spawner.spawn_resident("task-driver-observe", async move {
             while let Some(event) = events.next().await {
                 let Some(driver) = weak.upgrade() else {
                     return;
                 };
                 driver.observe(&event);
             }
-        });
+        }));
         driver
     }
 

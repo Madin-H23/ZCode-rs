@@ -244,6 +244,7 @@ pub fn install(
         .join("workspace")
         .join("default");
     let importer = Importer::new(
+        &area.spawner,
         area.agent.clone(),
         Some(area.tasks.clone()),
         client.clone(),
@@ -251,7 +252,9 @@ pub fn install(
         share_web_url,
     );
     let cleanup = importer.clone();
-    tokio::spawn(async move { cleanup.cleanup_abandoned().await });
+    drop(area.spawner.spawn("share-cleanup-abandoned", async move {
+        cleanup.cleanup_abandoned().await
+    }));
     let service = Arc::new(ShareService {
         client,
         importer,

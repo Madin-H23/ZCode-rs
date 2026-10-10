@@ -342,13 +342,13 @@ impl Bots {
         let watch = Watch::new(bot.clone(), actor.clone(), context.clone(), user.clone());
         let bots = self.clone();
         let loop_key = key.clone();
-        let handle = tokio::spawn(async move {
+        let handle = self.spawner.spawn("bot-watch", async move {
             let run = bots.clone().run_watch(watch, frames, projector);
             let _ = tokio::time::timeout(WATCH_LIMIT, run).await;
             guard(&bots.watches).remove(&loop_key);
         });
         if let Some(slot) = guard(&self.watches).get_mut(&key) {
-            *slot = Some(handle.abort_handle());
+            *slot = Some(handle);
         }
         self.start_typing(bot, actor, &task);
     }
@@ -748,7 +748,9 @@ impl Bots {
             );
             let bots = self.clone();
             let bot = bot.clone();
-            tokio::spawn(async move { bots.send_typing(&bot, &target).await });
+            drop(self.spawner.spawn("bot-typing", async move {
+                bots.send_typing(&bot, &target).await
+            }));
             return;
         }
         if !matches!(provider, "telegram" | "weixin") {
@@ -757,7 +759,7 @@ impl Bots {
         let bots = self.clone();
         let repeat_bot = bot.clone();
         let repeat_target = target.clone();
-        let repeat = tokio::spawn(async move {
+        let repeat = self.spawner.spawn("bot-typing-repeat", async move {
             loop {
                 bots.send_typing(&repeat_bot, &repeat_target).await;
                 tokio::time::sleep(TYPING_INTERVAL).await;
@@ -768,7 +770,7 @@ impl Bots {
             Typing {
                 bot: bot.clone(),
                 target,
-                repeat: Some(repeat.abort_handle()),
+                repeat: Some(repeat),
             },
         );
     }
@@ -783,7 +785,9 @@ impl Bots {
             return;
         }
         let bots = self.clone();
-        tokio::spawn(async move { bots.stop_typing_reaction(&typing.bot, &typing.target).await });
+        drop(self.spawner.spawn("bot-typing-stop", async move {
+            bots.stop_typing_reaction(&typing.bot, &typing.target).await
+        }));
     }
 
     /// `sendTyping`（入站命令）：飞书等 reaction 建好再返回，其余通道后台发送。
@@ -808,7 +812,9 @@ impl Bots {
         } else {
             let bots = self.clone();
             let bot = bot.clone();
-            tokio::spawn(async move { bots.send_typing(&bot, &target).await });
+            drop(self.spawner.spawn("bot-typing", async move {
+                bots.send_typing(&bot, &target).await
+            }));
         }
     }
 
@@ -854,7 +860,7 @@ impl Bots {
             &workspace.workspace_path,
             workspace.workspace_identity.as_deref(),
         );
-        tokio::spawn(async move {
+        drop(self.spawner.spawn("bot-terminal-fallback", async move {
             let wait = async {
                 while let Some(outcome) = outcomes.next().await {
                     if outcome.workspace_key == key
@@ -897,7 +903,7 @@ impl Bots {
                     actor.bot_id
                 ));
             }
-        });
+        }));
     }
 }
 

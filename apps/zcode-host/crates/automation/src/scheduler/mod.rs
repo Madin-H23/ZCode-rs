@@ -26,6 +26,7 @@ use std::time::Duration;
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use tokio::sync::{Notify, mpsc, oneshot};
+use zcode_async::Spawner;
 
 use crate::automation::dispatch::{CronRunRequest, Dispatcher};
 use crate::automation::service::{AutomationService, Clock};
@@ -219,14 +220,19 @@ impl SchedulerHandle {
 pub struct Scheduler;
 
 impl Scheduler {
-    /// 启动 actor：回收中断的闲时任务 → 立即一轮 → 每 `tick_interval` 一轮。须在 tokio 运行时内调用。
-    pub fn start(deps: SchedulerDeps, options: SchedulerOptions) -> SchedulerHandle {
+    /// 启动 actor（`spawner` 作用域里的任务 `scheduler`）：回收中断的闲时任务 → 立即一轮 → 每
+    /// `tick_interval` 一轮。actor 在 [`SchedulerHandle::dispose`] 之后结束；派发是它持有的结构化任务。
+    pub fn start(
+        spawner: &Spawner,
+        deps: SchedulerDeps,
+        options: SchedulerOptions,
+    ) -> SchedulerHandle {
         let (commands, receiver) = mpsc::channel(4);
         let wake = deps.wake.clone();
         let actor = actor::Actor::new(deps, options.clock);
         #[cfg(test)]
         let ticks = actor.tick_counter();
-        tokio::spawn(actor.run(receiver, options.tick_interval));
+        drop(spawner.spawn("scheduler", actor.run(receiver, options.tick_interval)));
         SchedulerHandle {
             wake,
             commands,

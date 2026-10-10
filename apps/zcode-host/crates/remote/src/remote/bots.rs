@@ -758,6 +758,7 @@ impl TaskPort for RemotePort {
 /// 重连服务（Node 远端集合不注入 `remoteWorkspaceService`）。
 pub(super) fn connection_bots(local: &Arc<Bots>, handle: &RemoteHandle) -> Arc<Bots> {
     Bots::new(BotsDeps {
+        spawner: local.spawner().clone(),
         repo: local.repo.clone(),
         credentials: local.credentials.clone(),
         providers: local.providers.clone(),

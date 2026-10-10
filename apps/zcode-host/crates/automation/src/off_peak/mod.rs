@@ -247,16 +247,18 @@ pub fn install(area: &Arc<Area>, registry: &mut ChannelRegistry) -> Option<Insta
         .account
         .as_ref()
         .map(|account| account.source_headers.clone());
-    let client = match client::ServerClient::new(vars, credentials, source_headers, None) {
-        Ok(client) => client,
-        Err(error) => {
-            log::error(format!("off-peak client unavailable: {error:#}"));
-            return None;
-        }
-    };
+    let client =
+        match client::ServerClient::new(&area.spawner, vars, credentials, source_headers, None) {
+            Ok(client) => client,
+            Err(error) => {
+                log::error(format!("off-peak client unavailable: {error:#}"));
+                return None;
+            }
+        };
     let wake = area.scheduler_wake.clone();
     let driver = area.driver.clone();
     let service = OffPeakService::new(
+        &area.spawner,
         OffPeakRepo::new(area.tasks_index.clone()),
         client,
         area.providers.clone(),

@@ -324,6 +324,7 @@ pub fn install(
     // ── automation ──（R6：automation、闲时任务、bots、conversation-share、cua-permission）
     let automation = automation::install(
         automation::Area::new(
+            &scope("automation"),
             context.clone(),
             bridge.clone(),
             settings.clone(),

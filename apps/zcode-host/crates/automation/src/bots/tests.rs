@@ -171,7 +171,10 @@ async fn repo_imports_legacy_files_once() {
         legacy["input"].to_string(),
     )
     .unwrap();
-    let repo = BotsRepo::new(dir.path().to_path_buf());
+    let repo = BotsRepo::new(
+        &zcode_host_base::testing::spawner(),
+        dir.path().to_path_buf(),
+    );
     assert_eq!(repo.read_config().await.unwrap(), legacy["output"]);
     let written = std::fs::read_to_string(dir.path().join("bot-config.v3.json")).unwrap();
     assert_eq!(

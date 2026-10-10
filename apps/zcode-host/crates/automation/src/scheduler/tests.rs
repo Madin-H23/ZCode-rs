@@ -195,6 +195,7 @@ impl Harness {
         let service_clock = clock.clone();
         let counts = self.counts.clone();
         Scheduler::start(
+            &zcode_host_base::testing::spawner(),
             SchedulerDeps {
                 automations: Arc::new(AutomationService::new(
                     repo,

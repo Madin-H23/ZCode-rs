@@ -39,6 +39,7 @@ use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use futures_util::{FutureExt, StreamExt};
 use serde_json::{Map, Value, json};
+use zcode_async::Spawner;
 use zcode_host_control::ControlRouter;
 use zcode_host_kit::{ChannelRegistry, log};
 
@@ -558,9 +559,16 @@ impl TaskPort for AreaPort {
     }
 }
 
+/// 交给 Bot 消费者的逻辑帧队列（条）。满了时转发任务等待，见 [`subscribe_conversation`]。
+const CONVERSATION_QUEUE: usize = 1024;
+
 /// 订阅 `conversation/<taskId>`（Bot 自己的连接，desktop-continuous）：后台任务从 runtime 的 V4 帧总线
 /// 取本订阅的帧，重组成逻辑帧交给消费者；seq 缺口或重组失败时 forceSnapshot resync。消费者丢弃流、
 /// 或 CLI 进程换代时结束并尽力退订。
+///
+/// 转发任务在实例的作用域里（实例结束时随之结束）。交给消费者的队列有界（[`CONVERSATION_QUEUE`]）：
+/// 逻辑帧是增量，不能丢；满了时转发任务等消费者读走（背压），其间帧总线里本订阅的队列继续积压，越过
+/// 它的上限时订阅被结束，转发任务随之退订、流结束（docs/specs/rust-u2-task-scope.md §6.2）。
 pub async fn subscribe_conversation(
     agent: AgentRuntime,
     target: WorkspaceTarget,
@@ -600,8 +608,9 @@ pub async fn subscribe_conversation(
         .as_str()
         .ok_or("subscribe ack without subscriptionId")?
         .to_owned();
-    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Value>();
-    tokio::spawn(async move {
+    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Value>(CONVERSATION_QUEUE);
+    let tasks = process.tasks().clone();
+    drop(tasks.spawn("bot-conversation-frames", async move {
         let mut assembler = Assembler::new();
         let mut cursor: Option<u64> = None;
         loop {
@@ -633,7 +642,7 @@ pub async fn subscribe_conversation(
             });
             if let (Some(logical), true) = (logical, in_order) {
                 cursor = logical["toSeq"].as_u64();
-                if sender.send(logical).is_err() {
+                if sender.send(logical).await.is_err() {
                     break;
                 }
                 continue;
@@ -658,7 +667,7 @@ pub async fn subscribe_conversation(
                 )
                 .await;
         }
-    });
+    }));
     Ok(futures_util::stream::poll_fn(move |context| receiver.poll_recv(context)).boxed())
 }
 
@@ -691,8 +700,10 @@ impl BotDelivery for Delivery {
 
 /// 安装 `bots` channel 并按配置启动通道运行时；返回的 [`service::Bots`] 由 automation 的
 /// `AreaHandle` 持有，Host 退出时经它调用 [`service::Bots::shutdown`]。
+/// `spawner` 是 Bots 的作用域（`host/services/automation/bots`，由 automation 的 `AreaHandle` 持有）。
 pub fn install(
     area: &Arc<Area>,
+    spawner: &Spawner,
     registry: &mut ChannelRegistry,
     _router: &mut ControlRouter,
 ) -> Option<Arc<service::Bots>> {
@@ -707,7 +718,8 @@ pub fn install(
             }
         };
     let bots = service::Bots::new(service::BotsDeps {
-        repo: store::BotsRepo::new(dir.clone()),
+        spawner: spawner.clone(),
+        repo: store::BotsRepo::new(spawner, dir.clone()),
         // 合并 account 区域后统一走它的凭据存储：同一文件只有一个写入方，写入也会广播凭据变更。
         credentials: area.credentials.clone(),
         providers,

@@ -500,7 +500,11 @@ async fn telegram_message_runs_on_a_remote_workspace_agent() {
 
     // 本地 Bots（桌面 Host 里的那份）：远端运行时来自远端区域，Telegram 指向 mock。
     let bots = Bots::new(BotsDeps {
-        repo: BotsRepo::new(local_config.clone()),
+        spawner: zcode_host_services::testing::spawner(),
+        repo: BotsRepo::new(
+            &zcode_host_services::testing::spawner(),
+            local_config.clone(),
+        ),
         credentials,
         providers: Arc::new(Providers::new(Endpoints::local(&telegram_origin)).unwrap()),
         settings,

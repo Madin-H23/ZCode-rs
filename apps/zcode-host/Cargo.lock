@@ -3142,6 +3142,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "url",
+ "zcode-async",
  "zcode-host-account",
  "zcode-host-base",
  "zcode-host-control",

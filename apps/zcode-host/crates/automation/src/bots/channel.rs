@@ -3,6 +3,10 @@
 //! 每个启用且配了 token 的 Bot 一个轮询循环；配置变更后按“最新一次刷新”对齐。外部游标（Telegram
 //! offset、微信 get_updates_buf）只在本批消息全部成功进入业务处理后才提交，失败时整批重投。
 //! 同一个 token 在所有 ZCode 进程里只有一个轮询者（`bots-runtime-locks/<provider>-polling`）。
+//!
+//! 任务归属（docs/specs/rust-u2-task-scope.md §6.1）：每个轮询循环有自己的作用域
+//! `<provider>:<botId>`，由运行时表里的条目持有，停止时等循环收尾后随条目释放；对齐（刷新）在每类通道的
+//! owner 任务（`telegram-refresh` / `weixin-refresh`）里逐个执行。
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,8 +15,8 @@ use std::time::Duration;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
-use zcode_host_kit::log;
+use zcode_async::{Spawner, Task, TaskScope};
+use zcode_host_kit::{Serial, log};
 
 use super::model::{filter_allowed_workspaces, string_list};
 use super::now_ms;
@@ -30,15 +34,28 @@ const CONFLICT_RETRY: Duration = Duration::from_secs(10);
 struct Entry {
     stop: watch::Sender<bool>,
     fingerprint: String,
-    done: JoinHandle<()>,
+    done: Task<()>,
+    /// 这个轮询循环的作用域：条目释放（停止并收尾之后）时随之释放。
+    _scope: TaskScope,
 }
 
 /// 一类轮询通道的运行时表。
-#[derive(Default)]
 pub struct PollingRuntimes {
     entries: std::sync::Mutex<HashMap<String, Entry>>,
     generation: AtomicU64,
-    queue: tokio::sync::Mutex<()>,
+    /// 对齐的 owner 任务：刷新逐个执行，只有最新一次会走完。
+    refreshes: Serial,
+}
+
+impl PollingRuntimes {
+    pub fn new(spawner: &Spawner, name: &'static str) -> Self {
+        Self {
+            entries: std::sync::Mutex::default(),
+            generation: AtomicU64::new(0),
+            // 配置变更触发；排队超过 8 个时提交方等待（较早的发现自己过期会立即返回）。
+            refreshes: Serial::start(spawner, name, 8),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,23 +136,35 @@ impl Bots {
     pub(crate) fn schedule_polling_refresh(self: &Arc<Self>) {
         for kind in [Polling::Telegram, Polling::Weixin] {
             let bots = self.clone();
-            tokio::spawn(async move {
+            drop(self.spawner.spawn("polling-schedule-refresh", async move {
                 if let Err(error) = bots.refresh_polling(kind).await {
                     log::warn(format!(
                         "refresh {} polling failed: {error:#}",
                         kind.label()
                     ));
                 }
-            });
+            }));
         }
     }
 
-    /// 串行对齐；只有最新一次刷新会走完。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// 串行对齐；只有最新一次刷新会走完。代次在入队之前递增，对齐在 owner 任务里逐个执行（原来由跨
+    /// 整个对齐持有的 tokio 锁串行）。
     pub async fn refresh_polling(self: &Arc<Self>, kind: Polling) -> anyhow::Result<()> {
+        let generation = self.polling(kind).generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let bots = self.clone();
+        self.polling(kind)
+            .refreshes
+            .run(async move { bots.refresh_polling_turn(kind, generation).await })
+            .await
+            .unwrap_or_else(|stopped| Err(anyhow::anyhow!(stopped)))
+    }
+
+    async fn refresh_polling_turn(
+        self: &Arc<Self>,
+        kind: Polling,
+        generation: u64,
+    ) -> anyhow::Result<()> {
         let runtimes = self.polling(kind);
-        let generation = runtimes.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        let _turn = runtimes.queue.lock().await;
         let is_latest = || runtimes.generation.load(Ordering::SeqCst) == generation;
         if !is_latest() {
             return Ok(());
@@ -251,7 +280,8 @@ impl Bots {
         let (stop, stop_rx) = watch::channel(false);
         let bots = self.clone();
         let task_id = id.clone();
-        let done = tokio::spawn(async move {
+        let scope = self.spawner.child(format!("{}:{id}", kind.provider()));
+        let done = scope.spawner().spawn("polling", async move {
             match kind {
                 Polling::Telegram => bots.clone().poll_telegram(bot, stop_rx).await,
                 Polling::Weixin => bots.clone().poll_weixin(bot, stop_rx).await,
@@ -279,6 +309,7 @@ impl Bots {
                 stop,
                 fingerprint: print,
                 done,
+                _scope: scope,
             },
         );
     }

@@ -173,6 +173,7 @@ async fn import_installs_artifacts_then_cleans_up_when_the_session_cannot_be_cre
     let workspace = dir.path().join("ws");
     std::fs::create_dir_all(&workspace).unwrap();
     let importer = Importer::new(
+        &zcode_host_base::testing::spawner(),
         agent,
         None,
         client,

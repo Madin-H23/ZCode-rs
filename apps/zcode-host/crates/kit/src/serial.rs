@@ -5,7 +5,8 @@
 //!
 //! - 顺序：提交顺序即执行顺序（有界 mpsc 是 FIFO）；前一个执行完，后一个才开始。
 //! - 取消：提交方放弃等待（future 被丢弃）不会打断已经开始的工作，读改写总是完整执行；还没开始的
-//!   工作照常执行，只是结果没人读。
+//!   工作照常执行，只是结果没人读。需要随提交方一起取消的工作（原来在提交方任务里持锁执行、取消即
+//!   在等待点放弃的处理）用 [`Serial::run_cancellable`]。
 //! - panic：工作 panic 时 owner 继续执行后面的工作，提交方在自己的任务里得到同一个 panic，与原来在
 //!   调用方任务里持锁执行时相同。
 //! - 队列有界：满了时提交方等待（背压）。工作不能再向同一个队列提交并等待结果（与不可重入的锁一样会
@@ -61,6 +62,36 @@ impl Serial {
         let job: Job = Box::pin(async move {
             let _ = reply.send(catch_panic(job).await);
         });
+        self.submit(job, result).await
+    }
+
+    /// 同 [`Serial::run`]，但提交方放弃等待（future 被丢弃）时这项工作也被放弃：还没开始的不再执行，
+    /// 已经开始的在当前等待点被丢弃。与在提交方自己的任务里持锁执行、提交方被取消时的效果相同，
+    /// 顺序保证不变。
+    pub async fn run_cancellable<T, F>(&self, job: F) -> Result<T, Stopped>
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (mut reply, result) = oneshot::channel();
+        let job: Job = Box::pin(async move {
+            tokio::select! {
+                // 先看提交方是否已经放弃：排队期间被放弃的工作一次都不轮询。
+                biased;
+                () = reply.closed() => {}
+                output = catch_panic(job) => {
+                    let _ = reply.send(output);
+                }
+            }
+        });
+        self.submit(job, result).await
+    }
+
+    async fn submit<T>(
+        &self,
+        job: Job,
+        result: oneshot::Receiver<Result<T, zcode_async::Panicked>>,
+    ) -> Result<T, Stopped> {
         self.jobs.send(job).await.map_err(|_| Stopped)?;
         match result.await {
             Ok(Ok(output)) => Ok(output),

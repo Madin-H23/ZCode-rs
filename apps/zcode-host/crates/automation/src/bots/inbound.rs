@@ -8,7 +8,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use base64::Engine;
 use serde_json::{Map, Value, json};
-use zcode_host_kit::{RpcError, log};
+use zcode_host_kit::{RpcError, Serial, log};
 
 use super::TaskPort;
 use super::feishu::{Actor, Inbound};
@@ -1017,8 +1017,10 @@ impl Bots {
         )))
     }
 
-    /// 入站命令分发（`handleInboundMessage`）；同一聊天上下文串行处理。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// 入站命令分发（`handleInboundMessage`）；同一聊天上下文串行处理：每个上下文一个 owner 任务
+    /// （`bot-inbound`，在 Bots 的作用域里），消息按到达顺序逐个处理（原来是跨整个处理持有的 tokio 锁）。
+    /// 处理随调用方取消（轮询停止、Host 退出时丢弃了入站处理）：与原来在调用方任务里持锁执行时相同，
+    /// 被取消的处理不会继续占着这个上下文。
     pub async fn handle_inbound(
         self: &Arc<Self>,
         inbound: &Inbound,
@@ -1026,11 +1028,14 @@ impl Bots {
         let queue_key = self.actor_key(&inbound.actor);
         let queue = guard(&self.inbound_queues)
             .entry(queue_key)
-            .or_default()
+            // 一个聊天上下文的消息；排队超过 64 条时投递方等待。
+            .or_insert_with(|| Serial::start(&self.spawner, "bot-inbound", 64))
             .clone();
-        let _turn = queue.lock().await;
-        self.dispatch(inbound)
+        let (bots, inbound) = (self.clone(), inbound.clone());
+        queue
+            .run_cancellable(async move { bots.dispatch(&inbound).await })
             .await
+            .unwrap_or_else(|stopped| Err(anyhow::anyhow!(stopped)))
             .map_err(|error| super::service::error(format!("{error:#}")))
     }
 
@@ -1714,7 +1719,7 @@ impl Bots {
             ..SendText::default()
         };
         // 发送在后台进行：轮询通道是单循环顺序处理 update，等整轮结束会让按钮回调排队。
-        tokio::spawn(async move {
+        drop(self.spawner.spawn("bot-send-prompt", async move {
             let result = if attachments.is_empty() {
                 tasks.send(target, task_id.clone(), input).await
             } else {
@@ -1738,7 +1743,7 @@ impl Bots {
                     ));
                 }
             }
-        });
+        }));
         Ok(Vec::new())
     }
 
