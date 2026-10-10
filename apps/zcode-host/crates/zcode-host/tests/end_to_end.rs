@@ -679,3 +679,38 @@ async fn dispose_and_closed_stdin_exit_cleanly() {
     drop(stdin);
     assert!(wait_exit(&mut child).await.success());
 }
+
+/// 关闭报告（docs/specs/rust-u2-task-scope.md §5、§6.4）：服务装好、有一条 Renderer 连接与订阅时，
+/// 一次正常的 dispose 之后根作用域里没有需要中止的任务。常驻任务（监听、轮询、owner、转发循环）随
+/// 取消信号结束，不在列表里；列表非空时 Host 记 warn（桌面 E2E 也会因此失败）。
+#[tokio::test]
+async fn a_normal_dispose_leaves_no_tasks_to_abort() {
+    let mut host = Host::spawn().await;
+    host.init().await;
+    let mut rpc = open_rpc(&mut host).await;
+    assert_eq!(rpc.next().await.0, json!([200]));
+    rpc.send(
+        json!([102, 1, "zcode-agent", "onDynamicConversationFrame"]),
+        Some(json!({"workspacePath": "/w"})),
+    )
+    .await;
+    rpc.send(json!([100, 2, "setting", "get"]), Some(json!([])))
+        .await;
+    assert_eq!(rpc.next().await.0, json!([201, 2]));
+    host.send(json!({"type": "dispose"})).await;
+    let mut reports = Vec::new();
+    while let Ok(Ok(Some(line))) =
+        tokio::time::timeout(STEP_TIMEOUT, host.stdout.next_line()).await
+    {
+        let message: Value = serde_json::from_str(&line).unwrap();
+        let text = message["message"].as_str().unwrap_or_default();
+        if message["type"] == "log" && text.starts_with("host tasks") {
+            reports.push((message["level"].clone(), text.to_owned()));
+        }
+    }
+    assert!(wait_exit(&mut host.child).await.success());
+    assert_eq!(
+        reports,
+        [(json!("info"), "host tasks at shutdown: none left running".to_owned())]
+    );
+}

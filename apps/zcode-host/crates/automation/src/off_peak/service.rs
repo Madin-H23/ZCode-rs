@@ -57,7 +57,7 @@ struct SyncState {
     stopped: bool,
     running: bool,
     failures: u32,
-    timer: Option<Task<()>>,
+    timer: Option<Task<Option<()>>>,
 }
 
 fn non_empty_text(value: &Value) -> bool {
@@ -556,7 +556,8 @@ impl OffPeakService {
             timer.abort();
         }
         let weak = Arc::downgrade(self);
-        state.timer = Some(self.spawner.spawn("off-peak-sync", async move {
+        // 下一轮同步的定时器：常驻（关闭作用域时随取消信号结束，不算被中止的工作）。
+        state.timer = Some(self.spawner.spawn_resident("off-peak-sync", async move {
             tokio::time::sleep(Duration::from_millis(delay_ms.max(0) as u64)).await;
             if let Some(service) = weak.upgrade() {
                 service.lock().timer = None;

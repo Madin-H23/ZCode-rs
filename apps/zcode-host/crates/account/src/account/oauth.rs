@@ -783,7 +783,8 @@ impl OAuthService {
 
     fn spawn_pending_timeout(&self, id: u64, flow_id: Option<String>, delay_ms: i64) {
         let service = self.clone();
-        drop(self.inner.tasks.spawn("oauth-pending-timeout", async move {
+        // pending flow 的过期定时器：常驻（Host 退出时随取消信号结束，不算被中止的工作）。
+        drop(self.inner.tasks.spawn_resident("oauth-pending-timeout", async move {
             tokio::time::sleep(Duration::from_millis(delay_ms.max(0) as u64)).await;
             let mut state = service.state();
             let matches = state.pending.as_ref().is_some_and(|pending| {

@@ -224,6 +224,7 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 | rpc 客户端的事件流                              | `rpc/src/client.rs`                    | 每个流 4096 条                                                 | 结束这个事件流（已入队的照常读完）并向远端退订                                   | 读循环从不等待，不能为一个慢消费者停下；其他调用与事件流不受影响                         |
 | 远端传输：写子进程 stdin、读循环交给 rpc 客户端 | `remote/src/remote/transport.rs`       | 各 1024 条                                                     | 等待（背压，最终到达子进程管道）                                                 | 写任务只写 stdin，rpc 客户端的读循环从不等待，没有环                                     |
 | 远端 Bot 会话帧                                 | `remote/src/remote/bots.rs`            | 1024 条                                                        | 等待（背压）                                                                     | 同本地 Bot                                                                               |
+| Host → Main 控制消息 / 日志                     | `zcode-host/src/main.rs`               | 65536 / 8192 条                                                | 丢弃新消息并计数，写任务恢复时补一条 error / warn                                | 同步发送方不能等；控制消息正常每秒几条，满了说明 Main 挂起，继续缓存只会让内存无界增长   |
 
 ### 6.3 不跨 `.await` 持有 tokio 的锁
 
@@ -258,7 +259,17 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 
 ### 6.4 关闭报告
 
-（见 host-core 的迁移。）
+`HostCore::shutdown` 依次：关闭全部连接（Gateway）→ 冲刷遥测 → service 的有序收尾（调度器、终端、远端连接、Bot 通道、CLI 进程树）→ 关闭根作用域 `host`，宽限 1 s。
+
+- 常驻任务（`spawn_resident`：监听、轮询、owner、转发循环、定时器）随取消信号立即结束，不算被中止。
+- 其余任务正常应在 service 的有序收尾里已经结束；宽限期过后还在运行的被中止，记 warn：`host tasks still running 1s after the services shut down; aborting: [<作用域路径>: <任务名>, …]`（桌面 E2E 的日志检查会因此失败）。
+- 正常退出时列表为空，记 info：`host tasks at shutdown: none left running`。没有“已知的常驻任务”例外：常驻任务不进列表。
+- 由某个常驻任务持有的子作用域（例如 WebSocket 监听持有的 `host/websocket`）随它结束而释放，其中的任务被中止、不单独列出：Gateway 已先关闭全部连接并等过 transport 发 Close。
+- 二进制入口在退出前等控制写任务写完已入队的消息（上限 2 s）。缺陷修复：原来 `run` 返回时写任务随句柄被中止，关闭报告等最后几条日志可能还没写出就丢了。
+
+验收：`crates/zcode-host/tests/end_to_end.rs` 的 `a_normal_dispose_leaves_no_tasks_to_abort`（真实二进制：装好服务、有一条 Renderer 连接与订阅，dispose 后只有那条 info）。
+
+控制通道（Host → Main 的 stdout）：控制消息与日志各一条有界队列，写任务控制消息优先。发送方是同步的 `ControlSink::send` / 日志，不能等：控制消息队列 65536 条，满了说明 Main 已经很久不读 stdout，丢弃新消息并计数；日志队列 8192 条，满了丢弃新日志并计数；写任务恢复时各补一条 error / warn 说明丢了多少。
 
 ### 6.5 护栏
 

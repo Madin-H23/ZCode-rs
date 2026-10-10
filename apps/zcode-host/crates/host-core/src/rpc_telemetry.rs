@@ -129,7 +129,7 @@ impl RpcTelemetry {
 
     fn start_timer(&self) {
         let weak = self.this.clone();
-        drop(self.spawner.spawn("rpc-telemetry-flush", async move {
+        drop(self.spawner.spawn_resident("rpc-telemetry-flush", async move {
             let mut interval = tokio::time::interval(FLUSH_INTERVAL);
             interval.tick().await;
             loop {
