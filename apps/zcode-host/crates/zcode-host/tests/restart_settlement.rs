@@ -80,6 +80,7 @@ async fn accepted_inputs_after_a_panic(command_vars: BTreeMap<String, String>) {
     let personal = provider_config(home.path(), port);
     let home_text = home.path().to_string_lossy().into_owned();
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: BTreeMap::from([
                 ("HOME".to_owned(), home_text.clone()),
@@ -92,8 +93,9 @@ async fn accepted_inputs_after_a_panic(command_vars: BTreeMap<String, String>) {
             command_vars,
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
         ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
             Some(
                 Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../../../../config/provider/zcode-builtin.json"),
@@ -101,10 +103,14 @@ async fn accepted_inputs_after_a_panic(command_vars: BTreeMap<String, String>) {
             personal,
         ),
     );
-    let events = AgentEvents::start(runtime.extensions(), None);
+    let events = AgentEvents::start(
+        &zcode_host_services::testing::spawner(),
+        runtime.extensions(),
+        None,
+    );
     let api = AgentApi::new(runtime.clone(), home.path(), events, None);
     let members = zcode_host_services::agent::members::agent_service(&api).build(None);
-    let channel = AgentChannel::new(api, Some(members));
+    let channel = AgentChannel::new(&zcode_host_services::testing::spawner(), api, Some(members));
     let context = CallContext {
         connection: 1,
         attachment_id: "test".into(),
