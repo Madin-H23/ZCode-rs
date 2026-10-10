@@ -189,6 +189,7 @@ pub fn install(
 
     let environment = &context.environment;
     let agent = agent::AgentRuntime::new(
+        &scope("agent"),
         agent::AgentRuntimeConfig {
             base_env: child_env.vars().clone(),
             command_vars: environment.vars.clone(),

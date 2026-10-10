@@ -185,6 +185,7 @@ async fn task_lifecycle_against_rust_cli() {
     let command_vars = runtime_vars();
     let settings = SettingStore::new(&zcode_host_services::testing::spawner(), home.path());
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env,
             command_vars,
@@ -342,6 +343,7 @@ async fn claude_import_against_rust_cli() {
         .join("../../../../config/provider/zcode-builtin.json");
     let home_text = home.path().to_string_lossy().into_owned();
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: BTreeMap::from([
                 ("HOME".to_owned(), home_text.clone()),

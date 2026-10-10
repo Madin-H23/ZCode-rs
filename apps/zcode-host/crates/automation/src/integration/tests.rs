@@ -199,6 +199,7 @@ done
             personal,
         );
         let runtime = AgentRuntime::new(
+            &zcode_host_base::testing::spawner(),
             AgentRuntimeConfig {
                 base_env: BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]),
                 command_vars: BTreeMap::from([(

@@ -234,6 +234,7 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
     let account = AccountStack::new(&context, &settings, &providers);
     vars.extend(runtime_vars());
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: vars.clone(),
             command_vars: vars.clone(),

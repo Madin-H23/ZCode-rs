@@ -1064,6 +1064,7 @@ mod tests {
     #[tokio::test]
     async fn frames_follow_seq_rules_and_mutations_refresh() {
         let runtime = crate::agent::AgentRuntime::new(
+            &zcode_host_base::testing::spawner(),
             crate::agent::AgentRuntimeConfig {
                 base_env: Default::default(),
                 command_vars: Default::default(),

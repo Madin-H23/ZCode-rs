@@ -22,7 +22,8 @@ struct Fixture {
     runtime: AgentRuntime,
 }
 
-fn fake_cli(dir: &Path, log: &Path) -> PathBuf {
+/// `greeting` 是启动后先写到 stdout 的一行（例如一个反向请求）。
+fn fake_cli(dir: &Path, log: &Path, greeting: &str) -> PathBuf {
     let script = dir.join("fake-cli.sh");
     std::fs::write(
         &script,
@@ -31,6 +32,7 @@ fn fake_cli(dir: &Path, log: &Path) -> PathBuf {
 printf '%s\n' '{DIAGNOSTIC}' >&2
 printf '%s\n' 'plain stderr line' >&2
 printf '%s\n' '{{"method":"process/resourceSample","params":{{"cpuPercent":1}}}}'
+{greeting}
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/^{{"id":\([0-9]*\),.*/\1/p')
   method=$(printf '%s' "$line" | sed -n 's/^{{"id":[0-9]*,"method":"\([^"]*\)".*/\1/p')
@@ -49,12 +51,17 @@ done
 }
 
 fn fixture() -> Fixture {
+    fixture_with(&zcode_host_base::testing::spawner(), "")
+}
+
+fn fixture_with(spawner: &zcode_async::Spawner, greeting: &str) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let workspace = dir.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
     let log = dir.path().join("calls.log");
-    let cli = fake_cli(dir.path(), &log);
+    let cli = fake_cli(dir.path(), &log, greeting);
     let runtime = AgentRuntime::new(
+        spawner,
         AgentRuntimeConfig {
             base_env: BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]),
             command_vars: BTreeMap::from([(
@@ -244,4 +251,64 @@ async fn mcp_status_lane_reclaims_idle_processes_and_labels_identity() {
     fixture.runtime.dispose_all().await;
     eventually(|| again.client.is_closed()).await;
     let _ = Arc::strong_count(&again);
+}
+
+/// 被丢弃时置位：观察任务的 future 是否已被释放。
+struct Dropped(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for Dropped {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// 缺陷修复的回归测试（docs/specs/rust-u2-task-scope.md §6.1）：实例启动的任务属于实例的作用域。
+/// 原来反向请求的处理是分离的 tokio 任务，实例结束后一直等不到结果的处理仍在运行；现在实例收口结束时
+/// 它被中止，agent 的作用域里不再有这个实例的任何任务（读写循环、存储帧观察、stderr 排空、监视）。
+#[tokio::test]
+async fn an_ended_instance_leaves_no_tasks_behind() {
+    let scope = zcode_async::TaskScope::root("host", |panic| panic!("task panicked: {panic:?}"));
+    let fixture = fixture_with(
+        &scope.spawner(),
+        r#"printf '%s\n' '{"id":"r1","method":"test/hold","params":{}}'"#,
+    );
+    let target = WorkspaceTarget::local(fixture.workspace.display().to_string());
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (started_tx, started) = tokio::sync::oneshot::channel();
+    let started_tx = std::sync::Mutex::new(Some(started_tx));
+    let guard_flag = dropped.clone();
+    fixture.runtime.extensions().register_reverse(
+        "test/hold",
+        Arc::new(move |_| {
+            let guard = Dropped(guard_flag.clone());
+            if let Some(started) = started_tx.lock().unwrap().take() {
+                let _ = started.send(());
+            }
+            Box::pin(async move {
+                let _guard = guard;
+                std::future::pending().await
+            })
+        }),
+    );
+    fixture
+        .runtime
+        .get_client(&target, RuntimePolicy::StartIfNeeded)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), started)
+        .await
+        .expect("the reverse request reaches its handler")
+        .unwrap();
+    let key = target.key();
+    assert!(
+        scope
+            .spawner()
+            .running()
+            .contains(&format!("host/{key}#1: reverse-request")),
+        "{:?}",
+        scope.spawner().running()
+    );
+    fixture.runtime.dispose_workspace(&target).await;
+    eventually(|| dropped.load(std::sync::atomic::Ordering::SeqCst)).await;
+    eventually(|| scope.spawner().running().is_empty()).await;
 }

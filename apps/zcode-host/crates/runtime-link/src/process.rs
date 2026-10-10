@@ -294,21 +294,26 @@ pub type DiagnosticSink = Box<dyn Fn(serde_json::Value) + Send + Sync>;
 /// stderr 排空完成的信号：退出事件要等最后几行诊断收齐。
 pub type StderrDone = tokio::sync::oneshot::Receiver<()>;
 
-/// 一直读到 EOF，避免管道写满后子进程阻塞。进程诊断行交给 `on_diagnostic`，不进 tail。
+/// 排空 stderr 的读循环：调用方在拥有这个子进程的作用域里运行它（docs/specs/rust-u2-task-scope.md
+/// §6.1），不运行它，管道写满后子进程会阻塞。
+pub type StderrDrain = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
+/// 一直读到 EOF，避免管道写满后子进程阻塞。进程诊断行交给 `on_diagnostic`，不进 tail。返回的
+/// [`StderrDrain`] 由调用方在子进程所有者的作用域里运行；作用域关闭时读循环随之结束。
 pub fn drain_stderr(
     stderr: Option<ChildStderr>,
     label: String,
     on_diagnostic: Option<DiagnosticSink>,
-) -> (StderrTail, StderrDone) {
+) -> (StderrTail, StderrDone, StderrDrain) {
     let tail = StderrTail::default();
     let collected = tail.clone();
     let (done, done_rx) = tokio::sync::oneshot::channel();
     // 嵌入式 runtime 没有 stderr（它的日志走 tracing）：tail 为空，完成信号立即发出。
     let Some(stderr) = stderr else {
         let _ = done.send(());
-        return (tail, done_rx);
+        return (tail, done_rx, Box::pin(async {}));
     };
-    tokio::spawn(async move {
+    let drain = Box::pin(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             if line.trim().is_empty() {
@@ -327,7 +332,7 @@ pub fn drain_stderr(
         }
         let _ = done.send(());
     });
-    (tail, done_rx)
+    (tail, done_rx, drain)
 }
 
 /// 等子进程自行退出，超时后逐级升级；调用前应已关闭它的 stdin。

@@ -336,6 +336,7 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
         &mut router,
     );
     let runtime = crate::agent::AgentRuntime::new(
+        &zcode_host_base::testing::spawner(),
         crate::agent::AgentRuntimeConfig {
             base_env: Default::default(),
             command_vars: Default::default(),

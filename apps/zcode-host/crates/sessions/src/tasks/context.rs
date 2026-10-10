@@ -220,6 +220,7 @@ pub(crate) mod testing {
         let home = dir.join("home");
         let settings = SettingStore::new(&zcode_host_base::testing::spawner(), &home);
         let runtime = AgentRuntime::new(
+            &zcode_host_base::testing::spawner(),
             AgentRuntimeConfig {
                 base_env: Default::default(),
                 command_vars: Default::default(),

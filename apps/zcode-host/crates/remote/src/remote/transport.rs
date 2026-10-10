@@ -254,7 +254,9 @@ async fn connect_via_connector(
     env.insert("ELECTRON_RUN_AS_NODE".into(), "1".into());
     let spawned = process::spawn(&config.node_exec, &config.args, &config.cwd, &env)
         .map_err(|error| format!("无法启动远程连接器：{error}"))?;
-    let (stderr, _) = process::drain_stderr(Some(spawned.stderr), "remote-connector".into(), None);
+    let (stderr, _, drain) =
+        process::drain_stderr(Some(spawned.stderr), "remote-connector".into(), None);
+    tokio::spawn(drain);
     let child = ChildHandle::watch(spawned.child, spawned.pid);
     let writer = spawn_writer(spawned.stdin);
 
@@ -515,7 +517,9 @@ async fn connect_process(
 ) -> Result<Connection, String> {
     let spawned = process::spawn(&config.program, &config.args, &config.cwd, &config.env)
         .map_err(|error| format!("无法启动远端 server：{error}"))?;
-    let (stderr, _) = process::drain_stderr(Some(spawned.stderr), "remote-server".into(), None);
+    let (stderr, _, drain) =
+        process::drain_stderr(Some(spawned.stderr), "remote-server".into(), None);
+    tokio::spawn(drain);
     let child = ChildHandle::watch(spawned.child, spawned.pid);
     let writer = spawn_writer(spawned.stdin);
     let mut stdout = spawned.stdout;

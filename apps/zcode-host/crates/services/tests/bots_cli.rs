@@ -259,6 +259,7 @@ async fn bots_read_real_cli_conversations_through_v4_frames() {
     let selection = resolved.model_selection_view(revision, None)["preferredSelection"].clone();
     assert_eq!(selection["modelId"], "my-model", "{selection}");
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: BTreeMap::from([
                 ("HOME".to_owned(), home_text.clone()),

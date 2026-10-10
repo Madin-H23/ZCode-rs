@@ -228,6 +228,7 @@ async fn harness() -> Harness {
     let home_text = home.path().to_string_lossy().into_owned();
     let settings = SettingStore::new(&zcode_host_services::testing::spawner(), home.path());
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: BTreeMap::from([
                 ("HOME".to_owned(), home_text.clone()),

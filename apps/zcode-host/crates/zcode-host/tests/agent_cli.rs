@@ -280,6 +280,7 @@ async fn core_chat_flow(command_vars: BTreeMap<String, String>) {
         personal,
     );
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env,
             command_vars,
@@ -662,6 +663,7 @@ async fn an_embedded_runtime_panic_only_restarts_its_own_workspace() {
     let mut env = base_env(home.path());
     env.insert("ZCODE_RUNTIME_FAULT_MARKER".to_owned(), FAULT.to_owned());
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: env,
             command_vars: runtime_vars(),
@@ -760,6 +762,7 @@ async fn an_embedded_runtime_that_ends_on_its_own_logs_why() {
     // workspace 目录不存在且没有回退目录：runtime 在准备阶段以错误结束。
     let missing = home.path().join("no-such-workspace");
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: base_env(home.path()),
             command_vars: runtime_vars(),
@@ -818,6 +821,7 @@ async fn a_replayable_attachment_streams_and_recovers_against_the_runtime() {
     tokio::spawn(serve_mock_model(listener));
     let personal = provider_config(home.path(), port);
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: base_env(home.path()),
             command_vars: runtime_vars(),

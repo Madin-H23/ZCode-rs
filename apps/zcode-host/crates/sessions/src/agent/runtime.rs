@@ -4,7 +4,7 @@
 //! 所有者与事件顺序：
 //!
 //! ```text
-//! get_client(target) ──(per-key 锁，single-flight)──► spawn ──► generation += 1
+//! get_client(target) ──(槽位 single-flight：启动在任务 instance-start 里)──► spawn ──► generation += 1
 //!     ├─ generation > 1: onAgentRuntimeRestarted {workspaceKey, runtimeIdentity}
 //!     ├─ onAgentRuntimeLifecycle available
 //!     └─ 回放 app 运行时偏好（若曾同步过）后才把 client 交给调用方
@@ -16,19 +16,26 @@
 //!
 //! 只做懒重启：进程没了不自动拉起，下一次 `get_client` 才启动新一代。
 //!
+//! 任务归属（docs/specs/rust-u2-task-scope.md §6.1）：`AgentRuntime` 在构造时拿到 agent 的作用域；
+//! 每个实例（一代进程）有自己的子作用域 `<workspaceKey>#<generation>[:<lane>]`，读写循环、存储帧观察、
+//! 空闲回收、stderr 排空与反向请求的应答都在里面。实例的监视任务 `instance-monitor` 在 agent 作用域里，
+//! 持有实例的作用域：收口（摘槽位、发 unavailable、回收进程树）结束时释放它，实例启动的任务不会活过实例。
+//!
 //! 同一套实现服务三个 lane（docs/specs/rust-host-agent.md §2.1）：chat 按 workspace 分进程，
 //! plugin-management 与 mcp-status 是控制面 lane，各自一张进程表，共享扩展点与通知总线。
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use futures_util::FutureExt;
+use futures_util::future::{BoxFuture, Shared};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use serde_json::{Map, Value, json};
-use tokio::task::JoinHandle;
-use zcode_host_kit::{EventHub, Overflow, RpcError, log};
+use zcode_async::{Spawner, Task, TaskScope};
+use zcode_host_kit::{EventHub, Overflow, RpcError, Serial, log};
 use zcode_host_runtime_link::process::{self, StderrTail};
 use zcode_host_runtime_link::{Exit, RuntimeCommand, Start};
 
@@ -314,8 +321,12 @@ pub struct AgentProcess {
     started_at_ms: u64,
     /// 首次通过 provider 门禁的时间（markReady）。
     ready_at_ms: std::sync::OnceLock<u64>,
-    /// 已推送到本进程的 app 偏好版本；锁同时串行化同一 workspace 的偏好推送。
-    preferences_applied: tokio::sync::Mutex<u64>,
+    /// 已推送到本进程的 app 偏好版本；只在 `preferences` 的 owner 任务里读写。
+    preferences_applied: AtomicU64,
+    /// 偏好推送的 owner 任务（实例作用域里）：同一进程的推送按提交顺序逐个执行，版本只增不减。
+    preferences: Serial,
+    /// 实例的作用域（由监视任务持有）：随实例结束而关闭的任务在这里启动。
+    tasks: Spawner,
     /// 功能门禁策略每个进程只推一次。
     policies: tokio::sync::OnceCell<()>,
 }
@@ -363,6 +374,11 @@ impl AgentProcess {
 
     pub fn lane(&self) -> Lane {
         self.lane
+    }
+
+    /// 实例的作用域：只在实例存活期间有意义的任务（例如对它的取消请求）在这里启动，实例结束时被中止。
+    pub fn tasks(&self) -> &Spawner {
+        &self.tasks
     }
 
     /// 发请求并指定超时；超时同样回收进程（插件市场 I/O、compact ACK 等放宽超时的请求）。
@@ -478,20 +494,34 @@ pub struct AgentRuntimeConfig {
     pub fallback_cwd: Option<PathBuf>,
 }
 
-type Slot = Arc<tokio::sync::Mutex<Option<Arc<AgentProcess>>>>;
+/// 一次启动的结果；等待方共享（启动方放弃等待不会打断启动）。
+type Starting = Shared<BoxFuture<'static, Result<Arc<AgentProcess>, RpcError>>>;
+
+/// 一个 workspace key 的进程槽。不在表里即没有进程。表由 std 锁保护，持锁期间只做同步读写。
+enum Slot {
+    /// 正在启动：启动在 agent 作用域的任务 `instance-start` 里进行，结束时把槽改为 `Live` 或移除。
+    Starting {
+        ticket: u64,
+        starting: Starting,
+    },
+    Live(Arc<AgentProcess>),
+}
 
 struct RuntimeInner {
+    /// agent 的作用域：启动、监视任务在这里，实例的作用域是它的子作用域。
+    spawner: Spawner,
     config: AgentRuntimeConfig,
     settings: SettingStore,
     providers: ProviderRuntime,
     slots: Mutex<HashMap<String, Slot>>,
+    next_ticket: AtomicU64,
     generations: Mutex<HashMap<String, u64>>,
     lifecycle: EventHub<Value>,
     restarted: EventHub<Value>,
     frames: EventHub<Arc<Frame>>,
     /// 最新一次 `syncAppRuntimePreferences`（版本号，归一化后的值）。
     app_preferences: Mutex<Option<(u64, Value)>>,
-    monitors: Mutex<Vec<JoinHandle<()>>>,
+    monitors: Mutex<Vec<Task<()>>>,
     disposed: AtomicBool,
     extensions: Arc<Extensions>,
     lane: Lane,
@@ -514,12 +544,15 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl AgentRuntime {
+    /// `spawner` 是 agent 的作用域（组装根给的 `host/services/agent`）。
     pub fn new(
+        spawner: &Spawner,
         config: AgentRuntimeConfig,
         settings: SettingStore,
         providers: ProviderRuntime,
     ) -> Self {
         Self::build(
+            spawner.clone(),
             config,
             settings,
             providers,
@@ -530,6 +563,7 @@ impl AgentRuntime {
     }
 
     fn build(
+        spawner: Spawner,
         config: AgentRuntimeConfig,
         settings: SettingStore,
         providers: ProviderRuntime,
@@ -539,10 +573,12 @@ impl AgentRuntime {
     ) -> Self {
         Self {
             inner: Arc::new(RuntimeInner {
+                spawner,
                 config,
                 settings,
                 providers,
                 slots: Mutex::new(HashMap::new()),
+                next_ticket: AtomicU64::new(0),
                 generations: Mutex::new(HashMap::new()),
                 // 订阅者：Renderer 订阅（Gateway 立即搬进出站队列）与 sessions-index 观察者、legacy 会话
                 // 事件（同步转换后转发）。满了结束落后的订阅，不悄悄丢（docs/specs/rust-u2-task-scope.md
@@ -568,6 +604,7 @@ impl AgentRuntime {
     /// `idle_timeout` 只给 mcp-status 用（无在途请求且存储就绪后空闲这么久就回收）。
     pub fn lane(&self, lane: Lane, idle_timeout: Option<Duration>) -> AgentRuntime {
         let runtime = Self::build(
+            self.inner.spawner.clone(),
             self.inner.config.clone(),
             self.inner.settings.clone(),
             self.inner.providers.clone(),
@@ -626,13 +663,6 @@ impl AgentRuntime {
         self.inner.frames.clone()
     }
 
-    fn slot(&self, key: &str) -> Slot {
-        lock(&self.inner.slots)
-            .entry(key.to_owned())
-            .or_default()
-            .clone()
-    }
-
     /// 只读路径（订阅、读行、文件变更）：没有 provider 门禁。
     /// start-if-needed 时，chat lane 在交出进程前补推 app 偏好与功能门禁策略。
     pub async fn get_client(
@@ -648,28 +678,98 @@ impl AgentRuntime {
     }
 
     /// 取进程但不补推偏好（prepareStorage：Node 直接用 process manager）。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    ///
+    /// 同一 key 同时只有一次启动（single-flight）：启动在任务 `instance-start` 里进行，正在启动时的
+    /// 调用（包括 `ExistingOnly`）等它的结果。原来启动在第一个调用方的任务里、持 per-key 的 tokio 锁
+    /// 进行，调用方被取消时启动停在半途（进程已拉起、监视任务还没启动）；现在调用方被取消不影响启动。
     pub async fn acquire(
         &self,
         target: &WorkspaceTarget,
         policy: RuntimePolicy,
     ) -> Result<Arc<AgentProcess>, RpcError> {
-        let slot = self.slot(&target.key());
-        let mut current = slot.lock().await;
-        if let Some(process) = current.as_ref()
-            && !process.client.is_closed()
-        {
-            return Ok(process.clone());
+        let key = target.key();
+        let (ticket, starting) = {
+            let mut slots = lock(&self.inner.slots);
+            match slots.get(&key) {
+                Some(Slot::Live(process)) if !process.client.is_closed() => {
+                    return Ok(process.clone());
+                }
+                Some(Slot::Starting { ticket, starting }) => (*ticket, starting.clone()),
+                Some(Slot::Live(_)) | None => {
+                    if policy == RuntimePolicy::ExistingOnly
+                        || self.inner.disposed.load(Ordering::SeqCst)
+                    {
+                        return Err(
+                            RpcError::new("Error", "ZCode Agent runtime is not running.")
+                                .with_code(RUNTIME_UNAVAILABLE_CODE),
+                        );
+                    }
+                    let ticket = self.inner.next_ticket.fetch_add(1, Ordering::Relaxed);
+                    let starting = self.begin_start(ticket, target.clone());
+                    slots.insert(
+                        key.clone(),
+                        Slot::Starting {
+                            ticket,
+                            starting: starting.clone(),
+                        },
+                    );
+                    (ticket, starting)
+                }
+            }
+        };
+        let result = starting.await;
+        if result.is_err() {
+            // 启动任务被中止（作用域关闭）时没人清槽：失败的启动不能一直占着槽位。
+            let mut slots = lock(&self.inner.slots);
+            if matches!(slots.get(&key), Some(Slot::Starting { ticket: current, .. }) if *current == ticket)
+            {
+                slots.remove(&key);
+            }
         }
-        if policy == RuntimePolicy::ExistingOnly || self.inner.disposed.load(Ordering::SeqCst) {
-            return Err(
-                RpcError::new("Error", "ZCode Agent runtime is not running.")
-                    .with_code(RUNTIME_UNAVAILABLE_CODE),
-            );
+        result
+    }
+
+    /// 在 agent 作用域里启动一次；结束时把槽改为 `Live`（成功）或移除（失败），只改仍是这次启动的槽。
+    fn begin_start(&self, ticket: u64, target: WorkspaceTarget) -> Starting {
+        let runtime = self.clone();
+        let task = self.inner.spawner.spawn("instance-start", async move {
+            let result = runtime.start(&target).await;
+            let key = target.key();
+            let mut slots = lock(&runtime.inner.slots);
+            let ours = matches!(slots.get(&key), Some(Slot::Starting { ticket: current, .. }) if *current == ticket);
+            match &result {
+                Ok(process) if ours => {
+                    slots.insert(key, Slot::Live(process.clone()));
+                }
+                // 槽已不属于这次启动（不应发生）：不留下没人引用的进程。
+                Ok(process) => process.client.close("dispose_workspace"),
+                Err(_) if ours => {
+                    slots.remove(&key);
+                }
+                Err(_) => {}
+            }
+            result
+        });
+        async move {
+            task.await.unwrap_or_else(|error| {
+                Err(RpcError::new(
+                    "Error",
+                    format!("ZCode agent start did not finish: {error}"),
+                ))
+            })
         }
-        let process = self.start(target).await?;
-        *current = Some(process.clone());
-        Ok(process)
+        .boxed()
+        .shared()
+    }
+
+    /// 槽里的进程；正在启动时等启动结束。
+    async fn settled(&self, key: &str) -> Option<Arc<AgentProcess>> {
+        let starting = match lock(&self.inner.slots).get(key) {
+            None => return None,
+            Some(Slot::Live(process)) => return Some(process.clone()),
+            Some(Slot::Starting { starting, .. }) => starting.clone(),
+        };
+        starting.await.ok()
     }
 
     /// 写路径（命令、附件上传）：先过 provider/model 就绪门禁。
@@ -726,31 +826,30 @@ impl AgentRuntime {
         }
     }
 
+    /// 已有的进程（正在启动时等启动结束）；没有或已关闭时 None。
     pub async fn existing(&self, target: &WorkspaceTarget) -> Option<Arc<AgentProcess>> {
-        let slot = self.slot(&target.key());
-        let current = slot.lock().await;
-        current
-            .as_ref()
+        self.settled(&target.key())
+            .await
             .filter(|process| !process.client.is_closed())
-            .cloned()
     }
 
-    /// 正在运行的进程；正在启动（槽位被占用）的跳过，它们启动时会自行回放偏好。
+    /// 正在运行的进程；正在启动的跳过，它们启动时会自行回放偏好。
     fn running(&self) -> Vec<Arc<AgentProcess>> {
-        let slots: Vec<Slot> = lock(&self.inner.slots).values().cloned().collect();
-        slots
-            .iter()
-            .filter_map(|slot| slot.try_lock().ok().and_then(|current| current.clone()))
-            .filter(|process| !process.client.is_closed())
+        lock(&self.inner.slots)
+            .values()
+            .filter_map(|slot| match slot {
+                Slot::Live(process) if !process.client.is_closed() => Some(process.clone()),
+                Slot::Live(_) | Slot::Starting { .. } => None,
+            })
             .collect()
     }
 
     /// 本 lane 当前存活的全部进程（等正在启动的槽位就绪）。
     pub async fn live_processes(&self) -> Vec<Arc<AgentProcess>> {
-        let slots: Vec<Slot> = lock(&self.inner.slots).values().cloned().collect();
+        let keys: Vec<String> = lock(&self.inner.slots).keys().cloned().collect();
         let mut processes = Vec::new();
-        for slot in slots {
-            if let Some(process) = slot.lock().await.clone()
+        for key in keys {
+            if let Some(process) = self.settled(&key).await
                 && !process.client.is_closed()
             {
                 processes.push(process);
@@ -781,24 +880,27 @@ impl AgentRuntime {
         self.ensure_preferences(process).await
     }
 
-    /// 在进程的偏好锁内推送当时最新的偏好，直到已推版本等于最新版本。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
-    async fn ensure_preferences(&self, process: &AgentProcess) -> Result<(), RpcError> {
-        loop {
-            let latest_version = match &*lock(&self.inner.app_preferences) {
-                Some((version, _)) => *version,
-                None => return Ok(()),
-            };
-            let mut applied = process.preferences_applied.lock().await;
-            if *applied >= latest_version {
-                return Ok(());
-            }
-            let Some((version, preferences)) = lock(&self.inner.app_preferences).clone() else {
-                return Ok(());
-            };
-            push_preferences(process, &preferences).await?;
-            *applied = version;
-        }
+    /// 在进程的偏好 owner 任务里推送当时最新的偏好，直到已推版本等于最新版本。owner 任务逐个执行，
+    /// 推送因此按版本顺序进行，不会有旧版本覆盖新版本（原来由跨推送持有的 tokio 锁保证）。
+    async fn ensure_preferences(&self, process: &Arc<AgentProcess>) -> Result<(), RpcError> {
+        let (runtime, target) = (self.clone(), process.clone());
+        process
+            .preferences
+            .run(async move {
+                loop {
+                    let Some((version, preferences)) = lock(&runtime.inner.app_preferences).clone()
+                    else {
+                        return Ok(());
+                    };
+                    if target.preferences_applied.load(Ordering::SeqCst) >= version {
+                        return Ok(());
+                    }
+                    push_preferences(&target, &preferences).await?;
+                    target.preferences_applied.store(version, Ordering::SeqCst);
+                }
+            })
+            .await
+            .unwrap_or_else(|_| Err(client_error(ClientError::Closed("runtime_exited".into()))))
     }
 
     async fn spawn_env(&self, target: &WorkspaceTarget) -> BTreeMap<String, String> {
@@ -929,10 +1031,21 @@ impl AgentRuntime {
             link.pid.map(|pid| pid.to_string()).unwrap_or_default(),
             command.supports_storage_startup()
         ));
+        // 实例的作用域：由下面的监视任务持有，实例收口结束时释放（docs/specs/rust-u2-task-scope.md §6.1）。
+        let instance = self
+            .inner
+            .spawner
+            .child(match self.inner.lane.identity_label() {
+                Some(lane) => format!("{key}#{generation}:{lane}"),
+                None => format!("{key}#{generation}"),
+            });
+        let tasks = instance.spawner();
         let diagnostic_sink = self.diagnostic_sink(target, generation, link.pid, &instance_id);
-        let (tail, stderr_done) =
+        let (tail, stderr_done, drain) =
             process::drain_stderr(link.stderr, label.clone(), diagnostic_sink);
+        drop(tasks.spawn("stderr-drain", drain));
         let handler = Arc::new(Handler {
+            tasks: tasks.clone(),
             key: key.clone(),
             target: target.clone(),
             extensions: self.inner.extensions.clone(),
@@ -942,6 +1055,7 @@ impl AgentRuntime {
             frames: self.inner.frames.clone(),
         });
         let client = ProtocolClient::start(
+            &tasks,
             link.reader,
             link.writer,
             command.supports_storage_startup(),
@@ -958,7 +1072,10 @@ impl AgentRuntime {
             instance_id,
             started_at_ms,
             ready_at_ms: std::sync::OnceLock::new(),
-            preferences_applied: tokio::sync::Mutex::new(0),
+            preferences_applied: AtomicU64::new(0),
+            // 偏好推送一次一个；排队超过 8 个时推送方等待。
+            preferences: Serial::start(&tasks, "preferences", 8),
+            tasks: tasks.clone(),
             policies: tokio::sync::OnceCell::new(),
         });
         if let Some(mut message) = process.lifecycle_base() {
@@ -981,16 +1098,20 @@ impl AgentRuntime {
             .emit(lifecycle_event(&process, "available"));
         self.watch_storage(&process);
         if let Some(timeout) = self.inner.idle_timeout {
-            tokio::spawn(idle_reclaim(process.clone(), timeout));
+            drop(tasks.spawn("idle-reclaim", idle_reclaim(process.clone(), timeout)));
         }
-        let monitor = tokio::spawn(monitor(
-            self.clone(),
-            link.exit,
-            process.clone(),
-            tail,
-            stderr_done,
-            label,
-        ));
+        let monitor = self.inner.spawner.spawn(
+            "instance-monitor",
+            monitor(
+                self.clone(),
+                instance,
+                link.exit,
+                process.clone(),
+                tail,
+                stderr_done,
+                label,
+            ),
+        );
         {
             let mut monitors = lock(&self.inner.monitors);
             monitors.retain(|handle| !handle.is_finished());
@@ -1041,7 +1162,7 @@ impl AgentRuntime {
             "workspaceKey": key,
             "snapshot": {"generation": generation, "state": Value::Null},
         }));
-        tokio::spawn(async move {
+        drop(process.tasks.spawn("storage-watch", async move {
             loop {
                 tokio::select! {
                     changed = receiver.changed() => {
@@ -1057,7 +1178,7 @@ impl AgentRuntime {
                     "snapshot": {"generation": generation, "state": state},
                 }));
             }
-        });
+        }));
     }
 
     /// `syncAppRuntimePreferences`：记住最新值，推给正在运行的 chat 进程（不拉起空闲 workspace）；
@@ -1087,40 +1208,47 @@ impl AgentRuntime {
             .map(|_| ())
     }
 
+    /// 摘下 key 的进程并关闭（正在启动时等启动结束）。
+    async fn take_and_close(&self, key: &str, reason: &str) {
+        let _ = self.settled(key).await;
+        let removed = {
+            let mut slots = lock(&self.inner.slots);
+            match slots.get(key) {
+                Some(Slot::Live(_)) => slots.remove(key),
+                Some(Slot::Starting { .. }) | None => None,
+            }
+        };
+        if let Some(Slot::Live(process)) = removed {
+            process.client.close(reason);
+        }
+    }
+
     /// 回收一个 workspace 的进程（关闭 workspace / 手动重启）。
     pub async fn dispose_workspace(&self, target: &WorkspaceTarget) {
-        let slot = self.slot(&target.key());
-        let process = slot.lock().await.take();
-        if let Some(process) = process {
-            process.client.close("dispose_workspace");
-        }
+        self.take_and_close(&target.key(), "dispose_workspace")
+            .await;
     }
 
     /// Host 退出：关闭本 lane 与派生 lane 的全部进程并等待回收（上限 3 s）。
     pub async fn dispose_all(&self) {
         self.inner.disposed.store(true, Ordering::SeqCst);
-        let slots: Vec<Slot> = lock(&self.inner.slots).values().cloned().collect();
-        for slot in slots {
-            if let Some(process) = slot.lock().await.take() {
-                process.client.close("host_dispose");
-            }
+        let keys: Vec<String> = lock(&self.inner.slots).keys().cloned().collect();
+        for key in keys {
+            self.take_and_close(&key, "host_dispose").await;
         }
         let lanes: Vec<AgentRuntime> = lock(&self.inner.lanes).clone();
         for lane in &lanes {
             Box::pin(lane.dispose_all()).await;
         }
-        let monitors: Vec<JoinHandle<()>> = lock(&self.inner.monitors).drain(..).collect();
+        let monitors: Vec<Task<()>> = lock(&self.inner.monitors).drain(..).collect();
         let _ = tokio::time::timeout(DISPOSE_WAIT, futures_util::future::join_all(monitors)).await;
     }
 
-    async fn release(&self, process: &AgentProcess) {
-        let slot = self.slot(&process.key);
-        let mut current = slot.lock().await;
-        if current
-            .as_ref()
-            .is_some_and(|live| live.generation == process.generation)
+    fn release(&self, process: &AgentProcess) {
+        let mut slots = lock(&self.inner.slots);
+        if matches!(slots.get(&process.key), Some(Slot::Live(live)) if live.generation == process.generation)
         {
-            *current = None;
+            slots.remove(&process.key);
         }
     }
 }
@@ -1303,8 +1431,11 @@ fn termination(reason: &str) -> (&'static str, &'static str) {
     }
 }
 
+/// 实例的监视任务：持有实例的作用域 `instance`，收口的最后一步释放它，实例里还没结束的任务
+/// （例如等不到回复的反向请求处理）随之中止。
 async fn monitor(
     runtime: AgentRuntime,
+    instance: TaskScope,
     mut exit: Exit,
     process: Arc<AgentProcess>,
     tail: StderrTail,
@@ -1322,7 +1453,7 @@ async fn monitor(
         }
         reason = process.client.closed() => reason,
     };
-    runtime.release(&process).await;
+    runtime.release(&process);
     runtime
         .inner
         .lifecycle
@@ -1389,9 +1520,15 @@ async fn monitor(
         }
         runtime.emit_process_event(Value::Object(message));
     }
+    // 缺陷修复：实例启动的任务原来是分离的 tokio 任务，实例结束后仍可能运行（例如反向请求的处理
+    // 一直等不到结果、继续持有已结束实例的 client）。现在它们都在实例的作用域里，收口结束时释放作用域，
+    // 剩下的任务被中止。这是监视任务的最后一步，之后不再等待。
+    drop(instance);
 }
 
 struct Handler {
+    /// 实例的作用域：反向请求的应答任务在这里。
+    tasks: Spawner,
     key: String,
     target: WorkspaceTarget,
     extensions: Arc<Extensions>,
@@ -1467,7 +1604,7 @@ impl ClientHandler for Handler {
                 method: request.method.clone(),
                 params,
             };
-            tokio::spawn(async move {
+            drop(self.tasks.spawn("reverse-request", async move {
                 match handler(context).await {
                     ReverseReply::Result(result) => client.respond(&request.id, &result).await,
                     ReverseReply::Error { code, message } => {
@@ -1484,16 +1621,16 @@ impl ClientHandler for Handler {
                     }
                     ReverseReply::Hold => {}
                 }
-            });
+            }));
             return;
         }
         let reply = match request.method.as_str() {
             "session/requestRuntimePreferences" => {
                 let settings = self.settings.clone();
-                tokio::spawn(async move {
+                drop(self.tasks.spawn("reverse-request", async move {
                     let result = runtime_preferences(&settings.get().await, &params);
                     client.respond(&request.id, &result).await;
-                });
+                }));
                 return;
             }
             // 权限与提问：CLI 拿这个反向请求和 V4 resolveInteraction 赛跑；回错误会让它在用户作答前
@@ -1518,12 +1655,12 @@ impl ClientHandler for Handler {
             })),
             other => Err(format!("Unsupported ZCode Protocol request: {other}")),
         };
-        tokio::spawn(async move {
+        drop(self.tasks.spawn("reverse-request", async move {
             match reply {
                 Ok(result) => client.respond(&request.id, &result).await,
                 Err(message) => client.respond_error(&request.id, -32601, &message).await,
             }
-        });
+        }));
     }
 }
 

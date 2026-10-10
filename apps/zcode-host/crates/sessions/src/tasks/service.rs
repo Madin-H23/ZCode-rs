@@ -457,6 +457,7 @@ mod tests {
 
     fn runtime() -> AgentRuntime {
         AgentRuntime::new(
+            &zcode_host_base::testing::spawner(),
             crate::agent::AgentRuntimeConfig {
                 base_env: Default::default(),
                 command_vars: Default::default(),

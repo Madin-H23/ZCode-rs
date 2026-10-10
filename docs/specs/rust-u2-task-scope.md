@@ -145,13 +145,21 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 
 `HostCore` 在根作用域下建 `host/services` 并把它的 `Spawner` 交给组装根 `install`；每个 service 在它下面有自己的子作用域，由 `Installed` 持有（不放全局、不用 `OnceLock`）。寿命比 service 短的所有者（runtime 实例、远端会话、终端、文件监听、Bot 通道……）再各有更小的作用域，所有者结束时关闭或释放它。常驻任务（随所有者一直运行、没有收口步骤的循环）用 `spawn_resident`，见 §3。
 
-| 作用域                    | 所有者      | 任务                                                                                                                                                 | 何时结束                  |
-| ------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| `host/services`           | `HostCore`  | —                                                                                                                                                    | Host 退出（根作用域关闭） |
-| `host/services/settings`  | `Installed` | `setting-writes`（owner：`SettingStore` 的读改写）、`setting-write-requests`（常驻：Main 的 `setting-write`）                                        | 随 Host                   |
-| `host/services/providers` | `Installed` | `provider-config-poll`、`builtin-config-refresh`（常驻）、`personal-provider-writes`（owner：personal 文件的编辑）；解析在阻塞线程池里（`blocking`） | 随 Host                   |
+| 作用域                                      | 所有者                      | 任务                                                                                                                                                                                        | 何时结束                                                 |
+| ------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `host/services`                             | `HostCore`                  | —                                                                                                                                                                                           | Host 退出（根作用域关闭）                                |
+| `host/services/settings`                    | `Installed`                 | `setting-writes`（owner：`SettingStore` 的读改写）、`setting-write-requests`（常驻：Main 的 `setting-write`）                                                                               | 随 Host                                                  |
+| `host/services/providers`                   | `Installed`                 | `provider-config-poll`、`builtin-config-refresh`（常驻）、`personal-provider-writes`（owner：personal 文件的编辑）；解析在阻塞线程池里（`blocking`）                                        | 随 Host                                                  |
+| `host/services/agent`                       | `Installed`                 | `instance-start`（一次启动，槽位 single-flight）、`instance-monitor`（每个实例一个，持有实例的作用域）                                                                                      | 随 Host；`dispose_all` 等监视任务收口（上限 3 s）        |
+| `host/services/agent/<key>#<代次>[:<lane>]` | 该实例的 `instance-monitor` | `client-reader`、`client-writer`（owner：stdin）、`storage-first-frame`、`storage-watch`、`idle-reclaim`（mcp-status）、`stderr-drain`、`preferences`（owner：偏好推送）、`reverse-request` | 监视任务收口的最后一步释放（实例退出、被回收或 dispose） |
 
 测试构造 service 时用 `zcode_host_base::testing::spawner()`：一个随测试进程存在、不关闭的根作用域。
+
+迁移中发现并修复的泄漏（所有者结束后任务仍在运行）：
+
+| 位置                                               | 泄漏                                                                                          | 测试                                                                        |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `sessions/src/agent/runtime.rs` `Handler::request` | 反向请求的处理是分离的任务：实例结束后，一直等不到结果的处理仍在运行并持有已结束实例的 client | `agent::lane_tests::an_ended_instance_leaves_no_tasks_behind`（修复前失败） |
 
 ### 6.2 有界通道
 
@@ -193,10 +201,13 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 2. **owner 任务（actor）**：资源（一个文件、一条 stdin、一组状态）交给一个任务独占，调用方把工作交给它并等回执。进程内的写队列（`tokio::sync::Mutex<()>`）改为 `zcode_host_kit::Serial`：工作在 owner 任务里按提交顺序逐个执行；提交方放弃等待不打断已经开始的读改写；工作 panic 时提交方得到同一个 panic，owner 继续；队列有界，满了提交方等待；owner 是所在作用域的常驻任务，作用域关闭后提交方得到 `Stopped`。
 3. **`std::sync::Mutex`，锁内不 await**。
 
-| 位置                                                 | 原来                                                                               | 现在                                                                                                                                              |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `settings/src/settings/mod.rs` `locked`              | 写队列 `Mutex<()>` 跨文件锁与读改写持有                                            | owner 任务 `setting-writes`（`Serial`）：读改写与 `settle`（结果、变更通知）在里面按提交顺序执行；`get` 先提交一个空工作作为屏障                  |
-| `providers/src/providers/personal.rs` `per_provider` | 每个 provider 一个 `Mutex<()>`（表只增不减），跨“读成员关系 → 读改写 → 读视图”持有 | personal 文件的 owner 任务 `personal-provider-writes`：每个编辑整段在里面执行（含不按 provider 加锁的创建与重排），所有 `PersonalWriter` 实例共用 |
+| 位置                                                        | 原来                                                                               | 现在                                                                                                                                                |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings/src/settings/mod.rs` `locked`                     | 写队列 `Mutex<()>` 跨文件锁与读改写持有                                            | owner 任务 `setting-writes`（`Serial`）：读改写与 `settle`（结果、变更通知）在里面按提交顺序执行；`get` 先提交一个空工作作为屏障                    |
+| `providers/src/providers/personal.rs` `per_provider`        | 每个 provider 一个 `Mutex<()>`（表只增不减），跨“读成员关系 → 读改写 → 读视图”持有 | personal 文件的 owner 任务 `personal-provider-writes`：每个编辑整段在里面执行（含不按 provider 加锁的创建与重排），所有 `PersonalWriter` 实例共用   |
+| `sessions/src/agent/client.rs` `write_line` / `close_input` | 写端 `tokio::Mutex<Option<writer>>` 跨写入持有                                     | 写任务 `client-writer` 独占 stdin，按提交顺序整行写出（有界 64，满了写入方等待）；关闭 stdin 是排在已提交行之后的一项工作                           |
+| `sessions/src/agent/runtime.rs` `acquire`                   | per-key 槽 `tokio::Mutex` 跨整个启动持有（single-flight）                          | 槽表 `std::sync::Mutex`，持锁只做同步读写；启动在任务 `instance-start` 里，正在启动时等待方共享它的结果（`Shared`）；调用方被取消不再让启动停在半途 |
+| `sessions/src/agent/runtime.rs` `ensure_preferences`        | 每进程 `tokio::Mutex<u64>` 跨推送持有，保证按版本顺序推送                          | 每进程的 owner 任务 `preferences`（`Serial`）：推送循环在里面执行，版本只增不减                                                                     |
 
 ### 6.4 关闭报告
 

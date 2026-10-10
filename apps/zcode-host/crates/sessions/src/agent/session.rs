@@ -596,6 +596,7 @@ mod tests {
     #[tokio::test]
     async fn api_retry_runtime_is_remembered_and_cleared() {
         let runtime = AgentRuntime::new(
+            &zcode_host_base::testing::spawner(),
             crate::agent::AgentRuntimeConfig {
                 base_env: Default::default(),
                 command_vars: Default::default(),

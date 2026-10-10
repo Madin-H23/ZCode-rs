@@ -352,6 +352,7 @@ async fn bot_initiated_resume_carries_session_tool_flags() {
 
     let dir = tempfile::tempdir().unwrap();
     let runtime = AgentRuntime::new(
+        &zcode_host_base::testing::spawner(),
         AgentRuntimeConfig {
             base_env: Default::default(),
             command_vars: Default::default(),

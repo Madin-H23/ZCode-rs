@@ -7,6 +7,9 @@
 //! - Host 发出的请求用递增整数 id；CLI 的反向请求 id 原样回显（字符串保持字符串）。
 //! - 普通 app-server 进程先发 `startup/storageState`：请求在存储就绪前不发出；首帧 30 s 未到、
 //!   或进入 failed，则所有请求以 `SQLite startup failed: <code>` 失败。
+//! - 任务都在实例的作用域里（docs/specs/rust-u2-task-scope.md §6.1）：读循环 `client-reader`、首帧计时
+//!   `storage-first-frame`，以及独占 stdin 的写任务 `client-writer`：每一行按提交顺序整行写完，调用方
+//!   放弃等待不会留下半行（原来写端由 tokio 锁保护、跨写入持有）。
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,12 +18,15 @@ use std::time::Duration;
 use serde_json::Value;
 use serde_json::value::RawValue;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch};
+use zcode_async::Spawner;
 use zcode_host_kit::log;
 
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 const STORAGE_FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(30);
 const ALLOWED_KEYS: &[&str] = &["id", "method", "params", "trace", "result", "error"];
+/// 写任务的队列：满了时写入方等待（背压）。写任务只写 stdin，从不等读循环或写入方，不会死锁。
+const WRITE_QUEUE: usize = 64;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClientError {
@@ -74,8 +80,49 @@ enum Gate {
 
 type Pending = HashMap<i64, (String, oneshot::Sender<Result<Box<RawValue>, ClientError>>)>;
 
+/// 交给写任务的工作。
+enum Write {
+    Line(String, oneshot::Sender<Result<(), ClientError>>),
+    /// 关闭 stdin（app-server 把 EOF 当作退出请求）；之后的行都以 `stdin_closed` 失败。
+    Close(oneshot::Sender<()>),
+}
+
+/// 独占 stdin 的写任务：按提交顺序整行写出。
+async fn write_loop(
+    mut writer: Box<dyn AsyncWrite + Send + Unpin>,
+    mut queue: mpsc::Receiver<Write>,
+) {
+    let mut open = true;
+    while let Some(work) = queue.recv().await {
+        match work {
+            Write::Line(line, done) => {
+                if !open {
+                    let _ = done.send(Err(ClientError::Closed("stdin_closed".into())));
+                    continue;
+                }
+                let result = async {
+                    writer.write_all(line.as_bytes()).await?;
+                    writer.write_all(b"\n").await?;
+                    writer.flush().await
+                }
+                .await;
+                let _ = done.send(
+                    result.map_err(|error| ClientError::Closed(format!("stdin_error: {error}"))),
+                );
+            }
+            Write::Close(done) => {
+                if open {
+                    open = false;
+                    let _ = writer.shutdown().await;
+                }
+                let _ = done.send(());
+            }
+        }
+    }
+}
+
 pub struct ProtocolClient {
-    writer: tokio::sync::Mutex<Option<Box<dyn AsyncWrite + Send + Unpin>>>,
+    writes: mpsc::Sender<Write>,
     next_id: AtomicI64,
     pending: Mutex<Pending>,
     closed: watch::Sender<Option<String>>,
@@ -111,8 +158,10 @@ struct StorageFrame {
 }
 
 impl ProtocolClient {
-    /// 启动读循环；`requires_storage_startup` 为 true 时请求要等存储就绪。
+    /// 在 `spawner`（实例的作用域）里启动读循环与写任务；`requires_storage_startup` 为 true 时请求
+    /// 要等存储就绪。
     pub fn start(
+        spawner: &Spawner,
         reader: impl AsyncRead + Send + Unpin + 'static,
         writer: impl AsyncWrite + Send + Unpin + 'static,
         requires_storage_startup: bool,
@@ -126,8 +175,10 @@ impl ProtocolClient {
         let (gate, _) = watch::channel(initial);
         let (closed, _) = watch::channel(None);
         let (storage_state, _) = watch::channel(None);
+        let (writes, queue) = mpsc::channel(WRITE_QUEUE);
+        drop(spawner.spawn("client-writer", write_loop(Box::new(writer), queue)));
         let client = Arc::new(Self {
-            writer: tokio::sync::Mutex::new(Some(Box::new(writer))),
+            writes,
             next_id: AtomicI64::new(1),
             pending: Mutex::new(HashMap::new()),
             closed,
@@ -137,7 +188,7 @@ impl ProtocolClient {
         });
         if requires_storage_startup {
             let weak = Arc::downgrade(&client);
-            tokio::spawn(async move {
+            drop(spawner.spawn("storage-first-frame", async move {
                 tokio::time::sleep(STORAGE_FIRST_FRAME_TIMEOUT).await;
                 if let Some(client) = weak.upgrade() {
                     client.gate.send_if_modified(|gate| {
@@ -149,13 +200,13 @@ impl ProtocolClient {
                         }
                     });
                 }
-            });
+            }));
         }
         let reading = client.clone();
-        tokio::spawn(async move {
+        drop(spawner.spawn("client-reader", async move {
             let reason = reading.read_loop(reader, handler).await;
             reading.close(&reason);
-        });
+        }));
         client
     }
 
@@ -325,27 +376,23 @@ impl ProtocolClient {
         });
     }
 
-    /// 关闭 stdin：app-server 把 EOF 当作退出请求。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// 关闭 stdin：app-server 把 EOF 当作退出请求。排在已提交的行之后。
     pub async fn close_input(&self) {
-        if let Some(mut writer) = self.writer.lock().await.take() {
-            let _ = writer.shutdown().await;
+        let (done, closed) = oneshot::channel();
+        if self.writes.send(Write::Close(done)).await.is_ok() {
+            let _ = closed.await;
         }
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// 交给写任务并等它写完；写任务已结束（实例作用域已关闭）时同 stdin 已关闭。
     async fn write_line(&self, line: String) -> Result<(), ClientError> {
-        let mut writer = self.writer.lock().await;
-        let Some(stream) = writer.as_mut() else {
+        let (done, written) = oneshot::channel();
+        if self.writes.send(Write::Line(line, done)).await.is_err() {
             return Err(ClientError::Closed("stdin_closed".into()));
-        };
-        let result = async {
-            stream.write_all(line.as_bytes()).await?;
-            stream.write_all(b"\n").await?;
-            stream.flush().await
         }
-        .await;
-        result.map_err(|error| ClientError::Closed(format!("stdin_error: {error}")))
+        written
+            .await
+            .unwrap_or_else(|_| Err(ClientError::Closed("stdin_closed".into())))
     }
 
     async fn wait_storage(&self) -> Result<(), ClientError> {
@@ -501,7 +548,13 @@ mod tests {
         let (host_out, mut cli_in) = duplex(64 * 1024);
         let (mut cli_out, host_in) = duplex(64 * 1024);
         let recorder = Arc::new(Recorder::default());
-        let client = ProtocolClient::start(host_in, host_out, true, recorder.clone());
+        let client = ProtocolClient::start(
+            &zcode_host_base::testing::spawner(),
+            host_in,
+            host_out,
+            true,
+            recorder.clone(),
+        );
 
         let request = {
             let client = client.clone();
@@ -541,7 +594,13 @@ mod tests {
     async fn invalid_envelope_closes_and_rejects_pending() {
         let (host_out, _cli_in) = duplex(1024);
         let (mut cli_out, host_in) = duplex(1024);
-        let client = ProtocolClient::start(host_in, host_out, false, Arc::new(Recorder::default()));
+        let client = ProtocolClient::start(
+            &zcode_host_base::testing::spawner(),
+            host_in,
+            host_out,
+            false,
+            Arc::new(Recorder::default()),
+        );
         let pending = {
             let client = client.clone();
             tokio::spawn(async move { client.request("x", &json!({})).await })
@@ -562,7 +621,13 @@ mod tests {
     async fn failed_storage_rejects_requests() {
         let (host_out, _cli_in) = duplex(1024);
         let (mut cli_out, host_in) = duplex(4096);
-        let client = ProtocolClient::start(host_in, host_out, true, Arc::new(Recorder::default()));
+        let client = ProtocolClient::start(
+            &zcode_host_base::testing::spawner(),
+            host_in,
+            host_out,
+            true,
+            Arc::new(Recorder::default()),
+        );
         cli_out
             .write_all(br#"{"method":"startup/storageState","params":{"schemaVersion":1,"attemptId":"a","sequence":1,"databaseId":"d","databaseKind":"session","phase":"failed","elapsedMs":1,"errorCode":"corrupt"}}
 "#)
@@ -577,7 +642,13 @@ mod tests {
     async fn remote_errors_keep_code_and_data() {
         let (host_out, mut cli_in) = duplex(4096);
         let (mut cli_out, host_in) = duplex(4096);
-        let client = ProtocolClient::start(host_in, host_out, false, Arc::new(Recorder::default()));
+        let client = ProtocolClient::start(
+            &zcode_host_base::testing::spawner(),
+            host_in,
+            host_out,
+            false,
+            Arc::new(Recorder::default()),
+        );
         let pending = {
             let client = client.clone();
             tokio::spawn(async move { client.request("v4/command", &json!({})).await })
