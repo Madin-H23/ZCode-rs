@@ -1,6 +1,6 @@
 //! Connections: backlog pause and recovery, flow pause, close and pins.
-use crate::support::{Frame, Harness, Sink, conversation, deltas, frames, snapshot, text};
-use serde_json::json;
+use crate::support::{Frame, Harness, Seen, Sink, conversation, deltas, frames, snapshot, text};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use zcode_cli_core_api::{Method, RuntimeError};
@@ -208,4 +208,70 @@ fn closing_a_connection_releases_its_pins_and_the_last_subscriber_releases_the_t
     );
     h.delivery.close_connection("b", &mut h.runtime);
     assert_eq!(h.runtime.pins, pins(0, 0));
+}
+
+/// 订阅请求在途时连接关闭：回复晚于关闭到达时不登记订阅、不推送初始帧，释放这次 open 取得的 pin，
+/// 请求回 `fault.connection.closed`；回复本身是错误时照原样回答。关闭之后同一连接 id 的新订阅照常
+/// 登记（修复前失败：回复照常登记，已关闭的连接持有 pin 并继续收到帧）。
+#[test]
+fn a_subscribe_reply_after_its_connection_closed_registers_nothing() {
+    let mut h = Harness::default();
+    let (a, _) = h.connection("a");
+    let (b, _) = h.connection("b");
+    let kept = h.subscribed(&b, Profile::Continuous, TOPIC, snapshot(0));
+    let opened = h.subscribe(&a, Profile::Continuous, TOPIC, Value::Null);
+    let failed = h.subscribe(&a, Profile::Continuous, INDEX, Value::Null);
+    h.delivery.close_connection("a", &mut h.runtime);
+    h.reply(Ok(snapshot(0)));
+    let unavailable = RuntimeError::Fault {
+        message: "Workspace unavailable".into(),
+        code: None,
+    };
+    h.reply(Err(unavailable.clone()));
+    let closed = RuntimeError::Fault {
+        message: "fault.connection.closed".into(),
+        code: None,
+    };
+    assert_eq!(
+        h.seen(),
+        vec![
+            Seen::Answer(opened, Err(closed)),
+            Seen::Answer(failed, Err(unavailable)),
+        ],
+        "no ACK and no initial frame for the closed connection"
+    );
+    assert_eq!(h.runtime.released, vec![TOPIC.to_owned()]);
+    assert_eq!(
+        h.runtime.pins,
+        BTreeMap::from([(TOPIC.into(), 1)]),
+        "only the other connection keeps a pin"
+    );
+    h.event(conversation(0, 1, &[text("a")], vec![]), 0);
+    let sent = frames(
+        "b",
+        TOPIC,
+        vec![deltas(&kept, "online", (0, 1), json!([text("a")]))],
+    );
+    assert_eq!(
+        h.flush(150),
+        vec![sent],
+        "the closed connection receives nothing"
+    );
+
+    // 关闭之后同一连接 id 的新订阅不受影响。
+    let again = h.subscribed(&a, Profile::Continuous, TOPIC, snapshot(1));
+    assert_eq!(h.runtime.pins, BTreeMap::from([(TOPIC.into(), 2)]));
+    h.event(conversation(1, 2, &[text("b")], vec![]), 200);
+    let next = json!([text("b")]);
+    assert_eq!(
+        h.flush(350),
+        vec![
+            frames(
+                "b",
+                TOPIC,
+                vec![deltas(&kept, "online", (1, 2), next.clone())]
+            ),
+            frames("a", TOPIC, vec![deltas(&again, "online", (1, 2), next)]),
+        ]
+    );
 }

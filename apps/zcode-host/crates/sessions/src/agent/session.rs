@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
-use zcode_host_kit::{Reply, RpcError, ServiceBuilder, log};
+use zcode_host_kit::{Reply, RpcError, RpcValue, ServiceBuilder, log};
 
 use super::api::{AgentApi, format_model};
 use super::extensions::UseReason;
@@ -463,9 +463,38 @@ fn args_value(args: &zcode_host_kit::Args) -> Value {
     args.raw(0).cloned().unwrap_or(Value::Null)
 }
 
+/// `zcode-session` 的串行键（docs/specs/rust-u2-gateway.md §2.2 的登记表）：这个门面建在 `zcode-agent`
+/// 之上、写的是同一个会话，所以会话写操作与 `zcode-agent` 同用 `session:<workspace key>:<session id>`。
+/// `promoteDeferredDraftSession` 改写 Host 的草稿表（它决定随后的 `setModel` 是否写 tasks-index），也排在
+/// 同一会话的写操作里。创建会话与只读成员没有键。
+///
+/// 修复：之前这些成员没有键，经 `zcode-session` 的写操作（例如 `setModel`）与经 `zcode-agent` 发给同一
+/// 会话的 V4 命令各自立即开始，可能以与到达相反的顺序交给 runtime。键只读参数里的 workspace 与
+/// sessionId，参数形状与 `zcode-agent` 的同名成员相同。
+pub fn serial_key(method: &str, args: &[RpcValue]) -> Option<String> {
+    if !matches!(
+        method,
+        "resumeSession"
+            | "closeSession"
+            | "closeDeferredDraftSession"
+            | "promoteDeferredDraftSession"
+            | "setModel"
+            | "setThoughtLevel"
+            | "setMode"
+    ) {
+        return None;
+    }
+    let Some(RpcValue::Json(params)) = args.first() else {
+        return None;
+    };
+    let session_id = params["sessionId"].as_str().filter(|id| !id.is_empty())?;
+    let workspace = WorkspaceTarget::key_of(params)?;
+    Some(format!("session:{workspace}:{session_id}"))
+}
+
 pub fn service(sessions: Arc<SessionService>) -> ServiceBuilder {
     let api = sessions.api.clone();
-    let mut builder = ServiceBuilder::new(CHANNEL);
+    let mut builder = ServiceBuilder::new(CHANNEL).serial_key(serial_key);
     let runtime = api.chat.clone();
     builder = builder.method("readWorkspacePresentation", move |_, args| {
         let runtime = runtime.clone();
@@ -593,8 +622,7 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn api_retry_runtime_is_remembered_and_cleared() {
+    fn offline_sessions() -> Arc<SessionService> {
         let runtime = AgentRuntime::new(
             crate::agent::AgentRuntimeConfig {
                 base_env: Default::default(),
@@ -610,7 +638,81 @@ mod tests {
             Arc::new(super::super::notifications::AgentEvents::default()),
             None,
         );
-        let sessions = SessionService::new(api, None);
+        SessionService::new(api, None)
+    }
+
+    /// 修复前失败：`zcode-session` 的会话写操作没有串行键，与经 `zcode-agent` 写同一会话的调用不排队。
+    #[tokio::test]
+    async fn the_channel_keys_its_session_writes_like_zcode_agent() {
+        use zcode_host_kit::CallContext;
+        let channel = service(offline_sessions()).build(None);
+        let context =
+            CallContext::new(1, "test", zcode_host_control::ClientMode::DesktopContinuous);
+        let args = |params: Value| vec![RpcValue::Json(params)];
+        let params = json!({"workspacePath": "/w", "sessionId": "s1"});
+        let send = json!({"workspacePath": "/w", "envelope": {"sessionId": "s1"}});
+        let agent = crate::agent::service::serial_key("sendConversationCommandV4", &args(send));
+        assert_eq!(agent.as_deref(), Some("session:/w:s1"));
+        for method in [
+            "resumeSession",
+            "closeSession",
+            "closeDeferredDraftSession",
+            "promoteDeferredDraftSession",
+            "setModel",
+            "setThoughtLevel",
+            "setMode",
+        ] {
+            assert_eq!(
+                channel.serial_key(&context, method, &args(params.clone())),
+                agent,
+                "{method}"
+            );
+        }
+        for method in [
+            "createSession",
+            "readWorkspacePresentation",
+            "initializeWorkspace",
+            "getWorkspaceRuntimeIdentity",
+            "listSessions",
+            "readSession",
+            "readSessionMessages",
+            "readSessionEvents",
+        ] {
+            assert_eq!(
+                channel.serial_key(&context, method, &args(params.clone())),
+                None,
+                "{method}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_keys_follow_the_workspace_identity_and_need_both_ids() {
+        let args = |params: Value| vec![RpcValue::Json(params)];
+        let remote =
+            json!({"workspacePath": "/w", "workspaceIdentity": " ssh://h/w ", "sessionId": "s1"});
+        assert_eq!(
+            serial_key("setMode", &args(remote)).as_deref(),
+            Some("session:ssh://h/w:s1")
+        );
+        // 参数缺 workspace 或 sessionId 为空时不设键（调用本身会以参数错误失败）。
+        assert_eq!(
+            serial_key("setModel", &args(json!({"sessionId": "s1"}))),
+            None
+        );
+        assert_eq!(
+            serial_key(
+                "closeSession",
+                &args(json!({"workspacePath": "/w", "sessionId": ""}))
+            ),
+            None
+        );
+        assert_eq!(serial_key("setModel", &[]), None);
+    }
+
+    #[tokio::test]
+    async fn api_retry_runtime_is_remembered_and_cleared() {
+        let sessions = offline_sessions();
         let snapshot = |status: &str, retry: Option<Value>| {
             let mut runtime = json!({"eventSeq": 1});
             if let Some(retry) = retry {

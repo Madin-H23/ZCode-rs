@@ -1,9 +1,10 @@
 //! The requests delivery serves and the runtime requests it issues for them.
 //!
 //! A subscription is registered only when the runtime's `TopicOpen` reply
-//! arrives; its answer (the ACK) goes to the embedder before its initial
-//! frames are pushed. Resync and snapshot recovery replies cover every delta
-//! published while they were in flight.
+//! arrives, and only if its connection has not closed since; its answer (the
+//! ACK) goes to the embedder before its initial frames are pushed. Resync and
+//! snapshot recovery replies cover every delta published while they were in
+//! flight.
 use crate::contract::{Method, RuntimeError, RuntimeEvent};
 use crate::domain::delivery::Profile;
 use crate::registry::{Delivery, Output, Target};
@@ -39,7 +40,7 @@ pub struct Resync {
 pub struct Call<R>(Pending<R>);
 
 enum Pending<R> {
-    Subscribe { reply: R, target: Target },
+    Subscribe { reply: R, target: Target, open: u64 },
     Resync { reply: R, subscription: String },
     Recover { subscription: String },
 }
@@ -47,6 +48,15 @@ enum Pending<R> {
 fn not_owned() -> RuntimeError {
     RuntimeError::Fault {
         message: "fault.subscription.notOwned".into(),
+        code: None,
+    }
+}
+
+/// The answer to a subscribe request whose connection closed while it was in
+/// flight (the Host's, and Node `assertOpen`'s, for a closed connection).
+fn connection_closed() -> RuntimeError {
+    RuntimeError::Fault {
+        message: "fault.connection.closed".into(),
         code: None,
     }
 }
@@ -72,6 +82,7 @@ impl Delivery {
         } = request;
         // 会话话题带上 attachment 的 workspace：冷加载只接受该 workspace 的会话。
         let params = json!({"topic":topic,"base":base,"workspace":workspace});
+        let open = self.open_started(&connection.id);
         let target = Target {
             topic,
             connection,
@@ -81,7 +92,11 @@ impl Delivery {
         link.request(
             Method::TopicOpen,
             params,
-            Call(Pending::Subscribe { reply, target }),
+            Call(Pending::Subscribe {
+                reply,
+                target,
+                open,
+            }),
         );
     }
 
@@ -147,11 +162,23 @@ impl Delivery {
         link: &mut impl Link<R>,
     ) {
         match call.0 {
-            Pending::Subscribe { reply, target } => {
+            Pending::Subscribe {
+                reply,
+                target,
+                open,
+            } => {
+                let still_open = self.open_finished(open);
                 let state = match result {
                     Ok(state) => state,
                     Err(error) => return link.answer(reply, Err(error)),
                 };
+                if !still_open {
+                    // 修复：连接在 topicOpen 在途时关闭，回复晚于 close_connection 到达。以前照常登记，
+                    // 已关闭的连接持有 pin、继续收到帧，要靠 Host 在 ACK 后补发退订才清掉。现在不登记、
+                    // 不推初始帧，释放这次 open 取得的 pin，按已关闭的连接回答。
+                    link.release(target.topic);
+                    return link.answer(reply, Err(connection_closed()));
+                }
                 match self.register(&target, &state) {
                     Ok(subscribed) => {
                         if subscribed.replaced {

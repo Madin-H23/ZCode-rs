@@ -85,7 +85,7 @@ pub trait CallObserver: Send + Sync { fn call_finished(&self, channel: &str, met
 - 没有串行键的调用立即开始，互不等待（与今天相同）。
 - 排队位置在请求到达时同步确定，不依赖任务调度。
 - 排队中的调用被取消（客户端取消，或它的连接关闭）时直接离队，不会开始执行。
-- `zcode-agent`：改变某个会话状态的方法（V4 命令、legacy 的会话写操作）使用 `session:<workspace key>:<session id>`；创建会话与只读方法不设键。其余 channel 暂不设键，发现顺序依赖时逐个补上，并在本节登记。
+- `zcode-agent`：改变某个会话状态的方法（V4 命令、legacy 的会话写操作）使用 `session:<workspace key>:<session id>`；创建会话与只读方法不设键。`zcode-task` 的 task 命令与 `zcode-session` 的会话写操作用同一个键空间（见下）。其余 channel 暂不设键，发现顺序依赖时逐个补上，并在本节登记。
 
 这只保证 Host 把请求按到达顺序交给 runtime；已接受输入的排队与 admission 仍由 runtime 的 `CommandInbox` 负责（AGENTS.md）。
 
@@ -114,7 +114,16 @@ pub trait CallObserver: Send + Sync { fn call_finished(&self, channel: &str, met
 
 `zcode-task` 的其余成员没有键；`sendPrompt` 的参数不带 workspace，算不出键。
 
-占用通道的时间：上面的方法都在 runtime 接受（ACK）时返回，不等 run 结束；runtime 的 Engine 逐个处理请求，本来也不会在请求里等一个 run 跑完。会有限地等待的情形：runtime 实例启动与存储就绪（`get_ready_client`）、`sendText` 向 Main 取浏览器环境（每个请求至多 30 s）、`deleteSession` / `closeSession` 等被取消的 run 收口、到 runtime 的请求超时（180 s；`compactSession` 放宽到 5 min）。这些等待期间同一会话的后续写操作排在后面，这正是要保证的顺序。
+`zcode-session` 的串行键（`crates/sessions/src/agent/session.rs` 的 `serial_key`，与上表同一个键空间）：这个 legacy 门面建在 `zcode-agent` 之上，写的是同一个会话，所以经它的写操作与经 `zcode-agent` 的 V4 命令按到达顺序交给 runtime。
+
+| 方法                                                                                                                          | 会话 id 的位置 |
+| ----------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `resumeSession`、`closeSession`、`closeDeferredDraftSession`、`setModel`、`setThoughtLevel`、`setMode`（经 runtime 改写会话） | `sessionId`    |
+| `promoteDeferredDraftSession`（改写 Host 的草稿表：它决定随后的 `setModel` 是否写 tasks-index）                               | `sessionId`    |
+
+没有键：`createSession`（与 `zcode-agent` 相同，带预分配 sessionId 的导入也不设）、`readWorkspacePresentation`、`initializeWorkspace`、`getWorkspaceRuntimeIdentity`、`listSessions`、`readSession`、`readSessionMessages`、`readSessionEvents`。本地 channel 没有 `sendPrompt`（契约 `IZCodeSessionService` 不含它）。远端 scope 的同名 channel（`RemoteSessionChannel`）把调用转发给远端，本地不设键，与远端的 `zcode-task` 相同。
+
+占用通道的时间：上面的方法都在 runtime 接受（ACK）时返回，不等 run 结束（`zcode-session` 的 `resumeSession` 可能再发一次 `setThoughtLevel`，它与 `setModel` 在 runtime 应答后再写一次 tasks-index）；runtime 的 Engine 逐个处理请求，本来也不会在请求里等一个 run 跑完。会有限地等待的情形：runtime 实例启动与存储就绪（`get_ready_client`）、`sendText` 向 Main 取浏览器环境（每个请求至多 30 s）、`deleteSession` / `closeSession` / `closeDeferredDraftSession` 等被取消的 run 收口、到 runtime 的请求超时（180 s；`compactSession` 放宽到 5 min）。这些等待期间同一会话的后续写操作排在后面，这正是要保证的顺序。
 
 ### 2.3 出站队列
 

@@ -66,6 +66,7 @@ crate：`apps/zcode-cli-rust/crates/delivery`（`zcode-cli-delivery`）。只依
   - 拥塞期间跳过增量的订阅都标记需要快照恢复，包括拥塞期间才登记、或在拥塞期间经 resync、快照恢复、历史重置拿到新快照的订阅。修复：以前只在进入拥塞时标记一次，这些订阅在拥塞解除后要等下一次增量暴露断档才补齐，会话空闲时一直停在旧状态。
 - stdio 前端的所有连接共用一个 sink，它的 `paused()` 是前端维护的进程级拥塞位：刷新前写端积压超过 64 MiB 时置位，每 100 ms 检查一次，低于 16 MiB 时清位。所有连接因此同时进入、同时恢复，与抽取前的全局阀相同。B4c 的 Host 让 `paused()` 读出站队列的饱和状态，在 `drained` 边沿或定时调用 `relieve`。
 - 连接在第一次订阅登记时按给出的 sink 建立，最后一个订阅结束或 `close_connection` 时删除。`close_connection` 让它的每个订阅各释放一次 pin，topic 的最后一个订阅释放后 runtime 不再保留它；`ConnectionClosed` 由嵌入方随后发送。
+- 订阅请求在途时连接关闭：`close_connection` 同时作废该连接在途的 `TopicOpen`。回复晚于关闭到达时不登记订阅、不推送初始帧，释放这次 open 取得的 pin，订阅请求回 `fault.connection.closed`（Host 对已关闭连接的订阅回的就是它，与 Node `assertOpen` 相同）；回复本身是错误时照原样回答（没有 pin 要释放）。只作废关闭时已在途的请求：关闭之后同一连接 id 的新订阅照常登记（stdio 前端允许连接 id 在 `closed` 之后重用）。修复：以前回复照常登记，已关闭的连接持有 pin、继续收到帧，要靠 Host 在 ACK 后补发退订清理。
 - 帧的字节与顺序、窗口（30 ms / 150 ms / 0）、水位、错误码与恢复都与抽取前相同。app-server、`tests/`、Node 驱动的集成测试与 Host 的测试不改断言。
 
 ```mermaid
@@ -224,19 +225,20 @@ sequenceDiagram
 
 - runtime（`apps/zcode-cli-rust/tests/input_queue.rs`，经 App 协议）：`inputQueue` 的空闲 / 运行中 / 暂停结果；`externalId` 记在队列项与轮头上；摘要的 `activeInputId` 随 run 出现与消失；`session/send` 带 `requestedDelivery: "queue"` 时在 legacy 锁下入队。
 - 桌面 E2E `queue-ui`（`scripts/rust-host/e2e-desktop.mjs`，嵌入式与子进程两种链路）：流式输出期间连续发送三条消息，按发送顺序出现在队列区；删除一条、把最后一条拖到最前，队列区随之变化；run 结束后剩下的两条按改后的顺序执行，删除的一条从未发给模型。外部客户端经 `enqueueTaskCommand` 入队的项出现在桌面队列区，桌面 E2E 没有覆盖（没有手机 / relay 的客户端）。
+- Host，实例 panic 后的结算（B10，`crates/zcode-host/tests/restart_settlement.rs`，可挂起的模拟模型；进程内与合并二进制的子进程链路各跑一次，故障注入只在调试构建里，所以不受 `ZCODE_TEST_CLI_RUST_BINARY` 影响）：一条输入在运行、一条排在它后面时，`ZCODE_RUNTIME_FAULT_MARKER` 让 Engine 循环 panic；下一次请求（`queryConversationCommandsV4`）让 Host 重启实例（代次 2）。开跑的输入查得 `accepted`（在 transcript 里），重提得到 `duplicate`；排队的输入查得 `failed fault.command.inputDiscardedOnRestart`（`result: {type: "inputDisposition", delivery: "queue"}`），重提得到同一个 ACK；新实例的队列为空；之后的新输入照常开跑并得到回复，transcript 里没有被丢弃的那条。
 - Host（`crates/services/tests/task_queue_cli.rs`，进程内 runtime + 可挂起的模拟模型；设置 `ZCODE_TEST_CLI_RUST_BINARY` 时走子进程链路）：运行中入队进入 runtime 队列、run 结束后由 runtime 开跑并带终态 inputId；promote 改变顺序；暂停的队列上 promote 开跑该项；cancel 移除、正在运行的项回 `already_running`；同一 commandId 重复入队不产生第二项；空闲会话入队立即开跑；held 时入队开跑而队列保持暂停；带附件的项在 legacy 锁下入队；三个成员的返回形状与错误码；runtime 实例重启后的结果（3.4.3 最后一条）；owner 错误码不变。
 
 ## 4. 步骤
 
-| 步   | 内容                                                                                                | 状态                                        |
-| ---- | --------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| B1   | 嵌入式成为缺省；桌面 E2E 改跑嵌入式；与子进程链路的对比测量                                         | 完成                                        |
-| B4a  | 投递逻辑抽成独立 crate（3.2）                                                                       | 完成                                        |
-| 边界 | 结构隔离、三种构建形态、单二进制多入口（[rust-host-cli-boundary.md](rust-host-cli-boundary.md)）    | 完成                                        |
-| B8   | 实例粒度（3.3）                                                                                     | 决定：保持每个 workspace 一个实例，不做切换 |
-| B9   | 输入队列归一（3.4）：三个接口映射到 `CommandInbox`，删除 Host 的命令队列                            | 完成，3.4.4 的差别已确认                    |
-| B10  | 已接受输入在实例重建后的结算：补测试（实例 panic 后查询命令状态得到 `inputDiscardedOnRestart`）     | 未开始                                      |
-| 缺陷 | 投递 crate：连接关闭与在途的订阅请求竞争时，连接已关仍登记订阅（今天由 Host 在 ACK 后补发退订清理） | 未开始                                      |
+| 步   | 内容                                                                                                | 状态                                                                                                                                                 |
+| ---- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B1   | 嵌入式成为缺省；桌面 E2E 改跑嵌入式；与子进程链路的对比测量                                         | 完成                                                                                                                                                 |
+| B4a  | 投递逻辑抽成独立 crate（3.2）                                                                       | 完成                                                                                                                                                 |
+| 边界 | 结构隔离、三种构建形态、单二进制多入口（[rust-host-cli-boundary.md](rust-host-cli-boundary.md)）    | 完成                                                                                                                                                 |
+| B8   | 实例粒度（3.3）                                                                                     | 决定：保持每个 workspace 一个实例，不做切换                                                                                                          |
+| B9   | 输入队列归一（3.4）：三个接口映射到 `CommandInbox`，删除 Host 的命令队列                            | 完成，3.4.4 的差别已确认                                                                                                                             |
+| B10  | 已接受输入在实例重建后的结算：补测试（实例 panic 后查询命令状态得到 `inputDiscardedOnRestart`）     | 完成（3.4.8），测试 `accepted_inputs_are_settled_after_an_embedded_runtime_panic`、`accepted_inputs_are_settled_after_a_child_process_runtime_panic` |
+| 缺陷 | 投递 crate：连接关闭与在途的订阅请求竞争时，连接已关仍登记订阅（今天由 Host 在 ACK 后补发退订清理） | 完成（3.2），测试 `a_subscribe_reply_after_its_connection_closed_registers_nothing`                                                                  |
 
 ## 5. 不做
 
