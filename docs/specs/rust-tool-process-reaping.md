@@ -170,7 +170,7 @@ sequenceDiagram
 - 测试（macOS 与 Linux；本机只运行过 macOS）：
   - `zcode-proc` 的 `ledger/sweep_tests.rs`，用真实进程树：所有者进程已不存在时，清扫结束整棵树并删除记录；所有者是另一个存活进程，或是本进程里仍在运行的实例时，清扫不动它的进程；pid 被复用（启动时间不符）时不结束任何进程，只删除记录；进程正常结束后记录被删除、目录为空；本进程里已经结束的实例留下的树被结束（嵌入的 runtime 在进程内重启的情形）；两个实例同时清扫同一个目录。
   - 端到端（`apps/zcode-cli-rust/tests/process_reaping.rs`）：真实的 `zcode-cli-rust app-server --stdio` 对着本地假模型运行一条安静的 Bash 命令（bash 等待 `sleep 300`），SIGKILL runtime 进程后命令的进程仍然存活（这就是缺陷）；在同一数据目录再次启动后，这些进程不再存在，账本目录为空。另一个用例：正常运行带工具调用的会话后，账本目录为空。
-  - 桌面 E2E（`scripts/rust-host/e2e-desktop.mjs`，嵌入式与子进程两种链路）：每个场景正常退出 App 后账本目录为空；`resilience-host-crash` 在 Host 被 SIGKILL 前让 runtime 运行一条安静的 Bash 命令（账本里有记录，所有者是 runtime 所在的进程），Host 自动重启、新的 runtime 实例启动后，按记下的 pid 与启动时刻核对这棵树已结束、账本为空；`agent-plugins-mcp` 在 MCP server 连接期间账本里有它的 `mcp-` 记录。
+  - 桌面 E2E（`scripts/rust-host/e2e-desktop.mjs`，嵌入式与子进程两种链路）：每个场景正常退出 App 后账本目录为空；`resilience-host-crash` 在 Host 被 SIGKILL 前让 runtime 运行一条安静的 Bash 命令（账本里有记录，所有者是 runtime 所在的进程），Host 自动重启、新的 runtime 实例启动后，按记下的 pid 与启动时刻核对这棵树已结束、账本为空；`agent-plugins-mcp` 在 MCP server 连接期间账本里有它的 `mcp-` 记录；`queue-ui` 配一个用户级 `UserPromptSubmit` hook，确认它对每个执行的输入都运行了。
 - Windows 的 Job Object 有本平台的测试（`zcode-proc` 的 `ledger/windows_tests.rs`、`job_tests.rs`），由 CI 的 Windows job 运行；在其他平台上只做交叉检查编译（`cargo clippy -p zcode-proc --target x86_64-pc-windows-msvc`）。工具层（`zcode-cli-tools`）在 macOS 上无法交叉编译到 Windows（`ring` 需要 Windows 的 C 头文件），它的 Windows 分支只剩 hooks 的 `creation_flags`，平台差异都在 `zcode-proc` 里。Linux 的 `PR_SET_PDEATHSIG` 未启用，没有测试。
 
 ## 5. 不做
