@@ -263,11 +263,11 @@ test("Rust Read sends a whole PDF as a document block to PDF models", posixOnly,
   try {
     const definition = first.tools.find((t: Message) => t.name === "Read");
     assert.equal(definition.input_schema.properties.pages.type, "string");
-    assert.ok(
-      definition.description.endsWith(
-        '\n- Reads PDFs via the `pages` parameter (e.g. "1-5", max 20 pages/request; required for PDFs over 10 pages).',
-      ),
-    );
+    // PDF 一行按 Node 的位置放在 images 与 video 之间，不再追加在末尾；完整文本与位置由
+    // zcode-cli-rust-tool-prompts.test.ts 对照 Node 断言，这里只确认它出现且只出现一次。
+    const pdfLine =
+      '\n- Reads PDFs via the `pages` parameter (e.g. "1-5", max 20 pages/request; required for PDFs over 10 pages).';
+    assert.equal(definition.description.split(pdfLine).length - 1, 1);
     const shown = join(await realpath(f.cwd), "doc.pdf");
     const heading = `PDF file read: ${shown} (${pdf.length} bytes)`;
     assert.deepEqual(toolResult(final), [
