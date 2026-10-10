@@ -10,11 +10,12 @@
 //! 与 Node 的差异：只有本地 source。搜索（`search`）逐个 source 调用 zcode-task 的全文检索
 //! `listTaskList`，再叠加投影行的实时状态（rust-host-tasks.md §2.3）。
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
-use zcode_host_kit::{Args, EventHub, Overflow, Reply, RpcError, ServiceBuilder, log};
+use zcode_async::Spawner;
+use zcode_host_kit::{Args, EventHub, Overflow, Reply, RpcError, Serial, ServiceBuilder, log};
 
 use super::{Partitions, TaskSource, WorkspaceEvents};
 use crate::agent::WorkspaceTarget;
@@ -96,12 +97,15 @@ pub struct ExternalUpdate {
 }
 
 pub struct Controller {
+    /// 自身的弱引用：刷新交给 owner 任务时带上强引用。
+    this: Weak<Controller>,
     tasks: Arc<dyn TaskSource>,
     observer: Arc<SessionsIndexObserver>,
     state: Mutex<State>,
     frames: EventHub<Arc<(u64, Value)>>,
-    /// 串行化分区读取与应用，避免较早的读取结果覆盖较新的。
-    refresh_lock: tokio::sync::Mutex<()>,
+    /// 刷新的 owner 任务：分区读取与应用逐个执行，较早的读取结果不会覆盖较新的
+    /// （docs/specs/rust-u2-task-scope.md §6.3）。
+    refreshes: Serial,
     external: Mutex<Option<Arc<dyn ExternalSources>>>,
 }
 
@@ -427,12 +431,17 @@ pub fn matches_kind(membership: &Value, kind: &str) -> bool {
 }
 
 impl Controller {
+    /// 观察者、workspace 事件的处理与刷新的 owner 任务都在 `spawner`（tasks 的作用域）里。
     pub fn start(
+        spawner: &Spawner,
         tasks: Arc<dyn TaskSource>,
         observer: Arc<SessionsIndexObserver>,
         workspace_events: WorkspaceEvents,
     ) -> Arc<Self> {
-        let controller = Arc::new(Self {
+        let controller = Arc::new_cyclic(|this| Self {
+            this: this.clone(),
+            // 刷新来自 Renderer 请求与 workspace 事件，一次读一个 source 的分区；排队超过 64 个时提交方等待。
+            refreshes: Serial::start(spawner, "task-controller-refresh", 64),
             tasks,
             observer: observer.clone(),
             state: Mutex::new(State {
@@ -451,45 +460,48 @@ impl Controller {
             // 每条连接的 `zcode-task` 帧，订阅者是该连接的 Renderer 订阅（Gateway 立即搬进出站队列）。
             // 落后 1024 条说明转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
             frames: EventHub::new("task-controller-frames", 1024, Overflow::CloseSubscriber),
-            refresh_lock: tokio::sync::Mutex::new(()),
             external: Mutex::new(None),
         });
         let mut index_events = Box::pin(observer.events().subscribe());
         let weak = Arc::downgrade(&controller);
-        tokio::spawn(async move {
-            while let Some(event) = index_events.next().await {
-                let Some(controller) = weak.upgrade() else {
-                    return;
-                };
-                let target = match event.as_ref() {
-                    IndexEvent::Snapshot { target, .. }
-                    | IndexEvent::Upserted { target, .. }
-                    | IndexEvent::Removed { target, .. }
-                    | IndexEvent::Offline { target } => target,
-                };
-                controller.apply_overlays(&target.key());
-            }
-        });
+        drop(
+            spawner.spawn_resident("task-controller-overlays", async move {
+                while let Some(event) = index_events.next().await {
+                    let Some(controller) = weak.upgrade() else {
+                        return;
+                    };
+                    let target = match event.as_ref() {
+                        IndexEvent::Snapshot { target, .. }
+                        | IndexEvent::Upserted { target, .. }
+                        | IndexEvent::Removed { target, .. }
+                        | IndexEvent::Offline { target } => target,
+                    };
+                    controller.apply_overlays(&target.key());
+                }
+            }),
+        );
         // workspace 事件（新建、改名、未读、置顶……）一律强制重读该 source 的分区。
         let mut events = Box::pin(workspace_events.subscribe());
         let weak = Arc::downgrade(&controller);
-        tokio::spawn(async move {
-            while let Some(event) = events.next().await {
-                let Some(controller) = weak.upgrade() else {
-                    return;
-                };
-                let target = controller
-                    .lock()
-                    .sources
-                    .get(&event.workspace_key)
-                    .map(|source| source.target.clone());
-                if let Some(target) = target
-                    && let Err(error) = controller.refresh(&target, true).await
-                {
-                    log::warn(format!("controller refresh failed: {}", error.message));
+        drop(
+            spawner.spawn_resident("task-controller-workspace-events", async move {
+                while let Some(event) = events.next().await {
+                    let Some(controller) = weak.upgrade() else {
+                        return;
+                    };
+                    let target = controller
+                        .lock()
+                        .sources
+                        .get(&event.workspace_key)
+                        .map(|source| source.target.clone());
+                    if let Some(target) = target
+                        && let Err(error) = controller.refresh(&target, true).await
+                    {
+                        log::warn(format!("controller refresh failed: {}", error.message));
+                    }
                 }
-            }
-        });
+            }),
+        );
         controller
     }
 
@@ -553,10 +565,20 @@ impl Controller {
         self.emit(frames);
     }
 
-    /// 登记 source（首次登记发 workspace.upserted），按需读取分区并更新投影。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// 登记 source（首次登记发 workspace.upserted），按需读取分区并更新投影。在刷新的 owner 任务里
+    /// 逐个执行；调用方放弃等待不打断已经开始的刷新。
     pub async fn refresh(&self, target: &WorkspaceTarget, force: bool) -> Result<(), RpcError> {
-        let _guard = self.refresh_lock.lock().await;
+        let Some(controller) = self.this.upgrade() else {
+            return Ok(());
+        };
+        let target = target.clone();
+        self.refreshes
+            .run(async move { controller.refresh_now(&target, force).await })
+            .await
+            .unwrap_or_else(|stopped| Err(RpcError::new("Error", stopped.to_string())))
+    }
+
+    async fn refresh_now(&self, target: &WorkspaceTarget, force: bool) -> Result<(), RpcError> {
         let key = target.key();
         let (registered, loaded) = {
             let mut state = self.lock();
@@ -1088,7 +1110,8 @@ mod tests {
             ],
             ..Default::default()
         })));
-        let controller = Controller::start(fake, observer, events);
+        let controller =
+            Controller::start(&zcode_host_base::testing::spawner(), fake, observer, events);
         let mut frames = Box::pin(controller.frames.subscribe_filtered(|frame| frame.0 == 7));
         let ack = controller
             .subscribe(7, &json!({"topic": TASKS_TOPIC}))

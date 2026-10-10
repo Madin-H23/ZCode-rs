@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
+use zcode_async::Spawner;
 use zcode_host_kit::{EventHub, Overflow, RpcError};
 
 use super::SessionSignal;
@@ -43,7 +44,8 @@ pub struct TaskLifecycle {
 }
 
 impl TaskLifecycle {
-    pub fn start(context: Arc<TaskContext>) -> Arc<Self> {
+    /// 终态信号的转发是 `spawner`（tasks 的作用域）里的常驻任务 `task-lifecycle-signals`。
+    pub fn start(spawner: &Spawner, context: Arc<TaskContext>) -> Arc<Self> {
         let lifecycle = Arc::new(Self {
             context: context.clone(),
             // 订阅者是 Renderer 订阅与 automation / off-peak / bots 等待终态的任务；每个 task 一轮至多几条。
@@ -54,14 +56,16 @@ impl TaskLifecycle {
         });
         let mut signals = Box::pin(context.tasks.signals().subscribe());
         let weak = Arc::downgrade(&lifecycle);
-        tokio::spawn(async move {
-            while let Some(signal) = signals.next().await {
-                let Some(lifecycle) = weak.upgrade() else {
-                    return;
-                };
-                lifecycle.on_signal(&signal);
-            }
-        });
+        drop(
+            spawner.spawn_resident("task-lifecycle-signals", async move {
+                while let Some(signal) = signals.next().await {
+                    let Some(lifecycle) = weak.upgrade() else {
+                        return;
+                    };
+                    lifecycle.on_signal(&signal);
+                }
+            }),
+        );
         lifecycle
     }
 

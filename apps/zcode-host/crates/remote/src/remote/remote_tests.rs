@@ -351,6 +351,7 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
     );
     let local = Arc::new(LocalTasks(Mutex::new(Vec::new())));
     let controller = Controller::start(
+        &zcode_host_base::testing::spawner(),
         local.clone(),
         crate::agent::sessions_index::SessionsIndexObserver::start(runtime),
         workspace_events(),

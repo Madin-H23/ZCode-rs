@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use tokio::task::JoinHandle;
+use zcode_async::Spawner;
 use zcode_host_kit::log;
 
 use super::meta;
@@ -40,18 +40,20 @@ pub struct Syncer {
     tasks: Arc<TaskService>,
 }
 
+/// 同步是 `spawner`（tasks 的作用域）里的常驻任务 `task-index-syncer`，随作用域结束。
 pub fn start(
+    spawner: &Spawner,
     observer: &SessionsIndexObserver,
     runtime: AgentRuntime,
     tasks: Arc<TaskService>,
-) -> JoinHandle<()> {
+) {
     let mut events = Box::pin(observer.events().subscribe());
     let syncer = Syncer { runtime, tasks };
-    tokio::spawn(async move {
+    drop(spawner.spawn_resident("task-index-syncer", async move {
         while let Some(event) = events.next().await {
             syncer.handle(&event).await;
         }
-    })
+    }));
 }
 
 impl Syncer {

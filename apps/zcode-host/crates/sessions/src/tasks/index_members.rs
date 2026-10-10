@@ -361,6 +361,7 @@ mod tests {
                 .subscribe_filtered(|event| event.workspace_key == "/w"),
         );
         let controller = Controller::start(
+            &zcode_host_base::testing::spawner(),
             Arc::new(fx.context.clone()),
             fx.observer.clone(),
             fx.events.clone(),

@@ -153,6 +153,7 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 | `host/services/agent`                       | `Installed`                                 | `instance-start`（一次启动，槽位 single-flight）、`instance-monitor`（每个实例一个，持有实例的作用域）、`sessions-index-follow`（每代实例一个，unavailable 或被替换时中止）、`warm-up`、`subscribe`（V4 订阅握手，调用方取消也走完）、`legacy-session-listener`（随订阅流结束）、`connection-dispose`；常驻：`process-events`、`agent-notifications`、`legacy-session-events`、`sessions-index-lifecycle` | 随 Host；`dispose_all` 等监视任务收口（上限 3 s）        |
 | `host/services/agent/<key>#<代次>[:<lane>]` | 该实例的 `instance-monitor`                 | `client-reader`、`client-writer`（owner：stdin）、`storage-first-frame`、`storage-watch`、`idle-reclaim`（mcp-status）、`stderr-drain`、`preferences`（owner：偏好推送）、`reverse-request`                                                                                                                                                                                                               | 监视任务收口的最后一步释放（实例退出、被回收或 dispose） |
 | `host/services/agent/connection:<id>`       | `zcode-agent` channel 的连接状态（`Scope`） | `frame-route`（每个 (kind, workspace) 一个）、`connection-flow`（流控边沿的串行转发）                                                                                                                                                                                                                                                                                                                     | 连接关闭的收口（`closed` 发完、退订之后）关闭            |
+| `host/services/tasks`                       | `Installed`                                 | 常驻：`task-lifecycle-signals`、`task-index-syncer`、`task-controller-overlays`、`task-controller-workspace-events`、`task-controller-refresh`（owner：分区的读取与应用）                                                                                                                                                                                                                                 | 随 Host                                                  |
 
 测试构造 service 时用 `zcode_host_base::testing::spawner()`：一个随测试进程存在、不关闭的根作用域。
 
@@ -194,11 +195,12 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 
 其余通道（mpsc 与 RPC 链路）：
 
-| 通道                  | 位置                                   | 容量 | 满了                                                                       | 理由                                               |
-| --------------------- | -------------------------------------- | ---- | -------------------------------------------------------------------------- | -------------------------------------------------- |
-| 连接流控的边沿与补发  | `sessions/src/agent/flow.rs`           | 256  | 边沿合并为最新状态（处理完队列再转发）；补发丢弃并记 warn；`closed` 等空位 | 接入层同步报告、不能等；边沿成对抵消，最终状态不变 |
-| CLI stdin 的写入      | `sessions/src/agent/client.rs`         | 64   | 写入方等待（背压）                                                         | 写任务只写 stdin，不等读循环或写入方，不会死锁     |
-| legacy 会话监听的出口 | `sessions/src/agent/session_events.rs` | 4096 | 结束这个监听（已入队的照常送达），记 warn                                  | 监听任务同时暂存 live 事件，不能为慢订阅停下       |
+| 通道                  | 位置                                   | 容量 | 满了                                                                       | 理由                                                                                     |
+| --------------------- | -------------------------------------- | ---- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 连接流控的边沿与补发  | `sessions/src/agent/flow.rs`           | 256  | 边沿合并为最新状态（处理完队列再转发）；补发丢弃并记 warn；`closed` 等空位 | 接入层同步报告、不能等；边沿成对抵消，最终状态不变                                       |
+| CLI stdin 的写入      | `sessions/src/agent/client.rs`         | 64   | 写入方等待（背压）                                                         | 写任务只写 stdin，不等读循环或写入方，不会死锁                                           |
+| legacy 会话监听的出口 | `sessions/src/agent/session_events.rs` | 4096 | 结束这个监听（已入队的照常送达），记 warn                                  | 监听任务同时暂存 live 事件，不能为慢订阅停下                                             |
+| tasks-index 的请求    | `sessions/src/tasks_index/mod.rs`      | 256  | 调用方等待（背压）                                                         | 专用线程只执行同步的 SQLite 操作，不等调用方；线程是连接的 owner，最后一个句柄释放时退出 |
 
 ### 6.3 不跨 `.await` 持有 tokio 的锁
 
@@ -215,6 +217,7 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 | `sessions/src/agent/client.rs` `write_line` / `close_input` | 写端 `tokio::Mutex<Option<writer>>` 跨写入持有                                     | 写任务 `client-writer` 独占 stdin，按提交顺序整行写出（有界 64，满了写入方等待）；关闭 stdin 是排在已提交行之后的一项工作                           |
 | `sessions/src/agent/runtime.rs` `acquire`                   | per-key 槽 `tokio::Mutex` 跨整个启动持有（single-flight）                          | 槽表 `std::sync::Mutex`，持锁只做同步读写；启动在任务 `instance-start` 里，正在启动时等待方共享它的结果（`Shared`）；调用方被取消不再让启动停在半途 |
 | `sessions/src/agent/runtime.rs` `ensure_preferences`        | 每进程 `tokio::Mutex<u64>` 跨推送持有，保证按版本顺序推送                          | 每进程的 owner 任务 `preferences`（`Serial`）：推送循环在里面执行，版本只增不减                                                                     |
+| `sessions/src/tasks/controller.rs` `refresh`                | 全局 `tokio::Mutex<()>` 跨“读分区 → 应用”持有，避免旧读取覆盖新读取                | 刷新的 owner 任务 `task-controller-refresh`（`Serial`）：逐个执行，顺序不变；调用方放弃等待不打断刷新                                               |
 
 ### 6.4 关闭报告
 

@@ -204,7 +204,12 @@ async fn task_lifecycle_against_rust_cli() {
     let events = workspace_events();
     let tasks = TaskService::new(Arc::new(index.clone()), events.clone(), runtime.clone());
     let observer = SessionsIndexObserver::start(runtime.clone());
-    let _syncer = syncer::start(&observer, runtime.clone(), tasks.clone());
+    syncer::start(
+        &zcode_host_services::testing::spawner(),
+        &observer,
+        runtime.clone(),
+        tasks.clone(),
+    );
     let context = TaskContext::new(
         TaskPaths {
             user_home: home.path().into(),
@@ -216,7 +221,7 @@ async fn task_lifecycle_against_rust_cli() {
         runtime.clone(),
         settings,
     );
-    let lifecycle = TaskLifecycle::start(context.clone());
+    let lifecycle = TaskLifecycle::start(&zcode_host_services::testing::spawner(), context.clone());
     let key = workspace_path.clone();
     let mut workspace_events = Box::pin(events.subscribe_filtered(move |e| e.workspace_key == key));
     let mut terminal = Box::pin(lifecycle.terminal_outcomes().subscribe());
@@ -377,7 +382,7 @@ async fn claude_import_against_rust_cli() {
         runtime.clone(),
         SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
     );
-    let lifecycle = TaskLifecycle::start(context);
+    let lifecycle = TaskLifecycle::start(&zcode_host_services::testing::spawner(), context);
     // 一个普通会话、一个侧链会话、一个 worktree 下的会话；只有第一个可导入。
     let project = home.path().join(".claude/projects/-tmp-project");
     std::fs::create_dir_all(project.join("subagents")).unwrap();

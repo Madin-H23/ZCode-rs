@@ -212,7 +212,6 @@ struct Harness {
     runtime: AgentRuntime,
     lifecycle: Arc<TaskLifecycle>,
     _observer: Arc<SessionsIndexObserver>,
-    _syncer: tokio::task::JoinHandle<()>,
 }
 
 async fn harness() -> Harness {
@@ -252,7 +251,12 @@ async fn harness() -> Harness {
         .unwrap();
     let tasks = TaskService::new(Arc::new(index.clone()), workspace_events(), runtime.clone());
     let observer = SessionsIndexObserver::start(runtime.clone());
-    let syncer = syncer::start(&observer, runtime.clone(), tasks.clone());
+    syncer::start(
+        &zcode_host_services::testing::spawner(),
+        &observer,
+        runtime.clone(),
+        tasks.clone(),
+    );
     let context = TaskContext::new(
         TaskPaths {
             user_home: home.path().into(),
@@ -271,9 +275,8 @@ async fn harness() -> Harness {
         path,
         mock,
         runtime,
-        lifecycle: TaskLifecycle::start(context),
+        lifecycle: TaskLifecycle::start(&zcode_host_services::testing::spawner(), context),
         _observer: observer,
-        _syncer: syncer,
     }
 }
 

@@ -85,7 +85,6 @@ pub struct Installed {
     /// 观察者只被弱引用的生命周期任务持有，必须留在这里才能存活。
     _observer: Arc<agent::sessions_index::SessionsIndexObserver>,
     _controller: Arc<tasks::controller::Controller>,
-    _syncer: tokio::task::JoinHandle<()>,
     automation: automation::AreaHandle,
     /// 调度状态机（rust-u4-app-host.md §2.4）：install 结束时启动，Host 退出时最先收尾。
     scheduler: scheduler::SchedulerHandle,
@@ -234,13 +233,15 @@ pub fn install(
     );
     registry.implement(tasks::index_members::service(task_context.clone()));
     // 生命周期、查询与事件成员；automation / off-peak / bots 也可直接用 TaskLifecycle 的 API。
-    let task_lifecycle = tasks::lifecycle::TaskLifecycle::start(task_context.clone());
+    let task_tasks = scope("tasks");
+    let task_lifecycle = tasks::lifecycle::TaskLifecycle::start(&task_tasks, task_context.clone());
     registry.implement(tasks::lifecycle_service::service(task_lifecycle));
     // App 级 Host 不建立到 Main taskRealtimeBus 的实时桥（rust-u4-app-host.md §2.5）：run 的 owner 与
     // stale run 判断在 TaskLifecycle 内；远端 workspace 的会话消息请求由 remote 区域在 Host 内应答。
     // `init-local` 的 hostId / deliveryKind 仍可解析但不再使用。
-    let syncer = tasks::syncer::start(&observer, agent.clone(), task_service.clone());
+    tasks::syncer::start(&task_tasks, &observer, agent.clone(), task_service.clone());
     let controller = tasks::controller::Controller::start(
+        &task_tasks,
         Arc::new(task_context),
         observer.clone(),
         workspace_events,
@@ -409,7 +410,6 @@ pub fn install(
         workspace,
         _observer: observer,
         _controller: controller,
-        _syncer: syncer,
         automation,
         scheduler,
         remote,

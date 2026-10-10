@@ -10,11 +10,15 @@
 //! `BEGIN IMMEDIATE` 中完成，业务连接 busy_timeout 5000 ms。
 //!
 //! ```text
-//! async 调用方 ──job──► mpsc ──► tasks-index 线程（rusqlite::Connection）
-//!      ▲                              │ BEGIN IMMEDIATE … COMMIT
-//!      └────────── oneshot 结果 ◄──────┘
+//! async 调用方 ──job──► mpsc（有界）──► tasks-index 线程（rusqlite::Connection）
+//!      ▲                                    │ BEGIN IMMEDIATE … COMMIT
+//!      └────────────── oneshot 结果 ◄────────┘
 //! 其他 Host / Node Host ──────────► 同一文件（WAL；写锁串行）
 //! ```
+//!
+//! 线程是这条连接的 owner：最后一个句柄释放时队列关闭、线程退出、连接关闭（不是 tokio 任务，不属于
+//! 任何作用域）。请求队列有界（[`JOB_QUEUE`]），满了调用方等待（背压，docs/specs/rust-u2-task-scope.md
+//! §6.2）：线程只执行队列里的同步操作，从不等调用方，不会死锁。
 mod api;
 mod archive;
 pub mod automation_repo;
@@ -34,13 +38,13 @@ mod tests;
 
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, anyhow};
 use rusqlite::Connection;
 use serde_json::Value;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use zcode_host_kit::log;
 
 use meta::{JsObject, as_integer, validate_input_meta};
@@ -72,6 +76,9 @@ pub struct UnreadOutcome {
 }
 
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
+
+/// 排队等 tasks-index 线程执行的请求上限。
+const JOB_QUEUE: usize = 256;
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 /// tasks-index 的唯一读写入口；clone 共享同一线程与连接。
@@ -117,7 +124,7 @@ impl TasksIndex {
         clock: Clock,
         lock_wait: Duration,
     ) -> Result<Self, TasksIndexError> {
-        let (jobs, receiver) = mpsc::channel::<Job>();
+        let (jobs, receiver) = mpsc::channel::<Job>(JOB_QUEUE);
         let (ready_tx, ready_rx) = oneshot::channel();
         let thread_path = path.clone();
         let thread_clock = clock.clone();
@@ -178,6 +185,7 @@ impl TasksIndex {
         self.inner
             .jobs
             .send(job)
+            .await
             .map_err(|_| anyhow!("tasks-index worker stopped"))?;
         result
             .await
@@ -468,8 +476,8 @@ fn set_unread(
 }
 
 /// 请求按到达顺序串行执行；单个请求 panic 时回滚未结束的事务，线程继续服务。
-fn run_jobs(mut conn: Connection, jobs: mpsc::Receiver<Job>) {
-    while let Ok(job) = jobs.recv() {
+fn run_jobs(mut conn: Connection, mut jobs: mpsc::Receiver<Job>) {
+    while let Some(job) = jobs.blocking_recv() {
         if std::panic::catch_unwind(AssertUnwindSafe(|| job(&mut conn))).is_err() {
             if !conn.is_autocommit() {
                 let _ = conn.execute_batch("ROLLBACK");
