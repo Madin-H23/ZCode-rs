@@ -13,6 +13,8 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, ReadHalf, WriteHalf};
 use zcode_cli_rust::{embed, runtime::RuntimeOptions, serve::AppServerOptions};
 
+use super::common::read_request;
+
 const LIMIT: Duration = Duration::from_secs(20);
 
 fn sse(delta: Value, finish: Option<&str>) -> String {
@@ -88,36 +90,6 @@ fn respond(body: &str) -> String {
             "function": {"name": name, "arguments": arguments.to_string()}}]}),
         Some("tool_calls"),
     )
-}
-
-async fn read_request(socket: &mut tokio::net::TcpStream) -> Option<String> {
-    let mut bytes = Vec::new();
-    let mut chunk = [0u8; 4096];
-    let header_end = loop {
-        if let Some(at) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
-            break at + 4;
-        }
-        let read = socket.read(&mut chunk).await.ok()?;
-        if read == 0 {
-            return None;
-        }
-        bytes.extend_from_slice(&chunk[..read]);
-    };
-    let head = String::from_utf8_lossy(&bytes[..header_end]).to_ascii_lowercase();
-    let length: usize = head
-        .lines()
-        .find_map(|line| line.strip_prefix("content-length:"))?
-        .trim()
-        .parse()
-        .ok()?;
-    while bytes.len() < header_end + length {
-        let read = socket.read(&mut chunk).await.ok()?;
-        if read == 0 {
-            return None;
-        }
-        bytes.extend_from_slice(&chunk[..read]);
-    }
-    Some(String::from_utf8_lossy(&bytes[header_end..header_end + length]).into_owned())
 }
 
 struct Mock {

@@ -16,6 +16,8 @@ use zcode_cli_rust::{
     domain::{goal::Goal, session::Session},
 };
 
+use super::common::Clock;
+
 struct Store {
     gate: mpsc::UnboundedSender<oneshot::Sender<bool>>,
     intercepted: AtomicBool,
@@ -111,15 +113,6 @@ impl ToolPort for Tools {
     }
     async fn execute(&self, _: &str, _: &Value, _: &CancellationToken) -> Result<String> {
         panic!("no tool expected")
-    }
-}
-struct Clock(AtomicUsize);
-impl RuntimeClock for Clock {
-    fn id(&self) -> String {
-        self.0.fetch_add(1, Ordering::SeqCst).to_string()
-    }
-    fn now(&self) -> u64 {
-        1000
     }
 }
 #[tokio::test]

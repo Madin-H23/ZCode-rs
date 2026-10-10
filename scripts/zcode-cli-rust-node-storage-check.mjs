@@ -1,6 +1,6 @@
 // Run with node --import tsx. Rust writes scripted sessions (queued input and a
 // restarted runtime continuing it; guided and removed busy inputs) into fresh
-// Node session databases (apps/zcode-cli-rust/tests/node_storage.rs); Node's
+// Node session databases (apps/zcode-cli-rust/tests/suite/node_storage.rs); Node's
 // SqliteSessionStore, history hydrator and cold projection read it back and
 // must agree with what Rust reads. Spec rust-m11-node-storage §5.2, §11.
 import { execFileSync } from "node:child_process";
@@ -141,17 +141,24 @@ async function check(name, root, file) {
 
 const dir = await mkdtemp(join(tmpdir(), "zcode-node-storage-"));
 try {
+  // 用与 nextest 相同的 profile 设置：pnpm test:zcode-cli-rust 里这一步紧跟 nextest，直接复用它刚构建的
+  // `all` 测试二进制，不再另编一份关掉调试信息与增量编译的整个 CLI。
   execFileSync(
     "cargo",
-    ["test", "-q", "--manifest-path", "apps/zcode-cli-rust/Cargo.toml", "--test", "node_storage"],
+    [
+      "test",
+      "-q",
+      "--manifest-path",
+      "apps/zcode-cli-rust/Cargo.toml",
+      "--test",
+      "all",
+      "suite::node_storage::",
+    ],
     {
       stdio: "inherit",
       env: {
         ...process.env,
         ZCODE_CLI_RUST_NODE_DUMP: dir,
-        CARGO_INCREMENTAL: "0",
-        CARGO_PROFILE_DEV_DEBUG: "0",
-        CARGO_PROFILE_TEST_DEBUG: "0",
       },
     },
   );

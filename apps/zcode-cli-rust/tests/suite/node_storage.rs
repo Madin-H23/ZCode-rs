@@ -1,19 +1,12 @@
 //! The engine over the Node session database (spec rust-m11-node-storage
 //! §5.2 acceptance): turns are written as Node records, and Node's cold
 //! readers give back the live model context and rows, across a restart.
-#[path = "node_storage/attach.rs"]
 mod attach;
-#[path = "node_storage/files.rs"]
 mod files;
-#[path = "node_storage/goal.rs"]
 mod goal;
-#[path = "node_storage/grants.rs"]
 mod grants;
-#[path = "node_storage/harness.rs"]
 mod harness;
-#[path = "node_storage/shared.rs"]
 mod shared;
-#[path = "node_storage/side_chat.rs"]
 mod side_chat;
 
 use serde_json::{Value, json};
