@@ -40,7 +40,10 @@ impl Fixture {
             .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
             .collect(),
         );
-        let git = channel(service(GitRepo::new(&env)));
+        let git = channel(service(GitRepo::new(
+            &zcode_host_base::testing::spawner(),
+            &env,
+        )));
         Self {
             _home: home,
             env,
@@ -151,7 +154,10 @@ async fn not_a_repository_is_data_for_reads_and_an_error_for_mutations() {
 #[tokio::test]
 async fn missing_git_binary_reports_unavailable() {
     let env = ProcessEnv::new([("PATH".to_owned(), "/nonexistent".to_owned())].into());
-    let git = channel(service(GitRepo::new(&env)));
+    let git = channel(service(GitRepo::new(
+        &zcode_host_base::testing::spawner(),
+        &env,
+    )));
     let summary = call(
         &git,
         "getRepositorySummary",
@@ -653,7 +659,7 @@ async fn generate_commit_message_uses_agent_text_generation() {
     });
     let generator: Arc<dyn super::commit_message::TextGenerator> = mock.clone();
     let git = channel(super::service_with(
-        GitRepo::new(&fixture.env),
+        GitRepo::new(&zcode_host_base::testing::spawner(), &fixture.env),
         super::CommitMessageSupport {
             generator: Some(generator),
             default_locale: None,
@@ -686,7 +692,7 @@ async fn generate_commit_message_uses_agent_text_generation() {
         seen: Default::default(),
     });
     let git = channel(super::service_with(
-        GitRepo::new(&fixture.env),
+        GitRepo::new(&zcode_host_base::testing::spawner(), &fixture.env),
         super::CommitMessageSupport {
             generator: Some(bad),
             default_locale: None,
@@ -704,7 +710,10 @@ async fn generate_commit_message_uses_agent_text_generation() {
         "模型没有返回可用的 Conventional Commit 提交消息。"
     );
 
-    let unavailable = channel(super::service(GitRepo::new(&fixture.env)));
+    let unavailable = channel(super::service(GitRepo::new(
+        &zcode_host_base::testing::spawner(),
+        &fixture.env,
+    )));
     let error = call(
         &unavailable,
         "generateCommitMessage",

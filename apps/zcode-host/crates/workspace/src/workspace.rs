@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use serde_json::Value;
+use zcode_async::{Spawner, TaskScope};
 use zcode_host_control::ControlRouter;
 use zcode_host_kit::{ChannelRegistry, RpcError};
 
@@ -46,6 +47,8 @@ impl TextGenerator for AgentTextGenerator {
 }
 
 pub struct WorkspaceDeps<'a> {
+    /// 工作区的作用域（`host/services/workspace`）：终端、文件监听、git 的任务在它的子作用域里。
+    pub spawner: &'a Spawner,
     pub environment: &'a HostEnvironment,
     pub child_env: &'a ProcessEnv,
     pub settings: SettingStore,
@@ -59,6 +62,8 @@ pub struct WorkspaceDeps<'a> {
 /// Host 退出时需要回收的工作区资源。
 pub struct Workspace {
     terminals: Terminals,
+    /// `file-watchers`、`terminals`、`git` 三个子作用域，随工作区存在。
+    _scopes: [TaskScope; 3],
 }
 
 impl Workspace {
@@ -72,11 +77,20 @@ pub fn install(
     registry: &mut ChannelRegistry,
     router: &mut ControlRouter,
 ) -> Workspace {
-    registry.implement(file_watcher::service(file_watcher::FileWatchers::new()));
-    let terminals = Terminals::new(deps.child_env.clone(), deps.settings);
+    let child = |name: &str| deps.spawner.child(name.to_owned());
+    let (watchers, terminal_tasks, git_tasks) =
+        (child("file-watchers"), child("terminals"), child("git"));
+    registry.implement(file_watcher::service(file_watcher::FileWatchers::new(
+        &watchers.spawner(),
+    )));
+    let terminals = Terminals::new(
+        &terminal_tasks.spawner(),
+        deps.child_env.clone(),
+        deps.settings,
+    );
     registry.implement(terminal::service(terminals.clone()));
 
-    let repo = GitRepo::new(deps.child_env);
+    let repo = GitRepo::new(&git_tasks.spawner(), deps.child_env);
     let generator: Arc<dyn TextGenerator> = Arc::new(AgentTextGenerator {
         agent: deps.agent_api,
         providers: deps.providers,
@@ -90,6 +104,7 @@ pub fn install(
     ));
     let data_root = deps.environment.data_base_dir.join(".zcode");
     registry.implement(checkpoint::service(checkpoint::Checkpoints::new(
+        &git_tasks.spawner(),
         repo,
         data_root,
         deps.environment.app_config_dir(),
@@ -102,5 +117,8 @@ pub fn install(
         .set_media_path_authorizer(authorizer.clone());
     registry.implement(media_preview::service(Some(authorizer)));
     registry.implement(prompt_attachment_transfer::service());
-    Workspace { terminals }
+    Workspace {
+        terminals,
+        _scopes: [watchers, terminal_tasks, git_tasks],
+    }
 }

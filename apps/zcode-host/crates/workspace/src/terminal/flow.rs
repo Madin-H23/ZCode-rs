@@ -151,3 +151,26 @@ pub(super) async fn wait_open(paused: &mut watch::Receiver<bool>) {
         let _ = paused.wait_for(|paused| !*paused).await;
     }
 }
+
+/// [`wait_open`] 的阻塞版本，给 Windows 上读 PTY 的阻塞线程用：在当前线程上等门打开（`watch` 不依赖
+/// tokio 运行时，用线程挂起 / 唤醒驱动即可）。原来取运行时句柄 `block_on`，任务入口之外不再取运行时句柄。
+#[cfg(windows)]
+pub(super) fn wait_open_blocking(paused: &mut watch::Receiver<bool>) {
+    use std::future::Future;
+    use std::task::{Context, Poll, Wake, Waker};
+
+    struct Unpark(std::thread::Thread);
+
+    impl Wake for Unpark {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+
+    let waker = Waker::from(Arc::new(Unpark(std::thread::current())));
+    let mut context = Context::from_waker(&waker);
+    let mut wait = std::pin::pin!(wait_open(paused));
+    while let Poll::Pending = wait.as_mut().poll(&mut context) {
+        std::thread::park();
+    }
+}

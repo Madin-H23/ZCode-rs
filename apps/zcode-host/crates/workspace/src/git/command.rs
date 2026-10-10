@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::{Notify, OnceCell};
+use zcode_async::Spawner;
 use zcode_host_kit::RpcError;
 
 use crate::support::env::ProcessEnv;
@@ -156,6 +157,8 @@ pub struct GitRunner {
 }
 
 struct Inner {
+    /// git 的作用域：Windows 上结束进程树的 taskkill 在这里被回收。
+    spawner: Spawner,
     env: ProcessEnv,
     candidates: Vec<String>,
     /// 首次探测结果（包括“没有 git”）在 service 生命周期内缓存。
@@ -260,7 +263,7 @@ async fn read_capped(
 }
 
 #[cfg(windows)]
-fn force_kill(child: &mut tokio::process::Child, env: &ProcessEnv) {
+fn force_kill(child: &mut tokio::process::Child, env: &ProcessEnv, spawner: &Spawner) {
     // Windows：taskkill /T 连同 git 拉起的 helper/filter 子进程一起结束。
     if let Some(pid) = child.id() {
         let mut killer = command("taskkill", env);
@@ -270,15 +273,15 @@ fn force_kill(child: &mut tokio::process::Child, env: &ProcessEnv) {
             .stderr(Stdio::null())
             .kill_on_drop(true);
         if let Ok(mut killer) = killer.spawn() {
-            tokio::spawn(async move {
+            drop(spawner.spawn("git-taskkill", async move {
                 let _ = tokio::time::timeout(KILL_GRACE, killer.wait()).await;
-            });
+            }));
         }
     }
 }
 
 #[cfg(not(windows))]
-fn force_kill(child: &mut tokio::process::Child, _env: &ProcessEnv) {
+fn force_kill(child: &mut tokio::process::Child, _env: &ProcessEnv, _spawner: &Spawner) {
     let _ = child.start_kill();
 }
 
@@ -293,9 +296,10 @@ fn soft_kill(child: &mut tokio::process::Child) {
 }
 
 impl GitRunner {
-    pub fn new(base: &ProcessEnv) -> Self {
+    pub fn new(spawner: &Spawner, base: &ProcessEnv) -> Self {
         Self {
             inner: Arc::new(Inner {
+                spawner: spawner.clone(),
                 env: command_env(base),
                 candidates: binary_candidates(base),
                 binary: OnceCell::new(),
@@ -406,7 +410,7 @@ impl GitRunner {
                         1 => {
                             output.force_kill_attempted = true;
                             if status.is_none() {
-                                force_kill(&mut child, &env);
+                                force_kill(&mut child, &env, &self.inner.spawner);
                             }
                             FORCE_KILL_GRACE
                         }
@@ -437,11 +441,14 @@ pub(crate) mod tests {
     use super::*;
 
     pub(crate) fn runner_with(vars: &[(&str, &str)]) -> GitRunner {
-        GitRunner::new(&ProcessEnv::new(
-            vars.iter()
-                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
-                .collect(),
-        ))
+        GitRunner::new(
+            &zcode_host_base::testing::spawner(),
+            &ProcessEnv::new(
+                vars.iter()
+                    .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                    .collect(),
+            ),
+        )
     }
 
     /// 假 git：`--version` 成功，其余参数交给 /bin/sh，用来构造超时、超量输出等场景。

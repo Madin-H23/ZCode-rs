@@ -8,7 +8,12 @@
 //! Node/libuv 在 Linux 上同样共用一个 inotify fd；每个 watch 单独开 inotify 实例会很快耗尽
 //! `max_user_instances`，而递归监听只有少数几个（.git 目录、非 Linux 的工作区），独立后也不会与
 //! 非递归监听在同一 inode 的 watch 上互相覆盖。
-use std::collections::{HashMap, HashSet};
+//!
+//! 任务与通道（docs/specs/rust-u2-task-scope.md §6.1、§6.2）：每个监听有自己的作用域 `watcher:<id>`
+//! （防抖任务），由登记表里的条目持有，unwatch / 出错清理 / disposeAll 时随条目释放。notify 回调线程
+//! 不能等待，变化不经队列，而是合并进监听的待发批次（第一个路径、是否多个、是否未知、错误），内存有界，
+//! 与原来按批次发出的结果相同。
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -18,7 +23,8 @@ use futures_util::stream;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use tokio::sync::mpsc;
+use tokio::sync::Notify;
+use zcode_async::{Spawner, TaskScope};
 use zcode_host_kit::{EventHub, Overflow, Reply, RpcError, ServiceBuilder, log, replies};
 
 use crate::support::{node_error, path};
@@ -32,6 +38,52 @@ enum Change {
     Failed(String),
 }
 
+/// 一个监听在防抖窗口里攒下的变化。只保留决定事件内容所需的信息，内存有界。
+#[derive(Default)]
+struct Batch {
+    /// 第一个已知路径；之后出现不同路径只记 `multiple`（事件只在恰好一个路径时带 `changedPath`）。
+    first: Option<String>,
+    multiple: bool,
+    unknown: bool,
+    failed: Option<String>,
+    /// 自上次取走后有新的变化。
+    changed: bool,
+}
+
+/// notify 回调线程 → 防抖任务：合并变化并唤醒（回调线程不等待）。
+#[derive(Default)]
+struct Pending {
+    batch: Mutex<Batch>,
+    ready: Notify,
+}
+
+impl Pending {
+    fn push(&self, change: Change) {
+        {
+            let mut batch = lock(&self.batch);
+            match change {
+                Change::Path(path) => match &batch.first {
+                    None => batch.first = Some(path),
+                    Some(first) if *first != path => batch.multiple = true,
+                    Some(_) => {}
+                },
+                Change::Unknown => batch.unknown = true,
+                Change::Failed(message) => batch.failed = Some(message),
+            }
+            batch.changed = true;
+        }
+        self.ready.notify_one();
+    }
+
+    fn take_failure(&self) -> Option<String> {
+        lock(&self.batch).failed.take()
+    }
+
+    fn take(&self) -> Batch {
+        std::mem::take(&mut *lock(&self.batch))
+    }
+}
+
 struct Registration {
     /// watch 的入参，事件的 `dirPath` 原样回传。
     path: String,
@@ -42,7 +94,9 @@ struct Registration {
     /// 底层监听已建立；之前被清理的由 watch 自己释放，避免与启动交错时泄漏或重复释放。
     started: bool,
     events: EventHub<Value>,
-    changes: mpsc::UnboundedSender<Change>,
+    changes: Arc<Pending>,
+    /// 监听的作用域（防抖任务）：条目被移除时随之释放。
+    _scope: TaskScope,
 }
 
 impl Registration {
@@ -101,12 +155,12 @@ fn dispatch(registrations: &Registrations, source: &Source, result: notify::Resu
                     continue;
                 }
                 if rescan {
-                    let _ = registration.changes.send(Change::Unknown);
+                    registration.changes.push(Change::Unknown);
                     continue;
                 }
                 for changed in &event.paths {
                     if let Some(change) = registration.classify(changed) {
-                        let _ = registration.changes.send(change);
+                        registration.changes.push(change);
                     }
                 }
             }
@@ -125,7 +179,7 @@ fn dispatch(registrations: &Registrations, source: &Source, result: notify::Resu
                 };
                 if hit && covers(id, registration) {
                     affected += 1;
-                    let _ = registration.changes.send(Change::Failed(message.clone()));
+                    registration.changes.push(Change::Failed(message.clone()));
                 }
             }
             if affected == 0 {
@@ -135,53 +189,54 @@ fn dispatch(registrations: &Registrations, source: &Source, result: notify::Resu
     }
 }
 
-/// 每个监听一个防抖任务；收到 Failed 时立即发最终事件并清理。
+/// 每个监听一个防抖任务（在监听的作用域里）；出错时立即发最终事件并清理。unwatch 时作用域释放、
+/// 任务被中止，未触发的批次随之丢弃（TS 的 cleanup 会 clearTimeout）。
 async fn debounce(
     id: String,
     dir_path: String,
     events: EventHub<Value>,
-    mut changes: mpsc::UnboundedReceiver<Change>,
+    pending: Arc<Pending>,
     owner: Weak<Inner>,
 ) {
-    let mut pending: HashSet<String> = HashSet::new();
-    let mut unknown = false;
-    while let Some(first) = changes.recv().await {
-        let mut next = Some(first);
+    let fail = |message: String| {
+        log::warn(format!(
+            "文件监听器异常，清理 watcher id={id} path={dir_path} error={message}"
+        ));
+        events.emit(json!({"dirPath": dir_path}));
+        if let Some(inner) = owner.upgrade() {
+            inner.cleanup(&id);
+        }
+    };
+    loop {
+        pending.ready.notified().await;
+        // 尾部防抖：每来一次变化重新计时，DEBOUNCE 内没有新变化才发出。
         loop {
-            match next.take() {
-                Some(Change::Path(changed)) => {
-                    pending.insert(changed);
-                }
-                Some(Change::Unknown) => unknown = true,
-                Some(Change::Failed(message)) => {
-                    log::warn(format!(
-                        "文件监听器异常，清理 watcher id={id} path={dir_path} error={message}"
-                    ));
-                    events.emit(json!({"dirPath": dir_path}));
-                    if let Some(inner) = owner.upgrade() {
-                        inner.cleanup(&id);
-                    }
-                    return;
-                }
-                None => {}
+            if let Some(message) = pending.take_failure() {
+                return fail(message);
             }
-            match tokio::time::timeout(DEBOUNCE, changes.recv()).await {
-                Ok(Some(change)) => next = Some(change),
-                // unwatch：未触发的批次随之丢弃（TS 的 cleanup 会 clearTimeout）。
-                Ok(None) => return,
-                Err(_) => break,
+            if tokio::time::timeout(DEBOUNCE, pending.ready.notified())
+                .await
+                .is_err()
+            {
+                break;
             }
+        }
+        let batch = pending.take();
+        if let Some(message) = batch.failed {
+            return fail(message);
+        }
+        // 上一批取走之后才到的唤醒：变化已经随上一批发出。
+        if !batch.changed {
+            continue;
         }
         let mut payload = Map::new();
         payload.insert("dirPath".to_owned(), Value::String(dir_path.clone()));
-        if !unknown
-            && pending.len() == 1
-            && let Some(changed) = pending.iter().next()
+        if !batch.unknown
+            && !batch.multiple
+            && let Some(changed) = batch.first
         {
-            payload.insert("changedPath".to_owned(), Value::String(changed.clone()));
+            payload.insert("changedPath".to_owned(), Value::String(changed));
         }
-        pending.clear();
-        unknown = false;
         events.emit(Value::Object(payload));
     }
 }
@@ -205,6 +260,8 @@ pub struct FileWatchers {
 }
 
 struct Inner {
+    /// 文件监听区的作用域：各监听的作用域是它的子作用域，底层监听的释放也在这里。
+    spawner: Spawner,
     next_id: AtomicU64,
     registrations: Registrations,
     /// 递归监听各自的 watcher；不放进 registrations，回调线程上就不会析构 watcher。
@@ -282,20 +339,20 @@ impl Inner {
     /// 停止 notify watcher 可能要等回调线程退出，放到阻塞线程上做。
     fn release_later(self: &Arc<Self>, id: &str, root: PathBuf, recursive: bool) {
         let (inner, id) = (self.clone(), id.to_owned());
-        tokio::task::spawn_blocking(move || inner.release(&id, &root, recursive));
-    }
-}
-
-impl Default for FileWatchers {
-    fn default() -> Self {
-        Self::new()
+        drop(
+            self.spawner
+                .spawn_blocking("file-watcher-release", move || {
+                    inner.release(&id, &root, recursive)
+                }),
+        );
     }
 }
 
 impl FileWatchers {
-    pub fn new() -> Self {
+    pub fn new(spawner: &Spawner) -> Self {
         Self {
             inner: Arc::new(Inner {
+                spawner: spawner.clone(),
                 next_id: AtomicU64::new(0),
                 registrations: Arc::new(Mutex::new(HashMap::new())),
                 recursive: Mutex::new(HashMap::new()),
@@ -319,7 +376,9 @@ impl FileWatchers {
         let root_is_dir = tokio::fs::metadata(&root)
             .await
             .is_ok_and(|metadata| metadata.is_dir());
-        let (changes, receiver) = mpsc::unbounded_channel();
+        let changes = Arc::new(Pending::default());
+        let scope = self.inner.spawner.child(format!("watcher:{id}"));
+        let tasks = scope.spawner();
         // 去抖后的批次，订阅者是 Renderer 的 `onDidChange`（Gateway 立即搬进出站队列）；落后 1024 批说明
         // 转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
         let events = EventHub::new("file-watcher-events", 1024, Overflow::CloseSubscriber);
@@ -333,15 +392,15 @@ impl FileWatchers {
                 recursive,
                 started: false,
                 events: events.clone(),
-                changes,
+                changes: changes.clone(),
+                _scope: scope,
             },
         );
         let (inner, start_id, start_root) = (self.inner.clone(), id.clone(), root.clone());
-        let started =
-            tokio::task::spawn_blocking(move || inner.start(&start_id, &start_root, recursive))
-                .await
-                .map_err(|error| notify::Error::generic(&error.to_string()))
-                .and_then(|result| result);
+        let started = zcode_async::blocking(move || inner.start(&start_id, &start_root, recursive))
+            .await
+            .map_err(|error| notify::Error::generic(&error.to_string()))
+            .and_then(|result| result);
         if let Err(error) = started {
             lock(&self.inner.registrations).remove(&id);
             return Err(fail(watch_error_message(&error, &input)));
@@ -358,12 +417,15 @@ impl FileWatchers {
             self.inner.release_later(&id, root, recursive);
             return Ok(id);
         }
-        tokio::spawn(debounce(
-            id.clone(),
-            input,
-            events,
-            receiver,
-            Arc::downgrade(&self.inner),
+        drop(tasks.spawn(
+            "file-watcher-debounce",
+            debounce(
+                id.clone(),
+                input,
+                events,
+                changes,
+                Arc::downgrade(&self.inner),
+            ),
         ));
         Ok(id)
     }
@@ -473,7 +535,9 @@ mod tests {
     async fn single_change_carries_the_changed_path() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().to_str().unwrap().to_owned();
-        let watcher = channel(service(FileWatchers::new()));
+        let watcher = channel(service(FileWatchers::new(
+            &zcode_host_base::testing::spawner(),
+        )));
         let id = call(&watcher, "watch", json!({"path": input}))
             .await
             .unwrap()["id"]
@@ -496,7 +560,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         let input = dir.path().to_str().unwrap().to_owned();
-        let watchers = FileWatchers::new();
+        let watchers = FileWatchers::new(&zcode_host_base::testing::spawner());
         let watcher = channel(service(watchers.clone()));
         let flat = call(&watcher, "watch", json!({"path": input}))
             .await
@@ -544,7 +608,6 @@ mod tests {
 
     #[test]
     fn classify_limits_non_recursive_watches_to_direct_children() {
-        let (changes, _receiver) = mpsc::unbounded_channel();
         let mut registration = Registration {
             path: "/ws/./link".to_owned(),
             root: PathBuf::from("/real/ws"),
@@ -552,7 +615,8 @@ mod tests {
             recursive: false,
             started: true,
             events: EventHub::new("test", 16, Overflow::CloseSubscriber),
-            changes,
+            changes: Arc::default(),
+            _scope: zcode_host_base::testing::spawner().child("watcher:test"),
         };
         let path_of = |change: Option<Change>| match change {
             Some(Change::Path(path)) => Some(path),
@@ -587,7 +651,7 @@ mod tests {
     async fn watcher_errors_emit_a_final_event_and_clean_up() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().to_str().unwrap().to_owned();
-        let watchers = FileWatchers::new();
+        let watchers = FileWatchers::new(&zcode_host_base::testing::spawner());
         let watcher = channel(service(watchers.clone()));
         let id = call(&watcher, "watch", json!({"path": input, "recursive": true}))
             .await
@@ -613,9 +677,48 @@ mod tests {
             .is_ok_and(|event| event.is_none())
     }
 
+    /// 监听的防抖任务属于它的作用域：unwatch 之后监听区里不再有它；一连串变化合并成一个事件。
+    #[tokio::test]
+    async fn an_unwatched_watcher_leaves_no_tasks_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().to_str().unwrap().to_owned();
+        let scope = zcode_async::TaskScope::root("file-watchers", |panic| panic!("{panic:?}"));
+        let watchers = FileWatchers::new(&scope.spawner());
+        let watcher = channel(service(watchers.clone()));
+        let id = call(&watcher, "watch", json!({"path": input}))
+            .await
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mut events = listen(&watcher, "onDynamicChange", &id).unwrap();
+        settle(&mut [&mut events]).await;
+        assert_eq!(
+            scope.spawner().running(),
+            [format!("file-watchers/watcher:{id}: file-watcher-debounce")]
+        );
+        for index in 0..200 {
+            std::fs::write(dir.path().join(format!("f{index}.txt")), "x").unwrap();
+        }
+        assert_eq!(next_event(&mut events).await, json!({"dirPath": input}));
+        watchers.unwatch(&id);
+        assert!(next_ended(&mut events).await);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !scope.spawner().running().is_empty() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "{:?}",
+                scope.spawner().running()
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     #[tokio::test]
     async fn missing_paths_and_unknown_ids() {
-        let watcher = channel(service(FileWatchers::new()));
+        let watcher = channel(service(FileWatchers::new(
+            &zcode_host_base::testing::spawner(),
+        )));
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("missing");
         let error = call(&watcher, "watch", json!({"path": missing}))
@@ -650,7 +753,9 @@ mod tests {
         std::fs::create_dir(&real).unwrap();
         std::os::unix::fs::symlink(&real, dir.path().join("link")).unwrap();
         let input = dir.path().join("link").to_str().unwrap().to_owned();
-        let watcher = channel(service(FileWatchers::new()));
+        let watcher = channel(service(FileWatchers::new(
+            &zcode_host_base::testing::spawner(),
+        )));
         let id = call(&watcher, "watch", json!({"path": input}))
             .await
             .unwrap()["id"]

@@ -351,8 +351,10 @@ pub fn install(
     // ── workspace ──
     // git（提交信息生成回调 Agent）、git-checkpoint、media-preview（Main 授权路径）、
     // prompt-attachment-transfer；见 docs/specs/rust-host-workspace.md。
+    let workspace_tasks = scope("workspace");
     let workspace = workspace::install(
         workspace::WorkspaceDeps {
+            spawner: &workspace_tasks,
             environment: &context.environment,
             child_env: &child_env,
             settings: settings.clone(),
