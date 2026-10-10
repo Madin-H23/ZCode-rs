@@ -52,7 +52,11 @@ impl Engine {
             ("offPeakRunType", submission.off_peak_run_type.clone()),
         ];
         let estimated = session.active_context_tokens();
-        let run_id = session.run_id.clone().context("Run reservation required")?;
+        let run_id = session
+            .run
+            .as_ref()
+            .map(|run| run.id.clone())
+            .context("Run reservation required")?;
         let who = crate::domain::usage::Attribution {
             session_id: id.into(),
             run_id: run_id.clone(),

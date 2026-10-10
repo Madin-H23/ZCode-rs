@@ -12,10 +12,15 @@ impl Session {
         }
     }
     pub fn patch(&self) -> Value {
+        // 修复：startedAt 原来取 updated_at，每个事件都会变，于是每个流式文本分片都附带一条
+        // control 的 state.updated（400 段的一轮 402 次，Node 2 次），相邻 row.delta 也因此无法合并。
+        // Node 取轮次开始事件的时间，整轮不变（apps/zcode-cli/packages/bootstrap/src/
+        // zcode-protocol-v4/product-projection.ts:2093-2100 onTurnStarted 的 `startedAt: this.ms(event)`，
+        // 与 turnHeader 的 startedAt 同源 :2021）；这里取 run 预留时记下的轮次开始时间。
         let mut patch = json!({"revision":self.revision,
             "control":{"phase":self.phase,"sessionEnded":self.ended(),"canStop":self.running(),
                 "stopState":if self.running(){"stoppable"}else{"idle"},"stopTargetKind":if self.running(){"mixed"}else{"unknown"},
-                "activeWorks":self.run_id.as_ref().map(|id| vec![json!({"kind":"primaryTurn","foregroundExecutionId":id,"startedAt":self.updated_at})]).unwrap_or_default(),
+                "activeWorks":self.run.as_ref().map(|run| vec![json!({"kind":"primaryTurn","foregroundExecutionId":run.id,"startedAt":run.started_at})]).unwrap_or_default(),
                 "lastError":self.last_error,"apiRetry":self.api_retry},
             "availability":{"fork":if self.history.responses.is_empty(){json!({"allowed":false,"reasonCode":"guard.forkTargetNotStable"})}else{json!({"allowed":true})},"compact":{"allowed":true},"switchModelConfig":{"allowed":true},
                 "setFollowupMode":{"allowed":true},"queueEdit":{"allowed":true},"sendQueuedNow":if self.queued_now.is_none(){json!({"allowed":true})}else{json!({"allowed":false,"reasonCode":"guard.queuePromotionBusy"})},
@@ -83,3 +88,7 @@ impl Session {
         summary
     }
 }
+
+#[cfg(test)]
+#[path = "session_projection_tests.rs"]
+mod tests;

@@ -142,6 +142,10 @@ sequenceDiagram
   - 旧实现每个流式文本块都附带约 1.5 KB 的完整 patch。
   - 改动后，文本块只剩 `row.delta`，相邻块可以按规则 1 合并；线上字节和日志字节都大幅下降。
   - 发布内容为空时（没有增量，也没有变化的键），不推进 seq。
+- **前提：流式分片不改变 patch 的值**：
+  - control 一轮只变两次（开始、结束），与 Node 相同。`activeWorks[].startedAt` 是轮次开始的时间（Node `onTurnStarted` 的 `startedAt: this.ms(event)`，`apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection.ts:2084-2104`，与 `turnHeader.startedAt` 同源），由 run 预留时记在 `Session.run`（`ForegroundRun.started_at`）里，整轮不变。
+  - 修复（2026-10-10）：以前 `startedAt` 取会话的 `updated_at`，每个事件都会变，于是每个文本块仍附带一条 control 的 `state.updated`，规则 1 合并不了：400 段的一轮有 402 次 control 更新（Node 2 次），conversation 帧平均 1191 字节、4 个 op（Node 533 字节、1 个 op），见[性能报告](../reports/rust-app-performance-2026-10-10.md)「流式 CPU 为什么持平」(b)。
+  - 验收：`crates/domain/src/session_projection_tests.rs`；`tests/suite/stream_projection.rs` 经 App 协议跑一轮流式回复，桌面与手机两种订阅各只收到 2 次 control，`startedAt` 等于轮次头的 `startedAt`，同一帧里同一行的文本增量只有一个 `row.delta`。
 - **基线与快照对齐**：
   - 取 conversation 快照（`topicOpen`/`topicSnapshot`）前，先发布尚未发布的 state 变化，使差量基线等于快照中的 state。
   - 否则会出现一种漏发：某个值从 A 变为 B 但没有发布，快照订阅者拿到 B；之后又变回 A 并发布，差量判定"未变化"，快照订阅者就一直停在 B。

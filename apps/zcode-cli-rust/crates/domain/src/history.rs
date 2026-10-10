@@ -141,10 +141,17 @@ impl Session {
                 .is_some_and(|r| r["entityId"] == b.entity)
                 && last_input == Some(b.user_row)
         });
+        // 修复：原来不看这一轮是否结束，回复行在流式中就带上 canRetry（界面因此在流式中就有
+        // latestAssistantTextRow，每次渲染都对整段回复重算复制文本与代码评论投影）。Node 只把
+        // canRetry 给“没有进行中的工作、状态为 complete”的最新回复行
+        // （apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection.ts:1195、
+        // :1217-1240 latestRetryable，:1284 写入；轮次头仍 running 时同样不给）。run 结束时
+        // 先清掉 run 再发布，所以 canRetry（与 canFork）在这一轮结束的那次发布里出现。
         let response = self
             .rows
             .iter()
             .rposition(|r| r["kind"] == "assistantText" && r["turnId"].as_str() == latest_turn)
+            .filter(|row| !self.running() && self.rows[*row]["state"] == "complete")
             .filter(|_| {
                 self.history
                     .inputs
@@ -244,6 +251,10 @@ impl Session {
         self.mailbox.clear();
         self.last_error = None;
         self.api_retry = None;
-        self.run_id = None;
+        self.run = None;
     }
 }
+
+#[cfg(test)]
+#[path = "history_tests.rs"]
+mod tests;

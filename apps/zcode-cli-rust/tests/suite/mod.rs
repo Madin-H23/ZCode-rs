@@ -13,4 +13,5 @@ mod process_reaping;
 mod provider_options;
 mod runtime_consistency;
 mod shell_lifecycle;
+mod stream_projection;
 mod subagent_consistency;

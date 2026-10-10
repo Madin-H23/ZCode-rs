@@ -62,7 +62,10 @@ impl Engine {
         let now = self.clock.now();
         let turn = self.clock.id();
         s.compact_instructions = Some(c.payload["text"].as_str().unwrap_or("").into());
-        s.run_id = Some(self.clock.id());
+        s.run = Some(crate::domain::session::ForegroundRun {
+            id: self.clock.id(),
+            started_at: now,
+        });
         s.phase = crate::domain::execution::Phase::Running;
         s.last_error = None;
         s.updated_at = now;

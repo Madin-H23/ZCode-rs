@@ -85,7 +85,10 @@ impl Engine {
             &input,
         )?;
         let retained_messages = s.messages.len();
-        s.run_id = Some(self.clock.id());
+        s.run = Some(crate::domain::session::ForegroundRun {
+            id: self.clock.id(),
+            started_at: now,
+        });
         s.phase = crate::domain::execution::Phase::Running;
         s.last_error = None;
         s.updated_at = now;

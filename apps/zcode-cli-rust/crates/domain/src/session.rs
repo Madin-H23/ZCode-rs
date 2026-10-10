@@ -181,7 +181,15 @@ pub struct Session {
     #[serde(default = "queue_mode")]
     pub followup_mode: String,
     #[serde(skip)]
-    pub run_id: Option<String>,
+    pub run: Option<ForegroundRun>,
+}
+/// The run that holds the session's foreground (V4 `control.activeWorks`).
+#[derive(Clone, Debug)]
+pub struct ForegroundRun {
+    /// `activeWorks[].foregroundExecutionId`.
+    pub id: String,
+    /// When its turn started (`activeWorks[].startedAt`, the turn header's `startedAt`).
+    pub started_at: u64,
 }
 fn queue_mode() -> String {
     "queue".into()
@@ -279,7 +287,7 @@ impl Session {
             queue: vec![],
             auto_drain: true,
             followup_mode: queue_mode(),
-            run_id: None,
+            run: None,
         }
     }
     pub fn active_context_tokens(&mut self) -> usize {
@@ -306,7 +314,7 @@ impl Session {
         self.phase.ended()
     }
     pub fn running(&self) -> bool {
-        self.run_id.is_some()
+        self.run.is_some()
     }
     pub fn current_rows_start(&self) -> usize {
         self.rows
@@ -339,7 +347,7 @@ impl Session {
         }
         self.epoch = epoch;
         self.seq = 0;
-        self.run_id = None;
+        self.run = None;
         self.api_retry = None;
         self.pending.clear();
         self.queue.clear();
