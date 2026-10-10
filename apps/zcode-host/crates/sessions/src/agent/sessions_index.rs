@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use tokio::task::AbortHandle;
-use zcode_host_kit::{EventHub, log};
+use zcode_host_kit::{EventHub, Overflow, log};
 
 use super::runtime::{AgentRuntime, FrameKind, WorkspaceTarget};
 use super::service::uuid_v4;
@@ -69,7 +69,9 @@ impl SessionsIndexObserver {
             runtime: runtime.clone(),
             connection_id: format!("host-{}", uuid_v4()),
             watched: Mutex::new(HashMap::new()),
-            events: EventHub::new(),
+            // 订阅者是 syncer（每条事件写一次 tasks-index）与 controller；快照是一条事件，增量每次会话
+            // 摘要变化一条。4096 条约是卡住几分钟的量，满了结束落后的订阅（rust-u2-task-scope.md §6.2）。
+            events: EventHub::new("sessions-index-events", 4096, Overflow::CloseSubscriber),
         });
         let mut lifecycle = Box::pin(runtime.lifecycle().subscribe());
         let weak = Arc::downgrade(&observer);

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
-use zcode_host_kit::{EventHub, EventStream, Reply, log};
+use zcode_host_kit::{EventHub, EventStream, Overflow, Reply, log};
 
 use super::extensions::{AgentNotification, Extensions};
 use super::schema;
@@ -24,12 +24,28 @@ pub struct KeyedFact {
     pub value: Value,
 }
 
-#[derive(Default)]
 pub struct AgentEvents {
     plugin_progress: EventHub<Arc<(String, Value)>>,
     local_ttft: EventHub<Arc<KeyedFact>>,
     telemetry: EventHub<Arc<KeyedFact>>,
     cua: EventHub<Value>,
+}
+
+impl Default for AgentEvents {
+    /// 四个 hub 的订阅者都是 Renderer 订阅（Gateway 立即搬进出站队列）：落后 1024 条说明转发卡住，
+    /// 结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+    fn default() -> Self {
+        Self {
+            plugin_progress: EventHub::new(
+                "agent-plugin-progress",
+                1024,
+                Overflow::CloseSubscriber,
+            ),
+            local_ttft: EventHub::new("agent-local-ttft", 1024, Overflow::CloseSubscriber),
+            telemetry: EventHub::new("agent-telemetry", 1024, Overflow::CloseSubscriber),
+            cua: EventHub::new("agent-cua", 1024, Overflow::CloseSubscriber),
+        }
+    }
 }
 
 impl AgentEvents {

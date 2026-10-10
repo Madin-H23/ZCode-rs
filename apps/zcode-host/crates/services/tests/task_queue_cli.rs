@@ -28,7 +28,7 @@ use zcode_host_services::tasks::agent_calls;
 use zcode_host_services::tasks::context::{TaskContext, TaskPaths};
 use zcode_host_services::tasks::lifecycle::TaskLifecycle;
 use zcode_host_services::tasks::service::TaskService;
-use zcode_host_services::tasks::{WorkspaceEvents, syncer};
+use zcode_host_services::tasks::{syncer, workspace_events};
 use zcode_host_services::tasks_index::TasksIndex;
 
 const LIMIT: Duration = Duration::from_secs(90);
@@ -245,11 +245,7 @@ async fn harness() -> Harness {
     let index = TasksIndex::open(home.path().join(".zcode/v2/tasks-index.sqlite"), |_| {})
         .await
         .unwrap();
-    let tasks = TaskService::new(
-        Arc::new(index.clone()),
-        WorkspaceEvents::new(),
-        runtime.clone(),
-    );
+    let tasks = TaskService::new(Arc::new(index.clone()), workspace_events(), runtime.clone());
     let observer = SessionsIndexObserver::start(runtime.clone());
     let syncer = syncer::start(&observer, runtime.clone(), tasks.clone());
     let context = TaskContext::new(

@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
-use zcode_host_kit::{EventHub, RpcError};
+use zcode_host_kit::{EventHub, Overflow, RpcError};
 
 use super::SessionSignal;
 use super::agent_calls::{self as calls, ack_ok, envelope, send_command};
@@ -46,9 +46,11 @@ impl TaskLifecycle {
     pub fn start(context: Arc<TaskContext>) -> Arc<Self> {
         let lifecycle = Arc::new(Self {
             context: context.clone(),
-            terminal: TaskOutcomes::new(),
-            ready: TaskOutcomes::new(),
-            stream: TaskStreamEvents::new(),
+            // 订阅者是 Renderer 订阅与 automation / off-peak / bots 等待终态的任务；每个 task 一轮至多几条。
+            // 落后 1024 条说明订阅者卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+            terminal: EventHub::new("task-terminal", 1024, Overflow::CloseSubscriber),
+            ready: EventHub::new("task-ready", 1024, Overflow::CloseSubscriber),
+            stream: EventHub::new("task-stream", 1024, Overflow::CloseSubscriber),
         });
         let mut signals = Box::pin(context.tasks.signals().subscribe());
         let weak = Arc::downgrade(&lifecycle);

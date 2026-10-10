@@ -17,7 +17,8 @@ use serde_json::{Map, Value, json};
 use tokio::task::AbortHandle;
 use zcode_host_control::{ControlSink, HostToMain};
 use zcode_host_kit::{
-    CallContext, CallFuture, EventHub, EventStream, Reply, RpcError, RpcValue, ServiceChannel,
+    CallContext, CallFuture, EventHub, EventStream, Overflow, Reply, RpcError, RpcValue,
+    ServiceChannel,
 };
 use zcode_host_rpc::RpcClient;
 
@@ -78,7 +79,9 @@ impl TaskTracker {
             control,
             report,
             state: Mutex::new(TrackerState::default()),
-            ready_events: EventHub::new(),
+            // 订阅者是远端 Bot 的终态兜底（同步过滤后结束），每轮一条；落后 256 条说明它卡住，结束它的订阅
+            // （docs/specs/rust-u2-task-scope.md §6.2）。
+            ready_events: EventHub::new("remote-task-ready", 256, Overflow::CloseSubscriber),
         })
     }
 

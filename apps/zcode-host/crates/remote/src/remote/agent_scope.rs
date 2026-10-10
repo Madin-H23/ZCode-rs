@@ -19,7 +19,8 @@ use serde_json::{Map, Value, json};
 use tokio::task::AbortHandle;
 use zcode_host_control::ClientMode;
 use zcode_host_kit::{
-    CallContext, CallFuture, EventHub, EventStream, Reply, RpcError, RpcValue, ServiceChannel, log,
+    CallContext, CallFuture, EventHub, EventStream, Overflow, Reply, RpcError, RpcValue,
+    ServiceChannel, log,
 };
 use zcode_host_rpc::RpcClient;
 
@@ -330,7 +331,9 @@ impl Scope {
         if let Some(route) = state.routes.get(&(kind, key.clone())) {
             return Box::pin(route.hub.subscribe().map(Reply::Value));
         }
-        let hub = EventHub::<Value>::new();
+        // 远端 V4 帧再分发给本 scope 各连接的订阅（Gateway 立即搬进出站队列）；流式时每秒数百条，落后
+        // 8192 条说明转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+        let hub = EventHub::<Value>::new("remote-route-frames", 8192, Overflow::CloseSubscriber);
         let events = hub.subscribe();
         let mut upstream =
             self.client

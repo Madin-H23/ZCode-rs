@@ -207,7 +207,7 @@ pub(crate) mod testing {
     //! 测试用上下文：临时目录里的真实 tasks-index、设置文件，不拉起 CLI。
     use super::*;
     use crate::agent::{AgentRuntimeConfig, sessions_index::SessionsIndexObserver};
-    use crate::tasks::WorkspaceEvents;
+    use crate::tasks::{WorkspaceEvents, workspace_events};
 
     pub struct Fixture {
         pub context: Arc<TaskContext>,
@@ -231,7 +231,7 @@ pub(crate) mod testing {
         let index = TasksIndex::open(dir.join("tasks-index.sqlite"), |_| {})
             .await
             .expect("tasks-index");
-        let events = WorkspaceEvents::new();
+        let events = workspace_events();
         let tasks = TaskService::new(Arc::new(index.clone()), events.clone(), runtime.clone());
         let observer = SessionsIndexObserver::start(runtime.clone());
         Fixture {

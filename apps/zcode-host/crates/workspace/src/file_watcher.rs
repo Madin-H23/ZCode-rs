@@ -19,7 +19,7 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
-use zcode_host_kit::{EventHub, Reply, RpcError, ServiceBuilder, log, replies};
+use zcode_host_kit::{EventHub, Overflow, Reply, RpcError, ServiceBuilder, log, replies};
 
 use crate::support::{node_error, path};
 
@@ -320,7 +320,9 @@ impl FileWatchers {
             .await
             .is_ok_and(|metadata| metadata.is_dir());
         let (changes, receiver) = mpsc::unbounded_channel();
-        let events = EventHub::new();
+        // 去抖后的批次，订阅者是 Renderer 的 `onDidChange`（Gateway 立即搬进出站队列）；落后 1024 批说明
+        // 转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+        let events = EventHub::new("file-watcher-events", 1024, Overflow::CloseSubscriber);
         // 先登记再启动底层监听，启动后立刻到达的事件也能路由到这里。
         lock(&self.inner.registrations).insert(
             id.clone(),
@@ -549,7 +551,7 @@ mod tests {
             root_is_dir: true,
             recursive: false,
             started: true,
-            events: EventHub::new(),
+            events: EventHub::new("test", 16, Overflow::CloseSubscriber),
             changes,
         };
         let path_of = |change: Option<Change>| match change {

@@ -246,7 +246,13 @@ impl Importer {
             in_flight: Mutex::new(HashMap::new()),
             index_lock: AsyncMutex::new(()),
             loaded: tokio::sync::OnceCell::new(),
-            progress: EventHub::new(),
+            // 导入进度（最后一条是终态，不能合并），订阅者是 Renderer 订阅；落后 256 条说明转发卡住，结束它的
+            // 订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+            progress: EventHub::new(
+                "share-import-progress",
+                256,
+                zcode_host_kit::Overflow::CloseSubscriber,
+            ),
         })
     }
 

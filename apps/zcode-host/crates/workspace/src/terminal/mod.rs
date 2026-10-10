@@ -19,7 +19,9 @@ use portable_pty::{Child, ChildKiller, MasterPty};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
-use zcode_host_kit::{EventHub, EventStream, Reply, RpcError, ServiceBuilder, log, replies};
+use zcode_host_kit::{
+    EventHub, EventStream, Overflow, Reply, RpcError, ServiceBuilder, log, replies,
+};
 
 use crate::settings::SettingStore;
 use crate::support::env::ProcessEnv;
@@ -162,8 +164,11 @@ impl Terminals {
             child,
             mut killer,
         } = spawned;
-        let data = EventHub::new();
-        let exit = EventHub::new();
+        // 订阅者是 Renderer 的 `onDynamicData` / `onDynamicExit`（Gateway 立即搬进出站队列，saturated 时
+        // 由流控暂停读 PTY）；落后 4096 块说明转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md
+        // §6.2）。退出事件每个终端一条。
+        let data = EventHub::new("terminal-data", 4096, Overflow::CloseSubscriber);
+        let exit = EventHub::new("terminal-exit", 16, Overflow::CloseSubscriber);
         let emitter = data.clone();
         let paused = self.inner.flow.open(&id);
         let io = match pty::start(master.as_ref(), paused, move |text| {

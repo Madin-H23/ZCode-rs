@@ -22,7 +22,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 use tokio::fs;
 use tokio::sync::Mutex;
-use zcode_host_kit::{EventHub, Reply, RpcError, ServiceBuilder, log};
+use zcode_host_kit::{EventHub, Overflow, Reply, RpcError, ServiceBuilder, log};
 
 use crate::store::{LockOptions, atomic_write_text, with_file_lock};
 use schema::Patch;
@@ -110,7 +110,9 @@ impl SettingStore {
                 file: home.join(".zcode").join("v2").join("setting.json"),
                 home: home.to_owned(),
                 queue: Mutex::new(()),
-                updated: EventHub::new(),
+                // 订阅者（数据目录迁移、账号 provider、远端预配）按 patch 的键决定是否响应，不能合并；
+                // 设置写入一次一条，落后 256 条说明订阅者卡住，结束它的订阅（rust-u2-task-scope.md §6.2）。
+                updated: EventHub::new("setting-updated", 256, Overflow::CloseSubscriber),
                 changed,
             }),
         }

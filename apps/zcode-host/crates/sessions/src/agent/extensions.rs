@@ -16,7 +16,7 @@ use futures_util::future::BoxFuture;
 use serde_json::Value;
 use zcode_host_kit::{Args, Reply, RpcError};
 
-use zcode_host_kit::EventHub;
+use zcode_host_kit::{EventHub, Overflow};
 
 use super::runtime::{AgentProcess, Lane, WorkspaceTarget};
 
@@ -112,7 +112,6 @@ pub struct ProcessEvent {
 pub type DynamicWorkflowGate =
     Arc<dyn Fn() -> BoxFuture<'static, Result<bool, String>> + Send + Sync>;
 
-#[derive(Default)]
 pub struct Extensions {
     reverse: RwLock<HashMap<String, ReverseHandler>>,
     env: RwLock<Vec<EnvContributor>>,
@@ -125,6 +124,28 @@ pub struct Extensions {
     members: RwLock<HashMap<String, MemberHandler>>,
     notification_hooks: RwLock<HashMap<String, NotificationHook>>,
     media_path_authorizer: RwLock<Option<MediaPathAuthorizer>>,
+}
+
+impl Default for Extensions {
+    fn default() -> Self {
+        Self {
+            reverse: RwLock::default(),
+            env: RwLock::default(),
+            use_hooks: RwLock::default(),
+            // CLI 的非帧通知（含 legacy `session/update` 流式更新）：订阅者是通知分发与 legacy 会话事件，
+            // 都只做同步转换后转发。流式时每秒可达数百条，8192 条约是一个卡住的订阅者落后半分钟以上；
+            // 满了结束它的订阅，不悄悄丢（docs/specs/rust-u2-task-scope.md §6.2）。
+            notifications: EventHub::new("agent-notifications", 8192, Overflow::CloseSubscriber),
+            // 进程生命周期上报（每次启动 / 退出几条）：订阅者只转交控制通道。
+            process_events: EventHub::new("agent-process-events", 256, Overflow::CloseSubscriber),
+            off_peak_tools: AtomicBool::default(),
+            dynamic_workflow_gate: RwLock::default(),
+            dynamic_workflow: tokio::sync::OnceCell::default(),
+            members: RwLock::default(),
+            notification_hooks: RwLock::default(),
+            media_path_authorizer: RwLock::default(),
+        }
+    }
 }
 
 fn read<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {

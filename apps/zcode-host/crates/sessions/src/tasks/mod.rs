@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use serde_json::Value;
-use zcode_host_kit::{EventHub, RpcError};
+use zcode_host_kit::{EventHub, Overflow, RpcError};
 
 use crate::agent::WorkspaceTarget;
 
@@ -39,6 +39,13 @@ pub struct WorkspaceEvent {
 }
 
 pub type WorkspaceEvents = EventHub<Arc<WorkspaceEvent>>;
+
+/// workspace 事件的 hub。订阅者是 Renderer 的 `onDynamicWorkspaceEvent`（Gateway 立即搬进出站队列）与
+/// controller（每条事件重读一次分区）；一次批量操作至多几百条。落后 1024 条说明订阅者卡住，结束它的
+/// 订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+pub fn workspace_events() -> WorkspaceEvents {
+    EventHub::new("task-workspace-events", 1024, Overflow::CloseSubscriber)
+}
 
 /// sessions-index 观察到的会话终态迁移（zcodeTaskIndexSyncer `emitTerminalAndReady`）。
 /// 不是 UI 流，只给 host 内部的 terminal / ready 事件使用。

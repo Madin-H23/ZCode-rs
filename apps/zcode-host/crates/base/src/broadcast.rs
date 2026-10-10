@@ -29,7 +29,7 @@ use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use zcode_host_control::WindowId;
-use zcode_host_kit::{CallContext, EventHub, Reply, RpcError, ServiceBuilder};
+use zcode_host_kit::{CallContext, EventHub, Overflow, Reply, RpcError, ServiceBuilder};
 
 use crate::main_bridge::random_id;
 
@@ -277,7 +277,9 @@ pub fn service_with_sender() -> (ServiceBuilder, Broadcaster) {
 
 /// 同 [`service_with_sender`]，claim 的过期用给定时钟（测试注入）。
 pub fn service_with_clock(clock: Clock) -> (ServiceBuilder, Broadcaster) {
-    let messages = EventHub::<Arc<Envelope>>::new();
+    // 订阅者是各连接的 `onDidReceive` 转发（Gateway 立即搬进出站队列）；落后 1024 条说明转发卡住，
+    // 结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+    let messages = EventHub::<Arc<Envelope>>::new("broadcast", 1024, Overflow::CloseSubscriber);
     let claims = Arc::new(Claims::new(clock));
     let broadcaster = Broadcaster {
         messages: messages.clone(),

@@ -190,7 +190,7 @@ pub fn install(
 
     // ── tasks ──
     // 侧栏：syncer 与 controller 必须先挂上观察者，再预热拉起 CLI，否则会错过首份快照。
-    let workspace_events = tasks::WorkspaceEvents::new();
+    let workspace_events = tasks::workspace_events();
     let task_service = tasks::service::TaskService::new(
         Arc::new(storage.tasks_index.clone()),
         workspace_events.clone(),

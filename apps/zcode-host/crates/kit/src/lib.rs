@@ -1,4 +1,4 @@
-//! Rust Host 的 service 框架：channel 抽象、契约 stub、参数解码、事件分发与日志。
+//! Rust Host 的 service 框架：channel 抽象、契约 stub、参数解码、事件分发、owner 任务的工作队列与日志。
 //!
 //! 各 service 用 [`ServiceBuilder`] 按方法注册实现；没实现的成员回退到契约 stub
 //! （立即回 `NotImplemented`），保证 Renderer 的任何调用都不会挂起。
@@ -9,6 +9,7 @@ pub mod channel;
 pub mod contract;
 pub mod events;
 pub mod log;
+pub mod serial;
 
 pub use args::Args;
 pub use builder::ServiceBuilder;
@@ -16,6 +17,7 @@ pub use channel::{
     CallContext, CallFuture, ChannelRegistry, EventStream, FlowState, NOT_IMPLEMENTED_CODE, Reply,
     ServiceChannel, StubChannel,
 };
-pub use events::{EventHub, replies};
+pub use events::{EventHub, Overflow, replies};
+pub use serial::{Serial, Stopped};
 pub use zcode_host_rpc::codec::base64_encode;
 pub use zcode_host_rpc::{RpcError, RpcValue};

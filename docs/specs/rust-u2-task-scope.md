@@ -136,3 +136,61 @@ sequenceDiagram
 - runtime 嵌入测试（`apps/zcode-cli-rust/tests/embed.rs`）：实例因 EOF、Engine panic 或被嵌入方中止而结束之后，实例中没有仍在运行的任务；中止实例时，运行中的 run、标题请求与后台 Bash 任务随之结束（模型请求关闭、后台进程被回收）。
 - Host 退出时日志里列出被中止的任务；正常退出时这个列表为空或只含已知的常驻任务。
 - 现有测试与桌面 E2E 全部通过。
+
+## 6. Host 的 service（U2 收尾）
+
+U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有者（6.1）、通道都有界（6.2）、不跨 `.await` 持有 tokio 的锁（6.3）、退出时报告被中止的任务（6.4）、由检查保证（6.5）。迁移不改变任务做的事、它们的取消令牌与关闭顺序；所有权是附加的一层。
+
+### 6.1 作用域树
+
+（随各 crate 的迁移补全。）
+
+### 6.2 有界通道
+
+每条通道写明容量与满了以后的做法，三种之一：
+
+- **背压**：发送方等空位（`send().await`）。只用于能停下来等的发送方，且接收方的处理不会反过来等这个发送方（否则死锁）。
+- **结束落后的一方**：同步的发送方不能等，消息又不能丢时，满了说明接收方已经卡住：结束它的那条流（事件订阅）或整条连接（RPC 链路），记 warn。这是看得见的失败（订阅方重新订阅时取快照，连接方按断开处理），不是悄悄留下的缺口；无限缓存会拖垮整个 Host。
+- **合并**：只表示“有变化”的信号，已有一条待处理时丢弃新的。
+
+进程内事件分发 `EventHub`（`zcode-host-kit`）：每个订阅者一条有界队列，构造时给出名字、容量与策略（`Overflow::CloseSubscriber` / `Overflow::Coalesce`）；同步的 `emit` 按策略处理满的订阅者，能等待的发送方用 `emit_waiting`（背压，一个 hub 只用其中一种）。订阅者多是 Renderer 的订阅：Gateway 的转发立即把事件搬进连接的出站队列（rust-u2-gateway.md §2.3），真正的上限是出站队列的 256 MiB；hub 的容量只兜底一个卡住的订阅者。
+
+| hub                                                                            | 位置                                                     | 容量           | 满了     | 订阅者 / 理由                                                      |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------- | -------------- | -------- | ------------------------------------------------------------------ |
+| `broadcast`                                                                    | `base/src/broadcast.rs`                                  | 1024           | 结束订阅 | 各连接的 `onDidReceive`                                            |
+| `setting-updated`                                                              | `settings/src/settings/mod.rs`                           | 256            | 结束订阅 | 数据目录迁移、账号 provider、远端预配：按 patch 的键响应，不能合并 |
+| `providers-changed`、`providers-builtin-changed`、`providers-personal-updated` | `providers/src/providers/mod.rs`                         | 1              | 合并     | 变化信号，订阅者重读快照                                           |
+| `agent-notifications`                                                          | `sessions/src/agent/extensions.rs`                       | 8192           | 结束订阅 | 通知分发与 legacy 会话事件（同步转换）；流式时每秒数百条           |
+| `agent-process-events`                                                         | 同上                                                     | 256            | 结束订阅 | 进程生命周期上报，转交控制通道                                     |
+| `agent-plugin-progress`、`agent-local-ttft`、`agent-telemetry`、`agent-cua`    | `sessions/src/agent/notifications.rs`                    | 1024           | 结束订阅 | Renderer 订阅                                                      |
+| `agent-lifecycle`、`agent-restarted`、`agent-storage-startup`                  | `sessions/src/agent/runtime.rs`                          | 1024、256、256 | 结束订阅 | Renderer 订阅、sessions-index 观察者、legacy 会话事件              |
+| `agent-frames`、`agent-route-frames`、`legacy-session-events`                  | `sessions/src/agent/{runtime,service,session_events}.rs` | 8192           | 结束订阅 | V4 帧与 legacy 事件；流式时每秒数百条，8192 条约是卡住半分钟以上   |
+| `sessions-index-events`                                                        | `sessions/src/agent/sessions_index.rs`                   | 4096           | 结束订阅 | syncer（每条写一次 tasks-index）与 controller                      |
+| `task-workspace-events`、`task-session-signals`                                | `sessions/src/tasks/{mod,service}.rs`                    | 1024           | 结束订阅 | Renderer 订阅、controller（每条重读分区）、TaskLifecycle           |
+| `task-terminal`、`task-ready`、`task-stream`、`task-controller-frames`         | `sessions/src/tasks/{lifecycle,controller}.rs`           | 1024           | 结束订阅 | Renderer 订阅，automation / off-peak / bots 等待终态               |
+| `account-providers-changed`、`credential-mutations`                            | `account/src/account/{account_providers,credential}.rs`  | 256            | 结束订阅 | CLI 热同步（原因进日志）、远端预配                                 |
+| `feedback-progress`、`share-import-progress`、`share-publish-progress`         | `account`、`automation/src/conversation_share`           | 1024、256、256 | 结束订阅 | 进度：最后一条是终态，不能合并                                     |
+| `automation-terminal`                                                          | `automation/src/automation/driver.rs`                    | 1024           | 结束订阅 | bots 的回复观察与 automation 的等待方                              |
+| `file-watcher-events`                                                          | `workspace/src/file_watcher.rs`                          | 1024 批        | 结束订阅 | Renderer 的 `onDidChange`                                          |
+| `terminal-data`、`terminal-exit`                                               | `workspace/src/terminal/mod.rs`                          | 4096 块、16    | 结束订阅 | Renderer 订阅；saturated 时流控暂停读 PTY                          |
+| `remote-route-frames`、`remote-task-ready`                                     | `remote/src/remote/{agent_scope,tasks}.rs`               | 8192、256      | 结束订阅 | 远端 V4 帧的再分发、远端 Bot 的终态兜底                            |
+
+其余通道见各 crate 迁移时补充的表格（6.2.1 起）。
+
+### 6.3 不跨 `.await` 持有 tokio 的锁
+
+存量的 `#[expect(clippy::await_holding_invalid_type)]` 逐处按三种方式之一消除，不只是把 `.await` 挪个位置：
+
+1. **缩小临界区**：锁只保护内存状态，持锁期间只做同步的读写，等待放到锁外；需要的顺序保证用代次或版本号确认。
+2. **owner 任务（actor）**：资源（一个文件、一条 stdin、一组状态）交给一个任务独占，调用方把工作交给它并等回执。进程内的写队列（`tokio::sync::Mutex<()>`）改为 `zcode_host_kit::Serial`：工作在 owner 任务里按提交顺序逐个执行；提交方放弃等待不打断已经开始的读改写；工作 panic 时提交方得到同一个 panic，owner 继续；队列有界，满了提交方等待；owner 是所在作用域的常驻任务，作用域关闭后提交方得到 `Stopped`。
+3. **`std::sync::Mutex`，锁内不 await**。
+
+逐处的做法见各 crate 迁移时补充的表格（6.3.1 起）。
+
+### 6.4 关闭报告
+
+（见 host-core 的迁移。）
+
+### 6.5 护栏
+
+（见最后一步。）

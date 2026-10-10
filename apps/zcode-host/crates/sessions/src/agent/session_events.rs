@@ -16,7 +16,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use zcode_host_kit::{EventHub, EventStream, Reply, RpcError, log};
+use zcode_host_kit::{EventHub, EventStream, Overflow, Reply, RpcError, log};
 
 use super::extensions::AgentNotification;
 use super::runtime::{AgentRuntime, Lane, RuntimePolicy, WorkspaceTarget};
@@ -96,7 +96,9 @@ impl SessionEvents {
     pub fn start(runtime: AgentRuntime) -> Arc<Self> {
         let events = Arc::new(Self {
             runtime: runtime.clone(),
-            hub: EventHub::new(),
+            // legacy `zcode-session` 事件，订阅者是 Renderer 订阅（Gateway 立即搬进出站队列）；流式输出时每秒
+            // 数百条。落后 8192 条说明转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+            hub: EventHub::new("legacy-session-events", 8192, Overflow::CloseSubscriber),
             state: Mutex::new(State::default()),
         });
         let mut notifications = Box::pin(runtime.extensions().notifications().subscribe());

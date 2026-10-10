@@ -255,7 +255,13 @@ pub fn install(
     let service = Arc::new(ShareService {
         client,
         importer,
-        publish_progress: zcode_host_kit::EventHub::new(),
+        // 发布进度（最后一条是终态，不能合并），订阅者是 Renderer 订阅；落后 256 条说明转发卡住，结束它的
+        // 订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+        publish_progress: zcode_host_kit::EventHub::new(
+            "share-publish-progress",
+            256,
+            zcode_host_kit::Overflow::CloseSubscriber,
+        ),
     });
     registry.implement(channel(service.clone()));
     Some(Box::new(service))

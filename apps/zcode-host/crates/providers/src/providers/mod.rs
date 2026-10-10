@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use zcode_host_kit::{EventHub, Reply, RpcError, ServiceBuilder, log};
+use zcode_host_kit::{EventHub, Overflow, Reply, RpcError, ServiceBuilder, log};
 
 use resolve::Resolved;
 
@@ -121,9 +121,14 @@ impl ProviderRuntime {
                 active_builtin: RwLock::new(None),
                 personal_file,
                 state: RwLock::new(State::default()),
-                changed: EventHub::new(),
-                builtin_changed: EventHub::new(),
-                personal_updated: EventHub::new(),
+                // 三个都是“有变化”的信号（订阅者收到后重新读快照）：队列里已有一条时合并（§6.2）。
+                changed: EventHub::new("providers-changed", 1, Overflow::Coalesce),
+                builtin_changed: EventHub::new("providers-builtin-changed", 1, Overflow::Coalesce),
+                personal_updated: EventHub::new(
+                    "providers-personal-updated",
+                    1,
+                    Overflow::Coalesce,
+                ),
                 account_ready: tokio::sync::watch::channel(true).0,
             }),
         }

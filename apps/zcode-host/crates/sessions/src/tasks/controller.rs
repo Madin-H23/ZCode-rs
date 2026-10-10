@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
-use zcode_host_kit::{Args, EventHub, Reply, RpcError, ServiceBuilder, log};
+use zcode_host_kit::{Args, EventHub, Overflow, Reply, RpcError, ServiceBuilder, log};
 
 use super::{Partitions, TaskSource, WorkspaceEvents};
 use crate::agent::WorkspaceTarget;
@@ -448,7 +448,9 @@ impl Controller {
                 subscribers: HashMap::new(),
                 external: ExternalProjection::default(),
             }),
-            frames: EventHub::new(),
+            // 每条连接的 `zcode-task` 帧，订阅者是该连接的 Renderer 订阅（Gateway 立即搬进出站队列）。
+            // 落后 1024 条说明转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+            frames: EventHub::new("task-controller-frames", 1024, Overflow::CloseSubscriber),
             refresh_lock: tokio::sync::Mutex::new(()),
             external: Mutex::new(None),
         });
@@ -1071,7 +1073,7 @@ mod tests {
             crate::providers::ProviderRuntime::new(None, "/nonexistent/p.json".into()),
         );
         let observer = SessionsIndexObserver::start(runtime);
-        let events = WorkspaceEvents::new();
+        let events = crate::tasks::workspace_events();
         let fake = Arc::new(Fake(Mutex::new(Partitions {
             active: vec![
                 json!({"taskId": "t1", "title": "T", "workspacePath": "/w", "createdAt": 1, "updatedAt": 1}),

@@ -22,8 +22,8 @@ use serde_json::{Map, Value, json};
 use tokio::task::AbortHandle;
 use zcode_host_control::{ClientMode, WindowId};
 use zcode_host_kit::{
-    Args, CallContext, CallFuture, EventHub, EventStream, FlowState, Reply, RpcError, RpcValue,
-    ServiceChannel, log, replies,
+    Args, CallContext, CallFuture, EventHub, EventStream, FlowState, Overflow, Reply, RpcError,
+    RpcValue, ServiceChannel, log, replies,
 };
 
 use super::api::AgentApi;
@@ -508,7 +508,9 @@ impl Scope {
                     }
                 });
                 Route {
-                    hub: EventHub::new(),
+                    // 同一 (kind, workspace) 的 V4 帧再分发给各连接的订阅（Gateway 立即搬进出站队列）。
+                    // 落后 8192 条说明转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+                    hub: EventHub::new("agent-route-frames", 8192, Overflow::CloseSubscriber),
                     task: task.abort_handle(),
                 }
             });

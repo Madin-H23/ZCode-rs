@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
 use sha2::Digest;
 use tokio::sync::oneshot;
-use zcode_host_kit::{EventHub, log};
+use zcode_host_kit::{EventHub, Overflow, log};
 
 use super::auth::{AccountRequestAuth, AccountSettings, CodingPlanKeys, read_account_settings};
 use super::availability::{Availability, AvailabilityProvider, AvailabilityResolver};
@@ -174,7 +174,9 @@ impl AccountProviderSource {
                 keys,
                 availability,
                 state: Mutex::new(SourceState::default()),
-                changed: EventHub::new(),
+                // 订阅者是 CLI 热同步（按原因逐次推送，原因进日志），一次变化一条；落后 256 条说明它卡住，
+                // 结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+                changed: EventHub::new("account-providers-changed", 256, Overflow::CloseSubscriber),
             }),
         }
     }

@@ -294,9 +294,9 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::tasks::WorkspaceEvents;
     use crate::tasks::repo::memory::MemoryRepo;
     use crate::tasks::repo::{RepoFilter, TaskRepo};
+    use crate::tasks::workspace_events;
 
     fn runtime() -> AgentRuntime {
         AgentRuntime::new(
@@ -317,7 +317,7 @@ mod tests {
     #[tokio::test]
     async fn baseline_seeds_silently_and_terminal_patches_broadcast() {
         let repo = Arc::new(MemoryRepo::default());
-        let events = WorkspaceEvents::new();
+        let events = workspace_events();
         let mut seen = Box::pin(events.subscribe());
         let tasks = TaskService::new(repo.clone(), events, runtime());
         let syncer = Syncer {

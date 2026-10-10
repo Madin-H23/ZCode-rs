@@ -16,7 +16,7 @@ use super::provisioning::ProvisioningSource;
 use super::{RemoteConfig, install_with};
 use crate::agent::WorkspaceTarget;
 use crate::tasks::controller::Controller;
-use crate::tasks::{Partitions, TaskSource, WorkspaceEvents};
+use crate::tasks::{Partitions, TaskSource, workspace_events};
 
 fn context(connection: u64) -> CallContext {
     CallContext {
@@ -345,7 +345,7 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
     let controller = Controller::start(
         local.clone(),
         crate::agent::sessions_index::SessionsIndexObserver::start(runtime),
-        WorkspaceEvents::new(),
+        workspace_events(),
     );
     workspaces.sources().attach_to(&controller);
     let service = crate::tasks::controller::service(controller.clone()).build(None);

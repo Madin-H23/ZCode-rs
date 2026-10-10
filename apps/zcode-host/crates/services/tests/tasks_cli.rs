@@ -26,7 +26,7 @@ use zcode_host_services::settings::SettingStore;
 use zcode_host_services::tasks::context::{TaskContext, TaskPaths};
 use zcode_host_services::tasks::lifecycle::TaskLifecycle;
 use zcode_host_services::tasks::service::TaskService;
-use zcode_host_services::tasks::{WorkspaceEvents, syncer};
+use zcode_host_services::tasks::{syncer, workspace_events};
 use zcode_host_services::tasks_index::TasksIndex;
 
 /// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
@@ -196,7 +196,7 @@ async fn task_lifecycle_against_rust_cli() {
     let index = TasksIndex::open(home.path().join(".zcode/v2/tasks-index.sqlite"), |_| {})
         .await
         .unwrap();
-    let events = WorkspaceEvents::new();
+    let events = workspace_events();
     let tasks = TaskService::new(Arc::new(index.clone()), events.clone(), runtime.clone());
     let observer = SessionsIndexObserver::start(runtime.clone());
     let _syncer = syncer::start(&observer, runtime.clone(), tasks.clone());
@@ -354,7 +354,7 @@ async fn claude_import_against_rust_cli() {
     let index = TasksIndex::open(home.path().join(".zcode/v2/tasks-index.sqlite"), |_| {})
         .await
         .unwrap();
-    let events = WorkspaceEvents::new();
+    let events = workspace_events();
     let tasks = TaskService::new(Arc::new(index.clone()), events.clone(), runtime.clone());
     let context = TaskContext::new(
         TaskPaths {

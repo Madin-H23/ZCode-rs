@@ -28,7 +28,7 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 use serde_json::{Map, Value, json};
 use tokio::task::JoinHandle;
-use zcode_host_kit::{EventHub, RpcError, log};
+use zcode_host_kit::{EventHub, Overflow, RpcError, log};
 use zcode_host_runtime_link::process::{self, StderrTail};
 use zcode_host_runtime_link::{Exit, RuntimeCommand, Start};
 
@@ -544,16 +544,21 @@ impl AgentRuntime {
                 providers,
                 slots: Mutex::new(HashMap::new()),
                 generations: Mutex::new(HashMap::new()),
-                lifecycle: EventHub::new(),
-                restarted: EventHub::new(),
-                frames: EventHub::new(),
+                // 订阅者：Renderer 订阅（Gateway 立即搬进出站队列）与 sessions-index 观察者、legacy 会话
+                // 事件（同步转换后转发）。满了结束落后的订阅，不悄悄丢（docs/specs/rust-u2-task-scope.md
+                // §6.2）。生命周期与重启每次启动 / 退出几条；V4 帧在流式输出时每秒数百条，8192 条约是
+                // 一个卡住的订阅者落后半分钟以上。
+                lifecycle: EventHub::new("agent-lifecycle", 1024, Overflow::CloseSubscriber),
+                restarted: EventHub::new("agent-restarted", 256, Overflow::CloseSubscriber),
+                frames: EventHub::new("agent-frames", 8192, Overflow::CloseSubscriber),
                 app_preferences: Mutex::new(None),
                 monitors: Mutex::new(Vec::new()),
                 disposed: AtomicBool::new(false),
                 extensions,
                 lane,
                 idle_timeout,
-                storage: EventHub::new(),
+                // 存储启动帧：每次启动至多几十条，订阅者是 Renderer 的启动页。
+                storage: EventHub::new("agent-storage-startup", 256, Overflow::CloseSubscriber),
                 lanes: Mutex::new(Vec::new()),
             }),
         }

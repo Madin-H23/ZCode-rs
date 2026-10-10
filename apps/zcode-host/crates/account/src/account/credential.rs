@@ -12,7 +12,7 @@ use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use ring::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
-use zcode_host_kit::{EventHub, Reply, RpcError, ServiceBuilder, log};
+use zcode_host_kit::{EventHub, Overflow, Reply, RpcError, ServiceBuilder, log};
 
 use crate::store::{LockOptions, atomic_write_private_text, with_file_lock};
 
@@ -279,7 +279,9 @@ impl CredentialStore {
         Self {
             file: app_config_dir.join("credentials.json"),
             cipher: CredentialCipher::new(secret),
-            mutations: EventHub::new(),
+            // 订阅者是远端预配（凭据变化后重新下发），一次写入一条；落后 256 条说明它卡住，结束它的订阅
+            // （docs/specs/rust-u2-task-scope.md §6.2）。
+            mutations: EventHub::new("credential-mutations", 256, Overflow::CloseSubscriber),
         }
     }
 

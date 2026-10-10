@@ -234,7 +234,7 @@ pub fn default_view() -> Value {
 impl Default for FakeTasks {
     fn default() -> Self {
         Self {
-            terminal: EventHub::new(),
+            terminal: EventHub::new("test", 1024, zcode_host_kit::Overflow::CloseSubscriber),
             created: Mutex::default(),
             sent: Mutex::default(),
             resolved: Mutex::default(),
