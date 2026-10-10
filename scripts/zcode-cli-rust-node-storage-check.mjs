@@ -141,6 +141,8 @@ async function check(name, root, file) {
 
 const dir = await mkdtemp(join(tmpdir(), "zcode-node-storage-"));
 try {
+  // 用与 nextest 相同的 profile 设置：pnpm test:zcode-cli-rust 里这一步紧跟 nextest，直接复用它刚构建的
+  // `all` 测试二进制，不再另编一份关掉调试信息与增量编译的整个 CLI。
   execFileSync(
     "cargo",
     [
@@ -157,9 +159,6 @@ try {
       env: {
         ...process.env,
         ZCODE_CLI_RUST_NODE_DUMP: dir,
-        CARGO_INCREMENTAL: "0",
-        CARGO_PROFILE_DEV_DEBUG: "0",
-        CARGO_PROFILE_TEST_DEBUG: "0",
       },
     },
   );
