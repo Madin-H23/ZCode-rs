@@ -12,25 +12,26 @@ Host 与 CLI 在代码上保持隔离、可以分开编译，边界只有 App �
 
 ## 和今天的 App 对比
 
-整个桌面 App 的进程树（Electron Main、Renderer、GPU 与辅助进程、Host、runtime、scheduler、MCP 与工具进程），同一份 Electron 与界面的生产构建、本地 mock 模型，两种配置交错各测 3 次取中位数（2026-10-10，Apple M1 Max）。内存为 macOS physical footprint 合计，CPU 为单核百分比。
+整个桌面 App 的进程树（Electron Main、Renderer、GPU 与辅助进程、Host、runtime、scheduler、MCP 与工具进程），同一份 Electron 与界面的生产构建、本地 mock 模型，两种配置交错各测 3 次取中位数（2026-10-10 复测，`a17ddb6`，Apple M1 Max）。内存为 macOS physical footprint 合计，CPU 为单核百分比；CPU 采样时断开了测量用的调试连接。
 
 | 指标                                 | 今天的 App（Node Host + TS CLI） | ZCode RS（Rust Host + 进程内 runtime） | 变化 |
 | ------------------------------------ | -------------------------------: | -------------------------------------: | ---: |
-| 内存，空闲                           |                          868 MiB |                                460 MiB | −47% |
-| 内存，4 个 workspace                 |                         1.44 GiB |                                514 MiB | −65% |
-| 内存，8 个 workspace                 |                          2.2 GiB |                                535 MiB | −76% |
-| 每多一个 workspace                   |                          193 MiB |                                 11 MiB | −95% |
-| 内存，4 个会话同时流式               |                         1.68 GiB |                                664 MiB | −61% |
-| CPU 合计，4 个会话同时流式           |                            52.1% |                                  53.0% | 持平 |
-| 冷启动到主界面可用                   |                           4.08 s |                                 1.79 s | −56% |
-| 首条消息出现第一段                   |                           740 ms |                                 274 ms | −63% |
-| 新开 workspace 的第一段              |                           762 ms |                                 146 ms | −81% |
-| 退出（8 个 workspace，进程全部结束） |                           1.50 s |                                 0.24 s | −84% |
+| 内存，空闲                           |                          939 MiB |                                436 MiB | −54% |
+| 内存，4 个 workspace                 |                         1.46 GiB |                                449 MiB | −70% |
+| 内存，8 个 workspace                 |                         2.31 GiB |                                515 MiB | −78% |
+| 每多一个 workspace                   |                          203 MiB |                               约 4 MiB | −98% |
+| 内存，4 个会话同时流式               |                         1.73 GiB |                                688 MiB | −61% |
+| CPU 合计，1 个会话流式               |                            44.7% |                                  37.9% | −15% |
+| CPU 合计，4 个会话同时流式           |                            54.8% |                                  39.2% | −28% |
+| 冷启动到主界面可用                   |                           4.27 s |                                 2.01 s | −53% |
+| 首条消息出现第一段                   |                           1.41 s |                                 236 ms | −83% |
+| 新开 workspace 的第一段              |                           977 ms |                                 178 ms | −82% |
+| 退出（8 个 workspace，进程全部结束） |                           1.87 s |                                 0.28 s | −85% |
 
-- Electron 自身约 400–490 MiB，两种配置相同；差别来自 Node Host、scheduler 进程和每个 workspace 的 CLI 子进程。
-- 今天的 App 里每个 workspace 的 TS CLI 还各带一个 node_repl MCP 进程（约 78 MiB），这次 Rust 一侧没有启动它；扣掉这部分，内存仍少 42–66%。
-- 流式时总 CPU 由界面与 GPU 主导，两边持平；Rust Host 本身更省，但界面一侧经本地 WebSocket 接入的开销抵消了这部分（原因待剖析）。界面响应（长任务、按键与切换延迟）没有差别。
-- 只代表开发检出（没有 ASAR 与签名）、macOS、mock 模型下的量级，测量时机器上有其他编译任务。方法、分进程数据、偏差与 Node Host + Rust CLI 的第三组对照见 [App 级性能报告](docs/reports/rust-app-performance-2026-10-10.md)。
+- Electron 自身约 390–550 MiB，两种配置相同；差别来自 Node Host、scheduler 进程和每个 workspace 的 CLI 子进程。今天的 App 里每个 TS CLI 还各带一个约 80 MiB 的 node_repl MCP 进程，这次 Rust 一侧没有启动它；扣掉这部分，内存仍少 49–70%。
+- 流式时 CPU 的差别全在 Host 一侧：4 个会话时 Node Host 加 TS CLI 子进程约 19 个点，Rust Host 加本地 WebSocket 经过的 network service 约 5 个点。剩下约 35 个点是两边相同的界面渲染（Renderer 与 GPU），不随 Host 变化。界面响应（长任务、切换会话延迟）没有差别。
+- 首次测量里“流式 CPU 持平”主要是测量方式造成的：测量 harness 经调试协议连着界面时，Rust Host 的每个 WebSocket 帧都多出一条调试事件。复测在 CPU 采样时断开了它，并合入了 Rust 一侧的三项优化（同一方法下 Host 一侧再少约 2.5 个点，Rust Host 的空闲 CPU 从约 0.8% 降到约 0.1%）。
+- 只代表开发检出（没有 ASAR 与签名）、macOS、mock 模型下的量级；测量时机器上有其他编译与磁盘扫描任务，时间类指标波动较大。方法、分进程数据、偏差与 Node Host + Rust CLI 的第三组对照见 [App 级性能报告](docs/reports/rust-app-performance-2026-10-10.md)。
 
 ## 当前进度
 

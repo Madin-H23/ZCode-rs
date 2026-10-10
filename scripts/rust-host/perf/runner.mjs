@@ -99,7 +99,11 @@ export async function measureQuit(app, config, home) {
  * 运行一个 suite，返回结果对象（也写到 `outFile`）。`valid` 为 false 时结果不进统计：有检查未通过、
  * 运行抛错或退出不干净。
  */
-export async function runSuite(suite, configId, { outFile, keep = false, label = "" } = {}) {
+export async function runSuite(
+  suite,
+  configId,
+  { outFile, keep = false, label = "", hostBinary = RUST_HOST_RELEASE } = {},
+) {
   const config = CONFIGS[configId];
   if (!config) throw new Error(`unknown configuration ${configId}`);
   if (!SUITE_RUNNERS[suite]) throw new Error(`unknown suite ${suite}`);
@@ -121,12 +125,13 @@ export async function runSuite(suite, configId, { outFile, keep = false, label =
   const env = {
     ZCODE_BASE_URL: controlPlane.origin,
     NODE_ENV: "production",
-    ...(config.host === "rust" ? { ZCODE_RUST_HOST_BINARY: RUST_HOST_RELEASE } : {}),
+    ...(config.host === "rust" ? { ZCODE_RUST_HOST_BINARY: hostBinary } : {}),
   };
   const result = {
     suite,
     config: configId,
     label,
+    ...(hostBinary === RUST_HOST_RELEASE || config.host !== "rust" ? {} : { hostBinary }),
     startedAt: new Date().toISOString(),
     load1: { start: loadavg()[0] },
     coldStart: {},

@@ -67,9 +67,25 @@ function metricDefinitions() {
   add(["stream"], "rssIdle", "RSS 合计，空闲", "MiB", (r) =>
     MiB(total(snapshotOf(r, "idle")?.roles, "rssKiB")),
   );
+  add(
+    ["stream"],
+    "idleCpuTotal",
+    "空闲 60 s（一个 workspace，没有会话）：CPU 合计",
+    "%",
+    (r) => r.idle?.processes.cpuPercent.total,
+  );
+  add(["stream"], "idleHostCpu", "空闲 60 s：Host + scheduler + runtime + MCP 的 CPU", "%", (r) =>
+    r.idle
+      ? ["host", "scheduler", "runtime", "mcp", "tool"].reduce(
+          (sum, role) => sum + (r.idle.processes.cpuPercent[role] ?? 0),
+          0,
+        )
+      : null,
+  );
   for (const [name, label] of [
     ["one", "1 路流式"],
-    ["four", "4 路流式"],
+    ["four", "4 路流式（4 个订阅）"],
+    ["fourSteady", "4 路流式（1 个订阅）"],
   ]) {
     const window = (r) => r.streams?.[name];
     add(
@@ -104,14 +120,14 @@ function metricDefinitions() {
       `${name}KeyP50`,
       `${label}：按键到字符上屏 p50`,
       "ms",
-      (r) => window(r)?.keyLatencyMs.p50,
+      (r) => window(r)?.keyLatencyMs?.p50,
     );
     add(
       ["stream"],
       `${name}KeyMax`,
       `${label}：按键到字符上屏 最大`,
       "ms",
-      (r) => window(r)?.keyLatencyMs.max,
+      (r) => window(r)?.keyLatencyMs?.max,
     );
     add(
       ["stream"],
@@ -253,7 +269,10 @@ function roleTable(runsByConfig, label, suite) {
   return { markdown: lines.join("\n"), summary };
 }
 
-/** 流式窗口每个角色的 CPU % 与 footprint 均值（中位数）。 */
+/**
+ * 流式窗口每个角色的 CPU % 与 footprint 均值（中位数）；helper 角色另按种类（network service 等）拆行，
+ * 只有 CPU。
+ */
 function streamRoleTable(runsByConfig, name, source = (run) => run.streams?.[name]) {
   const lines = [
     `| 角色 | ${CONFIG_IDS.map((id) => `${id} CPU %`).join(" | ")} | ${CONFIG_IDS.map((id) => `${id} footprint 均值`).join(" | ")} |`,
@@ -276,6 +295,24 @@ function streamRoleTable(runsByConfig, name, source = (run) => run.streams?.[nam
       continue;
     lines.push(
       `| ${role === "total" ? "**合计**" : role} | ${CONFIG_IDS.map((id) => format(values[id].cpu?.median, "%")).join(" | ")} | ${CONFIG_IDS.map((id) => format(values[id].footprint?.median, "MiB")).join(" | ")} |`,
+    );
+  }
+  const windowsOf = (id) => (runsByConfig[id]?.stream ?? []).map(source).filter(Boolean);
+  const kinds = new Set(
+    CONFIG_IDS.flatMap((id) =>
+      windowsOf(id).flatMap((window) => Object.keys(window.processes.helperCpuPercent ?? {})),
+    ),
+  );
+  for (const kind of [...kinds].sort()) {
+    const values = Object.fromEntries(
+      CONFIG_IDS.map((id) => [
+        id,
+        stats(windowsOf(id).map((window) => window.processes.helperCpuPercent?.[kind] ?? 0)),
+      ]),
+    );
+    summary[`helper:${kind}`] = values;
+    lines.push(
+      `| helper: ${kind} | ${CONFIG_IDS.map((id) => format(values[id]?.median, "%")).join(" | ")} | ${CONFIG_IDS.map(() => "").join(" | ")} |`,
     );
   }
   return { markdown: lines.join("\n"), summary };
@@ -344,12 +381,17 @@ export function renderReport(results) {
       `### 分角色占用：${suite} / ${label}（MiB，中位数；括号内为进程数）\n\n${table.markdown}`,
     );
   }
-  for (const name of ["one", "four"]) {
+  const idle = streamRoleTable(runsByConfig, "idle", (run) => run.idle);
+  summary.roles["stream:idleWindow"] = idle.summary;
+  sections.push(`### 分角色：空闲 60 s 窗口（CPU 单核 %，footprint MiB）\n\n${idle.markdown}`);
+  for (const [name, title] of [
+    ["one", "1 路"],
+    ["four", "4 路（4 个订阅）"],
+    ["fourSteady", "4 路（1 个订阅）"],
+  ]) {
     const table = streamRoleTable(runsByConfig, name);
     summary.roles[`stream:${name}`] = table.summary;
-    sections.push(
-      `### 分角色：${name === "one" ? "1 路" : "4 路"}流式窗口（CPU 单核 %，footprint MiB）\n\n${table.markdown}`,
-    );
+    sections.push(`### 分角色：${title}流式窗口（CPU 单核 %，footprint MiB）\n\n${table.markdown}`);
   }
   const tool = streamRoleTable(runsByConfig, "tool", (run) => run.tool);
   summary.roles["stream:tool"] = tool.summary;

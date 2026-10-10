@@ -44,7 +44,7 @@ import {
   waitMarker,
   watchMarkers,
 } from "./page-probes.mjs";
-import { mainWindowRendererPids } from "./processes.mjs";
+import { helperKind, mainWindowRendererPids } from "./processes.mjs";
 import { decodeCapture, readTap, rpcTapInit, startCapture, takeCapture } from "./rpc-tap.mjs";
 import { CONFIGS, RUST_HOST_RELEASE, seedWorkspaces } from "./runner.mjs";
 import {
@@ -55,7 +55,6 @@ import {
   cpuWindow,
   EMIT_TAP_INSTALL,
   EMIT_TAP_TAKE,
-  helperKind,
   mainLogCounts,
   streamsCover,
 } from "./stream-cpu-lib.mjs";
