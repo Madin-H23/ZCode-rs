@@ -1,14 +1,36 @@
-# ZCode Rust
+# ZCode RS
 
-这是把 ZCode 桌面端的 Host 与 agent runtime（CLI）迁移到 Rust 的工作仓库：
+ZCode 桌面端服务的 Rust 实现。不只是把 CLI 换成 Rust：Host（会话、调度、设置、扩展、终端、Git、远端连接等服务）和 agent runtime 都用 Rust 重写，并合并成一个进程。
 
-- **Rust CLI**（[`apps/zcode-cli-rust/`](apps/zcode-cli-rust/)）：agent runtime，取代 TypeScript CLI。可以单独运行（`app-server --stdio`、`-p`），也可以作为库嵌进 Host。
-- **Rust Host**（[`apps/zcode-host/`](apps/zcode-host/)）：取代 Node Host。一个 App 只有一个 Host 进程，所有窗口接入它；runtime 在 Host 进程内运行，每个本地 workspace 一个实例，不再为每个 workspace 起 CLI 子进程。
-- **共用 crate**（[`rust/`](rust/)）：两边都用的基础代码（进程树、原子写、任务作用域、workspace 身份等）。
+- **Rust Host**（[`apps/zcode-host/`](apps/zcode-host/)）：取代 Node Host。一个 App 只有一个 Host 进程，所有窗口接入它；runtime 在 Host 进程内运行，每个本地 workspace 一个实例，不再为每个 workspace 起 CLI 子进程。cron 与闲时任务的调度、设置写入、窗口间广播也从 Electron Main 收回到 Host。
+- **Rust CLI**（[`apps/zcode-cli-rust/`](apps/zcode-cli-rust/)）：agent runtime，取代 TypeScript CLI。可以单独运行（`app-server --stdio`、`-p`），也作为库嵌进 Host。
+- **共用 crate**（[`rust/`](rust/)）：两边都用的基础代码（进程树与回收、原子写、任务作用域、workspace 身份等）。
 
 Host 与 CLI 在代码上保持隔离、可以分开编译，边界只有 App 协议（[边界规格](docs/specs/rust-host-cli-boundary.md)）。打包在一起的 `zcode-host` 二进制也能直接当 CLI 用（见下文）。
 
 **发布版的默认组合仍是 Node Host 加 TypeScript CLI。** Rust Host 只在开发构建中通过开关启用；切换默认之前要完成功能对齐、全平台验收与打包签名（规划见 [rust-unified-host.md](docs/specs/rust-unified-host.md) 第 12 节）。
+
+## 和今天的 App 对比
+
+整个桌面 App 的进程树（Electron Main、Renderer、GPU 与辅助进程、Host、runtime、scheduler、MCP 与工具进程），同一份 Electron 与界面的生产构建、本地 mock 模型，两种配置交错各测 3 次取中位数（2026-10-10，Apple M1 Max）。内存为 macOS physical footprint 合计，CPU 为单核百分比。
+
+| 指标                                 | 今天的 App（Node Host + TS CLI） | ZCode RS（Rust Host + 进程内 runtime） | 变化 |
+| ------------------------------------ | -------------------------------: | -------------------------------------: | ---: |
+| 内存，空闲                           |                          868 MiB |                                460 MiB | −47% |
+| 内存，4 个 workspace                 |                         1.44 GiB |                                514 MiB | −65% |
+| 内存，8 个 workspace                 |                          2.2 GiB |                                535 MiB | −76% |
+| 每多一个 workspace                   |                          193 MiB |                                 11 MiB | −95% |
+| 内存，4 个会话同时流式               |                         1.68 GiB |                                664 MiB | −61% |
+| CPU 合计，4 个会话同时流式           |                            52.1% |                                  53.0% | 持平 |
+| 冷启动到主界面可用                   |                           4.08 s |                                 1.79 s | −56% |
+| 首条消息出现第一段                   |                           740 ms |                                 274 ms | −63% |
+| 新开 workspace 的第一段              |                           762 ms |                                 146 ms | −81% |
+| 退出（8 个 workspace，进程全部结束） |                           1.50 s |                                 0.24 s | −84% |
+
+- Electron 自身约 400–490 MiB，两种配置相同；差别来自 Node Host、scheduler 进程和每个 workspace 的 CLI 子进程。
+- 今天的 App 里每个 workspace 的 TS CLI 还各带一个 node_repl MCP 进程（约 78 MiB），这次 Rust 一侧没有启动它；扣掉这部分，内存仍少 42–66%。
+- 流式时总 CPU 由界面与 GPU 主导，两边持平；Rust Host 本身更省，但界面一侧经本地 WebSocket 接入的开销抵消了这部分（原因待剖析）。界面响应（长任务、按键与切换延迟）没有差别。
+- 只代表开发检出（没有 ASAR 与签名）、macOS、mock 模型下的量级，测量时机器上有其他编译任务。方法、分进程数据、偏差与 Node Host + Rust CLI 的第三组对照见 [App 级性能报告](docs/reports/rust-app-performance-2026-10-10.md)。
 
 ## 当前进度
 
@@ -161,7 +183,7 @@ pnpm e2e:rust-host         # 桌面 E2E（隔离的 Electron、mock 模型）
 
 动态工作流不在当前迁移范围，TUI 只保留子命令入口。分项证据与剩余边界见[对齐清单](docs/specs/rust-parity-remaining.md)、[共用会话库规格](docs/specs/rust-m11-node-storage.md)和 [npm 启动器验收记录](docs/reports/rust-npm-app-launcher-2026-09-28.md)。默认 runtime 仍为 TypeScript。
 
-## 性能
+## 性能（只看 runtime）
 
 只比较 runtime 本身（不含 Electron 与 Host）：2026-09-25 在同一台 Apple M1 Max 上使用本地 SSE fixture、8 回合单 Session、5 次交错测量的结果如下。Node.js 使用当次 CLI bundle，Rust 使用切换到 Node 会话库后的 release 二进制：
 
@@ -174,20 +196,7 @@ pnpm e2e:rust-host         # 桌面 E2E（隔离的 Electron、mock 模型）
 
 这组数据只代表当次本地 fixture 和构建形态，测量时机器存在其他高负载进程。大历史冷读取与驻留另有专项数据；真实供应商、MCP 工具负载、Windows/Linux 和移动远控的性能仍需单独验收。完整口径见[性能报告](docs/reports/rust-performance-2026-09-25.md)；[2026-09-23 报告](docs/reports/rust-node-resource-parity-2026-09-23.md)保留为历史基线。
 
-整个桌面 App（Electron Main、Renderer、GPU 与辅助进程、Host、runtime、scheduler、MCP 与工具进程）：2026-10-10 在同一台机器上，同一份 Electron 与 Main / Renderer 生产构建、本地 mock 模型，三种配置各 3 次交错测量的中位数。A 是今天发布的 Node Host + TS CLI，B 是 Rust Host + 进程内 Rust runtime（release），C 是 Node Host + Rust CLI 子进程。内存为 macOS physical footprint 的进程树合计，CPU 为单核百分比：
-
-| 指标                                 |        A |        B |        C |
-| ------------------------------------ | -------: | -------: | -------: |
-| 内存，空闲                           |  868 MiB |  460 MiB |  582 MiB |
-| 内存，4 个 workspace 各完成一轮      | 1.44 GiB |  514 MiB |  717 MiB |
-| 每多一个 workspace                   |  193 MiB | 10.6 MiB | 27.9 MiB |
-| 内存，4 个会话同时流式               | 1.68 GiB |  664 MiB |  822 MiB |
-| CPU 合计，4 个会话同时流式           |    52.1% |    53.0% |    47.5% |
-| 冷启动到主界面可用                   |   4.08 s |   1.79 s |   2.59 s |
-| 首条消息首段                         |   740 ms |   274 ms |   199 ms |
-| 退出（8 个 workspace，进程全部结束） |   1.50 s |   0.24 s |   1.41 s |
-
-Electron 自身约 400–490 MiB，三种配置相同；差别来自 Node Host、scheduler 与每个 workspace 的 CLI 子进程（A 的 TS CLI 还各带一个 node_repl MCP，B、C 本次没有启动它）。流式时总 CPU 由 Renderer 与 GPU 主导，三种配置持平；界面响应（长任务、按键与切换延迟）没有差别。测量时机器上有其他编译任务（load average 5.7–38.9），只代表开发检出、macOS、mock 模型下的量级。方法、分角色数据与偏差见 [App 级性能报告](docs/reports/rust-app-performance-2026-10-10.md)。Host 内嵌 runtime 与 Host 加 CLI 子进程两种链路的对比见 [U3 报告](docs/reports/rust-u3-embedded-runtime.md)。
+整个 App 的对比见上文“[和今天的 App 对比](#和今天的-app-对比)”。Host 内嵌 runtime 与 Host 加 CLI 子进程两种链路的对比见 [U3 报告](docs/reports/rust-u3-embedded-runtime.md)。
 
 ## 上游同步记录
 
