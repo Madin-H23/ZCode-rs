@@ -401,13 +401,13 @@ pub async fn prepare_directory(
         stderr,
         mut exit,
     } = started.map_err(|error| PrepareError::io(&error))?;
-    // stderr 只排空，不上报（可能含本地路径）。
-    if let Some(mut stderr) = stderr {
-        tokio::spawn(async move {
+    // stderr 只排空，不上报（可能含本地路径）。读取由句柄拥有、存活到函数返回（进程树已回收之后）。
+    let _stderr = stderr.map(|mut stderr| {
+        zcode_async::owned(async move {
             let mut sink = Vec::new();
             let _ = stderr.read_to_end(&mut sink).await;
-        });
-    }
+        })
+    });
     let mut stdin = Some(writer);
     let mut reader = BufReader::new(reader);
     let mut failure: Option<PrepareError> = None;

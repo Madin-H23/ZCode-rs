@@ -616,6 +616,11 @@ impl AgentRuntime {
         runtime
     }
 
+    /// agent 的作用域：agent 子系统里随它一直运行的任务（观察者、事件转发、预热）在这里启动。
+    pub(crate) fn spawner(&self) -> &Spawner {
+        &self.inner.spawner
+    }
+
     pub fn lane_kind(&self) -> Lane {
         self.inner.lane
     }

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use tokio::task::AbortHandle;
+use zcode_async::Task;
 use zcode_host_kit::{EventHub, Overflow, log};
 
 use super::runtime::{AgentRuntime, FrameKind, WorkspaceTarget};
@@ -45,7 +45,7 @@ pub enum IndexEvent {
 
 struct Watched {
     generation: u64,
-    task: AbortHandle,
+    task: Task<()>,
     sessions: HashMap<String, Value>,
 }
 
@@ -75,21 +75,25 @@ impl SessionsIndexObserver {
         });
         let mut lifecycle = Box::pin(runtime.lifecycle().subscribe());
         let weak = Arc::downgrade(&observer);
-        tokio::spawn(async move {
-            while let Some(event) = lifecycle.next().await {
-                let Some(observer) = weak.upgrade() else {
-                    return;
-                };
-                let Some((target, generation, available)) = lifecycle_target(&event) else {
-                    continue;
-                };
-                if available {
-                    observer.watch(target, generation);
-                } else {
-                    observer.unwatch(target, generation);
-                }
-            }
-        });
+        drop(
+            runtime
+                .spawner()
+                .spawn_resident("sessions-index-lifecycle", async move {
+                    while let Some(event) = lifecycle.next().await {
+                        let Some(observer) = weak.upgrade() else {
+                            return;
+                        };
+                        let Some((target, generation, available)) = lifecycle_target(&event) else {
+                            continue;
+                        };
+                        if available {
+                            observer.watch(target, generation);
+                        } else {
+                            observer.unwatch(target, generation);
+                        }
+                    }
+                }),
+        );
         observer
     }
 
@@ -115,33 +119,37 @@ impl SessionsIndexObserver {
         let key = target.key();
         let observer = Arc::downgrade(self);
         let task_target = target;
-        let task = tokio::spawn(async move {
-            let Some(strong) = observer.upgrade() else {
-                return;
-            };
-            let runtime = strong.runtime.clone();
-            let connection_id = strong.connection_id.clone();
-            drop(strong);
-            let result = follow(
-                observer,
-                runtime,
-                connection_id,
-                task_target.clone(),
-                generation,
-            )
-            .await;
-            if let Err(error) = result {
-                log::debug(format!(
-                    "sessions-index observer for {} stopped: {error}",
-                    task_target.key()
-                ));
-            }
-        });
+        // 跟随一代实例的 sessions-index 帧；实例 unavailable 或被下一代替换时中止。
+        let task = self
+            .runtime
+            .spawner()
+            .spawn("sessions-index-follow", async move {
+                let Some(strong) = observer.upgrade() else {
+                    return;
+                };
+                let runtime = strong.runtime.clone();
+                let connection_id = strong.connection_id.clone();
+                drop(strong);
+                let result = follow(
+                    observer,
+                    runtime,
+                    connection_id,
+                    task_target.clone(),
+                    generation,
+                )
+                .await;
+                if let Err(error) = result {
+                    log::debug(format!(
+                        "sessions-index observer for {} stopped: {error}",
+                        task_target.key()
+                    ));
+                }
+            });
         let previous = self.lock().insert(
             key,
             Watched {
                 generation,
-                task: task.abort_handle(),
+                task,
                 sessions: HashMap::new(),
             },
         );

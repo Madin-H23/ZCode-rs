@@ -16,10 +16,11 @@
 //! 订阅实际工作放在独立任务里：连接关闭会中止调用 future，但 ACK 迟到时仍要反向退订。
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
-use tokio::task::AbortHandle;
+use zcode_async::{Spawner, Task, TaskScope};
 use zcode_host_control::{ClientMode, WindowId};
 use zcode_host_kit::{
     Args, CallContext, CallFuture, EventHub, EventStream, FlowState, Overflow, Reply, RpcError,
@@ -236,7 +237,7 @@ struct Pending {
 
 struct Route {
     hub: EventHub<Arc<Frame>>,
-    task: AbortHandle,
+    task: Task<()>,
 }
 
 #[derive(Default)]
@@ -261,6 +262,10 @@ enum RememberError {
 }
 
 struct Scope {
+    /// 连接的作用域（`connection:<id>`）：帧路由与流控 worker 在这里，连接收口结束时关闭。
+    tasks: TaskScope,
+    /// agent 的作用域：要在连接关闭后照常走完的工作（订阅的握手）在这里。
+    service: Spawner,
     connection_id: String,
     client_mode: ClientMode,
     /// 连接所属主窗口：这条连接发起的浏览器请求带上它，Main 按它路由（rust-u4-app-host.md §2.2）。
@@ -274,16 +279,19 @@ struct Scope {
 
 impl Scope {
     fn new(
+        service: &Spawner,
         connection_id: String,
         client_mode: ClientMode,
         window_id: Option<WindowId>,
         runtime: AgentRuntime,
         api: AgentApi,
     ) -> Arc<Self> {
+        let tasks = service.child(format!("connection:{connection_id}"));
         Arc::new_cyclic(|weak: &Weak<Scope>| {
             let weak = weak.clone();
             let (send_runtime, send_connection) = (runtime.clone(), connection_id.clone());
             let flow = ConnectionFlow::spawn(
+                &tasks.spawner(),
                 move || {
                     weak.upgrade()
                         .map(|scope| scope.lock().touched.values().cloned().collect())
@@ -310,6 +318,8 @@ impl Scope {
                 },
             );
             Scope {
+                tasks,
+                service: service.clone(),
                 connection_id,
                 client_mode,
                 window_id,
@@ -501,7 +511,7 @@ impl Scope {
                         frame.kind == kind && frame.workspace_key == key
                     }));
                 let scope = Arc::downgrade(self);
-                let task = tokio::spawn(async move {
+                let task = self.tasks.spawner().spawn("frame-route", async move {
                     while let Some(frame) = upstream.next().await {
                         let Some(scope) = scope.upgrade() else { return };
                         scope.route_frame(frame);
@@ -511,7 +521,7 @@ impl Scope {
                     // 同一 (kind, workspace) 的 V4 帧再分发给各连接的订阅（Gateway 立即搬进出站队列）。
                     // 落后 8192 条说明转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
                     hub: EventHub::new("agent-route-frames", 8192, Overflow::CloseSubscriber),
-                    task: task.abort_handle(),
+                    task,
                 }
             });
         let events = route
@@ -579,7 +589,9 @@ impl Scope {
         };
         let pending_id = self.begin_pending(kind, &workspace_key, &topic);
         let scope = self.clone();
-        let work = tokio::spawn(async move {
+        // 在 agent 的作用域里走完：调用方取消或连接关闭都不打断握手，失败时清理暂存、成功但连接已关闭时
+        // 由登记步骤退订，不会在 CLI 留下无主的订阅。
+        let work = self.service.spawn("subscribe", async move {
             let result = scope
                 .subscribe_on_cli(kind, &target, &topic, policy, pending_id, &params)
                 .await;
@@ -983,10 +995,14 @@ impl Scope {
                 self.unsubscribe_on_cli(&process, entry).await;
             }
         }
+        // 连接的作用域随连接结束：流控 worker 已发完 closed，帧路由已中止。
+        self.tasks.close(Duration::ZERO).await;
     }
 }
 
 pub struct AgentChannel {
+    /// agent 的作用域：各连接的作用域是它的子作用域，连接关闭后的收口任务也在这里。
+    spawner: Spawner,
     runtime: AgentRuntime,
     api: AgentApi,
     scopes: Mutex<HashMap<u64, Arc<Scope>>>,
@@ -994,8 +1010,13 @@ pub struct AgentChannel {
 }
 
 impl AgentChannel {
-    pub fn new(api: AgentApi, fallback: Option<Arc<dyn ServiceChannel>>) -> Arc<Self> {
+    pub fn new(
+        spawner: &Spawner,
+        api: AgentApi,
+        fallback: Option<Arc<dyn ServiceChannel>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
+            spawner: spawner.clone(),
             runtime: api.chat.clone(),
             api,
             scopes: Mutex::new(HashMap::new()),
@@ -1010,6 +1031,7 @@ impl AgentChannel {
             .entry(context.connection)
             .or_insert_with(|| {
                 Scope::new(
+                    &self.spawner,
                     format!("host-rpc-{}", uuid_v4()),
                     context.client_mode,
                     context.window_id,
@@ -1317,7 +1339,10 @@ impl ServiceChannel for AgentChannel {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&context.connection);
         if let Some(scope) = scope {
-            tokio::spawn(async move { scope.dispose().await });
+            drop(
+                self.spawner
+                    .spawn("connection-dispose", async move { scope.dispose().await }),
+            );
         }
         if let Some(fallback) = &self.fallback {
             fallback.connection_closed(context);

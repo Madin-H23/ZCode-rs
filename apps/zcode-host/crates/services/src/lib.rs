@@ -188,8 +188,9 @@ pub fn install(
     );
 
     let environment = &context.environment;
+    let agent_tasks = scope("agent");
     let agent = agent::AgentRuntime::new(
-        &scope("agent"),
+        &agent_tasks,
         agent::AgentRuntimeConfig {
             base_env: child_env.vars().clone(),
             command_vars: environment.vars.clone(),
@@ -272,11 +273,14 @@ pub fn install(
     // plugin-management 三个 channel。AgentChannel 在最外层：连接作用域成员由它处理，其余回退到
     // members，再回退到先前登记的实现（例如 automation 成员）与契约 stub。
     let agent_main = MainBridge::new(context.control.clone());
-    agent::process_events::forward(agent.extensions(), agent_main.clone());
+    agent::process_events::forward(&agent_tasks, agent.extensions(), agent_main.clone());
     let agent_browser = agent::browser::BrowserBridge::new(Some(agent_main.clone()));
     agent_browser.install(router, agent.extensions());
-    let agent_events =
-        agent::notifications::AgentEvents::start(agent.extensions(), Some(agent_main));
+    let agent_events = agent::notifications::AgentEvents::start(
+        &agent_tasks,
+        agent.extensions(),
+        Some(agent_main),
+    );
     let agent_api = agent::api::AgentApi::new(
         agent.clone(),
         &context.environment.data_base_dir,
@@ -289,7 +293,7 @@ pub fn install(
     let fallback = registry.get(agent::service::CHANNEL);
     registry.register(
         agent::service::CHANNEL,
-        agent::service::AgentChannel::new(agent_api.clone(), fallback),
+        agent::service::AgentChannel::new(&agent_tasks, agent_api.clone(), fallback),
     );
     registry.implement(agent::session::service(
         agent::session::SessionService::new(agent_api.clone(), Some(task_service.clone())),

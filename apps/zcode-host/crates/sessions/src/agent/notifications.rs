@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
+use zcode_async::Spawner;
 use zcode_host_kit::{EventHub, EventStream, Overflow, Reply, log};
 
 use super::extensions::{AgentNotification, Extensions};
@@ -49,17 +50,22 @@ impl Default for AgentEvents {
 }
 
 impl AgentEvents {
-    /// 订阅通知总线并开始分发；`main` 为 None 时（单测）不转发 Main 控制消息。
-    pub fn start(extensions: &Extensions, main: Option<MainBridge>) -> Arc<Self> {
+    /// 订阅通知总线并开始分发（`spawner` 里的常驻任务 `agent-notifications`）；`main` 为 None 时
+    /// （单测）不转发 Main 控制消息。
+    pub fn start(
+        spawner: &Spawner,
+        extensions: &Extensions,
+        main: Option<MainBridge>,
+    ) -> Arc<Self> {
         let events = Arc::new(Self::default());
         let mut notifications = Box::pin(extensions.notifications().subscribe());
         let weak = Arc::downgrade(&events);
-        tokio::spawn(async move {
+        drop(spawner.spawn_resident("agent-notifications", async move {
             while let Some(notification) = notifications.next().await {
                 let Some(events) = weak.upgrade() else { return };
                 events.dispatch(&notification, main.as_ref());
             }
-        });
+        }));
         events
     }
 

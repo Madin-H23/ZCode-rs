@@ -191,7 +191,9 @@ impl Drop for CancelOnDrop {
             return;
         };
         let operation_id = std::mem::take(&mut self.operation_id);
-        tokio::spawn(async move {
+        // 取消请求属于这个实例：实例结束时它随实例的作用域中止。
+        let tasks = process.tasks().clone();
+        drop(tasks.spawn("cancel-generate-text", async move {
             // 取消是尽力而为的控制面操作：超时不回收进程，失败只记 debug。
             if let Err(error) = process
                 .observe_with_timeout(
@@ -206,7 +208,7 @@ impl Drop for CancelOnDrop {
                     error.message
                 ));
             }
-        });
+        }));
     }
 }
 

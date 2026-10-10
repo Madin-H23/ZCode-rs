@@ -289,10 +289,18 @@ async fn core_chat_flow(command_vars: BTreeMap<String, String>) {
         SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
         providers,
     );
-    let events = AgentEvents::start(runtime.extensions(), None);
+    let events = AgentEvents::start(
+        &zcode_host_services::testing::spawner(),
+        runtime.extensions(),
+        None,
+    );
     let api = AgentApi::new(runtime.clone(), home.path(), events, None);
     let members = zcode_host_services::agent::members::agent_service(&api).build(None);
-    let channel = AgentChannel::new(api.clone(), Some(members));
+    let channel = AgentChannel::new(
+        &zcode_host_services::testing::spawner(),
+        api.clone(),
+        Some(members),
+    );
     let observer = SessionsIndexObserver::start(runtime.clone());
     let mut index_events = Box::pin(observer.events().subscribe());
     let context = CallContext {
@@ -676,10 +684,18 @@ async fn an_embedded_runtime_panic_only_restarts_its_own_workspace() {
             personal,
         ),
     );
-    let events = AgentEvents::start(runtime.extensions(), None);
+    let events = AgentEvents::start(
+        &zcode_host_services::testing::spawner(),
+        runtime.extensions(),
+        None,
+    );
     let api = AgentApi::new(runtime.clone(), home.path(), events, None);
     let members = zcode_host_services::agent::members::agent_service(&api).build(None);
-    let channel = AgentChannel::new(api.clone(), Some(members));
+    let channel = AgentChannel::new(
+        &zcode_host_services::testing::spawner(),
+        api.clone(),
+        Some(members),
+    );
     let context = CallContext {
         connection: 1,
         attachment_id: "test".into(),
@@ -834,10 +850,18 @@ async fn a_replayable_attachment_streams_and_recovers_against_the_runtime() {
             personal,
         ),
     );
-    let events = AgentEvents::start(runtime.extensions(), None);
+    let events = AgentEvents::start(
+        &zcode_host_services::testing::spawner(),
+        runtime.extensions(),
+        None,
+    );
     let api = AgentApi::new(runtime.clone(), home.path(), events, None);
     let members = zcode_host_services::agent::members::agent_service(&api).build(None);
-    let channel = AgentChannel::new(api.clone(), Some(members));
+    let channel = AgentChannel::new(
+        &zcode_host_services::testing::spawner(),
+        api.clone(),
+        Some(members),
+    );
     let target = json!({"workspacePath": workspace_path});
     let connect = |connection: u64| {
         let channel = &channel;

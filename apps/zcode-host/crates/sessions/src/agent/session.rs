@@ -555,7 +555,8 @@ pub fn service(sessions: Arc<SessionService>) -> ServiceBuilder {
 pub fn warm_up(runtime: AgentRuntime, targets: Vec<WorkspaceTarget>) {
     for target in targets {
         let runtime = runtime.clone();
-        tokio::spawn(async move {
+        let spawner = runtime.spawner().clone();
+        drop(spawner.spawn("warm-up", async move {
             let result = runtime.initialize(&target).await;
             let workspace = &target.workspace_path;
             if result["available"] == true {
@@ -570,7 +571,7 @@ pub fn warm_up(runtime: AgentRuntime, targets: Vec<WorkspaceTarget>) {
                     result["reason"].as_str().unwrap_or("unknown")
                 ));
             }
-        });
+        }));
     }
 }
 
