@@ -364,6 +364,9 @@ export async function launchApp({
       stop,
       secondInstance,
       pid: electron.pid,
+      // 性能测量（scripts/rust-host/perf/stream-cpu.mjs）要绕开 Playwright 直接连 CDP 与 Main inspector。
+      cdpPort,
+      inspectPort,
     };
   } catch (error) {
     await stop();

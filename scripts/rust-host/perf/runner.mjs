@@ -45,7 +45,7 @@ async function logLineTime(home, pattern, timeout = 60_000) {
   }
 }
 
-async function seedWorkspaces(home, workspaces, baseUrl) {
+export async function seedWorkspaces(home, workspaces, baseUrl) {
   await seedProfile(home, workspaces[0], baseUrl);
   for (const workspace of workspaces.slice(1)) await seedWorkspace(home, workspace);
   await writeFile(
@@ -64,7 +64,7 @@ async function seedWorkspaces(home, workspaces, baseUrl) {
 }
 
 /** 正常退出：SIGTERM 给 Main，直到 Main 与退出前的全部后代都不在了。 */
-async function measureQuit(app, config, home) {
+export async function measureQuit(app, config, home) {
   const identities = await treeIdentities(app.pid);
   const startedAt = Date.now();
   let allGoneMs = null;

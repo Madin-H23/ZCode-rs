@@ -71,12 +71,28 @@ export async function installProbes(page) {
       }
       perf.watches = perf.watches.filter((watch) => watch.next < watch.markers.length);
     };
-    new MutationObserver(() => {
+    perf.observer = new MutationObserver(() => {
       if (checkScheduled) return;
       checkScheduled = true;
       requestAnimationFrame(check);
-    }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
+    perf.observe = () =>
+      perf.observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+    perf.observe();
   });
+}
+
+/**
+ * 暂停 / 恢复探针的 DOM 观察（MutationObserver 与每帧一次的文本检查）。只供量“探针本身的成本”与
+ * 不带探针的 App 底数（stream-cpu.mjs）；暂停期间出现的标记不会被记录。
+ */
+export async function setProbesActive(page, active) {
+  await page.evaluate((on) => {
+    const perf = window.__perf;
+    if (!perf?.observer) return;
+    if (on) perf.observe();
+    else perf.observer.disconnect();
+  }, active);
 }
 
 /** 开始等这组标记（按顺序出现）。 */

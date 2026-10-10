@@ -62,6 +62,8 @@ export async function connectMainInspector(port) {
       }
       return result.result.value;
     },
+    /** 原始的 inspector 协议调用（性能测量用 Profiler 域）。 */
+    call,
     close() {
       socket.close();
     },
