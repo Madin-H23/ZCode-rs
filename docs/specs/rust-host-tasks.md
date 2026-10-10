@@ -158,11 +158,11 @@ Main                          RustHostProcess（Main）                Rust Host
 
 - `pnpm exec tsx scripts/rust-host/tasks-index-groups-fixtures.ts [--check]`：用真实 TS `TaskIndexRepo` 在固定时钟下生成 `tasks_index/fixtures/parity-groups.json`（分组 CRUD、grouped 结构与排序、搜索与摘要、自动归档、归档删除；每步返回值或错误文案，以及最终表内容）。`cargo test -p zcode-host-services tasks_index::groups_tests` 逐项复现。`scripts/rust-host/test.mjs` 先跑 `--check`。
 - `cargo test -p zcode-host-services --lib tasks::`：搜索 / 归档删除 / 分组事件与 controller 全文搜索、自动归档、V4 信封与 ACK、configOptions 与模型选择字符串、轨迹解析、Claude 解析规则、会话消息在 Host 内应答（`tasks::session_messages`）。
-- `ZCODE_TEST_CLI_RUST_BINARY=… cargo test -p zcode-host-services --test tasks_cli`：真实 Rust CLI + 本地 mock 模型：
+- `ZCODE_TEST_CLI_RUST_BINARY=… cargo test -p zcode-host-services --test all suite::tasks_cli::`：真实 Rust CLI + 本地 mock 模型：
   - initialize → createTask（legacy）→ sendPrompt → terminal 带 inputId、ready → configOptions、切换权限模式（V4 CAS）、读模型、token 用量 → 空闲时 enqueue 立即开跑 → resume → close；
-  - task 命令映射到 runtime 队列（`--test task_queue_cli`，[rust-u3-stage-b.md](rust-u3-stage-b.md) 3.4.8）；
+  - task 命令映射到 runtime 队列（`--test all suite::task_queue_cli::`，[rust-u3-stage-b.md](rust-u3-stage-b.md) 3.4.8）；
   - Claude 扫描（侧链、subagents 目录被排除）→ 导入（去重、缺失记 skipped）→ 广播 → 全文搜索命中 → resume。
-- `cargo test -p zcode-host --test end_to_end`：replayable 本地 attachment 可签发，hello 报告 replayable 与受限能力。
+- `cargo test -p zcode-host --test all suite::end_to_end::`：replayable 本地 attachment 可签发，hello 报告 replayable 与受限能力。
 - `ZCODE_RUST_HOST_BINARY=… node --import tsx --test packages/desktop/test/rustHostPortBridge.test.ts`：MessagePort 经 Main 的桥连到真实 Rust Host 的 replayable attachment，关闭端口即关闭连接。
 - 桌面 E2E（`node scripts/rust-host/e2e-desktop.mjs --scenario <name>`，隔离 Electron + Rust Host，runtime 缺省在 Host 进程内）：
   - `tasks-search`：命令中心搜索只在回复正文里出现的词，结果带正文摘要，可点击；

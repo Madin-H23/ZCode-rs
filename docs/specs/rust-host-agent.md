@@ -305,8 +305,8 @@ E2E 与集成测试用的是 Rust CLI。它与两个控制面 lane 的组合原�
   - legacy 会话事件：seq 补号、去重、replay 先于 live、合并规则；
   - 会话库准备：协议、reuse、失败分类、首帧超时；
   - zcode-session：草稿不写库、API 重试运行态、filesystem MCP 追加。
-- `cargo test -p zcode-host-services --test agent_cli`（真实 Rust CLI + 本地 mock 模型）：legacy createSession / readSession、workspace-config 订阅、插件列表（plugin lane，真实 workspace 的项目插件）、MCP 状态（mcp-status lane，真实 workspace 的项目 MCP 配置，两个 lane 同时存活）、技能目录、`--prepare-storage`。
-- `cargo test -p zcode-host --test agent_startup`（真实 Rust CLI）：Host 启动依次经过 `preparing_host_storage`、`preparing_session_storage`（首帧 checking，最后一个目录 `finalDatabase:true`）、`starting_services`、`ready`。
+- `cargo test -p zcode-host --test all suite::agent_cli::`（真实 Rust CLI + 本地 mock 模型）：legacy createSession / readSession、workspace-config 订阅、插件列表（plugin lane，真实 workspace 的项目插件）、MCP 状态（mcp-status lane，真实 workspace 的项目 MCP 配置，两个 lane 同时存活）、技能目录、`--prepare-storage`。
+- `cargo test -p zcode-host --test all suite::agent_startup::`（真实 Rust CLI）：Host 启动依次经过 `preparing_host_storage`、`preparing_session_storage`（首帧 checking，最后一个目录 `finalDatabase:true`）、`starting_services`、`ready`。
 - `pnpm exec tsx scripts/rust-host/agent-schema-fixtures.ts --check`：Rust 的 TTFT / telemetry / CUA 校验与 TS zod 对拍样本一致（`scripts/rust-host/test.mjs` 先跑它）。
 - 桌面 E2E `agent-subsystem`：Main 的启动状态镜像在 `ready` 时带会话库的 `migrationBaselines`（经过了 `preparing_session_storage`）；Composer 输入 `/` 后菜单列出 workspace 技能（`getSkillReferenceCatalog` 经 chat lane），菜单项可点击。`core` 场景回归通过。
 - 桌面 E2E `agent-plugins-mcp`：隔离 profile 预置用户级 marketplace 插件、workspace 项目插件与项目 stdio MCP server；设置页「Plugins」列出两个插件（plugin-management lane 按真实 workspace 读取），「MCP」页的 server 行由 mcp-status lane 探测为 connected、工具数 1。

@@ -4,18 +4,13 @@
 //! 再释放。所有出站 HTTP 被指向 127.0.0.1 上已关闭的端口，不访问任何真实服务。
 //!
 //! 构建产物：`pnpm --filter @zcode/server build:remote`。没有产物或找不到 node 时跳过并说明原因。
-#![expect(
-    clippy::disallowed_methods,
-    reason = "集成测试从进程环境取被测二进制与 PATH"
-)]
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use zcode_host_control::{ClientMode, ControlRouter, ControlSink, HostToMain};
+use zcode_host_control::{ClientMode, ControlRouter};
 use zcode_host_kit::{CallContext, ChannelRegistry, Reply, RpcValue};
 use zcode_host_services::account::credential::CredentialStore;
 use zcode_host_services::remote::provisioning::ProvisioningSource;
@@ -23,26 +18,7 @@ use zcode_host_services::remote::transport::ProcessTransport;
 use zcode_host_services::remote::{RemoteConfig, RemoteScope, install_with};
 use zcode_host_services::settings::SettingStore;
 
-struct Control(mpsc::UnboundedSender<Value>);
-
-impl ControlSink for Control {
-    fn send(&self, message: HostToMain) {
-        let _ = self.0.send(serde_json::to_value(&message).unwrap());
-    }
-}
-
-fn find_node() -> Option<PathBuf> {
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths)
-            .map(|dir| dir.join("node"))
-            .find(|candidate| candidate.is_file())
-    })
-}
-
-fn server_bundle() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../packages/server/dist/remote/zcode-server.cjs")
-}
+use super::common::{Control, find_node, repo_root, server_bundle};
 
 async fn next_of(
     messages: &mut mpsc::UnboundedReceiver<Value>,
@@ -499,13 +475,6 @@ async fn http_get(url: &str, method: &str, range: Option<&str>) -> (u16, String,
     let head = String::from_utf8_lossy(&response[..split]).into_owned();
     let status = head.split(' ').nth(1).unwrap().parse().unwrap();
     (status, head, response[split + 4..].to_vec())
-}
-
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../..")
-        .canonicalize()
-        .unwrap()
 }
 
 /// 产品传输 `ConnectorTransport` 的完整链路：Rust ⇄ TS 连接器（与产品相同的 `runRemoteConnector`，

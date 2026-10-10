@@ -94,7 +94,8 @@ await requireCargoTools(["nextest"]);
 await run("cargo", ["nextest", "run", "--workspace", "--manifest-path", manifest]);
 // “只有 Host”形态（docs/specs/rust-host-cli-boundary.md §3.3、§3.5）：不链接 CLI 的构建能编译，没有
 // `cli` 入口，不给 ZCODE_AGENT_SERVER_COMMAND 时启动 runtime 失败。用单独的 target 目录，不覆盖下面
-// 交给 TS 测试的合并形态二进制。
+// 交给 TS 测试的合并形态二进制。zcode-host 的集成测试只有一个二进制 `all`
+// （docs/specs/rust-engineering-practices.md §4.2），只在这个形态编译的模块按测试名选出。
 await run("cargo", [
   "nextest",
   "run",
@@ -108,7 +109,7 @@ await run("cargo", [
   "zcode-host",
   "--no-default-features",
   "-E",
-  "package(zcode-host-runtime-link) | binary(host_only)",
+  "package(zcode-host-runtime-link) | (binary(all) & test(/^suite::host_only::/))",
 ]);
 await run("cargo", ["build", "--manifest-path", manifest]);
 

@@ -184,7 +184,7 @@ test("pending calls are rejected as soon as the Host goes away", async () => {
 /**
  * Host 主动关闭连接时 Close 帧带状态码与原因（docs/specs/rust-u2-gateway.md §2.6）：Renderer 的客户端在
  * onClose 里拿到的值与 `RUST_HOST_CLOSE_CODES` 一致（防止两侧定义漂移）。越过出站上限（4001）需要调试
- * 构建的小上限，见 crates/zcode-host/tests/close_reasons.rs 与桌面 E2E gateway-close-recovery。
+ * 构建的小上限，见 crates/zcode-host/tests/suite/close_reasons.rs 与桌面 E2E gateway-close-recovery。
  */
 test("the Host names why it closed a connection in the WebSocket Close frame", async () => {
   const host = await startedHost();

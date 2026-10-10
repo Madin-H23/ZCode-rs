@@ -3,13 +3,7 @@ use serde_json::{Value, json};
 use zcode_host_rpc::codec::{self, RpcError};
 use zcode_host_rpc::{FrameReader, Reader, RequestKind, RpcValue, frame, read_request};
 
-fn fixture() -> Value {
-    serde_json::from_str(include_str!("fixtures/rpc-serialization.json")).unwrap()
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
+use super::common::{fixture, hex};
 
 fn unhex(text: &str) -> Vec<u8> {
     (0..text.len())

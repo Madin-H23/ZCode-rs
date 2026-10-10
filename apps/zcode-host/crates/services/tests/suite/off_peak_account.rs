@@ -5,11 +5,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use base64::Engine;
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use zcode_host_control::{ControlSink, HostToMain, InitLocal};
+use zcode_host_control::InitLocal;
 use zcode_host_services::account::AccountStack;
 use zcode_host_services::account::credential::{CredentialStore, credential_secret};
 use zcode_host_services::off_peak::client::ServerClient;
@@ -19,28 +18,7 @@ use zcode_host_services::providers::ProviderRuntime;
 use zcode_host_services::settings::SettingStore;
 use zcode_host_services::{HostEnvironment, ServiceContext};
 
-struct NullSink;
-
-impl ControlSink for NullSink {
-    fn send(&self, _message: HostToMain) {}
-}
-
-fn jwt(exp: i64) -> String {
-    let encode =
-        |value: Value| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.to_string());
-    format!(
-        "{}.{}.sig",
-        encode(json!({"alg": "none"})),
-        encode(json!({"exp": exp}))
-    )
-}
-
-fn now_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
-}
+use super::common::{NullSink, jwt, now_seconds};
 
 /// 一次请求：(method, path, 小写头名 → 值)。
 type Recorded = (String, String, BTreeMap<String, String>);

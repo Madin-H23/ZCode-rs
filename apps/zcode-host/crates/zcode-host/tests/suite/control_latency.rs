@@ -7,62 +7,39 @@
 //! - `zcode-agent.queryConversationCommandsV4{clock:true}`：经 Host 到正在流式的 CLI 再返回。
 //!
 //! 缺省用进程内的嵌入式 runtime；设置 `ZCODE_TEST_CLI_RUST_BINARY` 时走子进程链路作差分对照。
-//! 数字用 `cargo test --release -p zcode-host --test control_latency -- --nocapture` 查看。
+//! 数字用 `cargo test --release -p zcode-host --test all suite::control_latency:: -- --nocapture` 查看。
 //!
 //! `runtime_link_comparison`（`#[ignore]`）是 U3 的对照测量（docs/reports/rust-u3-embedded-runtime.md）：
 //! N（`ZCODE_PERF_WORKSPACES`，缺省 4）个 workspace 同时流式时的控制 RPC 延迟、Host 进程（子进程链路另加
 //! 各 CLI 进程）的 RSS 与 CPU，以及 workspace runtime 的冷启动就绪时间；结果以一行 `runtime_link_perf
 //! {json}` 打印。用发布构建运行：
-//! `cargo test --release -p zcode-host --test control_latency runtime_link_comparison -- --ignored --nocapture`。
+//! `cargo test --release -p zcode-host --test all suite::control_latency::runtime_link_comparison -- --ignored --nocapture`。
 #![expect(
     clippy::disallowed_methods,
     reason = "集成测试从进程环境取被测二进制与 PATH"
 )]
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Lines};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use zcode_host_rpc::{FrameReader, Reader, codec, frame};
 
-/// 调度器对执行中闲时任务数的上报：与请求无关、随时可能到达，读“下一条控制消息”时跳过。
-const UNSOLICITED_REPORT: &str = "off-peak-active-count";
+use super::common::{Socket, UNSOLICITED_REPORT, runtime_env};
+
 const WORKSPACES: usize = 4;
 const STREAM_CHUNKS: usize = 600;
 const CHUNK_GAP: Duration = Duration::from_millis(20);
 const SAMPLES: usize = 150;
 const P95_BUDGET: Duration = Duration::from_millis(20);
-
-/// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
-fn runtime_env() -> Vec<(&'static str, String)> {
-    match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
-        Some(cli) => {
-            assert!(
-                cli.is_file(),
-                "ZCODE_TEST_CLI_RUST_BINARY is not a file: {}",
-                cli.display()
-            );
-            vec![
-                (
-                    "ZCODE_AGENT_SERVER_COMMAND",
-                    cli.to_string_lossy().into_owned(),
-                ),
-                ("ZCODE_AGENT_SERVER_RUNTIME", "zcode-cli-rust".to_owned()),
-            ]
-        }
-        // 不设置任何选择变量：走 Host 的缺省链路（嵌入式）。
-        None => Vec::new(),
-    }
-}
 
 fn sse(delta: Value, finish: Value) -> String {
     let chunk = json!({
@@ -166,8 +143,6 @@ impl Control {
         }
     }
 }
-
-type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// 顺序发请求、读到对应应答为止；途中的事件帧按 listen id 计数。
 struct Rpc {

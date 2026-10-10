@@ -6,14 +6,13 @@
     reason = "集成测试从进程环境取被测二进制与 PATH"
 )]
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use base64::Engine;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use zcode_host_control::{ControlSink, HostToMain, InitLocal};
+use zcode_host_control::InitLocal;
 use zcode_host_services::account::AccountStack;
 use zcode_host_services::account::credential::{CredentialStore, credential_secret};
 use zcode_host_services::agent::extensions::{ReverseContext, ReverseReply, UseReason};
@@ -24,53 +23,7 @@ use zcode_host_services::providers::ProviderRuntime;
 use zcode_host_services::settings::SettingStore;
 use zcode_host_services::{HostEnvironment, ServiceContext};
 
-struct NullSink;
-
-impl ControlSink for NullSink {
-    fn send(&self, _message: HostToMain) {}
-}
-
-/// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
-fn runtime_vars() -> BTreeMap<String, String> {
-    match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
-        Some(cli) => {
-            assert!(
-                cli.is_file(),
-                "ZCODE_TEST_CLI_RUST_BINARY is not a file: {}",
-                cli.display()
-            );
-            BTreeMap::from([
-                (
-                    "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
-                    cli.to_string_lossy().into_owned(),
-                ),
-                (
-                    "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
-                    "zcode-cli-rust".to_owned(),
-                ),
-            ])
-        }
-        // 不设置任何选择变量：走 Host 的缺省链路（嵌入式）。
-        None => BTreeMap::new(),
-    }
-}
-
-fn jwt(exp: i64) -> String {
-    let encode =
-        |value: Value| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.to_string());
-    format!(
-        "{}.{}.sig",
-        encode(json!({"alg": "none"})),
-        encode(json!({"exp": exp}))
-    )
-}
-
-fn now_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
-}
+use super::common::{NullSink, jwt, now_seconds, runtime_vars};
 
 /// mock 业务后端：记录 (method, path, authorization)，按路径应答。
 async fn serve_backend(listener: TcpListener, log: Arc<Mutex<Vec<(String, String, String)>>>) {

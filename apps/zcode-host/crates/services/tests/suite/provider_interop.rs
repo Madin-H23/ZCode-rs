@@ -1,17 +1,12 @@
 //! Rust Host 写出的 provider_config.json 必须是 TS 的规范形态：真实的 TS codec 能解码，
 //! 重新编码后与文件逐字节相同（scripts/rust-host/provider-config-interop.ts）。没有 node_modules 时跳过。
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{Value, json};
 use zcode_host_services::providers::ProviderRuntime;
 use zcode_host_services::providers::personal::PersonalWriter;
 
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../..")
-        .canonicalize()
-        .unwrap()
-}
+use super::common::repo_root;
 
 fn check(root: &Path, file: &Path) -> Value {
     let output = zcode_proc::std_command("node")

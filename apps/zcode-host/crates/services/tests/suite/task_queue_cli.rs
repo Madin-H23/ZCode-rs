@@ -31,6 +31,8 @@ use zcode_host_services::tasks::service::TaskService;
 use zcode_host_services::tasks::{syncer, workspace_events};
 use zcode_host_services::tasks_index::TasksIndex;
 
+use super::common::write_provider_config;
+
 const LIMIT: Duration = Duration::from_secs(90);
 /// 带这个标记的输入，模型请求要等测试放行才回复。
 const HOLD: &str = "[hold]";
@@ -156,34 +158,6 @@ fn serve_mock_model(listener: TcpListener) -> Mock {
         }
     });
     Mock { holding, release }
-}
-
-fn write_provider_config(home: &Path, port: u16) -> PathBuf {
-    let config_dir = home.join(".zcode/v2");
-    std::fs::create_dir_all(&config_dir).unwrap();
-    let personal = config_dir.join("provider_config.json");
-    std::fs::write(
-        &personal,
-        json!({"schemaVersion": 1, "config": {
-            "providerOrder": ["new-provider"],
-            "providerConfigRules": {"providerRules": [{
-                "providerId": "new-provider", "providerName": "Mock",
-                "config": {
-                    "group": "standard-personal",
-                    "access": {"type": "api-key", "apiKey": "sk-test"},
-                    "api": {"type": "openai-chat-completions", "baseUrl": format!("http://127.0.0.1:{port}/v1")},
-                    "personalModelIds": ["my-model"], "modelOrder": ["my-model"],
-                },
-            }]},
-            "modelConfigRules": {
-                "providerModelRules": [{"providerId": "new-provider", "modelId": "my-model", "config": {"enabled": true}}],
-                "manualProviderModelRules": [],
-            },
-        }})
-        .to_string(),
-    )
-    .unwrap();
-    personal
 }
 
 async fn next_matching<T: Clone>(

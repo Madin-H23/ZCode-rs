@@ -1,5 +1,5 @@
 // Rust Host 凭据存储与 TS 实现的交叉读写（docs/specs/rust-host-account.md §2.1）。
-// 由 apps/zcode-host/crates/services/tests/account_interop.rs 调用；环境（HOME、ZCODE_DATA_BASE_DIR、
+// 由 apps/zcode-host/crates/services/tests/suite/account_interop.rs 调用；环境（HOME、ZCODE_DATA_BASE_DIR、
 // ZCODE_CREDENTIAL_SECRET）由调用方指向临时目录，绝不读写开发者真实的 ~/.zcode。
 // 反馈脱敏（redact）也在这里比对：Rust 的 account/privacy.rs 逐条移植 feedbackPrivacy.ts。
 // 用法：node --import tsx scripts/rust-host/credential-interop.ts <read|write|vector|redact> <json>

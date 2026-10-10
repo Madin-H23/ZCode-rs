@@ -3,20 +3,14 @@
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::sync::mpsc;
 use zcode_async::TaskScope;
 use zcode_host_rpc::client::{CONNECTION_CLOSED, LISTENER_CAPACITY, OUTBOUND_CAPACITY};
 use zcode_host_rpc::codec::{self, RpcError};
 use zcode_host_rpc::{RpcClient, RpcValue, read_request};
 
-fn fixture() -> Value {
-    serde_json::from_str(include_str!("fixtures/rpc-serialization.json")).unwrap()
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
+use super::common::{fixture, hex};
 
 #[test]
 fn request_encoding_matches_typescript_bytes() {

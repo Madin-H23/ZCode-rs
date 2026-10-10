@@ -135,9 +135,10 @@ jobs:
             cargo nextest run --locked --workspace --manifest-path "$workspace/Cargo.toml"
           done
           # “只有 Host”形态（docs/specs/rust-host-cli-boundary.md §3.3、§3.5），单独的 target 目录。
+          # zcode-host 的集成测试只有一个二进制 all，只在这个形态编译的模块按测试名选出。
           cargo nextest run --locked --manifest-path apps/zcode-host/Cargo.toml --target-dir apps/zcode-host/target/host-only \
             -p zcode-host-runtime-link -p zcode-host --no-default-features \
-            -E 'package(zcode-host-runtime-link) | binary(host_only)'
+            -E 'package(zcode-host-runtime-link) | (binary(all) & test(/^suite::host_only::/))'
 
   # rust/ 的基础 crate（含 Windows Job Object）全部在 Windows 上测试；应用 crate 的测试从未在 Windows 上
   # 运行过，先与 rust-npm-windows.yml 的范围对齐，再逐步扩大。

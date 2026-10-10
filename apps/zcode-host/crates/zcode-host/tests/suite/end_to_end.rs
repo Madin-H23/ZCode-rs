@@ -6,18 +6,15 @@ use std::time::{Duration, Instant};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
-use tokio::net::TcpStream;
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::Request;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use zcode_host_rpc::{FrameReader, Reader, RpcValue, codec, frame};
 
-/// 调度器对执行中闲时任务数的上报：与请求无关、随时可能到达，读“下一条控制消息”时跳过。
-const UNSOLICITED_REPORT: &str = "off-peak-active-count";
-const DEV_ORIGIN: &str = "http://localhost:5173";
+use super::common::{DEV_ORIGIN, Socket, UNSOLICITED_REPORT};
+
 const STEP_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct Host {
@@ -182,8 +179,6 @@ impl Host {
         (url, issued["capability"].as_str().unwrap().to_owned())
     }
 }
-
-type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 fn request(url: &str, protocols: &str, origin: Option<&str>) -> Request {
     let mut request = url.into_client_request().unwrap();

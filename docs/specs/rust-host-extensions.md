@@ -138,7 +138,7 @@ AgentRuntime.start(target)
 - `cargo test -p zcode-host-services extensions`（`--lib`）：
   - **差分**：`pnpm exec tsx scripts/rust-host/extensions-fixtures.ts [--check]` 用真实 TS 服务在 `extensions-scenarios.ts` 描述的文件树上执行 57 次调用（9 个 channel 的全部本地成员，含报错路径），把结果与 11 个文件的最终内容写进 `extensions/fixtures/extensions-parity.json`；Rust 的 `parity_tests` 在同样的文件树上经真实 channel 复现，结果（抹掉临时根、路径相关 hash 与时间）与文件内容逐项相同。hooks 的声明 digest 与 bundle digest 不做归一化，直接比较。`scripts/rust-host/test.mjs` 先跑 `--check`；
   - 单元：frontmatter（YAML 与宽松读取）、命令文件生成、JSON 键序与数字、tar 头与越界路径、Subagent Markdown 与旧 Provider 迁移、hooks schema、MCP 路径改写、锁内并发。
-- `cargo test -p zcode-host-services --test extensions_interop`（需要 node 与 tsx）：
+- `cargo test -p zcode-host-services --test all suite::extensions_interop::`（需要 node 与 tsx）：
   - Rust 与 TS 两个进程各写 150 次 `config.json`（命令开关、MCP upsert），最终 300 个键都在；用修复前的 TS 写入方运行时失败；
   - Rust 导出的 skill / plugin 归档由 TS 解包（含插件元数据与可执行位），TS 导出的 skill 归档由 Rust 导入。
 - `node --import tsx --test packages/services/test/cliConfigCrossProcess.test.ts`：4 个 Node 进程并发写 `config.json` 不丢键（修复前失败）。

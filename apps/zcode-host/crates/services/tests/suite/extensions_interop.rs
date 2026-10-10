@@ -5,18 +5,13 @@
 //! 需要仓库里的 node 与 tsx（`pnpm install`）；缺失时跳过。所有文件都在临时目录内。
 #![cfg(unix)]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 
 use serde_json::{Value, json};
 use zcode_host_services::extensions::{Roots, commands, mcp_sync, plugin_sync, skill_sync};
 
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../..")
-        .canonicalize()
-        .unwrap()
-}
+use super::common::repo_root;
 
 #[expect(clippy::print_stderr, reason = "前置条件缺失时提示测试被跳过")]
 fn node_available() -> bool {
