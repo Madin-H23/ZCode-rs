@@ -77,14 +77,16 @@ pub async fn blocking<F, T>(work: F) -> Result<T, TaskError>;
 
 ## 4. 作用域的划分
 
-| 作用域                    | 所有者                                      | 何时关闭                              |
-| ------------------------- | ------------------------------------------- | ------------------------------------- |
-| `host`（根）              | `HostCore`                                  | Host 退出（`dispose` / 控制通道关闭） |
-| `host/connection:<id>`    | Gateway 的连接循环（rust-u2-gateway.md）    | 连接断开                              |
-| `host/websocket`          | WebSocket 监听任务                          | 随 Host                               |
-| `host/<service>`          | 各 service（组装时由根派生）                | 随 Host                               |
-| `host/agent/<key>#<代次>` | runtime 实例的监视任务所在的 `AgentRuntime` | 实例结束或被回收                      |
-| `host/remote/<session>`   | 远端连接注册表里的一个会话                  | 会话断开或被回收                      |
+| 作用域                                        | 所有者                                                          | 何时关闭                                         |
+| --------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------ |
+| `host`（根）                                  | `HostCore`                                                      | Host 退出（`dispose` / 控制通道关闭）            |
+| `host/connection:<id>`                        | Gateway 的连接循环（rust-u2-gateway.md）                        | 连接断开                                         |
+| `host/websocket`                              | WebSocket 监听任务                                              | 随 Host                                          |
+| `host/services/<service>`                     | 各 service（组装时由 `host/services` 派生，`Installed` 持有）   | 随 Host                                          |
+| `host/services/agent/<key>#<代次>`            | 该 runtime 实例的监视任务                                       | 实例结束或被回收                                 |
+| `host/services/remote/connection:<requestId>` | 远端连接（注册表里的一个 entry，可被多个 logical session 共用） | 连接释放（最后一个会话断开、被回收或 Host 退出） |
+
+完整的树（含终端、文件监听、Bot 通道等更短命的所有者）见 6.1。
 
 runtime 内部的任务（run、标题、hook、辅助模型请求）属于它所在实例的作用域：Engine 结束（包括 panic 之后的收口）时关闭。
 
