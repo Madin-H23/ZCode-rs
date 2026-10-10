@@ -3,7 +3,7 @@
 //!
 //! 扫描外部 Agent 的 skills / commands / plugins / MCP，按目标根或目标配置判定冲突，导入时软链或
 //! 复制到 `~/.zcode` / `<workspace>/.zcode`。`config.json` 的写入经 extensions 区域的
-//! `cli_config::update`（跨进程锁 + 原子写），与其他写入方共用一条写路径。
+//! `ConfigWrites::update`（跨进程锁 + 原子写），与其他写入方共用一个 owner 任务。
 use std::collections::{HashMap, HashSet};
 
 use regex::Regex;
@@ -321,6 +321,8 @@ enum ImportMode {
 pub struct Paths<'a> {
     pub home: &'a str,
     pub workspace: Option<&'a str>,
+    /// 共享配置文件的写入方（与扩展区共用，docs/specs/rust-u2-task-scope.md §6.3）。
+    pub writes: &'a cli_config::ConfigWrites,
 }
 
 impl Paths<'_> {
@@ -1362,53 +1364,65 @@ async fn import_dir(source: &str, target: &str, mode: ImportMode) -> Result<(), 
 }
 
 /// `addPluginDirToConfig`：已有（按 resolve 比较）则不写。
-async fn add_plugin_dir(config: &str, plugin: &str) -> Result<(), RpcError> {
+async fn add_plugin_dir(
+    writes: &cli_config::ConfigWrites,
+    config: &str,
+    plugin: &str,
+) -> Result<(), RpcError> {
     let resolved = fsx::resolve(plugin, &[]);
-    cli_config::update(config, |raw| {
-        let mut parsed = raw
-            .as_deref()
-            .and_then(js::parse_record)
-            .unwrap_or_default();
-        let mut plugins = match parsed.get("plugins") {
-            Some(Value::Object(plugins)) => plugins.clone(),
-            _ => Map::new(),
-        };
-        let mut dirs = string_array(plugins.get("dirs"));
-        if dirs.iter().any(|dir| fsx::resolve(dir, &[]) == resolved) {
-            return Ok(cli_config::Update::Skip(()));
-        }
-        dirs.push(resolved.clone());
-        plugins.insert("dirs".into(), json!(dirs));
-        parsed.insert("plugins".into(), Value::Object(plugins));
-        Ok(cli_config::Update::Write(
-            js::pretty_line(&Value::Object(parsed)),
-            (),
-        ))
-    })
-    .await
+    writes
+        .update(config, move |raw| {
+            let mut parsed = raw
+                .as_deref()
+                .and_then(js::parse_record)
+                .unwrap_or_default();
+            let mut plugins = match parsed.get("plugins") {
+                Some(Value::Object(plugins)) => plugins.clone(),
+                _ => Map::new(),
+            };
+            let mut dirs = string_array(plugins.get("dirs"));
+            if dirs.iter().any(|dir| fsx::resolve(dir, &[]) == resolved) {
+                return Ok(cli_config::Update::Skip(()));
+            }
+            dirs.push(resolved);
+            plugins.insert("dirs".into(), json!(dirs));
+            parsed.insert("plugins".into(), Value::Object(plugins));
+            Ok(cli_config::Update::Write(
+                js::pretty_line(&Value::Object(parsed)),
+                (),
+            ))
+        })
+        .await
 }
 
 /// `addMcpServerToZcodeConfig`：合并进 `mcp.servers`（无效条目随之丢弃，同 Node）。
-async fn add_mcp_server(config: &str, name: &str, server: &Value) -> Result<(), RpcError> {
-    cli_config::update(config, |raw| {
-        let mut parsed = raw
-            .as_deref()
-            .and_then(js::parse_record)
-            .unwrap_or_default();
-        let mut mcp = match parsed.get("mcp") {
-            Some(Value::Object(mcp)) => mcp.clone(),
-            _ => Map::new(),
-        };
-        let mut servers = zcode_servers(&parsed);
-        servers.insert(name.to_owned(), server.clone());
-        mcp.insert("servers".into(), Value::Object(servers));
-        parsed.insert("mcp".into(), Value::Object(mcp));
-        Ok(cli_config::Update::Write(
-            js::pretty_line(&Value::Object(parsed)),
-            (),
-        ))
-    })
-    .await
+async fn add_mcp_server(
+    writes: &cli_config::ConfigWrites,
+    config: &str,
+    name: &str,
+    server: &Value,
+) -> Result<(), RpcError> {
+    let (name, server) = (name.to_owned(), server.clone());
+    writes
+        .update(config, move |raw| {
+            let mut parsed = raw
+                .as_deref()
+                .and_then(js::parse_record)
+                .unwrap_or_default();
+            let mut mcp = match parsed.get("mcp") {
+                Some(Value::Object(mcp)) => mcp.clone(),
+                _ => Map::new(),
+            };
+            let mut servers = zcode_servers(&parsed);
+            servers.insert(name, server);
+            mcp.insert("servers".into(), Value::Object(servers));
+            parsed.insert("mcp".into(), Value::Object(mcp));
+            Ok(cli_config::Update::Write(
+                js::pretty_line(&Value::Object(parsed)),
+                (),
+            ))
+        })
+        .await
 }
 
 fn item_result(
@@ -1558,7 +1572,7 @@ async fn import_category(category: Category, selection: &Selection, paths: &Path
                                         .await
                                         .map_err(|error| error.message)?;
                                     import_dir(&candidate.source, &target, selection.mode).await?;
-                                    add_plugin_dir(&config, &target)
+                                    add_plugin_dir(paths.writes, &config, &target)
                                         .await
                                         .map_err(|error| error.message)
                                 }
@@ -1590,8 +1604,13 @@ async fn import_category(category: Category, selection: &Selection, paths: &Path
                         match mcp_skip_reason(candidate, paths, scope, &mut existing).await {
                             Some(skip) => Ok(Some(skip)),
                             None => {
-                                match add_mcp_server(&config, &candidate.name, &candidate.config)
-                                    .await
+                                match add_mcp_server(
+                                    paths.writes,
+                                    &config,
+                                    &candidate.name,
+                                    &candidate.config,
+                                )
+                                .await
                                 {
                                     Ok(()) => {
                                         existing.add(scope.as_str(), &candidate.name_key);

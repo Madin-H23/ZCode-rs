@@ -261,8 +261,15 @@ pub fn install(
     let coding_plan = account.register_coding_plan(registry, &providers);
     account.register_provider_writes(registry, &providers, &agent);
     account.register_feedback(registry, &context, bridge.clone(), router);
+    // 扩展区（扩展各 service 与 settings-sync）共用一个作用域与共享配置文件的写入方。
+    let extension_roots = extensions::Roots::new(
+        &scope("extensions"),
+        &context.environment.user_home,
+        &context.environment.data_base_dir,
+    );
     registry.implement(settings_sync::service(settings_sync::SettingsSync::new(
         settings.clone(),
+        extension_roots.writes.clone(),
         &context.environment.vars,
         &context.environment.user_home,
     )));
@@ -359,14 +366,7 @@ pub fn install(
     );
 
     // ── extensions ──
-    extensions::install(
-        registry,
-        &agent,
-        extensions::Roots::new(
-            &context.environment.user_home,
-            &context.environment.data_base_dir,
-        ),
-    );
+    extensions::install(registry, &agent, extension_roots);
     // ── integration ──（docs/specs/rust-host-integration.md）
     // 动态工作流门禁的唯一写入方：coding-plan-subscription 的 client config（Node
     // `resolveDynamicWorkflowClientConfig`）。必须在预热拉起 CLI 之前登记，进程就绪前的

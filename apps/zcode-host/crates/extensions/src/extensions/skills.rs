@@ -6,8 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use tokio::sync::Mutex;
-use zcode_host_kit::{Reply, RpcError, ServiceBuilder};
+use zcode_host_kit::{Reply, RpcError, Serial, ServiceBuilder};
 use zcode_kit::js::string::trim as js_trim;
 
 use super::walk::{self, SKILL_FILE_NAME};
@@ -321,7 +320,9 @@ async fn read_metadata(skill_path: &str) -> Option<Value> {
 #[derive(Clone)]
 pub struct SkillsService {
     roots: Roots,
-    write_queue: std::sync::Arc<Mutex<()>>,
+    /// 启用开关的 owner 任务：每次“发现 → 写覆盖”按提交顺序整段执行，连续的开关按点击顺序落盘
+    /// （docs/specs/rust-u2-task-scope.md §6.3）。配置写入本身再交给共享的 `ConfigWrites`。
+    writes: Serial,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -341,10 +342,9 @@ struct WorkspaceParams {
 
 impl SkillsService {
     pub fn new(roots: Roots) -> Self {
-        Self {
-            roots,
-            write_queue: Default::default(),
-        }
+        // 用户点击触发；排队超过 16 个时提交方等待。
+        let writes = Serial::start(&roots.tasks, "skill-writes", 16);
+        Self { roots, writes }
     }
 
     pub fn user_zcode_root(&self) -> String {
@@ -653,12 +653,18 @@ impl SkillsService {
         }))
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn set_enabled(&self, params: Value) -> Result<(), RpcError> {
         let params: WorkspaceParams = parse_params(params)?;
+        let service = self.clone();
+        self.writes
+            .run(async move { service.set_enabled_now(params).await })
+            .await
+            .unwrap_or_else(|stopped| Err(fsx::error(stopped.to_string())))
+    }
+
+    async fn set_enabled_now(&self, params: WorkspaceParams) -> Result<(), RpcError> {
         let skill_id = params.skill_id.unwrap_or_default();
         let enabled = params.enabled.unwrap_or(true);
-        let _queue = self.write_queue.lock().await;
         let (skills, _) = self.discover(&params.workspace_path).await;
         let skill = skills
             .into_iter()

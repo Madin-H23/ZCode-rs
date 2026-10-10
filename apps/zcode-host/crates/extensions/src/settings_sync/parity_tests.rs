@@ -62,6 +62,7 @@ async fn manual_import_matches_typescript() {
     let vars = BTreeMap::from([("HOME".to_owned(), home.to_string_lossy().into_owned())]);
     let sync = SettingsSync::new(
         SettingStore::new(&zcode_host_base::testing::spawner(), &home),
+        crate::extensions::cli_config::ConfigWrites::start(&zcode_host_base::testing::spawner()),
         &vars,
         &home,
     );

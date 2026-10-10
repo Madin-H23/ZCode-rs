@@ -187,7 +187,11 @@ async fn matches_typescript_services() {
         }
     }
     let home = std::path::Path::new(&root).join("home");
-    let channels = channels(&Roots::new(&home, &home));
+    let channels = channels(&Roots::new(
+        &zcode_host_base::testing::spawner(),
+        &home,
+        &home,
+    ));
     let context = CallContext {
         connection: 1,
         attachment_id: "parity".into(),

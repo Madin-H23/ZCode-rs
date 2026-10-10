@@ -603,7 +603,11 @@ mod tests {
         let skill = home.path().join(".zcode/skills/group/demo");
         std::fs::create_dir_all(&skill).unwrap();
         std::fs::write(skill.join("SKILL.md"), "---\nname: demo\n---\nbody").unwrap();
-        let roots = Roots::new(home.path(), home.path());
+        let roots = Roots::new(
+            &zcode_host_base::testing::spawner(),
+            home.path(),
+            home.path(),
+        );
         let service = SkillSyncService::new(roots);
         let list = service.list_local_candidates().await.unwrap();
         let id = list["candidates"][0]["id"].as_str().unwrap().to_owned();
@@ -613,7 +617,11 @@ mod tests {
             .await
             .unwrap();
         let remote_home = tempfile::tempdir().unwrap();
-        let remote = SkillSyncService::new(Roots::new(remote_home.path(), remote_home.path()));
+        let remote = SkillSyncService::new(Roots::new(
+            &zcode_host_base::testing::spawner(),
+            remote_home.path(),
+            remote_home.path(),
+        ));
         let imported = remote
             .import_archive(json!({ "archive": exported["archive"] }))
             .await

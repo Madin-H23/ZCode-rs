@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 use zcode_host_kit::{Reply, RpcError, ServiceBuilder, log};
 use zcode_shared::hook_trust as trust_record;
 
-use super::cli_config::{self, Update};
+use super::cli_config::Update;
 use super::skill_sync::truthy;
 use super::{Roots, bind, fsx, json as js};
 use crate::agent::{AgentRuntime, RuntimePolicy, WorkspaceTarget};
@@ -1094,20 +1094,23 @@ impl HooksService {
 
     async fn write_config(&self, workspace: Option<&str>, hooks: &[Value]) -> Result<(), RpcError> {
         let path = self.config_path("zcode", workspace);
-        cli_config::update(&path, |raw| {
-            let mut existing = raw
-                .as_deref()
-                .and_then(js::parse_record)
-                .unwrap_or_default();
-            let mut root = js::record(existing.get("hooks"));
-            if let Some(enabled) = next_root_enabled(root.get("enabled"), hooks) {
-                root.insert("enabled".into(), enabled);
-            }
-            root.insert("events".into(), to_events(hooks));
-            existing.insert("hooks".into(), Value::Object(root));
-            Ok(Update::Write(js::pretty_line(&Value::Object(existing)), ()))
-        })
-        .await
+        let hooks = hooks.to_vec();
+        self.roots
+            .writes
+            .update(&path, move |raw| {
+                let mut existing = raw
+                    .as_deref()
+                    .and_then(js::parse_record)
+                    .unwrap_or_default();
+                let mut root = js::record(existing.get("hooks"));
+                if let Some(enabled) = next_root_enabled(root.get("enabled"), &hooks) {
+                    root.insert("enabled".into(), enabled);
+                }
+                root.insert("events".into(), to_events(&hooks));
+                existing.insert("hooks".into(), Value::Object(root));
+                Ok(Update::Write(js::pretty_line(&Value::Object(existing)), ()))
+            })
+            .await
     }
 
     pub async fn save(&self, params: Value) -> Result<(), RpcError> {
@@ -1224,7 +1227,14 @@ mod tests {
             r#"{"keep":1,"hooks":{"enabled":true,"events":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo hi","timeout":5,"note":"x"}]}]}}}"#,
         )
         .unwrap();
-        let service = HooksService::new(Roots::new(home.path(), home.path()), None);
+        let service = HooksService::new(
+            Roots::new(
+                &zcode_host_base::testing::spawner(),
+                home.path(),
+                home.path(),
+            ),
+            None,
+        );
         let loaded = service
             .load(json!({"workspacePath": workspace.display().to_string()}))
             .await
