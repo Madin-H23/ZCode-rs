@@ -91,7 +91,7 @@ async fn agent_scope_stages_routes_and_cleans_up_ownership() {
         );
         Ok(json!({"ack": {"subscriptionId": "sub-1"}}))
     });
-    let channel = RemoteAgentChannel::new(client);
+    let channel = RemoteAgentChannel::new(&zcode_host_base::testing::spawner(), client);
     let desktop = context(1);
     let target = json!({"workspacePath": "/w", "workspaceIdentity": "remote:docker:c:/w", "sessionId": "s1"});
 
@@ -323,6 +323,7 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
     let mut router = ControlRouter::default();
     let workspaces = install_with(
         RemoteConfig {
+            spawner: zcode_host_base::testing::spawner(),
             transport: Arc::new(transport),
             settings: crate::settings::SettingStore::new(
                 &zcode_host_base::testing::spawner(),
@@ -524,6 +525,7 @@ async fn remote_resource_facts_reach_main() {
     let mut router = ControlRouter::default();
     let _workspaces = install_with(
         RemoteConfig {
+            spawner: zcode_host_base::testing::spawner(),
             transport: Arc::new(transport),
             settings: crate::settings::SettingStore::new(
                 &zcode_host_base::testing::spawner(),
@@ -592,6 +594,7 @@ async fn remote_attachments_route_usage_and_share_like_node() {
     let mut router = ControlRouter::default();
     let workspaces = install_with(
         RemoteConfig {
+            spawner: zcode_host_base::testing::spawner(),
             transport: Arc::new(transport),
             settings: crate::settings::SettingStore::new(
                 &zcode_host_base::testing::spawner(),

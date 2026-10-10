@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
-use tokio::task::AbortHandle;
+use zcode_async::{Spawner, Task};
 use zcode_host_control::ClientMode;
 use zcode_host_kit::{
     CallContext, CallFuture, EventHub, EventStream, Overflow, Reply, RpcError, RpcValue,
@@ -185,7 +185,7 @@ struct Pending {
 
 struct Route {
     hub: EventHub<Value>,
-    task: AbortHandle,
+    task: Task<()>,
 }
 
 #[derive(Default)]
@@ -203,10 +203,12 @@ struct ScopeState {
     generations: HashMap<String, u64>,
     /// attachmentBeginV4 进入 staging 的 workspace：关闭时也要发 `closed`。
     attachment_routes: HashMap<String, Value>,
-    lifecycle: Option<AbortHandle>,
+    lifecycle: Option<Task<()>>,
 }
 
 struct Scope {
+    /// 远端连接的作用域：本 scope 的帧路由、生命周期观察与订阅都在这里，随连接释放。
+    tasks: Spawner,
     connection_id: String,
     client_mode: ClientMode,
     client: RpcClient,
@@ -339,7 +341,7 @@ impl Scope {
             self.client
                 .listen(CHANNEL, kind.event(), RpcValue::Json(params.clone()));
         let (scope, route_hub, route_key) = (Arc::downgrade(self), hub.clone(), key.clone());
-        let task = tokio::spawn(async move {
+        let task = self.tasks.spawn("remote-frame-route", async move {
             while let Some(frame) = upstream.next().await {
                 let Some(scope) = scope.upgrade() else { return };
                 let frame = frame.into_json();
@@ -371,8 +373,7 @@ impl Scope {
                     pending.bytes += bytes;
                 }
             }
-        })
-        .abort_handle();
+        });
         state.routes.insert((kind, key), Route { hub, task });
         Box::pin(events.map(Reply::Value))
     }
@@ -583,26 +584,23 @@ impl Scope {
             self.client
                 .listen(CHANNEL, "onAgentRuntimeLifecycle", RpcValue::Undefined);
         let scope = Arc::downgrade(self);
-        state.lifecycle = Some(
-            tokio::spawn(async move {
-                while let Some(event) = events.next().await {
-                    let Some(scope) = scope.upgrade() else { return };
-                    let event = event.into_json();
-                    // available 不是旧 ownership 的失效边界；真正的换代一定先发 unavailable。
-                    if event["state"] == "available" {
-                        continue;
-                    }
-                    let (Some(key), Some(generation)) = (
-                        event["workspaceKey"].as_str(),
-                        event["runtimeIdentity"]["generation"].as_u64(),
-                    ) else {
-                        continue;
-                    };
-                    scope.invalidate(key, generation);
+        state.lifecycle = Some(self.tasks.spawn("remote-agent-lifecycle", async move {
+            while let Some(event) = events.next().await {
+                let Some(scope) = scope.upgrade() else { return };
+                let event = event.into_json();
+                // available 不是旧 ownership 的失效边界；真正的换代一定先发 unavailable。
+                if event["state"] == "available" {
+                    continue;
                 }
-            })
-            .abort_handle(),
-        );
+                let (Some(key), Some(generation)) = (
+                    event["workspaceKey"].as_str(),
+                    event["runtimeIdentity"]["generation"].as_u64(),
+                ) else {
+                    continue;
+                };
+                scope.invalidate(key, generation);
+            }
+        }));
     }
 
     async fn dispose(&self) {
@@ -625,7 +623,7 @@ impl Scope {
                     .or_insert_with(|| entry.target.clone());
             }
             let routes: Vec<Route> = state.routes.drain().map(|(_, route)| route).collect();
-            let tasks: Vec<AbortHandle> = state.lifecycle.take().into_iter().collect();
+            let tasks: Vec<Task<()>> = state.lifecycle.take().into_iter().collect();
             (routes, owned, flow_targets, tasks)
         };
         for task in tasks {
@@ -667,13 +665,16 @@ impl Scope {
 
 /// `zcode-agent` channel：每条 attachment 连接一个 [`Scope`]。
 pub struct RemoteAgentChannel {
+    /// 远端连接的作用域。
+    tasks: Spawner,
     client: RpcClient,
     scopes: Mutex<HashMap<u64, Arc<Scope>>>,
 }
 
 impl RemoteAgentChannel {
-    pub fn new(client: RpcClient) -> Arc<Self> {
+    pub fn new(spawner: &Spawner, client: RpcClient) -> Arc<Self> {
         Arc::new(Self {
+            tasks: spawner.clone(),
             client,
             scopes: Mutex::new(HashMap::new()),
         })
@@ -687,6 +688,7 @@ impl RemoteAgentChannel {
             .entry(context.connection)
             .or_insert_with(|| {
                 Arc::new(Scope {
+                    tasks: self.tasks.clone(),
                     connection_id: format!("host-rpc-{}", uuid_v4()),
                     client_mode: context.client_mode,
                     client: self.client.clone(),
@@ -757,7 +759,9 @@ impl ServiceChannel for RemoteAgentChannel {
             return match action {
                 "subscribe" => {
                     // 订阅在独立任务里完成：调用 future 被中止时，迟到的 ACK 仍会反向退订。
-                    let task = tokio::spawn(scope.subscribe(kind, params));
+                    let task = self
+                        .tasks
+                        .spawn("remote-subscribe", scope.subscribe(kind, params));
                     Box::pin(async move {
                         task.await
                             .unwrap_or_else(|_| Err(fault("fault.connection.closed")))
@@ -903,7 +907,10 @@ impl ServiceChannel for RemoteAgentChannel {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&context.connection);
         if let Some(scope) = scope {
-            tokio::spawn(async move { scope.dispose().await });
+            drop(
+                self.tasks
+                    .spawn("remote-agent-dispose", async move { scope.dispose().await }),
+            );
         }
     }
 }

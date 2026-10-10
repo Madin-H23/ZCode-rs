@@ -10,6 +10,9 @@
 //! 底层关闭 ─► entry disconnected、移出复用表 ─► session disconnected/offline ─► on_session_closed
 //! dispose_session ─► 最后一个 session：WSL 空闲 60 s 再释放；SSH 保留为窗口缓存；其余立即释放
 //! ```
+//!
+//! 注册表的任务（建连、关闭观察、workspace 运行时的准备与释放、WSL 空闲计时）都在构造时给的作用域
+//! （远端区域）里；连接自己的任务在连接的作用域里（docs/specs/rust-u2-task-scope.md §6.1）。
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -17,7 +20,7 @@ use std::time::Duration;
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
 use tokio::sync::watch;
-use tokio::task::AbortHandle;
+use zcode_async::{Spawner, Task};
 
 use super::target::{RemoteTarget, TargetKind};
 use super::transport::CloseEvent;
@@ -200,8 +203,8 @@ struct Entry<H> {
     handle: Option<Arc<H>>,
     disposed: bool,
     dispose_done: Option<watch::Receiver<bool>>,
-    close_watch: Option<AbortHandle>,
-    idle_timer: Option<AbortHandle>,
+    close_watch: Option<Task<()>>,
+    idle_timer: Option<Task<()>>,
     workspace_keys: HashSet<String>,
     running: HashMap<String, u64>,
     runtimes: HashMap<String, RuntimeState>,
@@ -253,6 +256,7 @@ struct State<H> {
 }
 
 pub struct RemoteRegistry<H: RegistryHandle> {
+    spawner: Spawner,
     state: Arc<Mutex<State<H>>>,
     options: Arc<RegistryOptions<H>>,
 }
@@ -260,6 +264,7 @@ pub struct RemoteRegistry<H: RegistryHandle> {
 impl<H: RegistryHandle> Clone for RemoteRegistry<H> {
     fn clone(&self) -> Self {
         Self {
+            spawner: self.spawner.clone(),
             state: self.state.clone(),
             options: self.options.clone(),
         }
@@ -279,8 +284,9 @@ fn unavailable(remote_session_id: &str) -> String {
 }
 
 impl<H: RegistryHandle> RemoteRegistry<H> {
-    pub fn new(options: RegistryOptions<H>) -> Self {
+    pub fn new(spawner: &Spawner, options: RegistryOptions<H>) -> Self {
         Self {
+            spawner: spawner.clone(),
             state: Arc::new(Mutex::new(State {
                 disposed: false,
                 next_entry: 1,
@@ -467,10 +473,10 @@ impl<H: RegistryHandle> RemoteRegistry<H> {
             abort: abort_rx,
         });
         let registry = self.clone();
-        tokio::spawn(async move {
+        drop(self.spawner.spawn("remote-connect", async move {
             let result = connect.await;
             registry.on_entry_connected(entry_id, result).await;
-        });
+        }));
         entry_id
     }
 
@@ -513,13 +519,10 @@ impl<H: RegistryHandle> RemoteRegistry<H> {
                 entry.state = ConnState::Online;
                 let registry = self.clone();
                 let closed = handle.closed();
-                entry.close_watch = Some(
-                    tokio::spawn(async move {
-                        let event = closed.await;
-                        registry.handle_connection_closed(entry_id, event);
-                    })
-                    .abort_handle(),
-                );
+                entry.close_watch = Some(self.spawner.spawn("remote-close-watch", async move {
+                    let event = closed.await;
+                    registry.handle_connection_closed(entry_id, event);
+                }));
                 let sessions: Vec<String> = entry.sessions.iter().cloned().collect();
                 entry.ready.send_replace(Ready::Online(handle));
                 for id in sessions {
@@ -718,7 +721,7 @@ impl<H: RegistryHandle> RemoteRegistry<H> {
         let receiver = session.workspace_ready.subscribe();
         let registry = self.clone();
         let id = remote_session_id.to_owned();
-        tokio::spawn(async move {
+        drop(self.spawner.spawn("workspace-prepare", async move {
             let waited = match release {
                 Some(mut release) => match release.wait_for(Option::is_some).await {
                     Ok(result) => result.clone().unwrap_or(Ok(())),
@@ -751,7 +754,7 @@ impl<H: RegistryHandle> RemoteRegistry<H> {
                 ReadyState::Failed
             };
             session.workspace_ready.send_replace(Some(result));
-        });
+        }));
         Some(receiver)
     }
 
@@ -794,7 +797,7 @@ impl<H: RegistryHandle> RemoteRegistry<H> {
         runtime.release_id = release_id;
         let registry = self.clone();
         let key = key.to_owned();
-        tokio::spawn(async move {
+        drop(self.spawner.spawn("workspace-release", async move {
             let result = release_fn(handle, context.clone()).await;
             if let Err(error) = &result {
                 (registry.options.on_release_error)(&context, error);
@@ -818,7 +821,7 @@ impl<H: RegistryHandle> RemoteRegistry<H> {
             }
             // 失败结果留给同 workspace 的下一代 acquire：fail-closed，而不是踩过未完成的清理。
             done.send_replace(Some(result));
-        });
+        }));
     }
 
     fn request_workspace_release(
@@ -876,24 +879,21 @@ impl<H: RegistryHandle> RemoteRegistry<H> {
             return;
         }
         let registry = self.clone();
-        entry.idle_timer = Some(
-            tokio::spawn(async move {
-                tokio::time::sleep(ttl).await;
-                let dispose = {
-                    let state = registry.lock();
-                    state.entries.get(&entry_id).is_some_and(|entry| {
-                        state.by_key.get(&entry.key) == Some(&entry_id)
-                            && !entry.disposed
-                            && entry.sessions.is_empty()
-                            && !entry.running.values().any(|count| *count > 0)
-                    })
-                };
-                if dispose {
-                    registry.dispose_entry(entry_id).await;
-                }
-            })
-            .abort_handle(),
-        );
+        entry.idle_timer = Some(self.spawner.spawn("wsl-idle-dispose", async move {
+            tokio::time::sleep(ttl).await;
+            let dispose = {
+                let state = registry.lock();
+                state.entries.get(&entry_id).is_some_and(|entry| {
+                    state.by_key.get(&entry.key) == Some(&entry_id)
+                        && !entry.disposed
+                        && entry.sessions.is_empty()
+                        && !entry.running.values().any(|count| *count > 0)
+                })
+            };
+            if dispose {
+                registry.dispose_entry(entry_id).await;
+            }
+        }));
     }
 
     // ---- 取消、bind、释放 ----
@@ -973,7 +973,7 @@ impl<H: RegistryHandle> RemoteRegistry<H> {
         };
         if let Some(entry_id) = dispose {
             let future = self.dispose_entry(entry_id);
-            tokio::spawn(future);
+            drop(self.spawner.spawn("remote-dispose", future));
         }
     }
 

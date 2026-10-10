@@ -428,6 +428,7 @@ async fn telegram_message_runs_on_a_remote_workspace_agent() {
     let settings = SettingStore::new(&zcode_host_services::testing::spawner(), &local_home);
     let remote = install_with(
         RemoteConfig {
+            spawner: zcode_host_services::testing::spawner(),
             transport: Arc::new(ProcessTransport {
                 program: node,
                 args: vec![bundle.display().to_string()],

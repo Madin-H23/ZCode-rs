@@ -16,7 +16,8 @@ use std::sync::{Arc, Mutex, Weak};
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
-use tokio::task::AbortHandle;
+use zcode_async::{Spawner, Task};
+use zcode_host_kit::Serial;
 use zcode_host_kit::{RpcError, RpcValue, log};
 use zcode_host_rpc::RpcClient;
 
@@ -91,13 +92,15 @@ struct Source {
     rows: BTreeMap<String, Value>,
     /// 已读过快照的远端连接（句柄地址）；换了连接要重读。
     loaded_for: Option<usize>,
-    events: Option<AbortHandle>,
+    events: Option<Task<()>>,
     observer: Option<Observer>,
 }
 
 /// 远端 sessions-index 观察任务与它当前的订阅（停止时反向退订）。
 struct Observer {
-    task: AbortHandle,
+    task: Task<()>,
+    /// 所在远端连接的作用域：退订请求在这里发出（连接释放时随之结束）。
+    tasks: Spawner,
     subscription: Arc<Mutex<Option<String>>>,
     client: RpcClient,
 }
@@ -137,9 +140,13 @@ impl Source {
                     "unsubscribeSessionsIndexV4",
                     vec![RpcValue::Json(params)],
                 );
-                tokio::spawn(async move {
-                    let _ = call.await;
-                });
+                drop(
+                    observer
+                        .tasks
+                        .spawn("remote-sessions-index-unsubscribe", async move {
+                            let _ = call.await;
+                        }),
+                );
             }
         }
     }
@@ -256,7 +263,9 @@ pub struct RemoteSources {
     registry: RemoteRegistry<RemoteHandle>,
     controller: Mutex<Weak<Controller>>,
     state: Mutex<State>,
-    refresh_lock: tokio::sync::Mutex<()>,
+    /// 刷新的 owner 任务：分区读取与应用逐个执行，较早的读取不会覆盖较新的
+    /// （docs/specs/rust-u2-task-scope.md §6.3，原来是跨刷新持有的 tokio 锁）。
+    refreshes: Serial,
     me: Weak<RemoteSources>,
 }
 
@@ -276,12 +285,14 @@ fn diff(previous: &BTreeMap<String, Value>, next: &BTreeMap<String, Value>) -> V
 }
 
 impl RemoteSources {
-    pub fn new(registry: RemoteRegistry<RemoteHandle>) -> Arc<Self> {
+    /// 刷新的 owner 任务 `remote-source-refresh` 在 `spawner`（远端区域）的作用域里。
+    pub fn new(spawner: &Spawner, registry: RemoteRegistry<RemoteHandle>) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             registry,
             controller: Mutex::new(Weak::new()),
             state: Mutex::new(State::default()),
-            refresh_lock: tokio::sync::Mutex::new(()),
+            // 远端事件与查询触发；排队超过 64 个时提交方等待。
+            refreshes: Serial::start(spawner, "remote-source-refresh", 64),
             me: me.clone(),
         })
     }
@@ -353,15 +364,29 @@ impl RemoteSources {
         self.registry.resolve_scoped(scope).ok()
     }
 
-    /// 登记并在需要时读取远端分区（`refreshSource`）。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// 登记并在需要时读取远端分区（`refreshSource`）。在刷新的 owner 任务里逐个执行。
     pub async fn refresh_source(
         &self,
         scope: &RemoteScope,
         online: bool,
         force: bool,
     ) -> Result<(), RpcError> {
-        let _guard = self.refresh_lock.lock().await;
+        let Some(sources) = self.me.upgrade() else {
+            return Ok(());
+        };
+        let scope = scope.clone();
+        self.refreshes
+            .run(async move { sources.refresh_source_now(&scope, online, force).await })
+            .await
+            .unwrap_or_else(|stopped| Err(RpcError::new("Error", stopped.to_string())))
+    }
+
+    async fn refresh_source_now(
+        &self,
+        scope: &RemoteScope,
+        online: bool,
+        force: bool,
+    ) -> Result<(), RpcError> {
         let key = source_key(scope);
         let handle = if online { self.handle(scope) } else { None };
         let was_online = {
@@ -450,8 +475,9 @@ impl RemoteSources {
                 RpcValue::Json(workspace_target(scope)),
             );
             let (me, scope) = (self.me.clone(), scope.clone());
-            source.events = Some(
-                tokio::spawn(async move {
+            source.events = Some(handle.connection.spawner().spawn(
+                "remote-source-events",
+                async move {
                     while events.next().await.is_some() {
                         let Some(sources) = me.upgrade() else { return };
                         if let Err(error) = sources.refresh_source(&scope, true, true).await {
@@ -461,20 +487,23 @@ impl RemoteSources {
                             ));
                         }
                     }
-                })
-                .abort_handle(),
-            );
+                },
+            ));
         }
         if source.observer.is_none() {
             let subscription = Arc::new(Mutex::new(None));
+            let tasks = handle.connection.spawner();
             source.observer = Some(Observer {
-                task: tokio::spawn(observe_sessions(
-                    self.me.clone(),
-                    handle.connection.client.clone(),
-                    scope.clone(),
-                    subscription.clone(),
-                ))
-                .abort_handle(),
+                task: tasks.spawn(
+                    "remote-sessions-index",
+                    observe_sessions(
+                        self.me.clone(),
+                        handle.connection.client.clone(),
+                        scope.clone(),
+                        subscription.clone(),
+                    ),
+                ),
+                tasks,
                 subscription,
                 client: handle.connection.client.clone(),
             });

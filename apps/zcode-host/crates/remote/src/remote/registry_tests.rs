@@ -114,7 +114,7 @@ fn registry(fake: &Arc<Fake>, wsl_idle: Duration) -> RemoteRegistry<FakeHandle> 
     options.create_id =
         Arc::new(move || format!("s{}", counter.fetch_add(1, Ordering::SeqCst) + 1));
     options.wsl_idle_ttl = wsl_idle;
-    RemoteRegistry::new(options)
+    RemoteRegistry::new(&zcode_host_base::testing::spawner(), options)
 }
 
 fn params(request_id: &str, target: Value, path: &str) -> ConnectParams {

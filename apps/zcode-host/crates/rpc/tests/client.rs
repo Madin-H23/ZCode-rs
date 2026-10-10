@@ -5,6 +5,8 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
+use zcode_async::TaskScope;
+use zcode_host_rpc::client::{CONNECTION_CLOSED, LISTENER_CAPACITY, OUTBOUND_CAPACITY};
 use zcode_host_rpc::codec::{self, RpcError};
 use zcode_host_rpc::{RpcClient, RpcValue, read_request};
 
@@ -68,8 +70,10 @@ fn error_payload_restores_passthrough_keys() {
 }
 
 struct Peer {
-    to_client: mpsc::UnboundedSender<Vec<u8>>,
-    from_client: mpsc::UnboundedReceiver<Vec<u8>>,
+    to_client: mpsc::Sender<Vec<u8>>,
+    from_client: mpsc::Receiver<Vec<u8>>,
+    /// 读循环所在的作用域：随 Peer 一起释放。
+    _scope: TaskScope,
 }
 
 impl Peer {
@@ -92,13 +96,19 @@ impl Peer {
 }
 
 fn start() -> (RpcClient, Peer) {
-    let (outbound, from_client) = mpsc::unbounded_channel();
-    let (to_client, inbound) = mpsc::unbounded_channel();
+    start_with(OUTBOUND_CAPACITY)
+}
+
+fn start_with(outbound_capacity: usize) -> (RpcClient, Peer) {
+    let scope = TaskScope::root("test", |panic| panic!("task panicked: {panic:?}"));
+    let (outbound, from_client) = mpsc::channel(outbound_capacity);
+    let (to_client, inbound) = mpsc::channel(64);
     (
-        RpcClient::start(outbound, inbound),
+        RpcClient::start(&scope.spawner(), outbound, inbound),
         Peer {
             to_client,
             from_client,
+            _scope: scope,
         },
     )
 }
@@ -110,7 +120,7 @@ async fn requests_wait_for_initialize_then_flow_in_order() {
     let second =
         tokio::spawn(client.call("file", "stat", vec![RpcValue::Json(json!({"path": "/"}))]));
     peer.silent().await;
-    peer.to_client.send(codec::initialize()).unwrap();
+    peer.to_client.try_send(codec::initialize()).unwrap();
     assert!(client.wait_initialized().await);
     let request = peer.next().await;
     assert_eq!(
@@ -125,10 +135,10 @@ async fn requests_wait_for_initialize_then_flow_in_order() {
     );
 
     peer.to_client
-        .send(codec::success_value(0, &json!({"os": "x"})))
+        .try_send(codec::success_value(0, &json!({"os": "x"})))
         .unwrap();
     peer.to_client
-        .send(codec::promise_error(
+        .try_send(codec::promise_error(
             1,
             &RpcError::new("Error", "ENOENT").with_code("ENOENT"),
         ))
@@ -147,7 +157,7 @@ async fn requests_wait_for_initialize_then_flow_in_order() {
 #[tokio::test]
 async fn dropping_a_call_cancels_it_and_late_answers_are_ignored() {
     let (client, mut peer) = start();
-    peer.to_client.send(codec::initialize()).unwrap();
+    peer.to_client.try_send(codec::initialize()).unwrap();
     let call = client.call("git", "status", vec![]);
     let pending = tokio::spawn(call);
     let request = peer.next().await;
@@ -160,12 +170,12 @@ async fn dropping_a_call_cancels_it_and_late_answers_are_ignored() {
     );
     // 迟到的应答不影响后续调用。
     peer.to_client
-        .send(codec::success_value(request.id, &json!(1)))
+        .try_send(codec::success_value(request.id, &json!(1)))
         .unwrap();
     let next = tokio::spawn(client.call("git", "status", vec![]));
     let request = peer.next().await;
     peer.to_client
-        .send(codec::success_value(request.id, &json!(2)))
+        .try_send(codec::success_value(request.id, &json!(2)))
         .unwrap();
     assert_eq!(next.await.unwrap().unwrap(), RpcValue::Int(2));
 }
@@ -173,7 +183,7 @@ async fn dropping_a_call_cancels_it_and_late_answers_are_ignored() {
 #[tokio::test]
 async fn events_flow_until_the_stream_is_dropped() {
     let (client, mut peer) = start();
-    peer.to_client.send(codec::initialize()).unwrap();
+    peer.to_client.try_send(codec::initialize()).unwrap();
     let mut events = client.listen(
         "zcode-agent",
         "onDynamicConversationFrame",
@@ -183,7 +193,7 @@ async fn events_flow_until_the_stream_is_dropped() {
     assert_eq!(listen.kind, zcode_host_rpc::RequestKind::EventListen);
     assert_eq!(listen.body, RpcValue::Json(json!({"workspacePath": "/w"})));
     peer.to_client
-        .send(codec::response_value(204, listen.id, &json!({"seq": 1})))
+        .try_send(codec::response_value(204, listen.id, &json!({"seq": 1})))
         .unwrap();
     assert_eq!(events.next().await, Some(RpcValue::Json(json!({"seq": 1}))));
     drop(events);
@@ -197,7 +207,7 @@ async fn events_flow_until_the_stream_is_dropped() {
 #[tokio::test]
 async fn closing_the_transport_fails_pending_calls_and_ends_streams() {
     let (client, mut peer) = start();
-    peer.to_client.send(codec::initialize()).unwrap();
+    peer.to_client.try_send(codec::initialize()).unwrap();
     let pending = tokio::spawn(client.call("file", "readFile", vec![]));
     let mut events = client.listen("setting", "onDidUpdate", RpcValue::Undefined);
     peer.next().await;
@@ -214,11 +224,11 @@ async fn closing_the_transport_fails_pending_calls_and_ends_streams() {
 #[tokio::test]
 async fn non_error_rejection_keeps_the_payload() {
     let (client, mut peer) = start();
-    peer.to_client.send(codec::initialize()).unwrap();
+    peer.to_client.try_send(codec::initialize()).unwrap();
     let call = tokio::spawn(client.call("x", "y", vec![]));
     let request = peer.next().await;
     peer.to_client
-        .send(codec::response_value(
+        .try_send(codec::response_value(
             203,
             request.id,
             &json!({"reason": "nope"}),
@@ -232,7 +242,7 @@ async fn non_error_rejection_keeps_the_payload() {
 #[tokio::test]
 async fn encoded_calls_and_events_keep_remote_bytes() {
     let (client, mut peer) = start();
-    peer.to_client.send(codec::initialize()).unwrap();
+    peer.to_client.try_send(codec::initialize()).unwrap();
     // [undefined, VSBuffer(0xaa 0xbb)]：Array 标签 4、长度 2、Undefined 0、VSBuffer 3 + 长度 2。
     let body = vec![4u8, 2, 0, 3, 2, 0xaa, 0xbb];
     let call = tokio::spawn(client.call_encoded("file", "x", vec![]));
@@ -242,7 +252,7 @@ async fn encoded_calls_and_events_keep_remote_bytes() {
     codec::write_int(&mut response, 201);
     codec::write_int(&mut response, request.id);
     response.extend_from_slice(&body);
-    peer.to_client.send(response).unwrap();
+    peer.to_client.try_send(response).unwrap();
     assert_eq!(call.await.unwrap().unwrap(), body);
     assert_eq!(
         codec::response_encoded(201, request.id, &body)[..],
@@ -261,13 +271,74 @@ async fn encoded_calls_and_events_keep_remote_bytes() {
     codec::write_int(&mut fire, 204);
     codec::write_int(&mut fire, listen.id);
     fire.extend_from_slice(&body);
-    peer.to_client.send(fire).unwrap();
+    peer.to_client.try_send(fire).unwrap();
     assert_eq!(events.next().await, Some(body.clone()));
     // 头之后没有 body：按 undefined 交出。
     let mut bare = Vec::new();
     codec::write_array_header(&mut bare, 2);
     codec::write_int(&mut bare, 204);
     codec::write_int(&mut bare, listen.id);
-    peer.to_client.send(bare).unwrap();
+    peer.to_client.try_send(bare).unwrap();
     assert_eq!(events.next().await, Some(vec![0]));
+}
+
+fn event_fire(id: i32, value: i64) -> Vec<u8> {
+    codec::response_value(204, id, &json!(value))
+}
+
+/// 有界队列（docs/specs/rust-u2-task-scope.md §6.2）：事件流的消费方落后 LISTENER_CAPACITY 条时，
+/// 只有这个事件流结束并向对端退订，已入队的事件照常读完；同一连接上的调用不受影响。
+#[tokio::test]
+async fn a_listener_that_falls_behind_ends_and_is_disposed_upstream() {
+    let (client, mut peer) = start();
+    peer.to_client.try_send(codec::initialize()).unwrap();
+    let mut events = client.listen("terminal", "onData", RpcValue::Undefined);
+    let listen = peer.next().await;
+    for value in 0..=LISTENER_CAPACITY as i64 {
+        peer.to_client
+            .send(event_fire(listen.id, value))
+            .await
+            .unwrap();
+    }
+    let dispose = peer.next().await;
+    assert_eq!(
+        (dispose.kind, dispose.id),
+        (zcode_host_rpc::RequestKind::EventDispose, listen.id)
+    );
+    let mut received = 0;
+    while let Some(value) = events.next().await {
+        assert_eq!(value.into_json(), json!(received));
+        received += 1;
+    }
+    assert_eq!(received, LISTENER_CAPACITY as i64);
+    let call = tokio::spawn(client.call("git", "status", vec![]));
+    let request = peer.next().await;
+    peer.to_client
+        .try_send(codec::response_value(201, request.id, &json!("clean")))
+        .unwrap();
+    assert_eq!(call.await.unwrap().unwrap().into_json(), json!("clean"));
+}
+
+/// 出站队列满（传输长时间不写）或 `[200]` 之前排队超过 OUTBOUND_CAPACITY 条：客户端关闭，挂起的
+/// 调用以 Connection closed 失败，而不是无限缓存。
+#[tokio::test]
+async fn a_full_outbound_queue_closes_the_client() {
+    let (client, peer) = start_with(1);
+    peer.to_client.try_send(codec::initialize()).unwrap();
+    assert!(client.wait_initialized().await);
+    let first = tokio::spawn(client.call("a", "first", vec![]));
+    let second = tokio::spawn(client.call("a", "second", vec![]));
+    for call in [first, second] {
+        assert_eq!(call.await.unwrap().unwrap_err().message, CONNECTION_CLOSED);
+    }
+    assert!(client.is_closed());
+
+    let (client, _peer) = start();
+    let calls: Vec<_> = (0..=OUTBOUND_CAPACITY)
+        .map(|_| client.call("a", "queued", vec![]))
+        .collect();
+    assert!(client.is_closed());
+    for result in futures_util::future::join_all(calls).await {
+        assert_eq!(result.unwrap_err().message, CONNECTION_CLOSED);
+    }
 }

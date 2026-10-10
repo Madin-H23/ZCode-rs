@@ -24,7 +24,7 @@ struct State {
 
 #[derive(Clone)]
 pub(crate) struct FakeRemote {
-    to_client: Arc<Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>>>,
+    to_client: Arc<Mutex<Option<mpsc::Sender<Vec<u8>>>>>,
     state: Arc<Mutex<State>>,
     closed: watch::Sender<Option<CloseEvent>>,
 }
@@ -32,10 +32,11 @@ pub(crate) struct FakeRemote {
 impl FakeRemote {
     /// 返回 (远端, 连到它的客户端)。
     pub(crate) fn start() -> (Self, RpcClient) {
-        let (outbound, mut requests) = mpsc::unbounded_channel::<Vec<u8>>();
-        let (to_client, inbound) = mpsc::unbounded_channel();
-        let client = RpcClient::start(outbound, inbound);
-        let _ = to_client.send(codec::initialize());
+        let (outbound, mut requests) =
+            mpsc::channel::<Vec<u8>>(zcode_host_rpc::client::OUTBOUND_CAPACITY);
+        let (to_client, inbound) = mpsc::channel(4096);
+        let client = RpcClient::start(&zcode_host_base::testing::spawner(), outbound, inbound);
+        let _ = to_client.try_send(codec::initialize());
         let remote = Self {
             to_client: Arc::new(Mutex::new(Some(to_client))),
             state: Arc::default(),
@@ -92,7 +93,7 @@ impl FakeRemote {
 
     fn send(&self, message: Vec<u8>) {
         if let Some(sender) = self.to_client.lock().unwrap().as_ref() {
-            let _ = sender.send(message);
+            let _ = sender.try_send(message);
         }
     }
 

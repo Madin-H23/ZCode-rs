@@ -38,6 +38,7 @@ fn setup(home: &std::path::Path, connections: Vec<Connection>) -> Setup {
     let mut router = ControlRouter::default();
     let workspaces = install_with(
         RemoteConfig {
+            spawner: zcode_host_base::testing::spawner(),
             transport: Arc::new(FakeTransport(Mutex::new(connections))),
             settings: crate::settings::SettingStore::new(
                 &zcode_host_base::testing::spawner(),

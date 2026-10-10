@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
-use tokio::task::AbortHandle;
+use zcode_async::{Spawner, Task};
 use zcode_host_control::{ControlSink, HostToMain};
 use zcode_host_kit::{
     CallContext, CallFuture, EventHub, EventStream, Overflow, Reply, RpcError, RpcValue,
@@ -42,12 +42,14 @@ struct TrackerState {
     metas: HashMap<String, (String, Option<String>)>,
     /// workspaceKey → (上下文, 运行中的 taskId)
     active: HashMap<String, (Context, HashSet<String>)>,
-    ready: HashMap<String, AbortHandle>,
-    workspaces: HashMap<String, AbortHandle>,
+    ready: HashMap<String, Task<()>>,
+    workspaces: HashMap<String, Task<()>>,
 }
 
 /// 每条远端连接一个：记住 task meta、跟踪运行中任务、应答会话消息请求。
 pub struct TaskTracker {
+    /// 远端连接的作用域：workspace 事件与 task ready 的等待在这里。
+    tasks: Spawner,
     client: RpcClient,
     control: Arc<dyn ControlSink>,
     report: ReportFn,
@@ -73,8 +75,14 @@ fn target_of(path: &str, identity: Option<&str>) -> Value {
 }
 
 impl TaskTracker {
-    pub fn new(client: RpcClient, control: Arc<dyn ControlSink>, report: ReportFn) -> Arc<Self> {
+    pub fn new(
+        spawner: &Spawner,
+        client: RpcClient,
+        control: Arc<dyn ControlSink>,
+        report: ReportFn,
+    ) -> Arc<Self> {
         Arc::new(Self {
+            tasks: spawner.clone(),
             client,
             control,
             report,
@@ -124,7 +132,7 @@ impl TaskTracker {
                 "onDynamicWorkspaceEvent",
                 RpcValue::Json(target_of(path, identity.as_deref())),
             );
-            let task = tokio::spawn(async move {
+            let task = self.tasks.spawn("remote-workspace-events", async move {
                 while let Some(event) = events.next().await {
                     let event = event.into_json();
                     if event["type"] == "workspace_session_message_send_requested" {
@@ -132,7 +140,7 @@ impl TaskTracker {
                     }
                 }
             });
-            self.lock().workspaces.insert(key, task.abort_handle());
+            self.lock().workspaces.insert(key, task);
         }
     }
 
@@ -195,7 +203,7 @@ impl TaskTracker {
         );
         let tracker = Arc::downgrade(self);
         let id = task_id.to_owned();
-        let task = tokio::spawn(async move {
+        let task = self.tasks.spawn("remote-task-ready", async move {
             if ready.next().await.is_some()
                 && let Some(tracker) = tracker.upgrade()
             {
@@ -207,11 +215,7 @@ impl TaskTracker {
                 tracker.finish(&id);
             }
         });
-        if let Some(previous) = self
-            .lock()
-            .ready
-            .insert(task_id.to_owned(), task.abort_handle())
-        {
+        if let Some(previous) = self.lock().ready.insert(task_id.to_owned(), task) {
             previous.abort();
         }
         true

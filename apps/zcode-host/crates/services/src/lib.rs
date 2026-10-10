@@ -311,6 +311,7 @@ pub fn install(
     // ── remote ──（docs/specs/rust-host-remote.md）
     // 先于 automation：本地 Bots 安装时注入远端区域的 Bot 远端运行时（§2.9）。
     let remote = remote::install(
+        &scope("remote"),
         &context,
         remote::provisioning::ProvisioningSources {
             settings: settings.clone(),
