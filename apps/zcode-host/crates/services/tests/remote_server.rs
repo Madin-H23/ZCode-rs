@@ -164,7 +164,7 @@ async fn remote_workspace_against_a_real_zcode_server() {
     let remote = install_with(
         RemoteConfig {
             transport: Arc::new(transport),
-            settings: SettingStore::new(&local_home),
+            settings: SettingStore::new(&zcode_host_services::testing::spawner(), &local_home),
             control: Arc::new(Control(sink)),
             provisioning: ProvisioningSource {
                 personal_config_file: local_home.join(".zcode/v2/provider_config.json"),

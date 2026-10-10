@@ -281,7 +281,7 @@ async fn core_chat_flow(command_vars: BTreeMap<String, String>) {
             command_vars,
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
         providers,
     );
     let events = AgentEvents::start(runtime.extensions(), None);
@@ -663,7 +663,7 @@ async fn an_embedded_runtime_panic_only_restarts_its_own_workspace() {
             command_vars: runtime_vars(),
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
         ProviderRuntime::new(Some(builtin_providers()), personal),
     );
     let events = AgentEvents::start(runtime.extensions(), None);
@@ -757,7 +757,7 @@ async fn an_embedded_runtime_that_ends_on_its_own_logs_why() {
             command_vars: runtime_vars(),
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
         ProviderRuntime::new(
             Some(builtin_providers()),
             home.path().join("provider_config.json"),
@@ -814,7 +814,7 @@ async fn a_replayable_attachment_streams_and_recovers_against_the_runtime() {
             command_vars: runtime_vars(),
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
         ProviderRuntime::new(Some(builtin_providers()), personal),
     );
     let events = AgentEvents::start(runtime.extensions(), None);

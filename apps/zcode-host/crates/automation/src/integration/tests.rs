@@ -141,7 +141,7 @@ done
                 "integration".to_owned(),
             ),
         ]);
-        let settings = SettingStore::new(home);
+        let settings = SettingStore::new(&zcode_host_base::testing::spawner(), home);
         let providers = ProviderRuntime::new(None, home.join("provider_config.json"));
         let context = ServiceContext {
             environment: HostEnvironment::capture(vars).unwrap(),
@@ -163,7 +163,7 @@ done
         let log = dir.join("calls.log");
         let cli = fake_cli(dir, &log);
         let plan = plan(&dir.join("account"), mode);
-        let settings = SettingStore::new(dir);
+        let settings = SettingStore::new(&zcode_host_base::testing::spawner(), dir);
         // 写入路径要求 provider 就绪：一个个人 API Key provider（不会发出请求）。
         let personal = dir.join("provider_config.json");
         std::fs::write(

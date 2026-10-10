@@ -305,7 +305,10 @@ mod tests {
                 command_vars: Default::default(),
                 fallback_cwd: None,
             },
-            crate::settings::SettingStore::new(std::path::Path::new("/nonexistent")),
+            crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                std::path::Path::new("/nonexistent"),
+            ),
             crate::providers::ProviderRuntime::new(None, "/nonexistent/p.json".into()),
         )
     }

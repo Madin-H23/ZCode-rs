@@ -218,7 +218,7 @@ pub(crate) mod testing {
 
     pub async fn fixture(dir: &std::path::Path) -> Fixture {
         let home = dir.join("home");
-        let settings = SettingStore::new(&home);
+        let settings = SettingStore::new(&zcode_host_base::testing::spawner(), &home);
         let runtime = AgentRuntime::new(
             AgentRuntimeConfig {
                 base_env: Default::default(),

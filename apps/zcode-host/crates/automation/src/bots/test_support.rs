@@ -653,7 +653,7 @@ pub fn bots_with_remote(
         repo: BotsRepo::new(config_dir.clone()),
         credentials: CredentialStore::new(&config_dir, "test"),
         providers: Arc::new(Providers::new(Endpoints::local(origin)).unwrap()),
-        settings: SettingStore::new(dir),
+        settings: SettingStore::new(&zcode_host_base::testing::spawner(), dir),
         tasks,
         remote,
         attachments_dir: config_dir.join("bot-attachments"),

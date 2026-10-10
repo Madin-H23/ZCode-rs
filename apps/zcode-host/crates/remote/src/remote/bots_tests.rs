@@ -39,7 +39,10 @@ fn setup(home: &std::path::Path, connections: Vec<Connection>) -> Setup {
     let workspaces = install_with(
         RemoteConfig {
             transport: Arc::new(FakeTransport(Mutex::new(connections))),
-            settings: crate::settings::SettingStore::new(home),
+            settings: crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                home,
+            ),
             control,
             provisioning: ProvisioningSource::for_test(home),
             media_range_enabled: true,

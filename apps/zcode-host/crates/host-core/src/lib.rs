@@ -78,6 +78,8 @@ struct Inner {
     /// 根作用域 `host`。它的任务（连接循环、transport、启动）持有 `HostCore` 的克隆，所以作用域不会
     /// 随最后一个外部克隆释放；[`HostCore::shutdown`] 显式关闭它。
     scope: TaskScope,
+    /// `host/services`：交给组装根，各 service 的作用域在它下面（rust-u2-task-scope.md §6.1）。
+    services: TaskScope,
 }
 
 impl HostCore {
@@ -92,6 +94,7 @@ impl HostCore {
         });
         let telemetry = rpc_telemetry::RpcTelemetry::new(control.clone(), scope.spawner());
         let gateway = Gateway::new(scope.spawner(), telemetry.clone(), config.outbound_limits);
+        let services = scope.spawner().child("services");
         Self {
             inner: Arc::new(Inner {
                 config,
@@ -105,6 +108,7 @@ impl HostCore {
                 startup: Mutex::new(None),
                 gateway,
                 scope,
+                services,
             }),
         }
     }
@@ -297,7 +301,13 @@ impl HostCore {
         });
         let mut registry = ChannelRegistry::from_contract(contract::embedded());
         let mut router = ControlRouter::default();
-        let installed = zcode_host_services::install(context, storage, &mut registry, &mut router);
+        let installed = zcode_host_services::install(
+            &self.inner.services.spawner(),
+            context,
+            storage,
+            &mut registry,
+            &mut router,
+        );
         *self.lock_router() = router;
         *self
             .inner

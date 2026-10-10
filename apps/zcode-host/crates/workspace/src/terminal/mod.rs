@@ -448,7 +448,10 @@ mod tests {
             .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
             .collect(),
         );
-        Terminals::new(env, SettingStore::new(home))
+        Terminals::new(
+            env,
+            SettingStore::new(&zcode_host_base::testing::spawner(), home),
+        )
     }
 
     async fn read_until(events: &mut EventStream, needle: &str) -> String {

@@ -214,7 +214,7 @@ mod tests {
     #[tokio::test]
     async fn first_run_flag_and_agents_file_copy() {
         let home = tempfile::tempdir().unwrap();
-        let settings = SettingStore::new(home.path());
+        let settings = SettingStore::new(&zcode_host_base::testing::spawner(), home.path());
         let vars = std::collections::BTreeMap::from([(
             "HOME".to_owned(),
             home.path().display().to_string(),

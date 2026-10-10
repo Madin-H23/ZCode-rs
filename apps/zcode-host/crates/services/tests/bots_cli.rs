@@ -266,7 +266,7 @@ async fn bots_read_real_cli_conversations_through_v4_frames() {
             command_vars: runtime_vars(),
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
         providers,
     );
     let target = WorkspaceTarget::local(workspace_path.clone());

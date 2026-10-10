@@ -324,7 +324,10 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
     let workspaces = install_with(
         RemoteConfig {
             transport: Arc::new(transport),
-            settings: crate::settings::SettingStore::new(home.path()),
+            settings: crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                home.path(),
+            ),
             control: Arc::new(Control(sink)),
             provisioning: ProvisioningSource::for_test(home.path()),
             media_range_enabled: true,
@@ -338,7 +341,7 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
             command_vars: Default::default(),
             fallback_cwd: None,
         },
-        crate::settings::SettingStore::new(home.path()),
+        crate::settings::SettingStore::new(&zcode_host_base::testing::spawner(), home.path()),
         crate::providers::ProviderRuntime::new(None, home.path().join("pc.json")),
     );
     let local = Arc::new(LocalTasks(Mutex::new(Vec::new())));
@@ -516,7 +519,10 @@ async fn remote_resource_facts_reach_main() {
     let _workspaces = install_with(
         RemoteConfig {
             transport: Arc::new(transport),
-            settings: crate::settings::SettingStore::new(home.path()),
+            settings: crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                home.path(),
+            ),
             control: Arc::new(Control(sink)),
             provisioning: ProvisioningSource::for_test(home.path()),
             media_range_enabled: true,
@@ -581,7 +587,10 @@ async fn remote_attachments_route_usage_and_share_like_node() {
     let workspaces = install_with(
         RemoteConfig {
             transport: Arc::new(transport),
-            settings: crate::settings::SettingStore::new(home.path()),
+            settings: crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                home.path(),
+            ),
             control: Arc::new(Control(sink)),
             provisioning: ProvisioningSource::for_test(home.path()),
             media_range_enabled: true,

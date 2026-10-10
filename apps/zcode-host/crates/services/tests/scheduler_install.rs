@@ -203,7 +203,13 @@ async fn due_automation_is_dispatched_and_settled_without_any_connection() {
     });
     let mut registry = ChannelRegistry::empty();
     let mut router = ControlRouter::default();
-    let installed = install(context, storage, &mut registry, &mut router);
+    let installed = install(
+        &zcode_host_services::testing::spawner(),
+        context,
+        storage,
+        &mut registry,
+        &mut router,
+    );
 
     // 认领 → 派发（建会话、发 prompt）→ 结算：没有任何 attachment，也没有 Main 的 cron-run。
     eventually("dispatch settled", async || {

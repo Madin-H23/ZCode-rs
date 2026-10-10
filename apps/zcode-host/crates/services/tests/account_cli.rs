@@ -220,7 +220,7 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         .join("../../../../config/provider/zcode-builtin.json")
         .canonicalize()
         .unwrap();
-    let settings = SettingStore::new(home.path());
+    let settings = SettingStore::new(&zcode_host_services::testing::spawner(), home.path());
     let providers = ProviderRuntime::new(Some(builtin), config_dir.join("provider_config.json"));
     let context = ServiceContext {
         environment,

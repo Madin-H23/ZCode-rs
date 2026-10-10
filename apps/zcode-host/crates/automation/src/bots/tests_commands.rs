@@ -357,7 +357,7 @@ async fn bot_initiated_resume_carries_session_tool_flags() {
             command_vars: Default::default(),
             fallback_cwd: None,
         },
-        crate::settings::SettingStore::new(dir.path()),
+        crate::settings::SettingStore::new(&zcode_host_base::testing::spawner(), dir.path()),
         crate::providers::ProviderRuntime::new(None, dir.path().join("provider_config.json")),
     );
     let local = WorkspaceTarget::local("/tmp/ws-bot".to_owned());

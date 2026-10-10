@@ -296,7 +296,10 @@ mod tests {
             dir.path().join("provider_config.json"),
         );
         let sources = ProvisioningSources {
-            settings: crate::settings::SettingStore::new(dir.path()),
+            settings: crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                dir.path(),
+            ),
             credentials: CredentialStore::new(dir.path(), "test-secret"),
             providers: providers.clone(),
         };

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
+use zcode_async::Spawner;
 use zcode_host_control::{ControlRouter, ControlSink, HostToMain};
 use zcode_host_kit::{RpcError, log};
 
@@ -47,12 +47,13 @@ fn write_result(request_id: &str, result: &Result<(), RpcError>) -> HostToMain {
     HostToMain::Raw(message)
 }
 
-/// 登记 `setting-write`，返回串行处理写入的任务（随控制路由一起结束）。
+/// 登记 `setting-write`；串行处理写入的任务是 `spawner` 作用域里的常驻任务 `setting-write-requests`。
 pub fn register_setting_writes(
+    spawner: &Spawner,
     router: &mut ControlRouter,
     store: SettingStore,
     control: Arc<dyn ControlSink>,
-) -> JoinHandle<()> {
+) {
     let (queue, mut requests) = mpsc::channel::<(String, Value)>(WRITE_QUEUE);
     let reject = control.clone();
     router.on(SETTING_WRITE, move |message| {
@@ -79,26 +80,29 @@ pub fn register_setting_writes(
             ));
         }
     });
-    tokio::spawn(async move {
-        while let Some((request_id, patch)) = requests.recv().await {
-            let patch = match settings::parse_update_patch(&patch) {
-                Ok(patch) => patch,
-                Err(error) => {
-                    control.send(write_result(&request_id, &Err(error)));
-                    continue;
+    drop(
+        spawner.spawn_resident("setting-write-requests", async move {
+            while let Some((request_id, patch)) = requests.recv().await {
+                let patch = match settings::parse_update_patch(&patch) {
+                    Ok(patch) => patch,
+                    Err(error) => {
+                        control.send(write_result(&request_id, &Err(error)));
+                        continue;
+                    }
+                };
+                let (reporter, reported_id) = (control.clone(), request_id.clone());
+                let result = store
+                    .update_reporting(&patch, None, move |result| {
+                        reporter.send(write_result(&reported_id, result));
+                    })
+                    .await;
+                if let Err(error) = result {
+                    log::warn(format!(
+                        "setting-write failed, requestId={request_id}: {}",
+                        error.message
+                    ));
                 }
-            };
-            let result = store
-                .update_reporting(&patch, None, |result| {
-                    control.send(write_result(&request_id, result));
-                })
-                .await;
-            if let Err(error) = result {
-                log::warn(format!(
-                    "setting-write failed, requestId={request_id}: {}",
-                    error.message
-                ));
             }
-        }
-    })
+        }),
+    );
 }

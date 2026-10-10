@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use zcode_async::{Spawner, TaskScope};
 use zcode_host_control::ControlRouter;
 use zcode_host_kit::ChannelRegistry;
 
@@ -85,14 +86,15 @@ pub struct Installed {
     _observer: Arc<agent::sessions_index::SessionsIndexObserver>,
     _controller: Arc<tasks::controller::Controller>,
     _syncer: tokio::task::JoinHandle<()>,
-    /// Main 的 `setting-write` 串行写入任务。
-    _setting_writes: tokio::task::JoinHandle<()>,
     automation: automation::AreaHandle,
     /// 调度状态机（rust-u4-app-host.md §2.4）：install 结束时启动，Host 退出时最先收尾。
     scheduler: scheduler::SchedulerHandle,
     remote: Arc<remote::RemoteWorkspaces>,
     /// 至少保留一个句柄，否则 tasks-index 线程与连接随之关闭。
     _storage: Storage,
+    /// 各 service 的作用域 `host/services/<service>`（docs/specs/rust-u2-task-scope.md §6.1）：它们的
+    /// 常驻任务与 owner 任务随 Installed 存在；Host 退出时由根作用域的关闭统一收口。
+    _scopes: Vec<TaskScope>,
 }
 
 impl Installed {
@@ -113,19 +115,32 @@ impl Installed {
     }
 }
 
+/// `spawner` 是 HostCore 交给组装根的 `host/services` 作用域；每个 service 在它下面有自己的子作用域
+/// `host/services/<service>`，由返回的 [`Installed`] 持有（docs/specs/rust-u2-task-scope.md §6.1）。
 pub fn install(
+    spawner: &Spawner,
     context: Arc<ServiceContext>,
     storage: Storage,
     registry: &mut ChannelRegistry,
     router: &mut ControlRouter,
 ) -> Installed {
+    let mut scopes = Vec::new();
+    let mut scope = |name: &'static str| {
+        let scope = spawner.child(name);
+        let spawner = scope.spawner();
+        scopes.push(scope);
+        spawner
+    };
     let bridge = MainBridge::new(context.control.clone());
     // setting.json 的唯一写入方（rust-u4-app-host.md §2.6）：每次成功写入都推 `setting-changed` 给 Main。
+    let settings_tasks = scope("settings");
     let settings = settings::SettingStore::with_change_sink(
+        &settings_tasks,
         &context.environment.home_dir,
         settings_control::change_sink(context.control.clone()),
     );
-    let setting_writes = settings_control::register_setting_writes(
+    settings_control::register_setting_writes(
+        &settings_tasks,
         router,
         settings.clone(),
         context.control.clone(),
@@ -389,10 +404,10 @@ pub fn install(
         _observer: observer,
         _controller: controller,
         _syncer: syncer,
-        _setting_writes: setting_writes,
         automation,
         scheduler,
         remote,
         _storage: storage,
+        _scopes: scopes,
     }
 }

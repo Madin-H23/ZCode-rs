@@ -162,7 +162,7 @@ async fn import_installs_artifacts_then_cleans_up_when_the_session_cannot_be_cre
             command_vars: Default::default(),
             fallback_cwd: None,
         },
-        crate::settings::SettingStore::new(dir.path()),
+        crate::settings::SettingStore::new(&zcode_host_base::testing::spawner(), dir.path()),
         crate::providers::ProviderRuntime::new(None, dir.path().join("p.json")),
     );
     let workspace = dir.path().join("ws");

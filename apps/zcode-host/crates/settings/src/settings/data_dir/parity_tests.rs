@@ -285,7 +285,7 @@ mod copy_cases {
             } else {
                 let home = root.join("home");
                 let mover = DataDirMove::with_paths(
-                    SettingStore::new(&home),
+                    SettingStore::new(&zcode_host_base::testing::spawner(), &home),
                     &joined(case["current"].as_str().unwrap()),
                     &home.to_string_lossy(),
                     BTreeMap::new(),

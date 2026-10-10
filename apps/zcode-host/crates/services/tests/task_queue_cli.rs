@@ -226,7 +226,7 @@ async fn harness() -> Harness {
     let builtin = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../config/provider/zcode-builtin.json");
     let home_text = home.path().to_string_lossy().into_owned();
-    let settings = SettingStore::new(home.path());
+    let settings = SettingStore::new(&zcode_host_services::testing::spawner(), home.path());
     let runtime = AgentRuntime::new(
         AgentRuntimeConfig {
             base_env: BTreeMap::from([

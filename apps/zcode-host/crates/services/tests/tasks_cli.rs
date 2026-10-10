@@ -183,7 +183,7 @@ async fn task_lifecycle_against_rust_cli() {
         ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
     ]);
     let command_vars = runtime_vars();
-    let settings = SettingStore::new(home.path());
+    let settings = SettingStore::new(&zcode_host_services::testing::spawner(), home.path());
     let runtime = AgentRuntime::new(
         AgentRuntimeConfig {
             base_env,
@@ -348,7 +348,7 @@ async fn claude_import_against_rust_cli() {
             command_vars: runtime_vars(),
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
         ProviderRuntime::new(Some(builtin), personal),
     );
     let index = TasksIndex::open(home.path().join(".zcode/v2/tasks-index.sqlite"), |_| {})
@@ -365,7 +365,7 @@ async fn claude_import_against_rust_cli() {
         index.clone(),
         tasks,
         runtime.clone(),
-        SettingStore::new(home.path()),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
     );
     let lifecycle = TaskLifecycle::start(context);
     // 一个普通会话、一个侧链会话、一个 worktree 下的会话；只有第一个可导入。
