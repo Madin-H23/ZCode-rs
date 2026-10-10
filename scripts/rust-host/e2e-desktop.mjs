@@ -22,6 +22,8 @@
 //
 // 每个场景结束时 harness 断言进程表（Rust：Main 下恰好一个 Rust Host、没有 Node Host / scheduler 进程），
 // 然后正常退出 App（SIGTERM 只发给 Main），断言 Main 走完退出流程、Rust Host 经 dispose 退出、不留进程；
+// 再断言 runtime 的工具进程账本（docs/specs/rust-tool-process-reaping.md）为空：Bash / hook / MCP 的进程树
+// 都已确认结束（Rust runtime；relaunch 的每次退出同样检查）；
 // 最后断言 Host 日志与 runtime 的 JSONL 日志里没有任务 panic、出站积压越过上限而关闭的连接、退出时被中止的任务。
 //
 // 场景模块导出：
@@ -55,6 +57,7 @@ import {
   launchApp,
 } from "./e2e/app.mjs";
 import { lastUserText } from "./e2e/helpers.mjs";
+import { assertLedgerEmpty } from "./e2e/ledger-helpers.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const desktop = join(root, "packages/desktop");
@@ -259,6 +262,7 @@ async function runScenario(name, cli) {
       secondInstance: (extraArgs) => app.secondInstance(extraArgs),
       relaunch: async () => {
         await assertCleanQuit(options.host, home, await app.stop());
+        if (options.host === "rust") await assertLedgerEmpty(home);
         app = await launchApp({ host: options.host, temp, home, cli, env, args });
         return app.page;
       },
@@ -268,6 +272,7 @@ async function runScenario(name, cli) {
     const quit = await app.stop();
     app = undefined;
     await assertCleanQuit(options.host, home, quit);
+    if (options.host === "rust") await assertLedgerEmpty(home);
     await assertHostLogClean(home, scenario.expectedHostLog);
     console.info(`[e2e:${name}] passed`);
   } catch (error) {

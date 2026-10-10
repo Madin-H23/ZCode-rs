@@ -6,12 +6,14 @@
 // - workspace 项目配置 <workspace>/.zcode/config.json：一个 inline 插件目录，以及一个 stdio MCP
 //   server（本地 node 脚本，只回应 initialize / tools/list，不联网）。
 // 断言：插件页列出这两个插件（plugin-management lane 按真实 workspace 读到项目插件）；MCP 页的
-// server 行由 mcp-status lane 探测为 connected、工具数 1。
+// server 行由 mcp-status lane 探测为 connected、工具数 1；Rust runtime 下这个 stdio server 是经工具进程账本
+// 启动的（docs/specs/rust-tool-process-reaping.md）：连接期间账本里有它的 `mcp-` 记录，退出后由 harness 断言账本为空。
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { openSettingsSection } from "../extensions-helpers.mjs";
 import { sseText } from "../helpers.mjs";
+import { ledgerEntries, processIdentities } from "../ledger-helpers.mjs";
 
 const STORE_PLUGIN = "e2e-store-plugin";
 const STORE_PLUGIN_ID = `${STORE_PLUGIN}@e2e-market`;
@@ -120,7 +122,7 @@ async function selectScope(page, label, shots, name) {
   await option.click();
 }
 
-export async function run({ page, shots }) {
+export async function run({ page, shots, home, host }) {
   await openSettingsSection(page, "Plugins", shots, "plugins-mcp");
   // User 作用域：plugin-management lane 的 plugins/list（带真实 workspace、configScope user）。
   await waitVisible(
@@ -168,4 +170,19 @@ export async function run({ page, shots }) {
     );
   }
   console.info("[e2e:agent-plugins-mcp] workspace MCP server connected with 1 tool");
+
+  if (host !== "rust") return;
+  // 连接仍由 mcp-status lane 持有（空闲 5 分钟才回收）：账本里有一条 mcp 记录，根进程就是这个 server。
+  const records = (await ledgerEntries(home)).filter((entry) => entry.purpose === "mcp");
+  const identities = await processIdentities(records.map((entry) => entry.rootPid));
+  const server = records.find((entry) =>
+    identities.get(entry.rootPid)?.command.includes("mcp-echo.mjs"),
+  );
+  if (!server)
+    throw new Error(
+      `no ledger record for the running MCP server: ${JSON.stringify(records)} ${JSON.stringify([...identities])}`,
+    );
+  console.info(
+    `[e2e:agent-plugins-mcp] the MCP server's process tree is in the ledger: ${server.name}`,
+  );
 }
