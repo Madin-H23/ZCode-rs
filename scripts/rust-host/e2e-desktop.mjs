@@ -6,7 +6,8 @@
 // 经 CDP（私有端口）驱动界面。不使用固定的 Vite 5174 / CDP 9229 端口，不读写 ~/.zcode，遥测端点置空。
 //
 // 用法：node scripts/rust-host/e2e-desktop.mjs [--scenario <name>]... [--host rust|node]
-//                                             [--runtime embedded|child] [--skip-build] [--keep] [--explore]
+//                                             [--runtime embedded|child] [--cli standalone|merged]
+//                                             [--skip-build] [--keep] [--explore]
 //   --scenario    要运行的场景（scripts/rust-host/e2e/scenarios/<name>.mjs），可重复；默认 core
 //   --host        rust（缺省）= ZCODE_DESKTOP_HOST=rust，一个 App 一个 Rust Host（docs/specs/rust-u4-app-host.md）；
 //                 node = 发布的组合：Node Host（每个主窗口一个）+ TS CLI（apps/zcode-cli 的单文件构建），
@@ -14,14 +15,22 @@
 //   --runtime     runtime 链路：embedded（缺省）= Host 的缺省链路，进程内 runtime，不需要 CLI 二进制，
 //                 继承环境里的 ZCODE_AGENT_SERVER_* 一律清掉；child = 差分对照，经
 //                 ZCODE_AGENT_SERVER_COMMAND 让 Host 为每个 workspace 启动 Rust CLI 子进程
+//   --cli         child 链路的 CLI 可执行文件：standalone（缺省）= apps/zcode-cli-rust 的 release 构建；
+//                 merged = 指向调试构建 zcode-host 的 `zcode-cli-rust` 符号链接，即合并二进制自己的 CLI 入口
+//                 （docs/specs/rust-host-cli-boundary.md §3.4）
 //   --skip-build  复用已有的 out/ 与 Rust 构建
 //   --keep        结束后保留临时目录（截图、日志都在里面）
 //   --explore     只启动并每隔几秒截图，便于查看界面
-// child 模式下环境变量 ZCODE_E2E_CLI_RUST_BINARY 可指定 Rust CLI 可执行文件（默认用本仓库的 release 构建，
-// 需要先 cargo build --release）。
+// child 模式下环境变量 ZCODE_E2E_CLI_RUST_BINARY 可指定 Rust CLI 可执行文件（优先于 --cli；默认用本仓库的
+// release 构建，需要先 cargo build --release）。
+//
+// Rust Host 运行前先检查合并二进制的两种 CLI 入口（`zcode-host cli --version`、以 `zcode-cli-rust` 为名
+// 运行）输出 CLI 的版本并以 0 退出（e2e/cli-entry.mjs）。
 //
 // 每个场景结束时 harness 断言进程表（Rust：Main 下恰好一个 Rust Host、没有 Node Host / scheduler 进程），
 // 然后正常退出 App（SIGTERM 只发给 Main），断言 Main 走完退出流程、Rust Host 经 dispose 退出、不留进程；
+// 再断言 runtime 的工具进程账本（docs/specs/rust-tool-process-reaping.md）为空：Bash / hook / MCP 的进程树
+// 都已确认结束（Rust runtime；relaunch 的每次退出同样检查）；
 // 最后断言 Host 日志与 runtime 的 JSONL 日志里没有任务 panic、出站积压越过上限而关闭的连接、退出时被中止的任务。
 //
 // 场景模块导出：
@@ -54,7 +63,9 @@ import {
   assertRuntimeLink,
   launchApp,
 } from "./e2e/app.mjs";
+import { assertCliEntry, mergedCliLink } from "./e2e/cli-entry.mjs";
 import { lastUserText } from "./e2e/helpers.mjs";
+import { assertLedgerEmpty } from "./e2e/ledger-helpers.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const desktop = join(root, "packages/desktop");
@@ -66,12 +77,15 @@ const { values: options } = parseArgs({
     explore: { type: "boolean" },
     runtime: { type: "string", default: "embedded" },
     host: { type: "string", default: "rust" },
+    cli: { type: "string", default: "standalone" },
   },
 });
 if (!["embedded", "child"].includes(options.runtime))
   throw new Error(`--runtime must be embedded or child, got ${options.runtime}`);
 if (!["rust", "node"].includes(options.host))
   throw new Error(`--host must be rust or node, got ${options.host}`);
+if (!["standalone", "merged"].includes(options.cli))
+  throw new Error(`--cli must be standalone or merged, got ${options.cli}`);
 
 function run(command, args, cwd, env = process.env) {
   return new Promise((done, fail) => {
@@ -259,6 +273,7 @@ async function runScenario(name, cli) {
       secondInstance: (extraArgs) => app.secondInstance(extraArgs),
       relaunch: async () => {
         await assertCleanQuit(options.host, home, await app.stop());
+        if (options.host === "rust") await assertLedgerEmpty(home);
         app = await launchApp({ host: options.host, temp, home, cli, env, args });
         return app.page;
       },
@@ -268,6 +283,7 @@ async function runScenario(name, cli) {
     const quit = await app.stop();
     app = undefined;
     await assertCleanQuit(options.host, home, quit);
+    if (options.host === "rust") await assertLedgerEmpty(home);
     await assertHostLogClean(home, scenario.expectedHostLog);
     console.info(`[e2e:${name}] passed`);
   } catch (error) {
@@ -292,10 +308,10 @@ async function main() {
   // Node Host 不认 --runtime：它总是为每个 workspace 起 CLI 子进程（缺省 TS CLI）。
   let cli = null;
   if (options.host === "rust" && options.runtime === "child") {
-    cli =
-      process.env.ZCODE_E2E_CLI_RUST_BINARY?.trim() ||
-      join(root, "apps/zcode-cli-rust/target/release/zcode-cli-rust");
-    if (!existsSync(cli)) throw new Error(`Rust CLI release build missing: ${cli}`);
+    cli = process.env.ZCODE_E2E_CLI_RUST_BINARY?.trim() || null;
+    if (!cli && options.cli === "standalone")
+      cli = join(root, "apps/zcode-cli-rust/target/release/zcode-cli-rust");
+    if (cli && !existsSync(cli)) throw new Error(`Rust CLI release build missing: ${cli}`);
   }
   console.info(
     options.host === "node"
@@ -313,10 +329,20 @@ async function main() {
       NODE_ENV: "production",
     });
   }
+  // 合并二进制的 CLI 入口：指向刚构建的调试版 zcode-host 的 `zcode-cli-rust` 符号链接。
+  const merged = options.host === "rust" ? await mergedCliLink(root) : null;
+  if (options.host === "rust" && options.runtime === "child" && !cli) cli = merged.path;
+  if (cli === merged?.path)
+    console.info(`[e2e] child runtime: the merged binary's CLI entry (${cli})`);
   const scenarios = options.scenario?.length ? options.scenario : ["core"];
   const failed = [];
-  for (const name of scenarios) {
-    if (!(await runScenario(name, cli))) failed.push(name);
+  try {
+    if (merged) await assertCliEntry(root, merged.path);
+    for (const name of scenarios) {
+      if (!(await runScenario(name, cli))) failed.push(name);
+    }
+  } finally {
+    await merged?.dispose();
   }
   if (failed.length > 0) {
     console.error(`[e2e] failed scenarios: ${failed.join(", ")}`);

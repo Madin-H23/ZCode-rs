@@ -9,6 +9,7 @@ import { createServer as createNetServer } from "node:net";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { rustDataDir } from "./ledger-helpers.mjs";
 import { connectMainInspector } from "./main-process.mjs";
 import {
   descendantsOf,
@@ -231,7 +232,7 @@ export async function launchApp({ host, temp, home, cli, env = {}, args = [] }) 
     USERPROFILE: home,
     ZCODE_DATA_BASE_DIR: home,
     ZCODE_DESKTOP_HOME_DIR: home,
-    ZCODE_CLI_RUST_DATA_DIR: join(home, ".zcode", "rust"),
+    ZCODE_CLI_RUST_DATA_DIR: rustDataDir(home),
     ZCODE_DESKTOP_USER_DATA_DIR: join(temp, "electron"),
     ZCODE_DESKTOP_SESSION_DATA_DIR: join(temp, "electron-session"),
     ZCODE_DESKTOP_APPLICATION_NAME: "ZCode Rust Host E2E",

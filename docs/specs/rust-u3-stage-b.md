@@ -223,6 +223,7 @@ sequenceDiagram
 #### 3.4.8 验收
 
 - runtime（`apps/zcode-cli-rust/tests/input_queue.rs`，经 App 协议）：`inputQueue` 的空闲 / 运行中 / 暂停结果；`externalId` 记在队列项与轮头上；摘要的 `activeInputId` 随 run 出现与消失；`session/send` 带 `requestedDelivery: "queue"` 时在 legacy 锁下入队。
+- 桌面 E2E `queue-ui`（`scripts/rust-host/e2e-desktop.mjs`，嵌入式与子进程两种链路）：流式输出期间连续发送三条消息，按发送顺序出现在队列区；删除一条、把最后一条拖到最前，队列区随之变化；run 结束后剩下的两条按改后的顺序执行，删除的一条从未发给模型。外部客户端经 `enqueueTaskCommand` 入队的项出现在桌面队列区，桌面 E2E 没有覆盖（没有手机 / relay 的客户端）。
 - Host（`crates/services/tests/task_queue_cli.rs`，进程内 runtime + 可挂起的模拟模型；设置 `ZCODE_TEST_CLI_RUST_BINARY` 时走子进程链路）：运行中入队进入 runtime 队列、run 结束后由 runtime 开跑并带终态 inputId；promote 改变顺序；暂停的队列上 promote 开跑该项；cancel 移除、正在运行的项回 `already_running`；同一 commandId 重复入队不产生第二项；空闲会话入队立即开跑；held 时入队开跑而队列保持暂停；带附件的项在 legacy 锁下入队；三个成员的返回形状与错误码；runtime 实例重启后的结果（3.4.3 最后一条）；owner 错误码不变。
 
 ## 4. 步骤
