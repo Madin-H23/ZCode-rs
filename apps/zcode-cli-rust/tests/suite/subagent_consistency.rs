@@ -12,6 +12,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use zcode_cli_rust::{app::Engine, contract::*, domain::session::Session};
 
+use super::common::Clock;
+
 struct Store {
     stage: &'static str,
     intercepted: AtomicBool,
@@ -114,15 +116,6 @@ impl ToolPort for Tools {
     }
     async fn agent_output(&self, _: &str, _: &str) -> Result<String> {
         Ok("/fixture/agent.output".into())
-    }
-}
-struct Clock(AtomicUsize);
-impl RuntimeClock for Clock {
-    fn id(&self) -> String {
-        self.0.fetch_add(1, Ordering::SeqCst).to_string()
-    }
-    fn now(&self) -> u64 {
-        1000
     }
 }
 #[tokio::test]

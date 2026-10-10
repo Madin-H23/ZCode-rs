@@ -114,7 +114,13 @@ large-error-threshold = 256
 
 ### 4.2 每个 crate 一个集成测试二进制（E12）
 
-把 `tests/*.rs` 合并为 `tests/all.rs` 加 `tests/suite/<name>.rs`，只链接一次。CLI 现有 11 个测试二进制，合并后链接时间明显缩短。单元测试继续用现有的 `*_tests.rs` 加 `#[path]` 约定（Codex 同样如此）。
+把 `tests/*.rs` 合并为 `tests/all.rs` 加 `tests/suite/<name>.rs`，只链接一次。单元测试继续用现有的 `*_tests.rs` 加 `#[path]` 约定（Codex 同样如此）。
+
+- **CLI（已完成）**：根包 `zcode-cli-rust` 原来的 14 个集成测试二进制（每个都链接整个运行时）合并为 `tests/all.rs`，它只有 `mod suite;`；每个原文件是 `tests/suite/` 下的一个模块，测试名形如 `suite::embed::…`，nextest 的二进制 id 是 `zcode-cli-rust::all`。原先逐字复制的辅助代码（读 HTTP 请求、固定时钟）放在 `tests/suite/common.rs`。新测试加在 `tests/suite/` 下，不在 `tests/` 下新建 `*.rs`。
+  - 只跑一部分：`cargo nextest run --manifest-path apps/zcode-cli-rust/Cargo.toml --workspace -E 'binary(all) & test(/^suite::embed::/)'`；`scripts/zcode-cli-rust-node-storage-check.mjs` 用 `cargo test --test all suite::node_storage::`。
+  - 成员 crate 自己的集成测试（`bash-parse` 2 个、`delivery` 1 个）只链接各自的 crate，二进制只有几 MB，暂不合并。
+  - 合并后 CLI workspace 的测试二进制从 33 个（共约 709 MB）减到 20 个（约 313 MB），根包集成测试从 14 个（约 513 MB）变成 1 个（约 116 MB），测试数不变。改 `crates/core` 的一个函数体后构建全部测试二进制，CPU 时间约减半；只改一个测试文件时要重新编译并链接整个 `all`，比原来只重编一个测试二进制略慢（粗测多约 0.4 s）。
+- **Host（待做）**：25 个集成测试二进制（`crates/services/tests` 13 个、`crates/zcode-host/tests` 10 个、`crates/rpc/tests` 2 个）。等 Host 测试文件的 task-scope 迁移（[rust-u2-task-scope.md](rust-u2-task-scope.md)）合入后再合并，避免与之冲突；做法同 CLI，每个 crate 一个 `tests/all.rs`。`crates/zcode-host/tests/host_only.rs` 只在关掉 `embedded-runtime` 时编译，`scripts/rust-host/test.mjs` 与 CI 用 `binary(host_only)` 选它，合并时一并改成按测试名过滤。
 
 ### 4.3 进程内 TestHost（E10）
 

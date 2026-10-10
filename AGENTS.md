@@ -60,6 +60,7 @@
   - 合并的二进制以 `cli` 子命令（或以 `zcode-cli-rust` 为名）运行时，行为与独立 CLI 完全相同。
 - 工具链由仓库根 `rust-toolchain.toml` 固定；`clippy.toml`、`deny.toml`、`.cargo/config.toml` 也在仓库根，三个 workspace 共用。`pnpm check:rust` 与测试脚本依赖 `cargo-nextest`、`cargo-deny`、`cargo-shear`，缺失时脚本会给出安装命令。
 - 测试用 `cargo nextest run --workspace`：`apps/zcode-cli-rust` 的根 `Cargo.toml` 同时是一个 package，不加 `--workspace` 时 cargo 只处理根包。
+- CLI 根包的集成测试只有一个二进制 `tests/all.rs`：新测试作为模块加在 `tests/suite/` 下，不在 `tests/` 下新建 `*.rs`（每个都会再链接一遍整个运行时，`docs/specs/rust-engineering-practices.md` §4.2）。
 - 唯一入口（由 `clippy.toml` 的 `disallowed-methods` 或评审保证）：
   - 子进程只经 `zcode_proc::command` / `std_command` 创建；结束进程树用 `zcode_proc::tree` 与 Windows `zcode_proc::job`。
   - runtime 的工具进程树（Bash、hooks、MCP stdio，自成会话或进程组）只经 `zcode_proc::ledger::Ledger::spawn` 启动，并用它返回的 `Tracked` 结束：Unix 上写账本、实例启动时清扫，Windows 上放进 Job（`docs/specs/rust-tool-process-reaping.md`）。账本只有 runtime 读写，Host 不碰。

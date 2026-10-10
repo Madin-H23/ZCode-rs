@@ -508,7 +508,7 @@ M11.3 至 M11.4 期间两种存储二选一，不双写；M11.5 删除原存储�
 M11.3 已完成的范围与验证：
 
 - 写入：会话创建（首个输入）、直接开始与忙时输入的账本、排队提升、user 消息、assistant 步骤、推理与正文、工具 pending/running/completed/error、取消与失败收口、流恢复丢弃、稳定 fork 边界、标题（重命名）、模型选择、执行状态、todo、用量、项目设置、命令回执反查。
-- 集成测试 `apps/zcode-cli-rust/tests/node_storage.rs`：引擎跑带工具的轮次、忙时排队与提升、重启后由新 runtime 续聊；按 §6 冷读取，模型上下文与运行时请求一致，行与账本正确。
+- 集成测试 `apps/zcode-cli-rust/tests/suite/node_storage.rs`：引擎跑带工具的轮次、忙时排队与提升、重启后由新 runtime 续聊；按 §6 冷读取，模型上下文与运行时请求一致，行与账本正确。
 - 交叉读取 `node --import tsx scripts/zcode-cli-rust-node-storage-check.mjs`：Node 的 `SqliteSessionStore`、history hydrator 与冷投影读取 Rust 写出的库，history、行与快照状态与 Rust 冷读取逐项相等。
 
 M11.4 的写入：引导输入与队列编辑/删除/重排/回退（M11.4a，已完成：集成测试覆盖运行中引导与删除排队项）；`sendQueuedNow` 与 `deleteSession` 与 Node 一样不改账本（提升时写入，关闭时保留 `admitted`，冷查询结算为 `discarded/session_resumed`）；编辑与重试的分支切点、重跑输入与冷加载边界（M11.4b，已完成：集成测试覆盖编辑、重试与重启后编辑，Node 交叉读取一致）；稳定分叉（M11.4c，已完成：分叉后子会话继续对话，Node 交叉读取一致）；压缩与 todo 提醒（M11.4d，已完成：手动压缩后继续对话，Node 交叉读取一致；自动压缩保留段与中断恢复有单元测试。`autoCompactThreshold`/`willRetriggerNextTurn` 暂不写，Node 读取时视为缺省）；模型切换时间线（M11.4e，已完成）；子代理子会话（M11.4f，已完成：父子会话均被 Node 交叉读取一致）；后台子代理完成通知与运行中子会话插话（M11.4g，已完成：Node 交叉读取一致。Rust 的后台 bash 状态以本地 `<task-notification>` 随下次输入进入上下文，Node 没有对应记录，不落库，重启后与 Node 一样不再出现）；提示附件（M11.4h，已完成：上传图片与文本附件、重启后继续对话，Node 交叉读取一致，§5.3）；工具结果媒体（M11.4i，已完成：Read 图片的结果重启后仍以图片发送，Node 交叉读取一致）；完全访问授权（M11.4j，已完成：回执通过 Node schema 校验，重启后恢复授权标记）；提问自动结束阶段（M11.4k，已完成）；会话 shell 快照（M11.4l，已完成：Node 能恢复快照，分叉子会话与 Node 一样不写）；目标（M11.4m，已完成：两轮续跑与验证、暂停后恢复，Node 交叉读取的行、模型上下文与目标状态一致，§5.4）；工作区 checkpoint 与文件撤销（M11.4n，已完成：Node 按严格 schema 解析 entry 与产物，重启后可读回，§5.5）；分享上下文导入与 Claude Code 迁移（M11.4o，已完成：导入后继续对话，Node 交叉读取一致，§5.6）；冷读取的上下文用量种子（M11.4p，已完成）；选区侧聊（M11.4q，已完成：Node 交叉读取一致，端到端覆盖首条输入、父会话运行中、重启与重复命令）；自动标题更新（M11.4r，已完成：首条输入与 `/goal` 的标题、目标摘要标题与用量落库，端到端覆盖）。

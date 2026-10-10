@@ -1,6 +1,6 @@
 // Run with node --import tsx. Rust writes scripted sessions (queued input and a
 // restarted runtime continuing it; guided and removed busy inputs) into fresh
-// Node session databases (apps/zcode-cli-rust/tests/node_storage.rs); Node's
+// Node session databases (apps/zcode-cli-rust/tests/suite/node_storage.rs); Node's
 // SqliteSessionStore, history hydrator and cold projection read it back and
 // must agree with what Rust reads. Spec rust-m11-node-storage §5.2, §11.
 import { execFileSync } from "node:child_process";
@@ -143,7 +143,15 @@ const dir = await mkdtemp(join(tmpdir(), "zcode-node-storage-"));
 try {
   execFileSync(
     "cargo",
-    ["test", "-q", "--manifest-path", "apps/zcode-cli-rust/Cargo.toml", "--test", "node_storage"],
+    [
+      "test",
+      "-q",
+      "--manifest-path",
+      "apps/zcode-cli-rust/Cargo.toml",
+      "--test",
+      "all",
+      "suite::node_storage::",
+    ],
     {
       stdio: "inherit",
       env: {

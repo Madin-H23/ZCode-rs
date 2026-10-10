@@ -11,8 +11,10 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout};
+
+use super::common::read_request;
 
 const LIMIT: Duration = Duration::from_secs(30);
 /// 安静、很久不结束的命令：bash 等待它的后台 `sleep 300`（bash 是根进程，sleep 在它的进程组里）。
@@ -49,36 +51,6 @@ fn respond(body: &str, results: &AtomicUsize) -> String {
             "function": {"name": "Bash", "arguments": arguments.to_string()}}]}),
         "tool_calls",
     )
-}
-
-async fn read_request(socket: &mut tokio::net::TcpStream) -> Option<String> {
-    let mut bytes = Vec::new();
-    let mut chunk = [0u8; 4096];
-    let header_end = loop {
-        if let Some(at) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
-            break at + 4;
-        }
-        let read = socket.read(&mut chunk).await.ok()?;
-        if read == 0 {
-            return None;
-        }
-        bytes.extend_from_slice(&chunk[..read]);
-    };
-    let head = String::from_utf8_lossy(&bytes[..header_end]).to_ascii_lowercase();
-    let length: usize = head
-        .lines()
-        .find_map(|line| line.strip_prefix("content-length:"))?
-        .trim()
-        .parse()
-        .ok()?;
-    while bytes.len() < header_end + length {
-        let read = socket.read(&mut chunk).await.ok()?;
-        if read == 0 {
-            return None;
-        }
-        bytes.extend_from_slice(&chunk[..read]);
-    }
-    Some(String::from_utf8_lossy(&bytes[header_end..header_end + length]).into_owned())
 }
 
 /// 启动假模型；返回地址与收到的工具结果数。
