@@ -172,9 +172,22 @@ pnpm e2e:rust-host         # 桌面 E2E（隔离的 Electron、mock 模型）
 | 累计 CPU time    |  0.92 s |   0.05 s |
 | 8 回合耗时       |  1.50 s |   0.26 s |
 
-这组数据只代表当次本地 fixture 和构建形态，测量时机器存在其他高负载进程。大历史冷读取与驻留另有专项数据；真实供应商、Electron/Host 总进程、MCP 工具负载、Windows/Linux 和移动远控的性能仍需单独验收。完整口径见[性能报告](docs/reports/rust-performance-2026-09-25.md)；[2026-09-23 报告](docs/reports/rust-node-resource-parity-2026-09-23.md)保留为历史基线。
+这组数据只代表当次本地 fixture 和构建形态，测量时机器存在其他高负载进程。大历史冷读取与驻留另有专项数据；真实供应商、MCP 工具负载、Windows/Linux 和移动远控的性能仍需单独验收。完整口径见[性能报告](docs/reports/rust-performance-2026-09-25.md)；[2026-09-23 报告](docs/reports/rust-node-resource-parity-2026-09-23.md)保留为历史基线。
 
-App 级（整个桌面进程树：Main、Renderer、Host、runtime）的对比正在测量，完成后补在这里。Host 内嵌 runtime 与 Host 加 CLI 子进程两种链路的对比见 [U3 报告](docs/reports/rust-u3-embedded-runtime.md)。
+整个桌面 App（Electron Main、Renderer、GPU 与辅助进程、Host、runtime、scheduler、MCP 与工具进程）：2026-10-10 在同一台机器上，同一份 Electron 与 Main / Renderer 生产构建、本地 mock 模型，三种配置各 3 次交错测量的中位数。A 是今天发布的 Node Host + TS CLI，B 是 Rust Host + 进程内 Rust runtime（release），C 是 Node Host + Rust CLI 子进程。内存为 macOS physical footprint 的进程树合计，CPU 为单核百分比：
+
+| 指标                                 |        A |        B |        C |
+| ------------------------------------ | -------: | -------: | -------: |
+| 内存，空闲                           |  868 MiB |  460 MiB |  582 MiB |
+| 内存，4 个 workspace 各完成一轮      | 1.44 GiB |  514 MiB |  717 MiB |
+| 每多一个 workspace                   |  193 MiB | 10.6 MiB | 27.9 MiB |
+| 内存，4 个会话同时流式               | 1.68 GiB |  664 MiB |  822 MiB |
+| CPU 合计，4 个会话同时流式           |    52.1% |    53.0% |    47.5% |
+| 冷启动到主界面可用                   |   4.08 s |   1.79 s |   2.59 s |
+| 首条消息首段                         |   740 ms |   274 ms |   199 ms |
+| 退出（8 个 workspace，进程全部结束） |   1.50 s |   0.24 s |   1.41 s |
+
+Electron 自身约 400–490 MiB，三种配置相同；差别来自 Node Host、scheduler 与每个 workspace 的 CLI 子进程（A 的 TS CLI 还各带一个 node_repl MCP，B、C 本次没有启动它）。流式时总 CPU 由 Renderer 与 GPU 主导，三种配置持平；界面响应（长任务、按键与切换延迟）没有差别。测量时机器上有其他编译任务（load average 5.7–38.9），只代表开发检出、macOS、mock 模型下的量级。方法、分角色数据与偏差见 [App 级性能报告](docs/reports/rust-app-performance-2026-10-10.md)。Host 内嵌 runtime 与 Host 加 CLI 子进程两种链路的对比见 [U3 报告](docs/reports/rust-u3-embedded-runtime.md)。
 
 ## 上游同步记录
 
