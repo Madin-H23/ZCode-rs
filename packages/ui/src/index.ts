@@ -107,5 +107,6 @@ export {
   HostConnectionLostScreen,
   type HostConnectionLostState,
 } from "./root/HostConnectionLostScreen.js";
+export { logger } from "./logger.js";
 
 export { LocalTtftObserver, setLocalTtftObserver } from "@/v4/telemetry/localTtftObserver.js";

@@ -1,15 +1,22 @@
-// Rust Host 断开后的整页状态（docs/specs/rust-host-resilience.md §2.1）。
+// Rust Host 断开后的整页状态（docs/specs/rust-host-resilience.md §2.1、§2.5）。
 //
-// 一旦进入就取代启动页与业务 Root：旧连接上的服务已不可用，页面只等待 Main 的 reload（自动重启）
-// 或用户的重新加载 / 退出。状态只来自两处：连上之后 WebSocket 关闭，或 Main 的重启进度通知。
+// 一旦进入就取代启动页与业务 Root：旧连接上的服务已不可用。状态由 `HostConnectionLostController`
+// 唯一持有，只来自两处：连上之后 WebSocket 关闭（按 Close 的状态码决定等待 Main 还是自己重新接入），
+// 或 Main 的重启进度通知。这里只负责渲染与接线。
 import type { ReactNode } from "react";
-import { HostConnectionLostScreen, type HostConnectionLostState } from "@zcode/ui";
+import { HostConnectionLostScreen, type HostConnectionLostState, logger } from "@zcode/ui";
 import { InternalChannels, hostConnectionStatePayloadSchema } from "@zcode/shared";
+import {
+  HostConnectionLostController,
+  createSessionReattachHistory,
+  type HostConnectionCloseEvent,
+  type HostConnectionKind,
+} from "./hostConnectionClose.js";
 
 export interface HostConnectionLostView {
   readonly active: boolean;
-  /** 连上之后连接关闭：Main 随后会发重启进度。 */
-  onConnectionClosed: () => void;
+  /** 连上之后某条连接关闭：Host 仍在运行时自己重新接入，否则等待 Main 的重启进度。 */
+  onConnectionClosed: (close: HostConnectionCloseEvent, connection: HostConnectionKind) => void;
   /** 处理 preload 转发的重启进度；返回是否是这类消息。 */
   handleMessage: (event: MessageEvent) => boolean;
   render: () => void;
@@ -20,34 +27,36 @@ export function createHostConnectionLostView(options: {
   renderShell: (screen: ReactNode) => void;
   onExit: () => void;
 }): HostConnectionLostView {
-  let current: HostConnectionLostState | null = null;
-  const render = () => {
-    if (!current) return;
+  const renderState = (state: HostConnectionLostState) =>
     options.renderShell(
       <HostConnectionLostScreen
-        connection={current}
-        onReload={() => window.location.reload()}
+        connection={state}
+        onReload={() => controller.reloadByUser()}
         onExit={options.onExit}
       />,
     );
-  };
-  const show = (next: HostConnectionLostState) => {
-    // 已放弃自动重启的结论不会被迟到的“正在重启”覆盖。
-    if (current?.state === "failed") return;
-    current = next;
-    render();
-  };
+  const controller = new HostConnectionLostController({
+    history: createSessionReattachHistory(() => window.sessionStorage),
+    now: () => Date.now(),
+    setTimer: (delayMs, fire) => {
+      const timer = setTimeout(fire, delayMs);
+      return () => clearTimeout(timer);
+    },
+    reload: () => window.location.reload(),
+    render: renderState,
+    warn: (message) => logger.lifecycle.warn(message),
+  });
   return {
     get active() {
-      return current !== null;
+      return controller.state !== null;
     },
-    onConnectionClosed: () => show(current ?? { state: "reconnecting" }),
+    onConnectionClosed: (close, connection) => controller.connectionClosed(close, connection),
     handleMessage(event) {
       if (event.source !== window || event.data?.type !== InternalChannels.HostConnectionState)
         return false;
       const result = hostConnectionStatePayloadSchema.safeParse(event.data.payload);
       if (result.success)
-        show(
+        controller.hostRestartState(
           result.data.state === "failed"
             ? { state: "failed" }
             : {
@@ -58,6 +67,8 @@ export function createHostConnectionLostView(options: {
         );
       return true;
     },
-    render,
+    render() {
+      if (controller.state) renderState(controller.state);
+    },
   };
 }

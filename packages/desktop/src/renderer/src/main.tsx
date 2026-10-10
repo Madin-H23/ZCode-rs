@@ -241,8 +241,17 @@ function flushPendingRemoteWorkspaceServicePorts(): void {
 
   const pending = pendingRemoteWorkspaceServicePorts.splice(0);
   for (const entry of pending) {
-    registerRemoteWorkspaceServiceConnection(baseServicesForRemoteSessions, entry);
+    registerRemoteWorkspaceServiceConnection(
+      baseServicesForRemoteSessions,
+      entry,
+      onRemoteScopeConnectionClosed,
+    );
   }
+}
+
+/** 远端 scope 的 WebSocket（Rust Host）连上之后关闭：只有 Host 仍在运行的关闭会让页面重新接入。 */
+function onRemoteScopeConnectionClosed(event: { code: number; reason: string }): void {
+  hostConnectionLost.onConnectionClosed(event, "remote-scope");
 }
 
 function StartupReadyNotifier() {
@@ -288,7 +297,11 @@ function handleServicePortMessage(event: MessageEvent): void {
       return;
     }
 
-    registerRemoteWorkspaceServiceConnection(baseServicesForRemoteSessions, remoteWorkspacePort);
+    registerRemoteWorkspaceServiceConnection(
+      baseServicesForRemoteSessions,
+      remoteWorkspacePort,
+      onRemoteScopeConnectionClosed,
+    );
     return;
   }
 
@@ -328,9 +341,12 @@ function initializeBusinessRoot(connector: ServiceConnector): void {
       RUST_HOST_RPC_SUBPROTOCOL,
       `${RUST_HOST_CAPABILITY_SUBPROTOCOL_PREFIX}${connector.capability}`,
     ],
-    // 连上之后的关闭说明 Rust Host 已退出：立即离开不可操作的业务界面，等待 Main 自动重启。
-    onClose: () => {
-      if (connected) hostConnectionLost.onConnectionClosed();
+    // 连上之后的关闭：立即离开不可操作的业务界面。Host 仍在运行（Close 4001）时页面自己 reload 重新
+    // 接入，否则等待 Main 自动重启（docs/specs/rust-host-resilience.md §2.5）。
+    // 修复原因：原来把任何关闭都当成 Host 退出；Host 因出站积压越过上限关闭连接时自己仍在运行，
+    // Main 不会重启它，窗口一直停在“正在重连”。
+    onClose: (event) => {
+      if (connected) hostConnectionLost.onConnectionClosed(event, "local");
     },
   }).then(
     (connection) => {

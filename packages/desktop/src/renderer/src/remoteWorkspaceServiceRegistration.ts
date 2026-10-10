@@ -33,21 +33,31 @@ function registerRemoteWorkspaceServicePort(
   notifyRemoteWorkspaceServicePortReady(params);
 }
 
+/** 连上之后的 WebSocket 关闭（状态码与 Host 给的原因，docs/specs/rust-u2-gateway.md §2.6）。 */
+export type RemoteScopeConnectionClosed = (close: { code: number; reason: string }) => void;
+
 /**
  * Rust Host：远端 scope 经 WebSocket 直连（docs/specs/rust-host-remote.md §4.2）。注册与 ready ACK
- * 与 MessagePort 路径相同；握手失败时不回 ACK，由 Main 的 ready 超时收口。
+ * 与 MessagePort 路径相同；握手失败时不回 ACK，由 Main 的 ready 超时收口。连上之后的关闭交给
+ * `onClosed`（页面据状态码决定是否重新接入，rust-host-resilience.md §2.5）。
  */
 function registerRemoteWorkspaceServiceEndpoint(
   base: IServiceAccessor,
   params: RemoteWorkspaceServiceEndpointRegistration,
+  onClosed?: RemoteScopeConnectionClosed,
 ): void {
+  let connected = false;
   void createWebSocketServiceConnection(params.url, {
     protocols: [
       RUST_HOST_RPC_SUBPROTOCOL,
       `${RUST_HOST_CAPABILITY_SUBPROTOCOL_PREFIX}${params.capability}`,
     ],
+    onClose: (event) => {
+      if (connected) onClosed?.(event);
+    },
   }).then(
     (remoteConnection) => {
+      connected = true;
       registerRemoteWorkspaceSession({
         sessionId: params.sessionId,
         target: params.target,
@@ -65,10 +75,11 @@ function registerRemoteWorkspaceServiceEndpoint(
 export function registerRemoteWorkspaceServiceConnection(
   base: IServiceAccessor,
   params: RemoteWorkspaceServiceRegistration,
+  onClosed?: RemoteScopeConnectionClosed,
 ): void {
   if ("port" in params) {
     registerRemoteWorkspaceServicePort(base, params);
   } else {
-    registerRemoteWorkspaceServiceEndpoint(base, params);
+    registerRemoteWorkspaceServiceEndpoint(base, params, onClosed);
   }
 }
