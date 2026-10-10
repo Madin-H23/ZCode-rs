@@ -152,7 +152,12 @@ done
             init: InitLocal::default(),
             control: Arc::new(NullSink),
         };
-        let account = AccountStack::new(&context, &settings, &providers);
+        let account = AccountStack::new(
+            &zcode_host_base::testing::spawner(),
+            &context,
+            &settings,
+            &providers,
+        );
         CodingPlanSubscription::new(
             account.api.clone(),
             account.account_api.clone(),

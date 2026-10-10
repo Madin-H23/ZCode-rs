@@ -587,7 +587,11 @@ mod tests {
     #[tokio::test]
     async fn token_and_profile_roundtrip_with_node_layout() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = OAuthCredentialRepo::new(CredentialStore::new(dir.path(), "s"));
+        let repo = OAuthCredentialRepo::new(CredentialStore::new(
+            &zcode_host_base::testing::spawner(),
+            dir.path(),
+            "s",
+        ));
         repo.save_token_set(
             ZAI,
             &TokenSet {
@@ -630,11 +634,15 @@ mod tests {
     #[tokio::test]
     async fn decrypt_failure_clears_all_oauth_keys_but_keeps_others() {
         let dir = tempfile::tempdir().unwrap();
-        let good = CredentialStore::new(dir.path(), "right");
+        let good = CredentialStore::new(&zcode_host_base::testing::spawner(), dir.path(), "right");
         good.save("ssh:host", "keep").await.unwrap();
         good.save(&access_token_key(BIGMODEL), "t").await.unwrap();
         good.save(ACTIVE_PROVIDER_KEY, BIGMODEL).await.unwrap();
-        let repo = OAuthCredentialRepo::new(CredentialStore::new(dir.path(), "wrong"));
+        let repo = OAuthCredentialRepo::new(CredentialStore::new(
+            &zcode_host_base::testing::spawner(),
+            dir.path(),
+            "wrong",
+        ));
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         repo.set_corrupt_cleared_handler(Arc::new(move |providers| {
             let sender = sender.clone();

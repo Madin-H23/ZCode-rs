@@ -251,7 +251,8 @@ pub fn install(
     // ── account ──
     // 账号栈（docs/specs/rust-host-account.md）：凭据、ApiClient、OAuth、账号 provider overlay、
     // CLI 集成，以及账号增值 channel。必须在预热拉起 CLI 之前登记 CLI 扩展点。
-    let account = account::AccountStack::new(&context, &settings, &providers);
+    let account_tasks = scope("account");
+    let account = account::AccountStack::new(&account_tasks, &context, &settings, &providers);
     account.register(
         registry,
         storage.tasks_index.clone(),
@@ -267,7 +268,7 @@ pub fn install(
     )));
     account.attach_agent(&agent, &context);
     account.start(broadcaster);
-    account::telemetry::start_host_resource_samples(context.control.clone());
+    account::telemetry::start_host_resource_samples(&account_tasks, context.control.clone());
 
     // ── agent ──（docs/specs/rust-host-agent.md）
     // 三个 lane、CLI 通知分发、浏览器控制、进程生命周期上报，以及 zcode-agent / zcode-session /

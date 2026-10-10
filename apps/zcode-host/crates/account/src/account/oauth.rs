@@ -1,8 +1,10 @@
 //! `oauth` channel（packages/services/src/oauth/oauthService.ts、oauthUnauthorizedRequest.ts）。
 //!
-//! 所有改写 OAuth 凭据的路径都在会话变更队列（`mutation`）里串行执行；`session_generation`
-//! 让迟到的后台结果（profile 迁移、刷新）无法写回已退出或已切换的会话。pending flow 以
-//! `pending_id` 标识身份（对应 TS 的 `this.pendingState === pending`）。
+//! 所有改写 OAuth 凭据的路径都在会话变更队列里串行执行：owner 任务 `oauth-session-mutations`
+//! （docs/specs/rust-u2-task-scope.md §6.3）按提交顺序逐个执行，提交方放弃等待不打断已经开始的变更。
+//! `session_generation` 让迟到的后台结果（profile 迁移、刷新）无法写回已退出或已切换的会话。pending
+//! flow 以 `pending_id` 标识身份（对应 TS 的 `this.pendingState === pending`）。后台任务（profile 迁移、
+//! pending 超时）在构造时给的作用域里。
 use std::future::Future;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -11,7 +13,8 @@ use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
 use tokio::sync::watch;
 use url::Url;
-use zcode_host_kit::{Reply, RpcError, ServiceBuilder, log};
+use zcode_async::Spawner;
+use zcode_host_kit::{Reply, RpcError, Serial, ServiceBuilder, log};
 
 use super::credential::CredentialError;
 use super::endpoint::Endpoints;
@@ -146,7 +149,10 @@ struct Inner {
     adapters: Vec<Arc<Adapter>>,
     api: ApiClient,
     endpoints: Endpoints,
-    mutation: tokio::sync::Mutex<()>,
+    /// 会话变更队列的 owner 任务。
+    mutations: Serial,
+    /// 后台任务（profile 迁移、pending 超时）的作用域。
+    tasks: Spawner,
     state: Mutex<State>,
     on_logout: RwLock<Option<LogoutHook>>,
     clock: Arc<dyn Fn() -> i64 + Send + Sync>,
@@ -155,11 +161,12 @@ struct Inner {
 type Completion = (TokenSet, UserProfile);
 
 impl OAuthService {
-    pub fn new(repo: OAuthCredentialRepo, api: ApiClient) -> Self {
-        Self::with_clock(repo, api, Arc::new(now_ms))
+    pub fn new(spawner: &Spawner, repo: OAuthCredentialRepo, api: ApiClient) -> Self {
+        Self::with_clock(spawner, repo, api, Arc::new(now_ms))
     }
 
     pub fn with_clock(
+        spawner: &Spawner,
         repo: OAuthCredentialRepo,
         api: ApiClient,
         clock: Arc<dyn Fn() -> i64 + Send + Sync>,
@@ -175,7 +182,9 @@ impl OAuthService {
                 adapters,
                 api,
                 endpoints,
-                mutation: tokio::sync::Mutex::new(()),
+                // 登录、退出、回调与 401 复核：排队超过 16 个时提交方等待。
+                mutations: Serial::start(spawner, "oauth-session-mutations", 16),
+                tasks: spawner.clone(),
                 state: Mutex::new(State::default()),
                 on_logout: RwLock::new(None),
                 clock,
@@ -223,11 +232,21 @@ impl OAuthService {
         Ok(adapter)
     }
 
-    /// 在会话变更队列里执行（`runSessionMutation`）。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
-    async fn mutate<T, F: Future<Output = T>>(&self, run: impl FnOnce() -> F) -> T {
-        let _guard = self.inner.mutation.lock().await;
-        run().await
+    /// 在会话变更队列里执行（`runSessionMutation`）：交给 owner 任务，按提交顺序逐个执行。原来是跨整个
+    /// 变更持有的 tokio 锁，提交方被取消时变更停在半途；现在已经开始的变更总会做完。owner 已结束（作用域
+    /// 已关闭）时返回错误。
+    async fn mutate<T, F, Fut>(&self, run: F) -> Result<T, RpcError>
+    where
+        F: FnOnce(OAuthService) -> Fut + Send + 'static,
+        Fut: Future<Output = T> + Send,
+        T: Send + 'static,
+    {
+        let service = self.clone();
+        self.inner
+            .mutations
+            .run(async move { run(service).await })
+            .await
+            .map_err(|stopped| error(stopped.to_string()))
     }
 
     fn clear_pending(state: &mut State) {
@@ -333,8 +352,18 @@ impl OAuthService {
         expected_jwt: &str,
     ) -> Result<bool, RpcError> {
         let repo = self.inner.repo.clone();
+        let (provider_owned, expected_profile_owned, expected_jwt_owned) = (
+            provider.to_owned(),
+            expected_profile.clone(),
+            expected_jwt.to_owned(),
+        );
         let invalidated = self
-            .mutate(async || -> Result<bool, RpcError> {
+            .mutate(move |service| async move {
+                let (provider, expected_profile, expected_jwt) = (
+                    provider_owned.as_str(),
+                    &expected_profile_owned,
+                    expected_jwt_owned.as_str(),
+                );
                 let current_provider = repo.active_provider().await.map_err(credential_error)?;
                 let current_profile = repo.user_profile(provider).await.map_err(credential_error)?;
                 let current_jwt = repo
@@ -344,7 +373,7 @@ impl OAuthService {
                     .map_err(credential_error)?
                     .map(|jwt| jwt.trim().to_owned())
                     .unwrap_or_default();
-                let stale = self.state().session_generation != expected_generation
+                let stale = service.state().session_generation != expected_generation
                     || current_provider.as_deref() != Some(provider)
                     || !current_profile.is_some_and(|p| p.same_as(expected_profile))
                     || current_jwt != expected_jwt;
@@ -354,11 +383,11 @@ impl OAuthService {
                     ));
                     return Ok(false);
                 }
-                self.state().session_generation += 1;
+                service.state().session_generation += 1;
                 repo.clear_active_session().await.map_err(credential_error)?;
-                Ok(true)
+                Ok::<bool, RpcError>(true)
             })
-            .await?;
+            .await??;
         if !invalidated {
             return Ok(false);
         }
@@ -385,24 +414,28 @@ impl OAuthService {
             return;
         }
         let service = self.clone();
-        tokio::spawn(async move {
-            let repo = service.inner.repo.clone();
-            let is_current = async |service: &OAuthService| -> bool {
+        drop(self.inner.tasks.spawn("oauth-profile-migration", async move {
+            let cached = Arc::new(cached);
+            let is_current = move |service: OAuthService, cached: Arc<UserProfile>| async move {
                 if service.state().session_generation != generation {
                     return false;
                 }
+                let repo = &service.inner.repo;
                 let active = repo.active_provider().await.ok().flatten();
                 let current = repo.user_profile(BIGMODEL).await.ok().flatten();
                 active.as_deref() == Some(BIGMODEL) && current.is_some_and(|p| p.same_as(&cached))
             };
+            let check = cached.clone();
             let tokens = service
-                .mutate(async || {
-                    if !is_current(&service).await {
+                .mutate(move |service| async move {
+                    if !is_current(service.clone(), check).await {
                         return None;
                     }
-                    repo.token_set(BIGMODEL).await.ok().flatten()
+                    service.inner.repo.token_set(BIGMODEL).await.ok().flatten()
                 })
-                .await;
+                .await
+                .ok()
+                .flatten();
             let next = match tokens {
                 None => with_profile_schema(BIGMODEL, &cached),
                 Some(tokens) => {
@@ -410,10 +443,10 @@ impl OAuthService {
                     migrated_bigmodel_profile(&cached, refreshed, service.now())
                 }
             };
-            service
-                .mutate(async || {
-                    if is_current(&service).await
-                        && let Err(error) = repo.save_user_profile(BIGMODEL, &next).await
+            let _ = service
+                .mutate(move |service| async move {
+                    if is_current(service.clone(), cached).await
+                        && let Err(error) = service.inner.repo.save_user_profile(BIGMODEL, &next).await
                     {
                         log::debug(format!(
                             "[oauthService] background profile migration failed: {error}"
@@ -421,7 +454,7 @@ impl OAuthService {
                     }
                 })
                 .await;
-        });
+        }));
     }
 
     /// 保存一次登录：先清互斥的另一个 provider，再写 token、user_info、active；
@@ -527,8 +560,8 @@ impl OAuthService {
         attribution: Option<Map<String, Value>>,
     ) -> Result<Option<Value>, RpcError>
     where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = Result<Completion, RpcError>>,
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<Completion, RpcError>> + Send,
     {
         let (sender, receiver) = watch::channel(None);
         let seq = {
@@ -538,13 +571,16 @@ impl OAuthService {
             state.latest_completion = Some((pending.id, seq, receiver));
             seq
         };
+        let job_pending = pending.clone();
         let outcome = self
-            .mutate(async || -> Result<Option<Value>, RpcError> {
-                if !self.pending_is(pending.id) {
-                    if self.recently_completed_matches(&pending.state).is_some() {
+            .mutate(move |service| async move {
+                let pending = &job_pending;
+                if !service.pending_is(pending.id) {
+                    if service.recently_completed_matches(&pending.state).is_some() {
                         // 入队时已通过有效性检查；归因不能因排队超过去重窗口而丢失。
                         if let Some(attribution) = &attribution {
-                            self.inner
+                            service
+                                .inner
                                 .repo
                                 .save_login_attribution(attribution)
                                 .await
@@ -557,40 +593,43 @@ impl OAuthService {
                     return Ok(None);
                 }
                 if let Some(attribution) = &attribution {
-                    self.inner
+                    service
+                        .inner
                         .repo
                         .save_login_attribution(attribution)
                         .await
                         .map_err(credential_error)?;
                 }
-                if !self.pending_is(pending.id) {
+                if !service.pending_is(pending.id) {
                     return Ok(None);
                 }
                 let (tokens, profile) = complete().await?;
                 // 兑换期间用户可能取消或换了新 flow：旧结果不能写回。
-                if !self.pending_is(pending.id) {
+                if !service.pending_is(pending.id) {
                     return Ok(None);
                 }
-                self.persist_session(&pending.provider, &tokens, &profile, pending.id)
+                service
+                    .persist_session(&pending.provider, &tokens, &profile, pending.id)
                     .await?;
-                let mut state = self.state();
+                let mut state = service.state();
                 if state.pending.as_ref().is_some_and(|p| p.id == pending.id) {
                     Self::clear_pending(&mut state);
                 }
-                let expires_at = (self.inner.clock)() + COMPLETED_POLLING_STATE_GRACE_MS;
+                let expires_at = (service.inner.clock)() + COMPLETED_POLLING_STATE_GRACE_MS;
                 state.recently_completed = Some(Completed {
                     generation: state.flow_start_generation,
                     expires_at,
                     provider: pending.provider.clone(),
                     state: pending.state.clone(),
                 });
-                Ok(Some(json!({
+                Ok::<Option<Value>, RpcError>(Some(json!({
                     "kind": "session",
                     "provider": pending.provider,
                     "userInfo": profile.user_info(),
                 })))
             })
-            .await;
+            .await
+            .and_then(|outcome| outcome);
         let _ = sender.send(Some(outcome.is_ok()));
         let fallback = {
             let mut state = self.state();
@@ -713,13 +752,13 @@ impl OAuthService {
     pub async fn start_oauth(&self, provider: &str) -> Result<Value, RpcError> {
         let adapter = self.enabled_adapter(provider)?;
         // 同窗口快速切换 provider：先作废旧 state，避免两条流程抢同一回调通道。
-        self.mutate(async || {
-            let mut state = self.state();
+        self.mutate(|service| async move {
+            let mut state = service.state();
             state.flow_start_generation += 1;
             state.flow_start_provider = None;
             Self::clear_pending(&mut state);
         })
-        .await;
+        .await?;
         let flow_state = random_hex(32);
         let id = {
             let mut state = self.state();
@@ -744,7 +783,7 @@ impl OAuthService {
 
     fn spawn_pending_timeout(&self, id: u64, flow_id: Option<String>, delay_ms: i64) {
         let service = self.clone();
-        tokio::spawn(async move {
+        drop(self.inner.tasks.spawn("oauth-pending-timeout", async move {
             tokio::time::sleep(Duration::from_millis(delay_ms.max(0) as u64)).await;
             let mut state = service.state();
             let matches = state.pending.as_ref().is_some_and(|pending| {
@@ -756,7 +795,7 @@ impl OAuthService {
             if matches {
                 Self::clear_pending(&mut state);
             }
-        });
+        }));
     }
 
     pub async fn start_oauth_with_polling(&self, provider: &str) -> Result<Value, RpcError> {
@@ -904,7 +943,7 @@ impl OAuthService {
                 if terminal {
                     let message = failure.message.clone();
                     let result = self
-                        .run_pending_completion(&pending, async || Err(error(message)), None)
+                        .run_pending_completion(&pending, async move || Err(error(message)), None)
                         .await;
                     return match result {
                         Ok(value) => Ok(value.unwrap_or(Value::Null)),
@@ -936,7 +975,7 @@ impl OAuthService {
         let result = self
             .run_pending_completion(
                 &pending,
-                async || {
+                async move || {
                     let data = &envelope["data"];
                     if envelope["code"].as_f64() != Some(0.0) || !data.is_object() {
                         return Err(error(
@@ -1036,10 +1075,12 @@ impl OAuthService {
             };
             if let Some(completed) = completed {
                 let attribution = parse_attribution(&parsed);
-                self.mutate(async || -> Result<(), RpcError> {
+                let job_completed = completed.clone();
+                self.mutate(move |service| async move {
+                    let completed = job_completed;
                     // 轮询先成功时仍保存浏览器归因，登录去重不等于丢弃整条回调。
                     let still = {
-                        let state = self.state();
+                        let state = service.state();
                         state.pending.is_none()
                             && state.recently_completed.as_ref().is_some_and(|c| {
                                 c.state == completed.state && c.generation == completed.generation
@@ -1047,15 +1088,16 @@ impl OAuthService {
                             && completed.generation == state.flow_start_generation
                     };
                     if still && let Some(attribution) = &attribution {
-                        self.inner
+                        service
+                            .inner
                             .repo
                             .save_login_attribution(attribution)
                             .await
                             .map_err(credential_error)?;
                     }
-                    Ok(())
+                    Ok::<(), RpcError>(())
                 })
-                .await?;
+                .await??;
                 return Ok(json!({"kind": "duplicate", "provider": completed.provider}));
             }
             return Err(error("OAuth state 不匹配或已过期"));
@@ -1090,7 +1132,7 @@ impl OAuthService {
         let result = self
             .run_pending_completion(
                 &pending,
-                async || {
+                async move || {
                     let callback = adapter.parse_callback(&parsed).map_err(adapter_error)?;
                     let tokens = adapter
                         .exchange_token(&callback, &callback.state)
@@ -1152,7 +1194,7 @@ impl OAuthService {
         let conditional = is_current.is_some();
         let repo = self.inner.repo.clone();
         let result = self
-            .mutate(async || -> Result<Option<LogoutTarget>, RpcError> {
+            .mutate(move |service| async move {
                 if let Some(check) = is_current
                     && !check().await
                 {
@@ -1167,13 +1209,13 @@ impl OAuthService {
                         .map(|profile| profile.id),
                     None => None,
                 };
-                self.state().session_generation += 1;
+                service.state().session_generation += 1;
                 repo.clear_active_session()
                     .await
                     .map_err(credential_error)?;
-                Ok(Some((active, identity)))
+                Ok::<Option<LogoutTarget>, RpcError>(Some((active, identity)))
             })
-            .await?;
+            .await??;
         let Some((active, identity)) = result else {
             return Ok(false);
         };
@@ -1197,8 +1239,10 @@ impl OAuthService {
             return Ok(());
         };
         let repo = self.inner.repo.clone();
+        let job_provider = provider.clone();
         let logged_out = self
-            .mutate(async || -> Result<Option<Option<String>>, RpcError> {
+            .mutate(move |service| async move {
+                let provider = job_provider;
                 let active = repo.active_provider().await.map_err(credential_error)?;
                 if active.as_deref() != Some(provider.as_str()) {
                     return Ok(None);
@@ -1208,13 +1252,13 @@ impl OAuthService {
                     .await
                     .map_err(credential_error)?
                     .map(|profile| profile.id);
-                self.state().session_generation += 1;
+                service.state().session_generation += 1;
                 repo.clear_active_session()
                     .await
                     .map_err(credential_error)?;
-                Ok(Some(identity))
+                Ok::<Option<Option<String>>, RpcError>(Some(identity))
             })
-            .await?;
+            .await??;
         if let Some(identity) = logged_out {
             self.notify_logout(&provider, identity)
                 .await
@@ -1232,24 +1276,24 @@ impl OAuthService {
             .map(|adapter| adapter.id().to_owned())
             .collect();
         let repo = self.inner.repo.clone();
+        let job_providers = providers.clone();
         let identities = self
-            .mutate(
-                async || -> Result<Vec<(String, Option<String>)>, RpcError> {
-                    let mut identities = Vec::new();
-                    for provider in &providers {
-                        let identity = repo
-                            .user_profile(provider)
-                            .await
-                            .map_err(credential_error)?
-                            .map(|profile| profile.id);
-                        identities.push((provider.clone(), identity));
-                    }
-                    self.state().session_generation += 1;
-                    repo.clear_all(&providers).await.map_err(credential_error)?;
-                    Ok(identities)
-                },
-            )
-            .await?;
+            .mutate(move |service| async move {
+                let providers = job_providers;
+                let mut identities = Vec::new();
+                for provider in &providers {
+                    let identity = repo
+                        .user_profile(provider)
+                        .await
+                        .map_err(credential_error)?
+                        .map(|profile| profile.id);
+                    identities.push((provider.clone(), identity));
+                }
+                service.state().session_generation += 1;
+                repo.clear_all(&providers).await.map_err(credential_error)?;
+                Ok::<Vec<(String, Option<String>)>, RpcError>(identities)
+            })
+            .await??;
         self.cancel_pending(None).await;
         let results = futures_util::future::join_all(identities.into_iter().map(
             |(provider, identity)| async move { self.notify_logout(&provider, identity).await },

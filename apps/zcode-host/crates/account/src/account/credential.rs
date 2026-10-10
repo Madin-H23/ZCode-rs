@@ -12,7 +12,8 @@ use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use ring::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
-use zcode_host_kit::{EventHub, Overflow, Reply, RpcError, ServiceBuilder, log};
+use zcode_async::Spawner;
+use zcode_host_kit::{EventHub, Overflow, Reply, RpcError, Serial, ServiceBuilder, log};
 
 use crate::store::{LockOptions, atomic_write_private_text, with_file_lock};
 
@@ -242,6 +243,9 @@ pub fn credential_secret(vars: &BTreeMap<String, String>) -> String {
 pub struct CredentialStore {
     file: PathBuf,
     cipher: CredentialCipher,
+    /// 凭据文件在本进程内的唯一写入方：每次持跨进程锁的读改写在这个 owner 任务里逐个执行
+    /// （docs/specs/rust-u2-task-scope.md §6.3）。
+    writes: Serial,
     mutations: EventHub<CredentialMutation>,
 }
 
@@ -275,10 +279,13 @@ async fn backup_corrupt_file(file: &Path) -> std::io::Result<PathBuf> {
 }
 
 impl CredentialStore {
-    pub fn new(app_config_dir: &Path, secret: &str) -> Self {
+    /// 写入的 owner 任务 `credential-writes` 在 `spawner` 的作用域里。
+    pub fn new(spawner: &Spawner, app_config_dir: &Path, secret: &str) -> Self {
         Self {
             file: app_config_dir.join("credentials.json"),
             cipher: CredentialCipher::new(secret),
+            // 登录、退出与 key 写入；排队超过 32 个时写入方等待。
+            writes: Serial::start(spawner, "credential-writes", 32),
             // 订阅者是远端预配（凭据变化后重新下发），一次写入一条；落后 256 条说明它卡住，结束它的订阅
             // （docs/specs/rust-u2-task-scope.md §6.2）。
             mutations: EventHub::new("credential-mutations", 256, Overflow::CloseSubscriber),
@@ -366,29 +373,33 @@ impl CredentialStore {
         Ok(selected)
     }
 
-    /// 读改写持锁；`mutate` 返回 false 时不写回（锁仍覆盖读取）。
+    /// 在写入的 owner 任务里持锁读改写（锁覆盖读取）；写入方放弃等待不打断已经开始的读改写。
     async fn mutate(
         &self,
         key: &str,
         operation: &'static str,
-        apply: impl FnOnce(&mut Record) + Send,
+        apply: impl FnOnce(&mut Record) + Send + 'static,
     ) -> Result<(), CredentialError> {
         if key.is_empty() {
             return Err(CredentialError::InvalidKey);
         }
-        let mut apply = Some(apply);
-        let result: anyhow::Result<Result<(), CredentialError>> =
-            with_file_lock(&self.file, &LockOptions::default(), async || {
-                let mut record = match self.read_all().await {
-                    Ok(record) => record,
-                    Err(error) => return Ok(Err(error)),
-                };
-                if let Some(apply) = apply.take() {
+        let store = self.clone();
+        let result: anyhow::Result<Result<(), CredentialError>> = self
+            .writes
+            .run(async move {
+                let file = store.file.clone();
+                with_file_lock(&file, &LockOptions::default(), async move || {
+                    let mut record = match store.read_all().await {
+                        Ok(record) => record,
+                        Err(error) => return Ok(Err(error)),
+                    };
                     apply(&mut record);
-                }
-                Ok(self.write_all(&record).await)
+                    Ok(store.write_all(&record).await)
+                })
+                .await
             })
-            .await;
+            .await
+            .unwrap_or_else(|stopped| Err(anyhow::anyhow!(stopped)));
         match result {
             Ok(Ok(())) => {
                 self.mutations.emit(CredentialMutation {
@@ -464,7 +475,7 @@ mod tests {
     use super::*;
 
     fn store(dir: &Path) -> CredentialStore {
-        CredentialStore::new(dir, "test-secret")
+        CredentialStore::new(&zcode_host_base::testing::spawner(), dir, "test-secret")
     }
 
     #[test]

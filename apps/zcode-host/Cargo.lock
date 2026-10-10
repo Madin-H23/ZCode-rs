@@ -3113,6 +3113,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
+ "zcode-async",
  "zcode-host-base",
  "zcode-host-control",
  "zcode-host-kit",

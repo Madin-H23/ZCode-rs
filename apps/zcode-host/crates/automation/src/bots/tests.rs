@@ -144,7 +144,7 @@ fn feishu_messages_parse_like_the_provider() {
 #[tokio::test]
 async fn bot_credentials_use_the_shared_store() {
     let dir = tempfile::tempdir().unwrap();
-    let store = CredentialStore::new(dir.path(), "s");
+    let store = CredentialStore::new(&zcode_host_base::testing::spawner(), dir.path(), "s");
     store.save("bot:a:credential", "secret-1").await.unwrap();
     assert_eq!(
         store.load("bot:a:credential").await.unwrap().as_deref(),

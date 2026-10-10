@@ -1394,7 +1394,7 @@ async fn create_diagnostic_archive(
     let source = source.to_path_buf();
     let output_root = output_root.to_path_buf();
     let app_version = app_version.to_owned();
-    tokio::task::spawn_blocking(move || -> Result<Value, String> {
+    zcode_async::blocking(move || -> Result<Value, String> {
         use std::io::Write;
         let budget = max_total.min(MAX_LOG_TOTAL_BYTES);
         std::fs::create_dir_all(&output_root).map_err(|e| e.to_string())?;
@@ -1718,7 +1718,8 @@ mod tests {
         .await;
         *oss_origin.lock().unwrap() = server.origin.clone();
         let dir = tempfile::tempdir().unwrap();
-        let credentials = CredentialStore::new(dir.path(), "secret");
+        let credentials =
+            CredentialStore::new(&zcode_host_base::testing::spawner(), dir.path(), "secret");
         let api = ApiClient::with_network(
             endpoints_for(&server.origin),
             dir.path().to_path_buf(),

@@ -30,6 +30,7 @@ pub mod usage_monitor;
 use std::sync::Arc;
 
 use serde_json::json;
+use zcode_async::Spawner;
 use zcode_host_kit::{ChannelRegistry, log};
 
 use crate::ServiceContext;
@@ -59,11 +60,14 @@ pub struct AccountStack {
     pub official_mcp: official_mcp::OfficialMcpCredentials,
     pub config_sync: cli::AccountConfigSync,
     pub runtime: ProviderRuntime,
+    /// 账号的作用域（`host/services/account`）：各组件的后台任务与 owner 任务在这里。
+    tasks: Spawner,
 }
 
 impl AccountStack {
     /// 构建账号栈并把账号 overlay 接入 provider runtime（之后的读取等首份账号快照）。
     pub fn new(
+        spawner: &Spawner,
         context: &ServiceContext,
         settings: &SettingStore,
         runtime: &ProviderRuntime,
@@ -71,13 +75,14 @@ impl AccountStack {
         let environment = &context.environment;
         let app_config_dir = environment.app_config_dir();
         let credentials = credential::CredentialStore::new(
+            spawner,
             &app_config_dir,
             &credential::credential_secret(&environment.vars),
         );
         let endpoints = endpoint::Endpoints::new(environment.vars.clone(), Some(settings.clone()));
         let api = net::ApiClient::new(endpoints.clone(), app_config_dir.clone(), settings.clone());
         let repo = oauth_repo::OAuthCredentialRepo::new(credentials.clone());
-        let oauth = oauth::OAuthService::new(repo.clone(), api.clone());
+        let oauth = oauth::OAuthService::new(spawner, repo.clone(), api.clone());
         let account_api = auth::AccountApi::new(api.clone());
         let keys =
             auth::CodingPlanKeys::new(credentials.clone(), repo.clone(), account_api.clone());
@@ -94,6 +99,7 @@ impl AccountStack {
             billing.clone(),
         );
         let providers = account_providers::AccountProviderSource::new(
+            spawner,
             runtime.clone(),
             settings.clone(),
             auth.clone(),
@@ -105,7 +111,7 @@ impl AccountStack {
             auth.clone(),
             credentials.clone(),
         );
-        let config_sync = cli::AccountConfigSync::new(providers.clone());
+        let config_sync = cli::AccountConfigSync::new(spawner, providers.clone());
         // 内置配置按当前 Endpoint 物化 Active 并从 CDN 刷新（`zcodeBuiltinEnvironment`）。
         let platform = crate::providers::builtin::release_platform(
             &environment.vars,
@@ -137,6 +143,7 @@ impl AccountStack {
             },
         });
         Self {
+            tasks: spawner.clone(),
             runtime: runtime.clone(),
             config_sync,
             credentials,
@@ -189,12 +196,12 @@ impl AccountStack {
                 }
             })
         }));
-        // 401：只有在会话队列里复核为当前登录凭据才退出，并广播 JWT 失效。
-        let oauth = self.oauth.clone();
+        // 401：只有在会话队列里复核为当前登录凭据才退出，并广播 JWT 失效。复核是账号作用域里的任务。
+        let (oauth, tasks) = (self.oauth.clone(), self.tasks.clone());
         self.api
             .set_unauthorized_handler(Arc::new(move |url, headers| {
                 let (oauth, broadcaster) = (oauth.clone(), broadcaster.clone());
-                Box::pin(async move {
+                drop(tasks.spawn("unauthorized-logout", async move {
                     match oauth
                         .logout_if_current_credential_request(url, headers)
                         .await
@@ -209,7 +216,7 @@ impl AccountStack {
                             error.message
                         )),
                     }
-                })
+                }));
             }));
         self.providers.start();
         self.runtime.start_builtin_refresh();
@@ -230,6 +237,7 @@ impl AccountStack {
         registry.implement(client_config::client_scenes_service(self.api.clone()));
         let repo = self.repo.clone();
         let records = onboarding::OnboardingRecords::new(
+            &self.tasks,
             app_config_dir,
             Arc::new(move || {
                 let repo = repo.clone();

@@ -187,7 +187,11 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
     std::fs::create_dir_all(&config_dir).unwrap();
 
     // 已登录的 Z.ai 账号：与 Node 相同的凭据键与加密格式。
-    let credentials = CredentialStore::new(&config_dir, &credential_secret(&vars));
+    let credentials = CredentialStore::new(
+        &zcode_host_services::testing::spawner(),
+        &config_dir,
+        &credential_secret(&vars),
+    );
     credentials
         .save("oauth:active_provider", "zai")
         .await
@@ -231,7 +235,12 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         init: InitLocal::default(),
         control: Arc::new(NullSink),
     };
-    let account = AccountStack::new(&context, &settings, &providers);
+    let account = AccountStack::new(
+        &zcode_host_services::testing::spawner(),
+        &context,
+        &settings,
+        &providers,
+    );
     vars.extend(runtime_vars());
     let runtime = AgentRuntime::new(
         &zcode_host_services::testing::spawner(),

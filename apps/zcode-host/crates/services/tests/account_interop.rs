@@ -48,7 +48,11 @@ fn run_ts(root: &Path, home: &Path, mode: &str, payload: Value) -> Value {
 }
 
 fn store(home: &Path) -> CredentialStore {
-    CredentialStore::new(&home.join(".zcode").join("v2"), SECRET)
+    CredentialStore::new(
+        &zcode_host_services::testing::spawner(),
+        &home.join(".zcode").join("v2"),
+        SECRET,
+    )
 }
 
 #[tokio::test]
@@ -100,7 +104,11 @@ async fn credentials_cross_read_and_write_with_typescript() {
     assert_eq!(keys, ["oauth:active_provider", "oauth:zai:access_token"]);
 
     // 换 secret 后两边给出同一个解密错误码。
-    let other = CredentialStore::new(&home.join(".zcode").join("v2"), "wrong");
+    let other = CredentialStore::new(
+        &zcode_host_services::testing::spawner(),
+        &home.join(".zcode").join("v2"),
+        "wrong",
+    );
     let error = other.load("oauth:active_provider").await.unwrap_err();
     assert!(error.is_decrypt());
 

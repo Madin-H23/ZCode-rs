@@ -651,7 +651,11 @@ pub fn bots_with_remote(
     }
     let bots = Bots::new(BotsDeps {
         repo: BotsRepo::new(config_dir.clone()),
-        credentials: CredentialStore::new(&config_dir, "test"),
+        credentials: CredentialStore::new(
+            &zcode_host_base::testing::spawner(),
+            &config_dir,
+            "test",
+        ),
         providers: Arc::new(Providers::new(Endpoints::local(origin)).unwrap()),
         settings: SettingStore::new(&zcode_host_base::testing::spawner(), dir),
         tasks,

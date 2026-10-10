@@ -104,7 +104,11 @@ impl ProvisioningSource {
     pub(crate) fn for_test(dir: &Path) -> Self {
         Self {
             personal_config_file: dir.join("provider_config.json"),
-            credentials: CredentialStore::new(dir, "test-secret"),
+            credentials: CredentialStore::new(
+                &zcode_host_base::testing::spawner(),
+                dir,
+                "test-secret",
+            ),
         }
     }
 
@@ -257,7 +261,11 @@ mod tests {
         // 密钥不匹配：解密失败让本次同步失败，而不是带着缺失的凭据继续。
         let wrong = ProvisioningSource {
             personal_config_file: dir.path().join("provider_config.json"),
-            credentials: CredentialStore::new(dir.path(), "other-secret"),
+            credentials: CredentialStore::new(
+                &zcode_host_base::testing::spawner(),
+                dir.path(),
+                "other-secret",
+            ),
         };
         assert!(
             wrong
@@ -301,7 +309,11 @@ mod tests {
                 &zcode_host_base::testing::spawner(),
                 dir.path(),
             ),
-            credentials: CredentialStore::new(dir.path(), "test-secret"),
+            credentials: CredentialStore::new(
+                &zcode_host_base::testing::spawner(),
+                dir.path(),
+                "test-secret",
+            ),
             providers: providers.clone(),
         };
         let tasks = watch_sources(&sources, sink.clone());

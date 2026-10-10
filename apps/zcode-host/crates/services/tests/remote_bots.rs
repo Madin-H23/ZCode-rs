@@ -420,7 +420,11 @@ async fn telegram_message_runs_on_a_remote_workspace_agent() {
     let (sink, mut messages) = mpsc::unbounded_channel();
     let control: Arc<dyn ControlSink> = Arc::new(Control(sink));
     let mut router = ControlRouter::default();
-    let credentials = CredentialStore::new(&local_config, "test-secret");
+    let credentials = CredentialStore::new(
+        &zcode_host_services::testing::spawner(),
+        &local_config,
+        "test-secret",
+    );
     let settings = SettingStore::new(&zcode_host_services::testing::spawner(), &local_home);
     let remote = install_with(
         RemoteConfig {

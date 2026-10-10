@@ -168,7 +168,11 @@ async fn remote_workspace_against_a_real_zcode_server() {
             control: Arc::new(Control(sink)),
             provisioning: ProvisioningSource {
                 personal_config_file: local_home.join(".zcode/v2/provider_config.json"),
-                credentials: CredentialStore::new(&local_home.join(".zcode/v2"), "test-secret"),
+                credentials: CredentialStore::new(
+                    &zcode_host_services::testing::spawner(),
+                    &local_home.join(".zcode/v2"),
+                    "test-secret",
+                ),
             },
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),

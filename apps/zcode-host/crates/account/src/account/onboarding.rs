@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
-use zcode_host_kit::{Reply, RpcError, ServiceBuilder, log};
+use zcode_async::Spawner;
+use zcode_host_kit::{Reply, RpcError, Serial, ServiceBuilder, log};
 
 use crate::store::atomic_write_text;
 
@@ -152,7 +153,9 @@ pub struct OnboardingRecords {
     file: PathBuf,
     load_user_id: UserIdLoader,
     has_local_task: LocalTaskProbe,
-    queue: Arc<tokio::sync::Mutex<()>>,
+    /// 记录文件在本进程内的唯一写入方：读改写在这个 owner 任务里逐个执行
+    /// （docs/specs/rust-u2-task-scope.md §6.3）。
+    writes: Serial,
 }
 
 fn user_matches(item: &Value, user: &Option<String>) -> bool {
@@ -175,7 +178,9 @@ fn invalid(message: &str) -> RpcError {
 }
 
 impl OnboardingRecords {
+    /// 写入的 owner 任务 `onboarding-record-writes` 在 `spawner` 的作用域里。
     pub fn new(
+        spawner: &Spawner,
         app_config_dir: PathBuf,
         load_user_id: UserIdLoader,
         has_local_task: LocalTaskProbe,
@@ -184,8 +189,23 @@ impl OnboardingRecords {
             file: app_config_dir.join("onboarding-record.json"),
             load_user_id,
             has_local_task,
-            queue: Arc::new(tokio::sync::Mutex::new(())),
+            // 引导记录很少写；排队超过 8 个时写入方等待。
+            writes: Serial::start(spawner, "onboarding-record-writes", 8),
         }
+    }
+
+    /// 在写入的 owner 任务里执行一次读改写；写入方放弃等待不打断已经开始的读改写。
+    async fn serialized<T, Edit, Edited>(&self, edit: Edit) -> Result<T, RpcError>
+    where
+        Edit: FnOnce(OnboardingRecords) -> Edited + Send + 'static,
+        Edited: std::future::Future<Output = Result<T, RpcError>> + Send,
+        T: Send + 'static,
+    {
+        let records = self.clone();
+        self.writes
+            .run(async move { edit(records).await })
+            .await
+            .unwrap_or_else(|stopped| Err(RpcError::new("Error", stopped.to_string())))
     }
 
     async fn read(&self) -> Option<Value> {
@@ -222,11 +242,11 @@ impl OnboardingRecords {
         json!({"version": 2, "deviceMid": device_mid, "entries": [], "decisions": []})
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn append_record(&self, device_mid: &str, entry: &Value) -> Result<(), RpcError> {
         let user = (self.load_user_id)().await;
-        let _queue = self.queue.lock().await;
-        let mut file = match self.read().await {
+        let (device_mid, entry) = (device_mid.to_owned(), entry.clone());
+        self.serialized(move |records| async move {
+        let mut file = match records.read().await {
             Some(existing) => {
                 if existing["deviceMid"] != device_mid {
                     log::warn(format!(
@@ -236,7 +256,7 @@ impl OnboardingRecords {
                 }
                 existing
             }
-            None => Self::new_file(device_mid),
+            None => Self::new_file(&device_mid),
         };
         let mut record = Map::new();
         record.insert("userId".into(), json!(user));
@@ -256,33 +276,35 @@ impl OnboardingRecords {
         if let Some(decisions) = file["decisions"].as_array_mut() {
             decisions.retain(|decision| !user_matches(decision, &user));
         }
-        self.write(&file).await
+        records.write(&file).await
+        })
+        .await
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn claim_anonymous_record(&self) -> Result<(), RpcError> {
         let Some(user) = (self.load_user_id)().await else {
             return Ok(());
         };
-        let _queue = self.queue.lock().await;
-        let Some(mut file) = self.read().await else {
-            return Ok(());
-        };
-        let identity = Some(user.clone());
-        if has_identity_record(&file, &identity) {
-            return Ok(());
-        }
-        for key in ["entries", "decisions"] {
-            let items = file[key].as_array_mut().expect("parsed list");
-            if let Some(item) = items.iter_mut().rev().find(|item| item["userId"].is_null()) {
-                item["userId"] = json!(user);
-                return self.write(&file).await;
+        self.serialized(move |records| async move {
+            let Some(mut file) = records.read().await else {
+                return Ok(());
+            };
+            let identity = Some(user.clone());
+            if has_identity_record(&file, &identity) {
+                return Ok(());
             }
-        }
-        Ok(())
+            for key in ["entries", "decisions"] {
+                let items = file[key].as_array_mut().expect("parsed list");
+                if let Some(item) = items.iter_mut().rev().find(|item| item["userId"].is_null()) {
+                    item["userId"] = json!(user);
+                    return records.write(&file).await;
+                }
+            }
+            Ok(())
+        })
+        .await
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn should_onboard(&self, device_mid: &str) -> Result<bool, RpcError> {
         let user = (self.load_user_id)().await;
         if self
@@ -295,53 +317,58 @@ impl OnboardingRecords {
         if !(self.has_local_task)().await {
             return Ok(true);
         }
-        let _queue = self.queue.lock().await;
-        let mut current = self
-            .read()
-            .await
-            .unwrap_or_else(|| Self::new_file(device_mid));
-        if has_identity_record(&current, &user) {
-            return Ok(false);
-        }
-        current["decisions"]
-            .as_array_mut()
-            .expect("parsed decisions")
-            .push(json!({
-                "userId": user,
-                "status": "existing_local_user",
-                "reason": "existing_local_task",
-                "decidedAt": iso_now(),
-            }));
-        self.write(&current).await?;
-        Ok(false)
+        let device_mid = device_mid.to_owned();
+        self.serialized(move |records| async move {
+            let mut current = records
+                .read()
+                .await
+                .unwrap_or_else(|| Self::new_file(&device_mid));
+            if has_identity_record(&current, &user) {
+                return Ok(false);
+            }
+            current["decisions"]
+                .as_array_mut()
+                .expect("parsed decisions")
+                .push(json!({
+                    "userId": user,
+                    "status": "existing_local_user",
+                    "reason": "existing_local_task",
+                    "decidedAt": iso_now(),
+                }));
+            records.write(&current).await?;
+            Ok(false)
+        })
+        .await
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn dismiss_onboarding(&self, device_mid: &str) -> Result<(), RpcError> {
         let user = (self.load_user_id)().await;
-        let _queue = self.queue.lock().await;
-        let mut file = self
-            .read()
-            .await
-            .unwrap_or_else(|| Self::new_file(device_mid));
-        if file["entries"]
-            .as_array()
-            .is_some_and(|entries| entries.iter().any(|entry| user_matches(entry, &user)))
-        {
-            return Ok(());
-        }
-        let decision = json!({
-            "userId": user,
-            "status": "dismissed",
-            "reason": "user_closed",
-            "decidedAt": iso_now(),
-        });
-        let decisions = file["decisions"].as_array_mut().expect("parsed decisions");
-        match decisions.iter().position(|item| user_matches(item, &user)) {
-            Some(index) => decisions[index] = decision,
-            None => decisions.push(decision),
-        }
-        self.write(&file).await
+        let device_mid = device_mid.to_owned();
+        self.serialized(move |records| async move {
+            let mut file = records
+                .read()
+                .await
+                .unwrap_or_else(|| Self::new_file(&device_mid));
+            if file["entries"]
+                .as_array()
+                .is_some_and(|entries| entries.iter().any(|entry| user_matches(entry, &user)))
+            {
+                return Ok(());
+            }
+            let decision = json!({
+                "userId": user,
+                "status": "dismissed",
+                "reason": "user_closed",
+                "decidedAt": iso_now(),
+            });
+            let decisions = file["decisions"].as_array_mut().expect("parsed decisions");
+            match decisions.iter().position(|item| user_matches(item, &user)) {
+                Some(index) => decisions[index] = decision,
+                None => decisions.push(decision),
+            }
+            records.write(&file).await
+        })
+        .await
     }
 
     async fn latest_entry(&self) -> Option<Value> {
@@ -370,36 +397,39 @@ impl OnboardingRecords {
         })
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn update_record_preferences(&self, patch: &Value) -> Result<(), RpcError> {
         let user = (self.load_user_id)().await;
-        let _queue = self.queue.lock().await;
-        let Some(mut file) = self.read().await else {
-            return Ok(());
-        };
-        let entries = file["entries"].as_array_mut().expect("parsed entries");
-        let Some(index) = entries.iter().rposition(|entry| user_matches(entry, &user)) else {
-            return Ok(());
-        };
-        let mut merged = entries[index].as_object().cloned().unwrap_or_default();
-        if let Some(patch) = patch.as_object() {
-            for (key, value) in patch {
-                merged.insert(key.clone(), value.clone());
+        let patch = patch.clone();
+        self.serialized(move |records| async move {
+            let Some(mut file) = records.read().await else {
+                return Ok(());
+            };
+            let entries = file["entries"].as_array_mut().expect("parsed entries");
+            let Some(index) = entries.iter().rposition(|entry| user_matches(entry, &user)) else {
+                return Ok(());
+            };
+            let mut merged = entries[index].as_object().cloned().unwrap_or_default();
+            if let Some(patch) = patch.as_object() {
+                for (key, value) in patch {
+                    merged.insert(key.clone(), value.clone());
+                }
             }
-        }
-        entries[index] = parse_entry(&Value::Object(merged))
-            .ok_or_else(|| invalid("invalid onboarding record preferences"))?;
-        self.write(&file).await
+            entries[index] = parse_entry(&Value::Object(merged))
+                .ok_or_else(|| invalid("invalid onboarding record preferences"))?;
+            records.write(&file).await
+        })
+        .await
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn clear_records(&self) -> Result<(), RpcError> {
-        let _queue = self.queue.lock().await;
-        match tokio::fs::remove_file(&self.file).await {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(RpcError::new("Error", error.to_string())),
-        }
+        self.serialized(|records| async move {
+            match tokio::fs::remove_file(&records.file).await {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(RpcError::new("Error", error.to_string())),
+            }
+        })
+        .await
     }
 }
 
@@ -495,6 +525,7 @@ mod tests {
         has_task: bool,
     ) -> OnboardingRecords {
         OnboardingRecords::new(
+            &zcode_host_base::testing::spawner(),
             dir.to_path_buf(),
             Arc::new(move || {
                 let user = user.lock().unwrap().clone();
