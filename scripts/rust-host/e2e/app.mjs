@@ -113,7 +113,7 @@ export async function assertAppProcesses(host, mainPid) {
  * 它拉起的进程一个不剩；Rust Host 收到了 dispose（而不是被强杀）。
  */
 /** Main 日志行开头的本地时间戳（`[2026-10-09 21:23:39.426]`）→ 毫秒。 */
-function logTime(line) {
+export function logTime(line) {
   const match = line?.match(/^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}\.\d{3})\]/);
   return match ? new Date(`${match[1]}T${match[2]}`).getTime() : Number.NaN;
 }
@@ -207,8 +207,19 @@ export async function assertRuntimeLink(runtime, home, mainPid) {
   );
 }
 
-/** 启动一个隔离的 Electron 实例并连上它的 renderer 页面。 */
-export async function launchApp({ host, temp, home, cli, env = {}, args = [] }) {
+/**
+ * 启动一个隔离的 Electron 实例并连上它的 renderer 页面。`output` 是 Electron stdout / stderr 的去向
+ * （缺省继承 harness 的终端；性能测量传一个文件描述符，免得终端输出本身成为负载）。
+ */
+export async function launchApp({
+  host,
+  temp,
+  home,
+  cli,
+  env = {},
+  args = [],
+  output = "inherit",
+}) {
   const cdpPort = await freePort();
   const electronBinary = require("electron");
   // runtime 链路只由 --runtime 决定：先清掉开发者环境里可能残留的选择变量。
@@ -252,7 +263,7 @@ export async function launchApp({ host, temp, home, cli, env = {}, args = [] }) 
     {
       cwd: desktop,
       env: appEnv,
-      stdio: ["ignore", "inherit", "inherit"],
+      stdio: ["ignore", output, output],
       detached: process.platform !== "win32",
     },
   );
