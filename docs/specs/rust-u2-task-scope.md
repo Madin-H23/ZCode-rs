@@ -19,7 +19,7 @@ Host 有约 139 处直接的 `tokio::spawn`，runtime 有约 44 处 `tokio::spaw
 2. 作用域可以有子作用域。关闭或释放父作用域，等同于关闭或释放所有子作用域。
 3. 任务有名字（静态字符串，说明它在做什么）。panic 被捕获并交给根作用域的上报函数（作用域路径、任务名、panic 信息），等待该任务结果的一方得到错误，而不是一直等待。
 4. 关闭作用域分三步：发出取消信号 → 在给定的宽限期内等任务自行结束 → 中止剩余任务并返回它们的名字。关闭之后在这个作用域上启动的任务不会运行，其句柄立即得到“作用域已关闭”。
-5. `tokio::spawn` 与 `tokio::task::spawn_blocking` 只允许出现在 `zcode-async` 内。`clippy.toml` 由所有 Rust workspace 共用，Host 迁移完成后再由它的 `disallowed-methods` 强制；在那之前，runtime（`apps/zcode-cli-rust` 的 `crates/` 与 `src/`）由 `scripts/check-zcode-cli-rust-boundaries.mjs` 扫描非测试代码强制，例外文件逐个列出（见 4.1）；Host 中已迁移的 crate（`gateway`、`host-core`、`zcode-host`）由 `scripts/rust/check-host-spawns.mjs` 扫描，其余 crate 迁移后加入它的列表。
+5. `tokio::spawn` 与 `tokio::task::spawn_blocking` 只允许出现在 `zcode-async` 内。runtime（`apps/zcode-cli-rust` 的 `crates/` 与 `src/`）由 `scripts/check-zcode-cli-rust-boundaries.mjs` 扫描非测试代码强制，例外文件逐个列出（见 4.1）；Host 全部 crate 由 `scripts/rust/check-host-spawns.mjs` 扫描非测试代码强制（6.5）。为什么不由 `clippy.toml` 的 `disallowed-methods` 强制，见 6.5。
 
 ## 3. 接口（`zcode-async`）
 
@@ -132,7 +132,7 @@ sequenceDiagram
 
 - `zcode-async` 的测试：panic 上报且句柄得到错误；释放作用域中止任务；`close` 的三步（自行结束的不算中止，超时的被中止并列出）；关闭后启动的任务不运行；子作用域随父作用域关闭；任务结束后不再出现在 `running` 里；常驻任务随取消信号结束、不算中止。
 - `zcode-async` 的测试还覆盖 `owned` 与 `blocking`：丢弃句柄中止任务；panic 变成错误；结果原样返回；移动后的句柄让任务继续运行。
-- Host 与 runtime 的非测试代码中，`tokio::spawn` / `spawn_blocking` 只出现在 `zcode-async`（runtime 由边界脚本强制，例外见 4.1；Host 迁移后由 clippy 强制）。
+- Host 与 runtime 的非测试代码中，`tokio::spawn` / `spawn_blocking` 只出现在 `zcode-async`（runtime 由边界脚本强制，例外见 4.1；Host 由 `scripts/rust/check-host-spawns.mjs` 强制，见 6.5）。
 - runtime 嵌入测试（`apps/zcode-cli-rust/tests/embed.rs`）：实例因 EOF、Engine panic 或被嵌入方中止而结束之后，实例中没有仍在运行的任务；中止实例时，运行中的 run、标题请求与后台 Bash 任务随之结束（模型请求关闭、后台进程被回收）。
 - Host 退出时日志里列出被中止的任务；正常退出时这个列表为空或只含已知的常驻任务。
 - 现有测试与桌面 E2E 全部通过。
@@ -273,4 +273,12 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 
 ### 6.5 护栏
 
-（见最后一步。）
+`scripts/rust/check-host-spawns.mjs`（`pnpm check:rust` 的一步）扫描 `apps/zcode-host/crates` 下全部 crate：
+
+- 非测试代码不得直接启动 tokio 任务（`tokio::spawn`、`spawn_blocking`、`spawn_local`、`JoinSet`），也不得取运行时句柄（`Handle::current` / `try_current`）；
+- 非测试代码不得使用 tokio 的无界 mpsc（`unbounded_channel`、`UnboundedSender`、`UnboundedReceiver`）；
+- 任何代码（含测试）不得 `allow` / `expect` `clippy::await_holding_invalid_type`（这个 lint 在 workspace 级别是 deny）。
+
+测试代码：`tests.rs`、`*_tests.rs`、`tests/` 目录，`#[cfg(test)]` / `#[cfg(all(test, …))]` / `#[cfg(any(test, feature = "test-support"))]` 标注的条目，以及以这些条件声明的外部模块文件（例如 `#[cfg(test)] mod fake_remote;`）。扫描逻辑与 runtime 的边界脚本共用（`scripts/rust/task-spawns.mjs`）。
+
+为什么不由 `clippy.toml` 的 `disallowed-methods` 强制：`clippy.toml` 由三个 Rust workspace 共用（AGENTS.md），没有按 workspace 的覆盖；`disallowed-methods` 对测试代码同样生效，也没有“测试中放行”的开关。runtime（`apps/zcode-cli-rust`）的非测试代码还有直接的 `unbounded_channel`（工具遥测、App Server 的输出），`src/embed.rs` 的两处 `tokio::spawn` 需要逐处 `#[expect]`，三个 workspace 的测试里共有一百多处直接 `tokio::spawn`。把这些规则放进共用的 `clippy.toml` 就要先改 runtime 的代码与全部测试，超出 Host 的范围；runtime 清零之后再改由 clippy 强制，并删去这里的两条扫描。

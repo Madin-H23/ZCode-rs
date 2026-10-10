@@ -6,8 +6,9 @@ allow-expect-in-tests = true
 allow-print-in-tests = true
 
 # tokio 的锁 guard 跨 .await 持有时，其他任务会一直等待；std 的 guard 由 await_holding_lock 覆盖。
-# 存量位置标注了 `#[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]`：
-# 在 U2 改为 actor 或缩小临界区后删除（docs/specs/rust-unified-host.md 第 12 节）。
+# Host 已没有例外（scripts/rust/check-host-spawns.mjs 禁止 allow / expect）；runtime 的存量位置标注了
+# `#[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]`，改为 actor 或缩小临界区后
+# 删除（docs/specs/rust-u2-task-scope.md §6.3）。
 await-holding-invalid-types = [
   "tokio::sync::MutexGuard",
   "tokio::sync::OwnedMutexGuard",

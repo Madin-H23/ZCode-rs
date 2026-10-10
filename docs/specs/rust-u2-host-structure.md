@@ -55,9 +55,9 @@
 
 ## 6. U2 的后续步骤（不在本文范围）
 
-| 步骤     | 内容                                                                                                                          |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| 拆环     | `agent ↔ tasks` 改为事件订阅；`automation ↔ bots` 改为构造时传入的端口；之后把 `tasks_index`、`bots` 拆成独立 crate           |
-| 显式组装 | 去掉 `OnceLock` / `bind_*` / `attach_*` 这类事后注入，`install` 按依赖顺序构造                                                |
-| Gateway  | 已完成连接层（连接注册表、串行键、出站队列，[rust-u2-gateway.md](rust-u2-gateway.md)）；方法表与 `zcode-gateway-legacy` 在 U9 |
-| 并发     | 所有 spawn 归入任务作用域；无界通道改为有界并写明溢出策略；存量的 `#[expect(clippy::await_holding_invalid_type)]` 清零        |
+| 步骤     | 内容                                                                                                                                                                                |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 拆环     | `agent ↔ tasks` 改为事件订阅；`automation ↔ bots` 改为构造时传入的端口；之后把 `tasks_index`、`bots` 拆成独立 crate                                                                 |
+| 显式组装 | 去掉 `OnceLock` / `bind_*` / `attach_*` 这类事后注入，`install` 按依赖顺序构造                                                                                                      |
+| Gateway  | 已完成连接层（连接注册表、串行键、出站队列，[rust-u2-gateway.md](rust-u2-gateway.md)）；方法表与 `zcode-gateway-legacy` 在 U9                                                       |
+| 并发     | 已完成（[rust-u2-task-scope.md](rust-u2-task-scope.md) §6）：所有 spawn 归入任务作用域；无界通道改为有界并写明溢出策略；存量的 `#[expect(clippy::await_holding_invalid_type)]` 清零 |
