@@ -4,6 +4,7 @@
 //     document.body.textContent，按顺序只查下一个尚未出现的标记
 //   - 输入延迟：composer 里每次按键，从 keydown 事件的时间戳到字符出现在 DOM 后的下一帧
 //   - Enter 的 keydown 时刻（发送一条消息的起点）
+//   - 页面可见性的变化（visibilitychange）：窗口被完全遮挡时 Chromium 会把页面置为 hidden 并停止出帧
 // 所有时刻同时记 Date.now()（与 mock、harness 同一时钟）和 performance.now()。
 
 /** 装探针（同一页面重复调用无副作用）。 */
@@ -19,6 +20,10 @@ export async function installProbes(page) {
       pendingKey: null,
     };
     window.__perf = perf;
+    perf.visibility = [{ at: Date.now(), state: document.visibilityState }];
+    document.addEventListener("visibilitychange", () =>
+      perf.visibility.push({ at: Date.now(), state: document.visibilityState }),
+    );
     try {
       new PerformanceObserver((list) => {
         for (const entry of list.getEntries())
@@ -186,4 +191,21 @@ export async function measureClickUntilVisible(page, locator, marker, timeout = 
     polling: 100,
   });
   return handle.jsonValue();
+}
+
+/** [from, to]（Date.now()）内页面是否一直可见（没有记录到 hidden）。 */
+export async function visibleThroughout(page, from, to) {
+  return page.evaluate(
+    ({ from: start, to: end }) => {
+      const changes = window.__perf.visibility ?? [];
+      const before = changes.filter((change) => change.at <= start).at(-1);
+      return (
+        before?.state !== "hidden" &&
+        !changes.some(
+          (change) => change.at > start && change.at <= end && change.state === "hidden",
+        )
+      );
+    },
+    { from, to },
+  );
 }

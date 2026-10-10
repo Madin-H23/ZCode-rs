@@ -44,6 +44,15 @@ const NODE_UTILITY = /--utility-sub-type=node\.mojom\.NodeService/;
 const RUNTIME = /^zcode-cli(\s|$)|zcode-cli-rust|app-server --stdio/;
 const MCP = /mcp/i;
 
+/** 一个 Electron 辅助进程的种类：utility 的 sub-type（network.mojom.NetworkService 等）或 --type。 */
+export function helperKind(command) {
+  return (
+    command.match(/--utility-sub-type=([^\s]+)/)?.[1] ??
+    command.match(/--type=([^\s]+)/)?.[1] ??
+    command.split(/\s+/)[0].split("/").pop()
+  );
+}
+
 /** `ps` 的累计 CPU 时间（`M:SS.ss` 或 `H:MM:SS.ss`）→ 秒。 */
 function cpuSeconds(text) {
   return text
@@ -189,8 +198,10 @@ export async function snapshotTree(mainPid, rendererPids) {
 
 /**
  * 窗口采样：每 `intervalMs` 读一次进程表（RSS、CPU），每 `footprintEveryMs` 读一次 footprint。
- * stop() 返回窗口内每个角色的 CPU 百分比（单核 %，= CPU 时间差 / 墙钟）、RSS 与 footprint 的均值和峰值。
- * 窗口内结束的进程只计到最后一次采样（短命的工具进程 CPU 偏低，报告里说明）。
+ * stop() 返回窗口内每个角色的 CPU 百分比（单核 %，= CPU 时间差 / 墙钟）、RSS 与 footprint 的均值和峰值，
+ * 以及辅助进程（helper 角色）按种类（network service 等）拆开的 CPU 百分比。
+ * CPU 的墙钟取第一次与最后一次读进程表之间：footprint 读数较慢（进程越多越慢），不能把它的尾巴算进分母，
+ * 否则进程多的配置的 CPU 百分比偏低。窗口内结束的进程只计到最后一次采样（短命的工具进程 CPU 偏低，报告里说明）。
  */
 export function startWindowSampler(
   mainPid,
@@ -200,6 +211,9 @@ export function startWindowSampler(
   const firstCpu = new Map();
   const lastCpu = new Map();
   const roleOfPid = new Map();
+  const kindOfPid = new Map();
+  let firstTickAt = null;
+  let lastTickAt = null;
   const rssSeries = [];
   const footprintSeries = [];
   let stopped = false;
@@ -210,9 +224,12 @@ export function startWindowSampler(
     while (!stopped) {
       const tickAt = Date.now();
       const rows = classifyTree(await processUsageTable(), mainPid, rendererPids);
+      firstTickAt ??= tickAt;
+      lastTickAt = tickAt;
       const rss = Object.fromEntries(ROLES.map((role) => [role, 0]));
       for (const row of rows) {
         roleOfPid.set(row.pid, row.role);
+        if (row.role === "helper") kindOfPid.set(row.pid, helperKind(row.command));
         // 窗口开始前已存在的进程以首个样本为基准；窗口内新出现的进程从 0 起算。
         if (!firstCpu.has(row.pid)) firstCpu.set(row.pid, first ? row.cpuSec : 0);
         lastCpu.set(row.pid, row.cpuSec);
@@ -236,8 +253,14 @@ export function startWindowSampler(
       stopped = true;
       await loop;
       const wallSec = (Date.now() - startedAt) / 1000;
+      const cpuWallSec = (lastTickAt - firstTickAt) / 1000 || wallSec;
       const cpu = Object.fromEntries(ROLES.map((role) => [role, 0]));
-      for (const [pid, last] of lastCpu) cpu[roleOfPid.get(pid)] += last - firstCpu.get(pid);
+      const helperCpu = {};
+      for (const [pid, last] of lastCpu) {
+        cpu[roleOfPid.get(pid)] += last - firstCpu.get(pid);
+        const kind = kindOfPid.get(pid);
+        if (kind) helperCpu[kind] = (helperCpu[kind] ?? 0) + last - firstCpu.get(pid);
+      }
       const stats = (series) =>
         Object.fromEntries(
           [...ROLES, "total"].map((role) => {
@@ -256,11 +279,16 @@ export function startWindowSampler(
           }),
         );
       const cpuPercent = Object.fromEntries(
-        ROLES.map((role) => [role, (cpu[role] / wallSec) * 100]),
+        ROLES.map((role) => [role, (cpu[role] / cpuWallSec) * 100]),
       );
       cpuPercent.total = ROLES.reduce((sum, role) => sum + cpuPercent[role], 0);
+      const helperCpuPercent = Object.fromEntries(
+        Object.entries(helperCpu).map(([kind, seconds]) => [kind, (seconds / cpuWallSec) * 100]),
+      );
       return {
         wallSec,
+        cpuWallSec,
+        helperCpuPercent,
         samples: rssSeries.length,
         footprintSamples: footprintSeries.length,
         cpuSec: cpu,

@@ -18,7 +18,9 @@
 //   node scripts/rust-host/perf/app-perf.mjs seed-history
 //       用配置 A 生成长历史夹具（固定路径，见 history-fixture.mjs）
 //   node scripts/rust-host/perf/app-perf.mjs run --config A|B|C --suite startup|stream|history [--out f.json] [--keep]
-//       单个配置跑一次（一个配置一条命令）
+//                                           [--host-binary <zcode-host>]
+//       单个配置跑一次（一个配置一条命令）。--host-binary 换一个 Rust Host 构建（例如另一个提交的 release），
+//       只对 B 生效，用来在同一测量方法下对比代码改动前后
 //   node scripts/rust-host/perf/app-perf.mjs batch --out <dir> [--reps 3] [--suites startup,stream,history]
 //                                             [--configs A,B,C] [--max-load <n>] [--redo-load <n>] [--no-warmup]
 //       交错运行（每轮轮换起始配置：ABC、BCA、CAB…）。每次运行都记录开始与结束时的 1 分钟 load average；
@@ -31,10 +33,14 @@
 // suite：
 //   startup  冷启动（启动 → composer 可点、Host 数据库就绪、发送键可用、首段、回复完成），之后 N = 1 / 4 / 8
 //            个 workspace 各完成一轮、静置 35 s 后的分角色占用，最后正常退出计时
-//   stream   启动静置 30 s 后的空闲占用；1 路与 4 路（不同 workspace）20 ms 一段的流式窗口（20 s）：
-//            分角色 CPU、footprint、Renderer 长任务、按键延迟、切换会话延迟、增量端到端延迟；
-//            工具负载一轮（Bash seq 1 200000 + Read 10 万行文件）；退出计时
+//   stream   启动静置 30 s 后的空闲占用与 60 s 空闲 CPU；1 路与 4 路（不同 workspace）20 ms 一段的流式窗口
+//            （各 20 s；4 路量两次：4 个会话的订阅都在保温期内，与保温结束后只订阅可见会话）：分角色 CPU
+//            （辅助进程按种类拆开）、footprint、Renderer 长任务；窗口外量切换会话延迟；退出计时
 //   history  冷加载 120 轮的长历史会话：点开到最后一轮可见、滚到顶到第一轮可见，之后的占用；退出计时
+// CPU 窗口与稳态快照期间断开 Playwright、暂停页面探针（suites.mjs 的 detached）：Playwright 总会打开 CDP
+// Network 域，B 的每个 WebSocket 帧都会变成经 Main 转发的 CDP 事件，抬高 B 的读数（报告“流式 CPU 为什么
+// 持平”）。2026-10-10 首次测量时 stream suite 的窗口是连着 Playwright、开着探针、在窗口里打字与切换会话量的，
+// 另有一轮工具负载；复测改成现在的样子，两次的 stream 读数不能直接比。
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { loadavg } from "node:os";
@@ -69,6 +75,7 @@ const { values: options } = parseArgs({
     "max-load": { type: "string", default: "Infinity" },
     "redo-load": { type: "string", default: "Infinity" },
     "no-warmup": { type: "boolean" },
+    "host-binary": { type: "string" },
   },
 });
 
@@ -186,6 +193,7 @@ switch (command) {
       outFile: options.out ? resolve(options.out) : undefined,
       keep: options.keep,
       label: "manual",
+      ...(options["host-binary"] ? { hostBinary: resolve(options["host-binary"]) } : {}),
     });
     console.info(JSON.stringify(result, null, 2));
     console.info(`[perf] ${options.suite}-${options.config}: ${describe(result)}`);

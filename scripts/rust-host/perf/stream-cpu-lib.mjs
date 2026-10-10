@@ -6,22 +6,13 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { logTime } from "../e2e/app.mjs";
 import { hostLogLines } from "../e2e/resilience-helpers.mjs";
-import { classifyTree, processUsageTable } from "./processes.mjs";
+import { classifyTree, helperKind, processUsageTable } from "./processes.mjs";
 
 const ROOT = resolve(import.meta.dirname, "../../..");
 const requireDesktop = createRequire(join(ROOT, "packages/desktop/package.json"));
 
 // ---------------------------------------------------------------------------------------------
 // 进程 CPU
-
-/** 一个辅助进程的种类：utility 的 sub-type（network.mojom.NetworkService 等）或 --type。 */
-export function helperKind(command) {
-  return (
-    command.match(/--utility-sub-type=([^\s]+)/)?.[1] ??
-    command.match(/--type=([^\s]+)/)?.[1] ??
-    command.split(/\s+/)[0].split("/").pop()
-  );
-}
 
 export async function cpuTable(mainPid, rendererPids) {
   return classifyTree(await processUsageTable(), mainPid, rendererPids);
