@@ -304,6 +304,12 @@ impl BuiltinSource {
         )
     }
 
+    /// `read()` 现在会读的 Active 路径（随当前 Endpoint 变化）；Endpoint 不可用时 `None`，`read()`
+    /// 只读随包文件。轮询据此取元数据（docs/specs/rust-provider-config-poll.md）。
+    pub async fn active_path(&self) -> Option<PathBuf> {
+        self.paths().await.ok().map(|paths| paths.active)
+    }
+
     /// `read()`：选出较新的 Release 并物化 Active；物化失败时退回 Bundled（路径仍是 Active）。
     pub async fn read(&self) -> Result<BuiltinRead, String> {
         let paths = match self.paths().await {
