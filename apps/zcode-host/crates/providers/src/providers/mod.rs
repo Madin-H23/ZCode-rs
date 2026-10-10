@@ -3,6 +3,10 @@
 //! 数据源：Main 在 InitLocal 给的内置配置文件，与 `<appConfigDir>/provider_config.json`。
 //! 两个文件内容变化（每秒轮询，与 TS 的 personal 文件轮询节奏相同）时重新解析，revision 加一，
 //! 并触发两个 channel 的 `onDidChange`。未登录：account provider 一律不可用。
+//!
+//! 任务（docs/specs/rust-u2-task-scope.md §6.1）都在构造时给的作用域里：轮询 `provider-config-poll` 与
+//! 内置配置的远端刷新 `builtin-config-refresh` 是常驻任务；personal 文件的写入由 owner 任务
+//! `personal-provider-writes` 按提交顺序执行（[`personal::PersonalWriter`] 的所有实例共用）。
 pub mod builtin;
 pub mod personal;
 pub mod personal_schema;
@@ -14,7 +18,8 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use zcode_host_kit::{EventHub, Reply, RpcError, ServiceBuilder, log};
+use zcode_async::Spawner;
+use zcode_host_kit::{EventHub, Overflow, Reply, RpcError, Serial, ServiceBuilder, log};
 
 use resolve::Resolved;
 
@@ -26,6 +31,10 @@ pub struct ProviderRuntime {
 }
 
 struct Inner {
+    /// 轮询与远端刷新所在的作用域（不延长作用域的寿命）。
+    spawner: Spawner,
+    /// personal 文件在本进程内的唯一写入方（owner 任务）。
+    personal_writes: Serial,
     builtin_file: Option<PathBuf>,
     /// Endpoint 作用域的 Active/LKG 来源（账号栈接入端点后设置）；未设置时直接读随包文件。
     builtin_source: RwLock<Option<Arc<builtin::BuiltinSource>>>,
@@ -113,17 +122,25 @@ async fn read_json(path: &Path) -> (Vec<u8>, Value) {
 }
 
 impl ProviderRuntime {
-    pub fn new(builtin_file: Option<PathBuf>, personal_file: PathBuf) -> Self {
+    pub fn new(spawner: &Spawner, builtin_file: Option<PathBuf>, personal_file: PathBuf) -> Self {
         Self {
             inner: Arc::new(Inner {
+                spawner: spawner.clone(),
+                // 设置页的编辑（用户操作）：排队超过 16 个时编辑方等待。
+                personal_writes: Serial::start(spawner, "personal-provider-writes", 16),
                 builtin_file,
                 builtin_source: RwLock::new(None),
                 active_builtin: RwLock::new(None),
                 personal_file,
                 state: RwLock::new(State::default()),
-                changed: EventHub::new(),
-                builtin_changed: EventHub::new(),
-                personal_updated: EventHub::new(),
+                // 三个都是“有变化”的信号（订阅者收到后重新读快照）：队列里已有一条时合并（§6.2）。
+                changed: EventHub::new("providers-changed", 1, Overflow::Coalesce),
+                builtin_changed: EventHub::new("providers-builtin-changed", 1, Overflow::Coalesce),
+                personal_updated: EventHub::new(
+                    "providers-personal-updated",
+                    1,
+                    Overflow::Coalesce,
+                ),
                 account_ready: tokio::sync::watch::channel(true).0,
             }),
         }
@@ -150,8 +167,9 @@ impl ProviderRuntime {
             .inner
             .builtin_source
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(builtin::BuiltinSource::new(bundled, environment));
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(
+            builtin::BuiltinSource::new(&self.inner.spawner, bundled, environment),
+        );
     }
 
     fn builtin_source(&self) -> Option<Arc<builtin::BuiltinSource>> {
@@ -189,14 +207,18 @@ impl ProviderRuntime {
             return;
         }
         let runtime = self.clone();
-        tokio::spawn(async move {
-            loop {
-                if let Err(error) = runtime.refresh_builtin(false).await {
-                    log::warn(format!("ZCode Built-in Config 远端刷新失败: {error}"));
-                }
-                tokio::time::sleep(Duration::from_secs(60)).await;
-            }
-        });
+        drop(
+            self.inner
+                .spawner
+                .spawn_resident("builtin-config-refresh", async move {
+                    loop {
+                        if let Err(error) = runtime.refresh_builtin(false).await {
+                            log::warn(format!("ZCode Built-in Config 远端刷新失败: {error}"));
+                        }
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                    }
+                }),
+        );
     }
 
     async fn read_builtin(&self) -> (Vec<u8>, Value, Option<PathBuf>) {
@@ -297,7 +319,7 @@ impl ProviderRuntime {
                 state.account.clone(),
             )
         };
-        let resolved = tokio::task::spawn_blocking(move || {
+        let resolved = zcode_async::blocking(move || {
             resolve::resolve(&builtin, &personal, account.as_deref())
         })
         .await
@@ -391,15 +413,24 @@ impl ProviderRuntime {
         self.reload().await
     }
 
-    /// 后台轮询文件变化；Host 退出时随运行时一起结束。
+    /// 后台轮询文件变化（常驻任务）；作用域关闭时结束。
     pub fn start_polling(&self) {
         let runtime = self.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(POLL_INTERVAL).await;
-                runtime.reload().await;
-            }
-        });
+        drop(
+            self.inner
+                .spawner
+                .spawn_resident("provider-config-poll", async move {
+                    loop {
+                        tokio::time::sleep(POLL_INTERVAL).await;
+                        runtime.reload().await;
+                    }
+                }),
+        );
+    }
+
+    /// personal 文件的 owner 任务（[`personal::PersonalWriter`] 的所有实例共用）。
+    fn personal_writes(&self) -> &Serial {
+        &self.inner.personal_writes
     }
 
     pub fn changes(&self) -> EventHub<()> {
@@ -491,7 +522,8 @@ mod tests {
     async fn revision_increases_only_when_files_change() {
         let dir = tempfile::tempdir().unwrap();
         let personal = dir.path().join("provider_config.json");
-        let runtime = ProviderRuntime::new(None, personal.clone());
+        let runtime =
+            ProviderRuntime::new(&zcode_host_base::testing::spawner(), None, personal.clone());
         assert_eq!(runtime.snapshot().await.0, 1);
         assert_eq!(runtime.reload().await.0, 1);
         let mut changes = Box::pin(runtime.changes().subscribe());

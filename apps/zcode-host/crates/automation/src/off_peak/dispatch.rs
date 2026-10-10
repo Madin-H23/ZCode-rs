@@ -129,14 +129,17 @@ impl OffPeakDispatcher {
         });
         let mut outcomes = Box::pin(area.driver.terminal_outcomes());
         let weak = Arc::downgrade(&dispatcher);
-        tokio::spawn(async move {
-            while let Some(outcome) = outcomes.next().await {
-                let Some(dispatcher) = weak.upgrade() else {
-                    return;
-                };
-                dispatcher.finalize(outcome).await;
-            }
-        });
+        drop(
+            area.spawner
+                .spawn_resident("off-peak-finalize", async move {
+                    while let Some(outcome) = outcomes.next().await {
+                        let Some(dispatcher) = weak.upgrade() else {
+                            return;
+                        };
+                        dispatcher.finalize(outcome).await;
+                    }
+                }),
+        );
         dispatcher
     }
 

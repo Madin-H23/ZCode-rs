@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use tokio::task::AbortHandle;
+use zcode_async::Task;
 use zcode_host_kit::log;
 
 use super::Area;
@@ -112,7 +112,7 @@ struct Tracked {
     run: RunIdentity,
     target: WorkspaceTarget,
     session_id: String,
-    heartbeat: Option<AbortHandle>,
+    heartbeat: Option<Task<()>>,
 }
 
 pub struct Dispatcher {
@@ -147,14 +147,19 @@ impl Dispatcher {
         });
         let mut outcomes = Box::pin(driver.terminal_outcomes());
         let weak = Arc::downgrade(&dispatcher);
-        tokio::spawn(async move {
-            while let Some(outcome) = outcomes.next().await {
-                let Some(dispatcher) = weak.upgrade() else {
-                    return;
-                };
-                dispatcher.settle(outcome).await;
-            }
-        });
+        drop(
+            dispatcher
+                .area
+                .spawner
+                .spawn_resident("automation-settle", async move {
+                    while let Some(outcome) = outcomes.next().await {
+                        let Some(dispatcher) = weak.upgrade() else {
+                            return;
+                        };
+                        dispatcher.settle(outcome).await;
+                    }
+                }),
+        );
         dispatcher
     }
 
@@ -402,26 +407,27 @@ impl Dispatcher {
     }
 
     /// manual run 执行期间每 60 s 续租一次锁，避免长任务被 scheduler 当作僵尸回收。
-    fn start_heartbeat(&self, run: &RunIdentity) -> AbortHandle {
+    fn start_heartbeat(&self, run: &RunIdentity) -> Task<()> {
         let repo = self.service.repo().clone();
         let run = run.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(MANUAL_CLAIM_HEARTBEAT);
-            interval.tick().await;
-            loop {
+        self.area
+            .spawner
+            .spawn("automation-claim-heartbeat", async move {
+                let mut interval = tokio::time::interval(MANUAL_CLAIM_HEARTBEAT);
                 interval.tick().await;
-                if let Err(error) = repo
-                    .touch_manual_claim(&run.automation_id, &run.workspace_key)
-                    .await
-                {
-                    log::warn(format!(
-                        "续租 manual automation claim 失败 automation={} runId={}: {error:#}",
-                        run.automation_id, run.run_id
-                    ));
+                loop {
+                    interval.tick().await;
+                    if let Err(error) = repo
+                        .touch_manual_claim(&run.automation_id, &run.workspace_key)
+                        .await
+                    {
+                        log::warn(format!(
+                            "续租 manual automation claim 失败 automation={} runId={}: {error:#}",
+                            run.automation_id, run.run_id
+                        ));
+                    }
                 }
-            }
-        })
-        .abort_handle()
+            })
     }
 
     /// `recordCronRunOutcomeBestEffort`。

@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use zcode_async::{Spawner, TaskScope};
 use zcode_host_control::ControlRouter;
 use zcode_host_kit::ChannelRegistry;
 
@@ -84,15 +85,15 @@ pub struct Installed {
     /// 观察者只被弱引用的生命周期任务持有，必须留在这里才能存活。
     _observer: Arc<agent::sessions_index::SessionsIndexObserver>,
     _controller: Arc<tasks::controller::Controller>,
-    _syncer: tokio::task::JoinHandle<()>,
-    /// Main 的 `setting-write` 串行写入任务。
-    _setting_writes: tokio::task::JoinHandle<()>,
     automation: automation::AreaHandle,
     /// 调度状态机（rust-u4-app-host.md §2.4）：install 结束时启动，Host 退出时最先收尾。
     scheduler: scheduler::SchedulerHandle,
     remote: Arc<remote::RemoteWorkspaces>,
     /// 至少保留一个句柄，否则 tasks-index 线程与连接随之关闭。
     _storage: Storage,
+    /// 各 service 的作用域 `host/services/<service>`（docs/specs/rust-u2-task-scope.md §6.1）：它们的
+    /// 常驻任务与 owner 任务随 Installed 存在；Host 退出时由根作用域的关闭统一收口。
+    _scopes: Vec<TaskScope>,
 }
 
 impl Installed {
@@ -113,19 +114,32 @@ impl Installed {
     }
 }
 
+/// `spawner` 是 HostCore 交给组装根的 `host/services` 作用域；每个 service 在它下面有自己的子作用域
+/// `host/services/<service>`，由返回的 [`Installed`] 持有（docs/specs/rust-u2-task-scope.md §6.1）。
 pub fn install(
+    spawner: &Spawner,
     context: Arc<ServiceContext>,
     storage: Storage,
     registry: &mut ChannelRegistry,
     router: &mut ControlRouter,
 ) -> Installed {
+    let mut scopes = Vec::new();
+    let mut scope = |name: &'static str| {
+        let scope = spawner.child(name);
+        let spawner = scope.spawner();
+        scopes.push(scope);
+        spawner
+    };
     let bridge = MainBridge::new(context.control.clone());
     // setting.json 的唯一写入方（rust-u4-app-host.md §2.6）：每次成功写入都推 `setting-changed` 给 Main。
+    let settings_tasks = scope("settings");
     let settings = settings::SettingStore::with_change_sink(
+        &settings_tasks,
         &context.environment.home_dir,
         settings_control::change_sink(context.control.clone()),
     );
-    let setting_writes = settings_control::register_setting_writes(
+    settings_control::register_setting_writes(
+        &settings_tasks,
         router,
         settings.clone(),
         context.control.clone(),
@@ -136,6 +150,7 @@ pub fn install(
     registry.implement(settings::service(settings.clone()));
 
     let providers = providers::ProviderRuntime::new(
+        &scope("providers"),
         context
             .init
             .zcode_builtin_provider_config_file_path
@@ -172,7 +187,9 @@ pub fn install(
     );
 
     let environment = &context.environment;
+    let agent_tasks = scope("agent");
     let agent = agent::AgentRuntime::new(
+        &agent_tasks,
         agent::AgentRuntimeConfig {
             base_env: child_env.vars().clone(),
             command_vars: environment.vars.clone(),
@@ -190,7 +207,7 @@ pub fn install(
 
     // ── tasks ──
     // 侧栏：syncer 与 controller 必须先挂上观察者，再预热拉起 CLI，否则会错过首份快照。
-    let workspace_events = tasks::WorkspaceEvents::new();
+    let workspace_events = tasks::workspace_events();
     let task_service = tasks::service::TaskService::new(
         Arc::new(storage.tasks_index.clone()),
         workspace_events.clone(),
@@ -216,13 +233,15 @@ pub fn install(
     );
     registry.implement(tasks::index_members::service(task_context.clone()));
     // 生命周期、查询与事件成员；automation / off-peak / bots 也可直接用 TaskLifecycle 的 API。
-    let task_lifecycle = tasks::lifecycle::TaskLifecycle::start(task_context.clone());
+    let task_tasks = scope("tasks");
+    let task_lifecycle = tasks::lifecycle::TaskLifecycle::start(&task_tasks, task_context.clone());
     registry.implement(tasks::lifecycle_service::service(task_lifecycle));
     // App 级 Host 不建立到 Main taskRealtimeBus 的实时桥（rust-u4-app-host.md §2.5）：run 的 owner 与
     // stale run 判断在 TaskLifecycle 内；远端 workspace 的会话消息请求由 remote 区域在 Host 内应答。
     // `init-local` 的 hostId / deliveryKind 仍可解析但不再使用。
-    let syncer = tasks::syncer::start(&observer, agent.clone(), task_service.clone());
+    tasks::syncer::start(&task_tasks, &observer, agent.clone(), task_service.clone());
     let controller = tasks::controller::Controller::start(
+        &task_tasks,
         Arc::new(task_context),
         observer.clone(),
         workspace_events,
@@ -232,7 +251,8 @@ pub fn install(
     // ── account ──
     // 账号栈（docs/specs/rust-host-account.md）：凭据、ApiClient、OAuth、账号 provider overlay、
     // CLI 集成，以及账号增值 channel。必须在预热拉起 CLI 之前登记 CLI 扩展点。
-    let account = account::AccountStack::new(&context, &settings, &providers);
+    let account_tasks = scope("account");
+    let account = account::AccountStack::new(&account_tasks, &context, &settings, &providers);
     account.register(
         registry,
         storage.tasks_index.clone(),
@@ -241,25 +261,35 @@ pub fn install(
     let coding_plan = account.register_coding_plan(registry, &providers);
     account.register_provider_writes(registry, &providers, &agent);
     account.register_feedback(registry, &context, bridge.clone(), router);
+    // 扩展区（扩展各 service 与 settings-sync）共用一个作用域与共享配置文件的写入方。
+    let extension_roots = extensions::Roots::new(
+        &scope("extensions"),
+        &context.environment.user_home,
+        &context.environment.data_base_dir,
+    );
     registry.implement(settings_sync::service(settings_sync::SettingsSync::new(
         settings.clone(),
+        extension_roots.writes.clone(),
         &context.environment.vars,
         &context.environment.user_home,
     )));
     account.attach_agent(&agent, &context);
     account.start(broadcaster);
-    account::telemetry::start_host_resource_samples(context.control.clone());
+    account::telemetry::start_host_resource_samples(&account_tasks, context.control.clone());
 
     // ── agent ──（docs/specs/rust-host-agent.md）
     // 三个 lane、CLI 通知分发、浏览器控制、进程生命周期上报，以及 zcode-agent / zcode-session /
     // plugin-management 三个 channel。AgentChannel 在最外层：连接作用域成员由它处理，其余回退到
     // members，再回退到先前登记的实现（例如 automation 成员）与契约 stub。
     let agent_main = MainBridge::new(context.control.clone());
-    agent::process_events::forward(agent.extensions(), agent_main.clone());
+    agent::process_events::forward(&agent_tasks, agent.extensions(), agent_main.clone());
     let agent_browser = agent::browser::BrowserBridge::new(Some(agent_main.clone()));
     agent_browser.install(router, agent.extensions());
-    let agent_events =
-        agent::notifications::AgentEvents::start(agent.extensions(), Some(agent_main));
+    let agent_events = agent::notifications::AgentEvents::start(
+        &agent_tasks,
+        agent.extensions(),
+        Some(agent_main),
+    );
     let agent_api = agent::api::AgentApi::new(
         agent.clone(),
         &context.environment.data_base_dir,
@@ -272,7 +302,7 @@ pub fn install(
     let fallback = registry.get(agent::service::CHANNEL);
     registry.register(
         agent::service::CHANNEL,
-        agent::service::AgentChannel::new(agent_api.clone(), fallback),
+        agent::service::AgentChannel::new(&agent_tasks, agent_api.clone(), fallback),
     );
     registry.implement(agent::session::service(
         agent::session::SessionService::new(agent_api.clone(), Some(task_service.clone())),
@@ -281,6 +311,7 @@ pub fn install(
     // ── remote ──（docs/specs/rust-host-remote.md）
     // 先于 automation：本地 Bots 安装时注入远端区域的 Bot 远端运行时（§2.9）。
     let remote = remote::install(
+        &scope("remote"),
         &context,
         remote::provisioning::ProvisioningSources {
             settings: settings.clone(),
@@ -294,6 +325,7 @@ pub fn install(
     // ── automation ──（R6：automation、闲时任务、bots、conversation-share、cua-permission）
     let automation = automation::install(
         automation::Area::new(
+            &scope("automation"),
             context.clone(),
             bridge.clone(),
             settings.clone(),
@@ -321,8 +353,10 @@ pub fn install(
     // ── workspace ──
     // git（提交信息生成回调 Agent）、git-checkpoint、media-preview（Main 授权路径）、
     // prompt-attachment-transfer；见 docs/specs/rust-host-workspace.md。
+    let workspace_tasks = scope("workspace");
     let workspace = workspace::install(
         workspace::WorkspaceDeps {
+            spawner: &workspace_tasks,
             environment: &context.environment,
             child_env: &child_env,
             settings: settings.clone(),
@@ -336,14 +370,7 @@ pub fn install(
     );
 
     // ── extensions ──
-    extensions::install(
-        registry,
-        &agent,
-        extensions::Roots::new(
-            &context.environment.user_home,
-            &context.environment.data_base_dir,
-        ),
-    );
+    extensions::install(registry, &agent, extension_roots);
     // ── integration ──（docs/specs/rust-host-integration.md）
     // 动态工作流门禁的唯一写入方：coding-plan-subscription 的 client config（Node
     // `resolveDynamicWorkflowClientConfig`）。必须在预热拉起 CLI 之前登记，进程就绪前的
@@ -388,11 +415,10 @@ pub fn install(
         workspace,
         _observer: observer,
         _controller: controller,
-        _syncer: syncer,
-        _setting_writes: setting_writes,
         automation,
         scheduler,
         remote,
         _storage: storage,
+        _scopes: scopes,
     }
 }

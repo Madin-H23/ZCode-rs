@@ -7,12 +7,11 @@ pub mod markdown;
 pub mod selection;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
-use tokio::sync::Mutex;
-use zcode_host_kit::{Reply, RpcError, ServiceBuilder, log};
+
+use zcode_host_kit::{Reply, RpcError, Serial, ServiceBuilder, log};
 use zcode_kit::js::string::trim as js_trim;
 
 use super::plugin_roots::{OFFICIAL_MARKETPLACE, default_enabled};
@@ -155,15 +154,30 @@ struct InstalledRecord {
 #[derive(Clone)]
 pub struct SubagentsService {
     roots: Roots,
-    queue: Arc<Mutex<()>>,
+    /// 状态文件在本进程内的唯一写入方：迁移与读改写在这个 owner 任务里逐个执行
+    /// （docs/specs/rust-u2-task-scope.md §6.3）。
+    writes: Serial,
 }
 
 impl SubagentsService {
     pub fn new(roots: Roots) -> Self {
-        Self {
-            roots,
-            queue: Default::default(),
-        }
+        // 用户设置与每次启动 CLI 前的导入；排队超过 16 个时提交方等待。
+        let writes = Serial::start(&roots.tasks, "subagent-state-writes", 16);
+        Self { roots, writes }
+    }
+
+    /// 在状态文件的 owner 任务里执行；提交方放弃等待不打断已经开始的读改写。
+    async fn serialized<T, Edit, Edited>(&self, edit: Edit) -> Result<T, RpcError>
+    where
+        Edit: FnOnce(SubagentsService) -> Edited + Send + 'static,
+        Edited: std::future::Future<Output = Result<T, RpcError>> + Send,
+        T: Send + 'static,
+    {
+        let service = self.clone();
+        self.writes
+            .run(async move { edit(service).await })
+            .await
+            .unwrap_or_else(|stopped| Err(fsx::error(stopped.to_string())))
     }
 
     /// `resolveZCodeStorageRoot`：`storage.dir`（trim 后非空）或 `~/.zcode`，不追加 `cli`。
@@ -224,7 +238,7 @@ impl SubagentsService {
         )
     }
 
-    /// 持锁读改写状态文件（Host 内经 `queue` 串行）。
+    /// 持锁读改写状态文件；只在状态文件的 owner 任务里调用（[`Self::serialized`]）。
     async fn update_state(&self, mutate: impl FnOnce(&mut State) + Send) -> Result<(), RpcError> {
         if let Err(error) = self.migrate_state_file().await {
             log::warn(format!(
@@ -244,18 +258,22 @@ impl SubagentsService {
         outcome.map_err(|error| fsx::error(format!("{error:#}")))
     }
 
-    /// Host 启动 CLI 前的一次性存储导入（`prepareRuntimeState`）；失败只记 warn。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// Host 启动 CLI 前的一次性存储导入（`prepareRuntimeState`）；失败只记 warn。整段在 owner 任务里：
+    /// 每次启动 CLI 都会调用，Markdown 与状态文件的迁移都只有这一个进程内写入方。
     pub async fn prepare_runtime_state(&self) {
-        let root = self.user_root().await;
-        for failure in migrate_user_markdown(&root).await {
-            log::warn(format!(
-                "用户 Subagent Markdown 迁移失败，保留原文件 path={} error={}",
-                failure.0, failure.1
-            ));
-        }
-        let _queue = self.queue.lock().await;
-        if let Err(error) = self.migrate_state_file().await {
+        let result = self
+            .serialized(|service| async move {
+                let root = service.user_root().await;
+                for failure in migrate_user_markdown(&root).await {
+                    log::warn(format!(
+                        "用户 Subagent Markdown 迁移失败，保留原文件 path={} error={}",
+                        failure.0, failure.1
+                    ));
+                }
+                service.migrate_state_file().await
+            })
+            .await;
+        if let Err(error) = result {
             log::warn(format!("Subagent 状态文件迁移失败: {}", error.message));
         }
     }
@@ -554,7 +572,6 @@ impl SubagentsService {
         }))
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn set_enabled(&self, params: Value) -> Result<(), RpcError> {
         let id = params
             .get("agentId")
@@ -565,28 +582,30 @@ impl SubagentsService {
             .get("enabled")
             .and_then(Value::as_bool)
             .unwrap_or(true);
-        let _queue = self.queue.lock().await;
-        self.update_state(move |state| {
-            let mut set: Vec<String> = state.disabled.clone();
-            set.dedup();
-            let mut unique: Vec<String> = Vec::new();
-            for item in set {
-                if !unique.contains(&item) {
-                    unique.push(item);
-                }
-            }
-            if enabled {
-                unique.retain(|item| *item != id);
-            } else if !unique.contains(&id) {
-                unique.push(id);
-            }
-            sort_default(&mut unique);
-            state.disabled = unique;
+        self.serialized(move |service| async move {
+            service
+                .update_state(move |state| {
+                    let mut set: Vec<String> = state.disabled.clone();
+                    set.dedup();
+                    let mut unique: Vec<String> = Vec::new();
+                    for item in set {
+                        if !unique.contains(&item) {
+                            unique.push(item);
+                        }
+                    }
+                    if enabled {
+                        unique.retain(|item| *item != id);
+                    } else if !unique.contains(&id) {
+                        unique.push(id);
+                    }
+                    sort_default(&mut unique);
+                    state.disabled = unique;
+                })
+                .await
         })
         .await
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn set_built_in_override(&self, params: Value) -> Result<(), RpcError> {
         let name = params
             .get("agentName")
@@ -595,19 +614,21 @@ impl SubagentsService {
             .to_owned();
         let selection =
             selection::normalize_selection(params.get("modelSelection")).map_err(fsx::error)?;
-        let _queue = self.queue.lock().await;
-        self.update_state(move |state| match selection {
-            Some(selection) => {
-                state.built_in.insert(name, selection);
-            }
-            None => {
-                js::delete(&mut state.built_in, &name);
-            }
+        self.serialized(move |service| async move {
+            service
+                .update_state(move |state| match selection {
+                    Some(selection) => {
+                        state.built_in.insert(name, selection);
+                    }
+                    None => {
+                        js::delete(&mut state.built_in, &name);
+                    }
+                })
+                .await
         })
         .await
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn set_plugin_override(&self, params: Value) -> Result<(), RpcError> {
         let id = params
             .get("agentId")
@@ -619,14 +640,17 @@ impl SubagentsService {
         }
         let selection =
             selection::normalize_selection(params.get("modelSelection")).map_err(fsx::error)?;
-        let _queue = self.queue.lock().await;
-        self.update_state(move |state| match selection {
-            Some(selection) => {
-                state.plugin.insert(id, selection);
-            }
-            None => {
-                js::delete(&mut state.plugin, &id);
-            }
+        self.serialized(move |service| async move {
+            service
+                .update_state(move |state| match selection {
+                    Some(selection) => {
+                        state.plugin.insert(id, selection);
+                    }
+                    None => {
+                        js::delete(&mut state.plugin, &id);
+                    }
+                })
+                .await
         })
         .await
     }
@@ -1229,7 +1253,11 @@ mod tests {
     #[tokio::test]
     async fn create_list_toggle_and_migrate() {
         let home = tempfile::tempdir().unwrap();
-        let service = SubagentsService::new(Roots::new(home.path(), home.path()));
+        let service = SubagentsService::new(Roots::new(
+            &zcode_host_base::testing::spawner(),
+            home.path(),
+            home.path(),
+        ));
         let created = service
             .create_agent(json!({"config":{"name":"Reviewer","description":"d","systemPrompt":"p"},"provider":"glm"}))
             .await

@@ -28,7 +28,7 @@ use zcode_host_services::tasks::agent_calls;
 use zcode_host_services::tasks::context::{TaskContext, TaskPaths};
 use zcode_host_services::tasks::lifecycle::TaskLifecycle;
 use zcode_host_services::tasks::service::TaskService;
-use zcode_host_services::tasks::{WorkspaceEvents, syncer};
+use zcode_host_services::tasks::{syncer, workspace_events};
 use zcode_host_services::tasks_index::TasksIndex;
 
 const LIMIT: Duration = Duration::from_secs(90);
@@ -212,7 +212,6 @@ struct Harness {
     runtime: AgentRuntime,
     lifecycle: Arc<TaskLifecycle>,
     _observer: Arc<SessionsIndexObserver>,
-    _syncer: tokio::task::JoinHandle<()>,
 }
 
 async fn harness() -> Harness {
@@ -226,8 +225,9 @@ async fn harness() -> Harness {
     let builtin = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../config/provider/zcode-builtin.json");
     let home_text = home.path().to_string_lossy().into_owned();
-    let settings = SettingStore::new(home.path());
+    let settings = SettingStore::new(&zcode_host_services::testing::spawner(), home.path());
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: BTreeMap::from([
                 ("HOME".to_owned(), home_text.clone()),
@@ -240,18 +240,23 @@ async fn harness() -> Harness {
             fallback_cwd: None,
         },
         settings.clone(),
-        ProviderRuntime::new(Some(builtin), personal),
+        ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
+            Some(builtin),
+            personal,
+        ),
     );
     let index = TasksIndex::open(home.path().join(".zcode/v2/tasks-index.sqlite"), |_| {})
         .await
         .unwrap();
-    let tasks = TaskService::new(
-        Arc::new(index.clone()),
-        WorkspaceEvents::new(),
-        runtime.clone(),
-    );
+    let tasks = TaskService::new(Arc::new(index.clone()), workspace_events(), runtime.clone());
     let observer = SessionsIndexObserver::start(runtime.clone());
-    let syncer = syncer::start(&observer, runtime.clone(), tasks.clone());
+    syncer::start(
+        &zcode_host_services::testing::spawner(),
+        &observer,
+        runtime.clone(),
+        tasks.clone(),
+    );
     let context = TaskContext::new(
         TaskPaths {
             user_home: home.path().into(),
@@ -270,9 +275,8 @@ async fn harness() -> Harness {
         path,
         mock,
         runtime,
-        lifecycle: TaskLifecycle::start(context),
+        lifecycle: TaskLifecycle::start(&zcode_host_services::testing::spawner(), context),
         _observer: observer,
-        _syncer: syncer,
     }
 }
 

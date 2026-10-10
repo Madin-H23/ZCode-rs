@@ -67,9 +67,9 @@
   - Node 风格的“临时文件 + rename”原子写用 `zcode_kit::fs::atomic_write`；数据目录的 home 由二进制入口经 `zcode_kit::paths::home_dir` 解析一次，库内用 runtime 给定的 home（`Egress::home`），不得回落到空路径或 cwd。
   - 进程环境与进程 cwd 只在二进制入口读取（`clippy.toml` 禁用 `std::env::{var, var_os, vars, vars_os, current_dir}`）；库内用 `RuntimeEnv` 快照、workspace 根或显式基准目录，允许的位置用 `#[expect]` 标注理由（`docs/specs/rust-u1-runtime-library.md`）。
   - 秘密值用 `zcode_kit::secret::RedactedString`，日志中的值经 `zcode_kit::redact::redact_secrets`。
-  - 任务只经 `zcode_async` 启动并有唯一所有者：作用域任务用 `Spawner::spawn` / `spawn_blocking`，函数内启动并等待的用 `owned` / `blocking`；runtime 非测试代码由 `scripts/check-zcode-cli-rust-boundaries.mjs` 禁止直接 `tokio::spawn` / `spawn_blocking`（例外只有 `src/embed.rs`），Host 已迁移的 crate（`gateway`、`host-core`、`zcode-host`）由 `scripts/rust/check-host-spawns.mjs` 检查，Host 全部迁移后改由 clippy 强制（`docs/specs/rust-u2-task-scope.md`）。
+  - 任务只经 `zcode_async` 启动并有唯一所有者：作用域任务用 `Spawner::spawn` / `spawn_blocking`，函数内启动并等待的用 `owned` / `blocking`；runtime 非测试代码由 `scripts/check-zcode-cli-rust-boundaries.mjs` 禁止直接 `tokio::spawn` / `spawn_blocking`（例外只有 `src/embed.rs`），Host 全部 crate 的非测试代码由 `scripts/rust/check-host-spawns.mjs` 检查（`docs/specs/rust-u2-task-scope.md` §6.5；`clippy.toml` 三个 workspace 共用，runtime 还有直接的 spawn 与无界通道，暂不由 clippy 强制）。Host 的任务属于 `host/services/<service>` 或更短命的所有者（runtime 实例、远端连接、终端、文件监听、Bot 通道……）的子作用域；没有收口步骤的循环用 `spawn_resident`。
   - spawn 出去、负责发出终态或回复的任务用 `zcode_async::catch_panic` 兜住 panic。
-- 不新增 `#[expect(clippy::await_holding_invalid_type)]`：现有标注是待 U2 清理的存量。
+- Host 没有 `#[expect(clippy::await_holding_invalid_type)]`，`scripts/rust/check-host-spawns.mjs` 禁止 allow / expect 它（测试同样）：缩小临界区、交给 owner 任务（`zcode_host_kit::Serial`），或用锁内不 await 的 `std::sync::Mutex`。runtime 还有存量，不新增。
 - 编码约定：
   - 调用处要能看懂参数含义：不用 `bool` 或含义不明的 `Option` 作位置参数，改用枚举、newtype 或具名方法。
   - `match` 尽量穷尽，不写 `_ =>` 通配分支。
@@ -77,7 +77,7 @@
   - 模块默认私有，crate 的公开 API 显式导出并保持最小；不为测试扩大公开面，不写只被调用一次的小 helper。
   - 异步追踪在函数定义上加 `#[tracing::instrument]`，不在调用处给 future 套 `.instrument()`。
   - 单元测试放在同级 `*_tests.rs`，用 `#[path]` 引入；断言比较整个对象，不为静态定义的值写测试。
-- 并发：不持锁跨 `.await`；spawn 出去、负责发送终态或回复的任务必须处理 panic；新通道默认有界，并写明满了以后的策略。
+- 并发：不持锁跨 `.await`；spawn 出去、负责发送终态或回复的任务必须处理 panic；通道一律有界（Host 由脚本检查），并在通道旁写明容量与满了以后的策略（等待 / 结束落后的一方 / 合并），说明为什么不会死锁。
 - 评审规则：
   - 非机械性改动单次不超过 800 行，复杂逻辑不超过 500 行；超出时先合最小的可合入步骤。
   - 逐项检查破坏性变更：Renderer `@zcode/rpc` 契约、V4 wire、Main ↔ Host 控制消息、CLI 参数、配置加载、从已有会话库恢复会话。

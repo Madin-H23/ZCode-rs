@@ -55,3 +55,17 @@ pub fn reply_value(reply: Reply) -> Value {
         _ => Value::Null,
     }
 }
+
+/// 测试里 service 的任务作用域：每次调用新建一个根作用域，随测试进程存在（不关闭、不释放），构造
+/// service 的测试不用再持有它。任务 panic 记进日志，等待方照常得到错误。
+pub fn spawner() -> zcode_async::Spawner {
+    let scope = zcode_async::TaskScope::root("test", |panic| {
+        zcode_host_kit::log::error(format!(
+            "task panicked: scope={} task={}: {}",
+            panic.scope, panic.task, panic.message
+        ));
+    });
+    let spawner = scope.spawner();
+    std::mem::forget(scope);
+    spawner
+}

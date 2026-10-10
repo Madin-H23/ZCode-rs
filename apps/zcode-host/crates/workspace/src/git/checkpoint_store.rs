@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
-use tokio::sync::Mutex;
+use zcode_async::Spawner;
+use zcode_host_kit::Serial;
 
 use super::parse::{normalize_git_path, to_workspace_relative};
 use crate::store::atomic::atomic_write_text;
@@ -256,17 +257,24 @@ fn strip_repo_root(repo_root: &str, value: &str, separator: char, windows: bool)
 }
 
 /// `GitCheckpointStore`：manifest 放在 `<appConfigDir>/checkpoints/<hash12>/<id>.json`。
-/// Node 按文件串行写入、读取先等待写入；checkpoint 操作低频，这里用一把锁串行全部 IO。
+/// Node 按文件串行写入、读取先等待写入；checkpoint 操作低频，这里由一个 owner 任务按提交顺序执行
+/// 全部 IO（docs/specs/rust-u2-task-scope.md §6.3）。原来是跨 IO 持有的一把 tokio 锁。
 pub struct CheckpointStore {
     root: PathBuf,
-    io: Mutex<()>,
+    io: Serial,
+}
+
+fn stopped(stopped: zcode_host_kit::Stopped) -> std::io::Error {
+    std::io::Error::other(stopped.to_string())
 }
 
 impl CheckpointStore {
-    pub fn new(root: PathBuf) -> Self {
+    /// IO 的 owner 任务 `checkpoint-manifest-io` 在 `spawner` 的作用域里。
+    pub fn new(spawner: &Spawner, root: PathBuf) -> Self {
         Self {
             root,
-            io: Mutex::new(()),
+            // checkpoint 操作低频；排队超过 32 个时提交方等待。
+            io: Serial::start(spawner, "checkpoint-manifest-io", 32),
         }
     }
 
@@ -276,36 +284,46 @@ impl CheckpointStore {
             .join(format!("{checkpoint_id}.json"))
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn save(&self, meta: &CheckpointMeta) -> std::io::Result<()> {
-        let _guard = self.io.lock().await;
         let file = self.file(&meta.workspace_path, &meta.checkpoint_id);
         let content = format!(
             "{}\n",
             serde_json::to_string_pretty(&meta.to_value()).unwrap_or_default()
         );
-        atomic_write_text(&file, &content, false)
+        self.io
+            .run(async move {
+                atomic_write_text(&file, &content, false)
+                    .await
+                    .map_err(|error| std::io::Error::other(error.to_string()))
+            })
             .await
-            .map_err(|error| std::io::Error::other(error.to_string()))
+            .map_err(stopped)?
     }
 
     /// 读取失败、内容不合法都视为不存在（与 Node 的 `load` 一样返回 null）。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn load(&self, workspace_path: &str, checkpoint_id: &str) -> Option<CheckpointMeta> {
-        let _guard = self.io.lock().await;
-        let raw = tokio::fs::read_to_string(self.file(workspace_path, checkpoint_id))
+        let file = self.file(workspace_path, checkpoint_id);
+        self.io
+            .run(async move {
+                let raw = tokio::fs::read_to_string(file).await.ok()?;
+                CheckpointMeta::from_value(serde_json::from_str(&raw).ok()?)
+            })
             .await
-            .ok()?;
-        CheckpointMeta::from_value(serde_json::from_str(&raw).ok()?)
+            .ok()
+            .flatten()
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
     pub async fn delete(&self, workspace_path: &str, checkpoint_id: &str) -> std::io::Result<()> {
-        let _guard = self.io.lock().await;
-        match tokio::fs::remove_file(self.file(workspace_path, checkpoint_id)).await {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
-            _ => Ok(()),
-        }
+        let file = self.file(workspace_path, checkpoint_id);
+        self.io
+            .run(async move {
+                match tokio::fs::remove_file(file).await {
+                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+                    _ => Ok(()),
+                }
+            })
+            .await
+            .map_err(stopped)?
     }
 }
 

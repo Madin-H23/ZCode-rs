@@ -12,6 +12,7 @@ use futures_util::stream::{self, StreamExt};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::io::AsyncReadExt;
+use zcode_async::Spawner;
 use zcode_host_kit::{RpcError, log};
 
 use super::command::{GitOutput, GitRunner, Limits, git_error};
@@ -160,6 +161,8 @@ type Requests<T> = Arc<Mutex<HashMap<String, (u64, SharedResult<T>)>>>;
 
 /// 按 key 复用进行中的请求（`reuseInFlightRequest`）；完成后自行移除表项，不缓存结果。
 struct InFlight<T> {
+    /// git 的作用域：请求由任务 `git-request` 跑完，调用方被取消也不打断。
+    spawner: Spawner,
     requests: Requests<T>,
     next: AtomicU64,
 }
@@ -171,8 +174,9 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl<T: Send + Sync + 'static> InFlight<T> {
-    fn new() -> Self {
+    fn new(spawner: &Spawner) -> Self {
         Self {
+            spawner: spawner.clone(),
             requests: Arc::new(Mutex::new(HashMap::new())),
             next: AtomicU64::new(0),
         }
@@ -207,7 +211,7 @@ impl<T: Send + Sync + 'static> InFlight<T> {
                     .shared();
                     requests.insert(key.to_owned(), (token, shared.clone()));
                     // 调用方被取消时请求也要跑完并清理表项，否则后来者会一直拿到这次的结果。
-                    tokio::spawn(shared.clone());
+                    drop(self.spawner.spawn("git-request", shared.clone()));
                     shared
                 }
             }
@@ -510,18 +514,19 @@ fn parse_tracking_remote(tracking: Option<&str>) -> Option<String> {
 }
 
 impl GitRepo {
-    pub fn new(env: &ProcessEnv) -> Self {
-        Self::with_runner(GitRunner::new(env), temp_root(env))
+    /// git 的任务（复用请求的驱动、Windows 上结束进程树的 taskkill 回收）在 `spawner` 的作用域里。
+    pub fn new(spawner: &Spawner, env: &ProcessEnv) -> Self {
+        Self::with_runner(spawner, GitRunner::new(spawner, env), temp_root(env))
     }
 
-    fn with_runner(git: GitRunner, temp_root: String) -> Self {
+    fn with_runner(spawner: &Spawner, git: GitRunner, temp_root: String) -> Self {
         Self {
             inner: Arc::new(Inner {
                 git,
                 temp_root,
-                resolutions: InFlight::new(),
-                workspace_infos: InFlight::new(),
-                statuses: InFlight::new(),
+                resolutions: InFlight::new(spawner),
+                workspace_infos: InFlight::new(spawner),
+                statuses: InFlight::new(spawner),
                 collapsed_untracked: Mutex::new(HashSet::new()),
             }),
         }

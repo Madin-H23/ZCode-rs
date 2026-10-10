@@ -321,13 +321,28 @@ pub async fn fetch_team_entitlement(
 
 type BalanceFuture = Shared<BoxFuture<'static, Result<Value, ApiError>>>;
 
+/// 同一授权的余额请求在发起后这么久内复用（在途的一直复用）。
+const BALANCE_REUSE_WINDOW: Duration = Duration::from_millis(1000);
+
+/// 一次余额请求：发起时间与共享的结果。
+struct Cached {
+    started: std::time::Instant,
+    future: BalanceFuture,
+}
+
+impl Cached {
+    /// 在途，或发起不到 [`BALANCE_REUSE_WINDOW`]。
+    fn reusable(&self) -> bool {
+        self.future.peek().is_none() || self.started.elapsed() < BALANCE_REUSE_WINDOW
+    }
+}
+
 /// Start Plan 余额（`fetchZaiStartPlanBalanceEnvelope`）：同一授权的请求在发起后 1 秒内复用，
 /// 失败同样复用，避免 429 后立即重复请求。
 #[derive(Clone)]
 pub struct StartPlanBilling {
     api: ApiClient,
-    in_flight: Arc<Mutex<HashMap<String, (u64, BalanceFuture)>>>,
-    sequence: Arc<std::sync::atomic::AtomicU64>,
+    in_flight: Arc<Mutex<HashMap<String, Cached>>>,
 }
 
 impl StartPlanBilling {
@@ -335,7 +350,6 @@ impl StartPlanBilling {
         Self {
             api,
             in_flight: Arc::new(Mutex::new(HashMap::new())),
-            sequence: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -365,37 +379,27 @@ impl StartPlanBilling {
                 .in_flight
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // 过期的结果在下一次读取时清掉：原来每个请求完成后另起一个计时任务删除它，任务不属于任何
+            // 所有者；按发起时间判断复用窗口与它等价（在途的一直复用，完成后到发起满 1 秒为止）。
+            in_flight.retain(|_, cached| cached.reusable());
             if invalidate {
                 in_flight.remove(&key);
             }
-            if let Some((_, existing)) = in_flight.get(&key) {
-                existing.clone()
+            if let Some(existing) = in_flight.get(&key) {
+                existing.future.clone()
             } else {
-                let id = self
-                    .sequence
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let this = self.clone();
                 let authorization = authorization.to_owned();
-                let evict_key = key.clone();
-                let future = async move {
-                    let started = std::time::Instant::now();
-                    let result = this.request(&url, &authorization).await;
-                    let remaining = Duration::from_millis(1000).saturating_sub(started.elapsed());
-                    let map = this.in_flight.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(remaining).await;
-                        let mut map = map
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        if map.get(&evict_key).is_some_and(|(entry, _)| *entry == id) {
-                            map.remove(&evict_key);
-                        }
-                    });
-                    result
-                }
-                .boxed()
-                .shared();
-                in_flight.insert(key, (id, future.clone()));
+                let future = async move { this.request(&url, &authorization).await }
+                    .boxed()
+                    .shared();
+                in_flight.insert(
+                    key,
+                    Cached {
+                        started: std::time::Instant::now(),
+                        future: future.clone(),
+                    },
+                );
                 future
             }
         };

@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::sync::OnceCell;
+use zcode_async::Spawner;
 use zcode_host_kit::log;
 
 use super::credentials::{CredentialSource, Credentials, Unavailable, plan_identity_headers};
@@ -124,18 +125,22 @@ pub struct ServerClient {
     source_headers: Option<SourceHeaders>,
     gateway: OnceCell<Option<Arc<Gateway>>>,
     gateway_port: Option<u16>,
+    /// mock 网关的作用域（懒启动时用）。
+    spawner: Spawner,
     http: reqwest::Client,
 }
 
 impl ServerClient {
     /// `gateway_port` 只供测试覆盖 mock 网关端口（生产用 `ZCODE_OFFPEAK_MOCK_PORT` 或固定端口）。
     pub fn new(
+        spawner: &Spawner,
         vars: BTreeMap<String, String>,
         credentials: CredentialSource,
         source_headers: Option<SourceHeaders>,
         gateway_port: Option<u16>,
     ) -> anyhow::Result<Self> {
         Ok(Self {
+            spawner: spawner.clone(),
             vars,
             credentials,
             source_headers,
@@ -163,7 +168,7 @@ impl ServerClient {
         let gateway = self
             .gateway
             .get_or_init(|| async {
-                match Gateway::start(&self.vars, self.gateway_port).await {
+                match Gateway::start(&self.spawner, &self.vars, self.gateway_port).await {
                     Ok(gateway) => Some(Arc::new(gateway)),
                     Err(error) => {
                         log::warn(format!("off-peak mock gateway failed to start: {error:#}"));

@@ -420,10 +420,15 @@ async fn telegram_message_runs_on_a_remote_workspace_agent() {
     let (sink, mut messages) = mpsc::unbounded_channel();
     let control: Arc<dyn ControlSink> = Arc::new(Control(sink));
     let mut router = ControlRouter::default();
-    let credentials = CredentialStore::new(&local_config, "test-secret");
-    let settings = SettingStore::new(&local_home);
+    let credentials = CredentialStore::new(
+        &zcode_host_services::testing::spawner(),
+        &local_config,
+        "test-secret",
+    );
+    let settings = SettingStore::new(&zcode_host_services::testing::spawner(), &local_home);
     let remote = install_with(
         RemoteConfig {
+            spawner: zcode_host_services::testing::spawner(),
             transport: Arc::new(ProcessTransport {
                 program: node,
                 args: vec![bundle.display().to_string()],
@@ -496,7 +501,11 @@ async fn telegram_message_runs_on_a_remote_workspace_agent() {
 
     // 本地 Bots（桌面 Host 里的那份）：远端运行时来自远端区域，Telegram 指向 mock。
     let bots = Bots::new(BotsDeps {
-        repo: BotsRepo::new(local_config.clone()),
+        spawner: zcode_host_services::testing::spawner(),
+        repo: BotsRepo::new(
+            &zcode_host_services::testing::spawner(),
+            local_config.clone(),
+        ),
         credentials,
         providers: Arc::new(Providers::new(Endpoints::local(&telegram_origin)).unwrap()),
         settings,

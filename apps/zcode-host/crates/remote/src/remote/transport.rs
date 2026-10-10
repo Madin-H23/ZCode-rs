@@ -6,6 +6,12 @@
 //!   rpc 服务（每帧一条消息）。
 //! - [`ProcessTransport`]（测试注入）：直接拉起一个说 hello 协议的命令（本地构建的 `zcode-server.cjs`），
 //!   Host 自己完成握手（`packages/server/src/remote/handshake.ts`）。
+//!
+//! 任务与通道（docs/specs/rust-u2-task-scope.md §6.1、§6.2）：每条连接有自己的作用域
+//! `connection:<requestId>`（子进程等待、stdin 写任务、读循环、rpc 客户端），由 [`Connection`] 持有，
+//! [`Connection::dispose`] 结束子进程之后关闭它。连接阶段取消时作用域交给后台的退出等待，连接器退出
+//! 之后才释放。写任务的队列（[`WRITE_QUEUE`]）与读循环交给 rpc 客户端的队列（[`READ_QUEUE`]）有界，
+//! 满了等待（背压，最终到达子进程的管道）；写任务只写 stdin、rpc 客户端的读循环从不等待，没有环。
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -16,8 +22,10 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::{OnceCell, mpsc, oneshot, watch};
+use zcode_async::{Spawner, TaskScope};
 use zcode_host_control::LogLevel;
 use zcode_host_kit::log;
+use zcode_host_rpc::client::OUTBOUND_CAPACITY;
 use zcode_host_rpc::{FrameReader, RpcClient, frame};
 
 use zcode_host_runtime_link::process::{self, StderrTail};
@@ -36,6 +44,10 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_HANDSHAKE_DIAGNOSTIC_CHARS: usize = 2048;
 /// 单帧上限，防止损坏的长度字段让 Host 申请超大缓冲。
 const MAX_CONNECTOR_FRAME: usize = 64 * 1024 * 1024;
+/// 写子进程 stdin 的队列（条）。
+const WRITE_QUEUE: usize = 1024;
+/// 读循环交给 rpc 客户端的队列（条）。
+const READ_QUEUE: usize = 1024;
 
 /// 远端连接关闭：远端 server 的退出码，或 backend 断连（-1）；连接器自身异常退出时 `exit_code` 为空。
 #[derive(Debug, Clone, PartialEq)]
@@ -56,6 +68,8 @@ pub struct Connection {
     pub hello: Value,
     closed: watch::Receiver<Option<CloseEvent>>,
     disposer: Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>,
+    /// 连接的作用域：传输的任务与连接上的 Host 侧后台任务都在这里，释放连接时关闭。
+    tasks: TaskScope,
 }
 
 impl Connection {
@@ -72,7 +86,13 @@ impl Connection {
             hello: json!({"type": "zcode-hello"}),
             closed,
             disposer: Arc::new(|| -> BoxFuture<'static, ()> { Box::pin(async {}) }),
+            tasks: zcode_host_base::testing::spawner().child("connection:test"),
         }
+    }
+
+    /// 连接的作用域：只在这条连接存活期间有意义的任务（事件转发、订阅、跟踪）在这里启动。
+    pub fn spawner(&self) -> Spawner {
+        self.tasks.spawner()
     }
 
     /// 底层关闭时完成（只完成一次，之后立即返回同一事件）。
@@ -90,18 +110,22 @@ impl Connection {
         }
     }
 
-    /// 释放连接：幂等，返回时子进程已退出（或已被强制结束）。
+    /// 释放连接：幂等，返回时子进程已退出（或已被强制结束），连接的作用域已关闭（剩下的任务被中止）。
     pub async fn dispose(&self) {
         self.client.close();
         if let Some(backend) = &self.backend {
             backend.close();
         }
         (self.disposer)().await;
+        self.tasks.close(Duration::ZERO).await;
     }
 }
 
 /// 建连参数。`target` 是含凭据的原文，只交给连接器。
 pub struct ConnectParams {
+    /// 远端区域的作用域：连接的作用域 `connection:<requestId>` 是它的子作用域。
+    pub spawner: Spawner,
+    pub request_id: String,
     pub target: Value,
     pub remote_assets: Value,
     pub remote_runtime_network: Option<Value>,
@@ -131,11 +155,12 @@ struct ChildHandle {
 }
 
 impl ChildHandle {
-    /// 子进程由后台任务等待；收到 kill 请求时按进程树回收（与 CLI 相同的升级顺序）。
-    fn watch(mut child: tokio::process::Child, pid: Option<u32>) -> Arc<Self> {
+    /// 子进程由后台任务（连接作用域里的 `connector-child`）等待；收到 kill 请求时按进程树回收
+    /// （与 CLI 相同的升级顺序）。
+    fn watch(spawner: &Spawner, mut child: tokio::process::Child, pid: Option<u32>) -> Arc<Self> {
         let (exit_tx, exit) = watch::channel(None);
         let (kill_tx, kill_rx) = oneshot::channel::<()>();
-        tokio::spawn(async move {
+        drop(spawner.spawn("connector-child", async move {
             let status = tokio::select! {
                 status = child.wait() => status.ok(),
                 _ = kill_rx => {
@@ -144,7 +169,7 @@ impl ChildHandle {
                 }
             };
             exit_tx.send_replace(Some(status.and_then(|status| status.code())));
-        });
+        }));
         Arc::new(Self {
             exit,
             kill: Mutex::new(Some(kill_tx)),
@@ -185,31 +210,35 @@ fn encode_frame(stream: u8, payload: &[u8]) -> Vec<u8> {
 }
 
 /// 写任务：按入队顺序写 stdin；通道关闭时关闭 stdin（连接器把 EOF 当作 dispose）。
-fn spawn_writer(mut stdin: ChildStdin) -> mpsc::UnboundedSender<Vec<u8>> {
-    let (sender, mut receiver) = mpsc::unbounded_channel::<Vec<u8>>();
-    tokio::spawn(async move {
+fn spawn_writer(spawner: &Spawner, mut stdin: ChildStdin) -> mpsc::Sender<Vec<u8>> {
+    let (sender, mut receiver) = mpsc::channel::<Vec<u8>>(WRITE_QUEUE);
+    drop(spawner.spawn("connector-stdin", async move {
         while let Some(bytes) = receiver.recv().await {
             if stdin.write_all(&bytes).await.is_err() || stdin.flush().await.is_err() {
                 return;
             }
         }
         let _ = stdin.shutdown().await;
-    });
+    }));
     sender
 }
 
-/// 远端 rpc 客户端的出站：每条消息加 `SocketProtocol` 帧头后交给 `send`。
-fn server_client(
-    send: impl Fn(Vec<u8>) + Send + 'static,
-    inbound: mpsc::UnboundedReceiver<Vec<u8>>,
+/// 远端 rpc 客户端：出站消息经 `encode` 编成写给子进程的字节，排进写任务（满了转发任务等待）。
+fn framed_client(
+    spawner: &Spawner,
+    writer: mpsc::Sender<Vec<u8>>,
+    encode: fn(&[u8]) -> Vec<u8>,
+    inbound: mpsc::Receiver<Vec<u8>>,
 ) -> RpcClient {
-    let (outbound, mut messages) = mpsc::unbounded_channel::<Vec<u8>>();
-    tokio::spawn(async move {
+    let (outbound, mut messages) = mpsc::channel::<Vec<u8>>(OUTBOUND_CAPACITY);
+    drop(spawner.spawn("rpc-forward", async move {
         while let Some(message) = messages.recv().await {
-            send(frame(&message));
+            if writer.send(encode(&message)).await.is_err() {
+                return;
+            }
         }
-    });
-    RpcClient::start(outbound, inbound)
+    }));
+    RpcClient::start(spawner, outbound, inbound)
 }
 
 // ---- 连接器传输 ----
@@ -254,25 +283,34 @@ async fn connect_via_connector(
     env.insert("ELECTRON_RUN_AS_NODE".into(), "1".into());
     let spawned = process::spawn(&config.node_exec, &config.args, &config.cwd, &env)
         .map_err(|error| format!("无法启动远程连接器：{error}"))?;
-    let (stderr, _) = process::drain_stderr(Some(spawned.stderr), "remote-connector".into(), None);
-    let child = ChildHandle::watch(spawned.child, spawned.pid);
-    let writer = spawn_writer(spawned.stdin);
+    let scope = params
+        .spawner
+        .child(format!("connection:{}", params.request_id));
+    let tasks = scope.spawner();
+    let (stderr, _, drain) =
+        process::drain_stderr(Some(spawned.stderr), "remote-connector".into(), None);
+    drop(tasks.spawn("connector-stderr", drain));
+    let child = ChildHandle::watch(&tasks, spawned.child, spawned.pid);
+    let writer = spawn_writer(&tasks, spawned.stdin);
 
     let (control_tx, control_rx) = oneshot::channel::<ControlEvent>();
     let (closed_tx, closed) = watch::channel(None::<CloseEvent>);
-    let (server_tx, server_rx) = mpsc::unbounded_channel();
-    let (backend_tx, backend_rx) = mpsc::unbounded_channel();
-    tokio::spawn(read_connector(
-        spawned.stdout,
-        ConnectorSinks {
-            control: Mutex::new(Some(control_tx)),
-            closed: closed_tx,
-            server: server_tx,
-            backend: backend_tx,
-            log: params.log.clone(),
-            child: child.clone(),
-            stderr,
-        },
+    let (server_tx, server_rx) = mpsc::channel(READ_QUEUE);
+    let (backend_tx, backend_rx) = mpsc::channel(READ_QUEUE);
+    drop(tasks.spawn(
+        "connector-stdout",
+        read_connector(
+            spawned.stdout,
+            ConnectorSinks {
+                control: Mutex::new(Some(control_tx)),
+                closed: closed_tx,
+                server: server_tx,
+                backend: backend_tx,
+                log: params.log.clone(),
+                child: child.clone(),
+                stderr,
+            },
+        ),
     ));
 
     let mut connect = json!({
@@ -284,23 +322,29 @@ async fn connect_via_connector(
     if let Some(network) = params.remote_runtime_network.take() {
         connect["remoteRuntimeNetwork"] = network;
     }
-    let _ = writer.send(encode_frame(STREAM_CONTROL, connect.to_string().as_bytes()));
+    let _ = writer
+        .send(encode_frame(STREAM_CONTROL, connect.to_string().as_bytes()))
+        .await;
 
     let outcome = tokio::select! {
         event = control_rx => event.unwrap_or(ControlEvent::Failed("远程连接器已退出".into())),
         _ = aborted(&mut params.abort) => {
             // 连接阶段取消：连接器释放它独占的 backend 后退出（SSH 立即中止；WSL / Docker 与 Node Host
-            // 相同，等建连自然结束再释放）。退出等待放到后台，取消本身立即返回。
-            let _ = writer.send(encode_frame(STREAM_CONTROL, br#"{"type":"dispose"}"#));
+            // 相同，等建连自然结束再释放）。退出等待放到后台（远端区域的作用域里），取消本身立即返回；
+            // 连接的作用域交给它，连接器退出之后才释放（子进程等待与读循环一直在）。
+            let _ = writer
+                .send(encode_frame(STREAM_CONTROL, br#"{"type":"dispose"}"#))
+                .await;
             drop(writer);
-            tokio::spawn(async move {
+            drop(params.spawner.spawn("connector-cancel-exit", async move {
+                let _scope = scope;
                 if !child.wait(CANCEL_EXIT_WAIT).await {
                     log::info("remote connector is finishing an in-flight connect before exiting");
                     if !child.wait(CANCELLED_CONNECT_WAIT).await {
                         child.kill().await;
                     }
                 }
-            });
+            }));
             return Err("远程连接已取消".into());
         }
     };
@@ -315,21 +359,18 @@ async fn connect_via_connector(
         }
     };
 
-    let server_writer = writer.clone();
-    let client = server_client(
-        move |bytes| {
-            let _ = server_writer.send(encode_frame(STREAM_SERVER, &bytes));
-        },
+    let client = framed_client(
+        &tasks,
+        writer.clone(),
+        |message| encode_frame(STREAM_SERVER, &frame(message)),
         server_rx,
     );
-    let (backend_out, mut backend_messages) = mpsc::unbounded_channel::<Vec<u8>>();
-    let backend_writer = writer.clone();
-    tokio::spawn(async move {
-        while let Some(message) = backend_messages.recv().await {
-            let _ = backend_writer.send(encode_frame(STREAM_BACKEND, &message));
-        }
-    });
-    let backend = RpcClient::start(backend_out, backend_rx);
+    let backend = framed_client(
+        &tasks,
+        writer.clone(),
+        |message| encode_frame(STREAM_BACKEND, message),
+        backend_rx,
+    );
 
     let writer = Arc::new(Mutex::new(Some(writer)));
     let disposed = Arc::new(OnceCell::new());
@@ -345,8 +386,9 @@ async fn connect_via_connector(
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .take();
                         if let Some(writer) = writer {
-                            let _ =
-                                writer.send(encode_frame(STREAM_CONTROL, br#"{"type":"dispose"}"#));
+                            let _ = writer
+                                .send(encode_frame(STREAM_CONTROL, br#"{"type":"dispose"}"#))
+                                .await;
                         }
                         if !child.wait(CONNECTOR_DISPOSE_WAIT).await {
                             log::warn("remote connector did not exit after dispose; killing it");
@@ -363,14 +405,15 @@ async fn connect_via_connector(
         hello,
         closed,
         disposer,
+        tasks: scope,
     })
 }
 
 struct ConnectorSinks {
     control: Mutex<Option<oneshot::Sender<ControlEvent>>>,
     closed: watch::Sender<Option<CloseEvent>>,
-    server: mpsc::UnboundedSender<Vec<u8>>,
-    backend: mpsc::UnboundedSender<Vec<u8>>,
+    server: mpsc::Sender<Vec<u8>>,
+    backend: mpsc::Sender<Vec<u8>>,
     log: LogFn,
     child: Arc<ChildHandle>,
     stderr: StderrTail,
@@ -453,11 +496,11 @@ async fn read_connector(mut stdout: ChildStdout, sinks: ConnectorSinks) {
                 STREAM_SERVER => {
                     server.push(payload);
                     while let Some(message) = server.next_message() {
-                        let _ = sinks.server.send(message);
+                        let _ = sinks.server.send(message).await;
                     }
                 }
                 STREAM_BACKEND => {
-                    let _ = sinks.backend.send(payload.to_vec());
+                    let _ = sinks.backend.send(payload.to_vec()).await;
                 }
                 _ => {}
             }
@@ -515,9 +558,15 @@ async fn connect_process(
 ) -> Result<Connection, String> {
     let spawned = process::spawn(&config.program, &config.args, &config.cwd, &config.env)
         .map_err(|error| format!("无法启动远端 server：{error}"))?;
-    let (stderr, _) = process::drain_stderr(Some(spawned.stderr), "remote-server".into(), None);
-    let child = ChildHandle::watch(spawned.child, spawned.pid);
-    let writer = spawn_writer(spawned.stdin);
+    let scope = params
+        .spawner
+        .child(format!("connection:{}", params.request_id));
+    let tasks = scope.spawner();
+    let (stderr, _, drain) =
+        process::drain_stderr(Some(spawned.stderr), "remote-server".into(), None);
+    drop(tasks.spawn("connector-stderr", drain));
+    let child = ChildHandle::watch(&tasks, spawned.child, spawned.pid);
+    let writer = spawn_writer(&tasks, spawned.stdin);
     let mut stdout = spawned.stdout;
     let client_id = format!("rust-host-{}", std::process::id());
     let handshake = tokio::select! {
@@ -533,21 +582,21 @@ async fn connect_process(
         }
     };
     let ack = json!({"type": "zcode-hello-ack", "version": env!("CARGO_PKG_VERSION"), "clientId": client_id});
-    let _ = writer.send(format!("{ack}\n").into_bytes());
+    let _ = writer.send(format!("{ack}\n").into_bytes()).await;
     (params.log)(
         LogLevel::Info,
         format!("handshake done, server version: {}", hello["version"]),
     );
 
-    let (server_tx, server_rx) = mpsc::unbounded_channel();
+    let (server_tx, server_rx) = mpsc::channel(READ_QUEUE);
     let (closed_tx, closed) = watch::channel(None::<CloseEvent>);
     {
         let child = child.clone();
-        tokio::spawn(async move {
+        drop(tasks.spawn("server-stdout", async move {
             let mut reader = FrameReader::default();
             reader.push(&remaining);
             while let Some(message) = reader.next_message() {
-                let _ = server_tx.send(message);
+                let _ = server_tx.send(message).await;
             }
             let mut chunk = vec![0u8; 64 * 1024];
             loop {
@@ -556,7 +605,7 @@ async fn connect_process(
                     Ok(read) => {
                         reader.push(&chunk[..read]);
                         while let Some(message) = reader.next_message() {
-                            let _ = server_tx.send(message);
+                            let _ = server_tx.send(message).await;
                         }
                     }
                 }
@@ -566,15 +615,9 @@ async fn connect_process(
                 exit_code: child.exit_code().map(i64::from),
                 error: None,
             }));
-        });
+        }));
     }
-    let server_writer = writer.clone();
-    let client = server_client(
-        move |bytes| {
-            let _ = server_writer.send(bytes);
-        },
-        server_rx,
-    );
+    let client = framed_client(&tasks, writer.clone(), frame, server_rx);
     let writer = Arc::new(Mutex::new(Some(writer)));
     let disposed = Arc::new(OnceCell::new());
     let disposer = Arc::new(move || -> BoxFuture<'static, ()> {
@@ -600,6 +643,7 @@ async fn connect_process(
         hello,
         closed,
         disposer,
+        tasks: scope,
     })
 }
 
@@ -741,8 +785,11 @@ mod tests {
         let (_abort_tx, abort) = watch::channel(false);
         let logs = Arc::new(Mutex::new(Vec::new()));
         let sink = logs.clone();
+        let scope = zcode_async::TaskScope::root("remote", |panic| panic!("{panic:?}"));
         let connection = transport
             .connect(ConnectParams {
+                spawner: scope.spawner(),
+                request_id: "r1".into(),
                 target: json!({"kind": "docker", "container": "c"}),
                 remote_assets: json!({}),
                 remote_runtime_network: None,
@@ -754,9 +801,20 @@ mod tests {
             .unwrap();
         assert_eq!(connection.hello["version"], "9.9.9");
         assert!(logs.lock().unwrap()[0].contains("9.9.9"));
+        assert!(!scope.spawner().running().is_empty());
         connection.dispose().await;
         let event = connection.closed().await;
         assert!(event.error.is_none());
+        // 连接的任务都属于它的作用域：释放时关闭作用域，剩下的任务被中止，随后一个不剩。
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !scope.spawner().running().is_empty() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "{:?}",
+                scope.spawner().running()
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         let _ = futures_util::stream::empty::<()>().next().await;
 
         let failing = ProcessTransport {
@@ -768,6 +826,8 @@ mod tests {
         let (_abort_tx, abort) = watch::channel(false);
         let error = failing
             .connect(ConnectParams {
+                spawner: zcode_host_base::testing::spawner(),
+                request_id: "r2".into(),
                 target: json!({}),
                 remote_assets: json!({}),
                 remote_runtime_network: None,

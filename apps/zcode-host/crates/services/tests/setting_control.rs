@@ -29,10 +29,14 @@ fn setup() -> Setup {
     let home = tempfile::tempdir().unwrap();
     let (sink, messages) = mpsc::unbounded_channel();
     let control: Arc<dyn ControlSink> = Arc::new(Control(sink));
-    let store =
-        SettingStore::with_change_sink(home.path(), settings_control::change_sink(control.clone()));
+    let spawner = zcode_host_services::testing::spawner();
+    let store = SettingStore::with_change_sink(
+        &spawner,
+        home.path(),
+        settings_control::change_sink(control.clone()),
+    );
     let mut router = ControlRouter::default();
-    settings_control::register_setting_writes(&mut router, store.clone(), control);
+    settings_control::register_setting_writes(&spawner, &mut router, store.clone(), control);
     Setup {
         _home: home,
         store,

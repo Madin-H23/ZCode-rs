@@ -25,6 +25,7 @@ tokio.workspace = true
 url.workspace = true
 zcode-kit.workspace = true
 zcode-shared.workspace = true
+zcode-async.workspace = true
 zcode-host-control.workspace = true
 zcode-host-kit.workspace = true
 zcode-host-runtime-link.workspace = true

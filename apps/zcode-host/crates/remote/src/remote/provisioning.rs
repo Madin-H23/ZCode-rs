@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
-use tokio::task::AbortHandle;
+use zcode_async::{Spawner, Task};
 use zcode_host_control::{ControlSink, HostToMain};
 use zcode_host_kit::RpcValue;
 use zcode_host_rpc::RpcClient;
@@ -104,7 +104,11 @@ impl ProvisioningSource {
     pub(crate) fn for_test(dir: &Path) -> Self {
         Self {
             personal_config_file: dir.join("provider_config.json"),
-            credentials: CredentialStore::new(dir, "test-secret"),
+            credentials: CredentialStore::new(
+                &zcode_host_base::testing::spawner(),
+                dir,
+                "test-secret",
+            ),
         }
     }
 
@@ -257,7 +261,11 @@ mod tests {
         // 密钥不匹配：解密失败让本次同步失败，而不是带着缺失的凭据继续。
         let wrong = ProvisioningSource {
             personal_config_file: dir.path().join("provider_config.json"),
-            credentials: CredentialStore::new(dir.path(), "other-secret"),
+            credentials: CredentialStore::new(
+                &zcode_host_base::testing::spawner(),
+                dir.path(),
+                "other-secret",
+            ),
         };
         assert!(
             wrong
@@ -292,15 +300,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sink = Arc::new(Sink(std::sync::Mutex::new(Vec::new())));
         let providers = crate::providers::ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
             Some(builtin_path()),
             dir.path().join("provider_config.json"),
         );
         let sources = ProvisioningSources {
-            settings: crate::settings::SettingStore::new(dir.path()),
-            credentials: CredentialStore::new(dir.path(), "test-secret"),
+            settings: crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                dir.path(),
+            ),
+            credentials: CredentialStore::new(
+                &zcode_host_base::testing::spawner(),
+                dir.path(),
+                "test-secret",
+            ),
             providers: providers.clone(),
         };
-        let tasks = watch_sources(&sources, sink.clone());
+        let tasks = watch_sources(&zcode_host_base::testing::spawner(), &sources, sink.clone());
         let triggers = || -> Vec<String> {
             sink.0
                 .lock()
@@ -375,10 +391,13 @@ pub struct ProvisioningSources {
 /// - Personal Provider Config：本进程提交的写入 → `personal-config`；
 /// - 设置里的 `providerFamilyDomain` / `providerFamilyConnectionSelections` → `account-settings`；
 /// - allowlist 内的凭据保存或删除 → `credential`。
+///
+/// 三个监听是 `spawner`（远端区域）作用域里的常驻任务。
 pub fn watch_sources(
+    spawner: &Spawner,
     sources: &ProvisioningSources,
     control: Arc<dyn ControlSink>,
-) -> Vec<AbortHandle> {
+) -> Vec<Task<Option<()>>> {
     let notify = move |trigger: &'static str| {
         control.send(HostToMain::Raw(json!({
             "type": "provider-provisioning-source-changed",
@@ -390,14 +409,13 @@ pub fn watch_sources(
     let credentials = sources.credentials.mutations().subscribe();
     let (on_personal, on_settings, on_credential) = (notify.clone(), notify.clone(), notify);
     vec![
-        tokio::spawn(async move {
+        spawner.spawn_resident("provisioning-personal-config", async move {
             let mut personal = Box::pin(personal);
             while personal.next().await.is_some() {
                 on_personal("personal-config");
             }
-        })
-        .abort_handle(),
-        tokio::spawn(async move {
+        }),
+        spawner.spawn_resident("provisioning-account-settings", async move {
             let mut settings = Box::pin(settings);
             while let Some(keys) = settings.next().await {
                 if keys.iter().any(|key| {
@@ -406,16 +424,14 @@ pub fn watch_sources(
                     on_settings("account-settings");
                 }
             }
-        })
-        .abort_handle(),
-        tokio::spawn(async move {
+        }),
+        spawner.spawn_resident("provisioning-credentials", async move {
             let mut credentials = Box::pin(credentials);
             while let Some(mutation) = credentials.next().await {
                 if is_provisioned_credential(&mutation.key) {
                     on_credential("credential");
                 }
             }
-        })
-        .abort_handle(),
+        }),
     ]
 }

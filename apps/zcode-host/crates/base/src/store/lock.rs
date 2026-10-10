@@ -2,11 +2,15 @@
 //!
 //! 锁是 `<file>.lock/` 目录，里面唯一的 `owner-<token>.json` 记录 `{pid, createdAt, token}`。
 //! 回收只针对 owner 已退出、或无 PID 且超过 grace 的锁；等到上限仍拿不到就报超时，
-//! 绝不越过上限去删别人的锁。进程内先按路径 FIFO 排队，每个进程只让队首竞争 OS 锁。
+//! 绝不越过上限去删别人的锁。
+//!
+//! 进程内的顺序由各文件的 owner 任务负责：Host 里每个经这里读改写的文件都只有一个写入方，它在自己的
+//! owner 任务里按提交顺序逐个调用 [`with_file_lock`]（docs/specs/rust-u2-task-scope.md §6.3）。原来这里
+//! 还有一个按路径的进程内 FIFO 队列（跨整个读改写持有 tokio 锁），在 owner 之下它已没有排队对象，随之
+//! 去掉。进程内若仍有并发调用，目录锁照样互斥（轮询等待），只是不保证先来先得。
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
@@ -385,27 +389,12 @@ fn instance_identity_key(_metadata: &std::fs::Metadata) -> (u64, u64) {
     (0, 0)
 }
 
-type Tail = Arc<tokio::sync::Mutex<()>>;
-
-fn process_tail(file: &Path) -> Tail {
-    static TAILS: OnceLock<Mutex<HashMap<PathBuf, Tail>>> = OnceLock::new();
-    let tails = TAILS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut tails = tails
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    tails.entry(file.to_owned()).or_default().clone()
-}
-
-/// 在跨进程锁内执行 `operation`。同一进程内对同一路径先 FIFO 排队（tokio Mutex 公平），
-/// 避免几十个调用方同时轮询目录锁形成惊群。
-#[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+/// 在跨进程锁内执行 `operation`。调用方是这个文件在本进程内的 owner 任务（见模块文档）。
 pub async fn with_file_lock<T>(
     file: &Path,
     options: &LockOptions,
     operation: impl AsyncFnOnce() -> Result<T>,
 ) -> Result<T> {
-    let tail = process_tail(file);
-    let _queue = tail.lock().await;
     if let Some(parent) = file.parent() {
         fs::create_dir_all(parent).await?;
     }
@@ -489,13 +478,14 @@ mod tests {
             .await;
     }
 
+    /// 没有 owner 的并发调用（进程内不应出现，见模块文档）仍由目录锁互斥：读改写不丢。
     #[tokio::test]
     async fn with_file_lock_serializes_read_modify_write() {
         let dir = tempfile::tempdir().unwrap();
-        let file = Arc::new(dir.path().join("counter.json"));
+        let file = std::sync::Arc::new(dir.path().join("counter.json"));
         std::fs::write(file.as_path(), "0").unwrap();
         let mut tasks = Vec::new();
-        for _ in 0..20 {
+        for _ in 0..4 {
             let file = file.clone();
             tasks.push(tokio::spawn(async move {
                 with_file_lock(&file, &LockOptions::default(), || async {
@@ -511,6 +501,6 @@ mod tests {
         for task in tasks {
             task.await.unwrap();
         }
-        assert_eq!(std::fs::read_to_string(file.as_path()).unwrap(), "20");
+        assert_eq!(std::fs::read_to_string(file.as_path()).unwrap(), "4");
     }
 }

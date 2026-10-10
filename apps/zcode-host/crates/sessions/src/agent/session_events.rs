@@ -16,7 +16,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use zcode_host_kit::{EventHub, EventStream, Reply, RpcError, log};
+use zcode_host_kit::{EventHub, EventStream, Overflow, Reply, RpcError, log};
 
 use super::extensions::AgentNotification;
 use super::runtime::{AgentRuntime, Lane, RuntimePolicy, WorkspaceTarget};
@@ -27,6 +27,8 @@ const RETRY_MAX: Duration = Duration::from_secs(5);
 const MAX_ATTEMPTS: u32 = 8;
 const COALESCE_DEFAULT: Duration = Duration::from_millis(1_500);
 const COALESCE_MAX_ITEMS: usize = 96;
+/// 每个 legacy 监听的出口队列（条），满了结束监听。
+const LISTENER_QUEUE: usize = 4096;
 
 /// 一条共享事件：`session_id` 为 None 表示发给该 workspace 的全部会话（无 sessionId 的 state.updated）。
 #[derive(Debug)]
@@ -96,32 +98,38 @@ impl SessionEvents {
     pub fn start(runtime: AgentRuntime) -> Arc<Self> {
         let events = Arc::new(Self {
             runtime: runtime.clone(),
-            hub: EventHub::new(),
+            // legacy `zcode-session` 事件，订阅者是 Renderer 订阅（Gateway 立即搬进出站队列）；流式输出时每秒
+            // 数百条。落后 8192 条说明转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+            hub: EventHub::new("legacy-session-events", 8192, Overflow::CloseSubscriber),
             state: Mutex::new(State::default()),
         });
         let mut notifications = Box::pin(runtime.extensions().notifications().subscribe());
         let mut lifecycle = Box::pin(runtime.lifecycle().subscribe());
         let weak = Arc::downgrade(&events);
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    notification = notifications.next() => {
-                        let Some(notification) = notification else { return };
-                        let Some(events) = weak.upgrade() else { return };
-                        events.accept(&notification);
-                    }
-                    event = lifecycle.next() => {
-                        let Some(event) = event else { return };
-                        let Some(events) = weak.upgrade() else { return };
-                        if event["state"] == "unavailable"
-                            && let Some(key) = event["workspaceKey"].as_str()
-                        {
-                            events.forget_requests(key);
+        drop(
+            runtime
+                .spawner()
+                .spawn_resident("legacy-session-events", async move {
+                    loop {
+                        tokio::select! {
+                            notification = notifications.next() => {
+                                let Some(notification) = notification else { return };
+                                let Some(events) = weak.upgrade() else { return };
+                                events.accept(&notification);
+                            }
+                            event = lifecycle.next() => {
+                                let Some(event) = event else { return };
+                                let Some(events) = weak.upgrade() else { return };
+                                if event["state"] == "unavailable"
+                                    && let Some(key) = event["workspaceKey"].as_str()
+                                {
+                                    events.forget_requests(key);
+                                }
+                            }
                         }
                     }
-                }
-            }
-        });
+                }),
+        );
         events
     }
 
@@ -265,17 +273,26 @@ impl SessionEvents {
                 .map(|ms| Duration::from_millis(ms as u64))
                 .unwrap_or(COALESCE_DEFAULT)
         });
-        let (sender, receiver) = mpsc::unbounded_channel();
+        // 订阅者是 Renderer 的 legacy 会话订阅（Gateway 立即搬进出站队列）。监听任务不能为一个读得慢的
+        // 订阅停下（它同时在暂存 live 事件），落后 LISTENER_QUEUE 条时结束这个监听，已入队的照常送达
+        // （docs/specs/rust-u2-task-scope.md §6.2）。
+        let (sender, receiver) = mpsc::channel(LISTENER_QUEUE);
         let listener = Listener {
             events: self.clone(),
             target,
             session_id,
             params,
             sender,
+            overflowed: false,
             delivered: BoundedIds::default(),
             coalescer: coalesce.map(Coalescer::new),
         };
-        tokio::spawn(listener.run(Box::pin(live)));
+        // 监听随返回的事件流结束（订阅方丢弃流时 sender 关闭）；在 agent 的作用域里运行。
+        drop(
+            self.runtime
+                .spawner()
+                .spawn("legacy-session-listener", listener.run(Box::pin(live))),
+        );
         Ok(Box::pin(futures_util::stream::unfold(
             receiver,
             |mut receiver| async move {
@@ -293,7 +310,9 @@ struct Listener {
     target: WorkspaceTarget,
     session_id: String,
     params: Value,
-    sender: mpsc::UnboundedSender<Value>,
+    sender: mpsc::Sender<Value>,
+    /// 订阅方落后 LISTENER_QUEUE 条：监听结束。
+    overflowed: bool,
     delivered: BoundedIds,
     coalescer: Option<Coalescer>,
 }
@@ -367,6 +386,9 @@ impl Listener {
                     if let Some(snapshot) = result.get("snapshot").filter(|s| !s.is_null()) {
                         self.deliver(json!({"type": "snapshot", "snapshot": snapshot}));
                     }
+                    if self.overflowed {
+                        return;
+                    }
                     break;
                 }
                 Some(Err(error)) => {
@@ -401,7 +423,7 @@ impl Listener {
         for event in std::mem::take(&mut buffered) {
             self.deliver(event);
         }
-        loop {
+        while !self.overflowed {
             let deadline = self.coalescer.as_ref().and_then(Coalescer::deadline);
             tokio::select! {
                 item = live.next() => match item {
@@ -423,23 +445,36 @@ impl Listener {
                 return;
             }
         }
-        match &mut self.coalescer {
-            Some(coalescer) => {
-                for ready in coalescer.accept(event) {
-                    let _ = self.sender.send(ready);
-                }
-            }
-            None => {
-                let _ = self.sender.send(event);
-            }
+        let ready = match &mut self.coalescer {
+            Some(coalescer) => coalescer.accept(event),
+            None => vec![event],
+        };
+        for event in ready {
+            self.push(event);
         }
     }
 
     fn flush(&mut self) {
-        if let Some(coalescer) = &mut self.coalescer {
-            for ready in coalescer.flush() {
-                let _ = self.sender.send(ready);
-            }
+        let ready = match &mut self.coalescer {
+            Some(coalescer) => coalescer.flush(),
+            None => Vec::new(),
+        };
+        for event in ready {
+            self.push(event);
+        }
+    }
+
+    fn push(&mut self, event: Value) {
+        if self.overflowed {
+            return;
+        }
+        if let Err(mpsc::error::TrySendError::Full(_)) = self.sender.try_send(event) {
+            self.overflowed = true;
+            log::warn(format!(
+                "legacy session listener fell {LISTENER_QUEUE} events behind; ending it session={} workspace={}",
+                self.session_id,
+                self.target.key()
+            ));
         }
     }
 }
@@ -623,13 +658,21 @@ mod tests {
 
     fn runtime() -> AgentRuntime {
         AgentRuntime::new(
+            &zcode_host_base::testing::spawner(),
             crate::agent::AgentRuntimeConfig {
                 base_env: Default::default(),
                 command_vars: Default::default(),
                 fallback_cwd: None,
             },
-            crate::settings::SettingStore::new(std::path::Path::new("/nonexistent")),
-            crate::providers::ProviderRuntime::new(None, "/nonexistent/p.json".into()),
+            crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                std::path::Path::new("/nonexistent"),
+            ),
+            crate::providers::ProviderRuntime::new(
+                &zcode_host_base::testing::spawner(),
+                None,
+                "/nonexistent/p.json".into(),
+            ),
         )
     }
 

@@ -141,14 +141,23 @@ done
                 "integration".to_owned(),
             ),
         ]);
-        let settings = SettingStore::new(home);
-        let providers = ProviderRuntime::new(None, home.join("provider_config.json"));
+        let settings = SettingStore::new(&zcode_host_base::testing::spawner(), home);
+        let providers = ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
+            None,
+            home.join("provider_config.json"),
+        );
         let context = ServiceContext {
             environment: HostEnvironment::capture(vars).unwrap(),
             init: InitLocal::default(),
             control: Arc::new(NullSink),
         };
-        let account = AccountStack::new(&context, &settings, &providers);
+        let account = AccountStack::new(
+            &zcode_host_base::testing::spawner(),
+            &context,
+            &settings,
+            &providers,
+        );
         CodingPlanSubscription::new(
             account.api.clone(),
             account.account_api.clone(),
@@ -163,7 +172,7 @@ done
         let log = dir.join("calls.log");
         let cli = fake_cli(dir, &log);
         let plan = plan(&dir.join("account"), mode);
-        let settings = SettingStore::new(dir);
+        let settings = SettingStore::new(&zcode_host_base::testing::spawner(), dir);
         // 写入路径要求 provider 就绪：一个个人 API Key provider（不会发出请求）。
         let personal = dir.join("provider_config.json");
         std::fs::write(
@@ -189,8 +198,13 @@ done
         .unwrap();
         let builtin = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../config/provider/zcode-builtin.json");
-        let providers = ProviderRuntime::new(Some(builtin), personal);
+        let providers = ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
+            Some(builtin),
+            personal,
+        );
         let runtime = AgentRuntime::new(
+            &zcode_host_base::testing::spawner(),
             AgentRuntimeConfig {
                 base_env: BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]),
                 command_vars: BTreeMap::from([(

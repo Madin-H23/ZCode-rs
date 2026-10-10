@@ -19,6 +19,7 @@ sha2.workspace = true
 tokio.workspace = true
 url.workspace = true
 zcode-shared.workspace = true
+zcode-async.workspace = true
 zcode-host-kit.workspace = true
 
 [dev-dependencies]

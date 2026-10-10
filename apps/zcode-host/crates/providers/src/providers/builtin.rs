@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 use futures_util::FutureExt;
 use futures_util::future::{BoxFuture, Shared};
 use serde_json::{Map, Value, json};
-use zcode_host_kit::log;
+use zcode_async::Spawner;
+use zcode_host_kit::{Serial, log};
 
 use crate::store::atomic::atomic_write_private_text;
 use crate::store::lock::{LockOptions, with_file_lock};
@@ -253,6 +254,9 @@ type RefreshFuture = Shared<BoxFuture<'static, Result<String, String>>>;
 pub struct BuiltinSource {
     bundled: PathBuf,
     environment: BuiltinEnvironment,
+    /// Active 与控制文件在本进程内的唯一写入方：每次持跨进程锁的读改写在这个 owner 任务里逐个执行
+    /// （docs/specs/rust-u2-task-scope.md §6.3）；跨进程互斥由文件锁负责。
+    files: Serial,
     in_flight: Mutex<Option<RefreshFuture>>,
     now: Arc<dyn Fn() -> i64 + Send + Sync>,
 }
@@ -265,11 +269,13 @@ fn now_ms() -> i64 {
 }
 
 impl BuiltinSource {
-    pub fn new(bundled: PathBuf, environment: BuiltinEnvironment) -> Arc<Self> {
-        Self::with_clock(bundled, environment, Arc::new(now_ms))
+    /// 文件读改写的 owner 任务 `builtin-config-files` 在 `spawner` 的作用域里。
+    pub fn new(spawner: &Spawner, bundled: PathBuf, environment: BuiltinEnvironment) -> Arc<Self> {
+        Self::with_clock(spawner, bundled, environment, Arc::new(now_ms))
     }
 
     pub fn with_clock(
+        spawner: &Spawner,
         bundled: PathBuf,
         environment: BuiltinEnvironment,
         now: Arc<dyn Fn() -> i64 + Send + Sync>,
@@ -277,6 +283,8 @@ impl BuiltinSource {
         Arc::new(Self {
             bundled,
             environment,
+            // 读取（轮询）与刷新的读改写，排队超过 16 个时提交方等待。
+            files: Serial::start(spawner, "builtin-config-files", 16),
             in_flight: Mutex::new(None),
             now,
         })
@@ -362,23 +370,45 @@ impl BuiltinSource {
         }
     }
 
+    /// 在文件的 owner 任务里、持跨进程锁执行一次读改写。
+    async fn locked<T, Operation, Locked>(
+        &self,
+        file: PathBuf,
+        operation: Operation,
+    ) -> Result<T, String>
+    where
+        Operation: FnOnce() -> Locked + Send + 'static,
+        Locked: std::future::Future<Output = anyhow::Result<T>> + Send,
+        T: Send + 'static,
+    {
+        self.files
+            .run(async move {
+                with_file_lock(&file, &LockOptions::default(), async move || {
+                    operation().await
+                })
+                .await
+            })
+            .await
+            .map_err(|stopped| stopped.to_string())?
+            .map_err(|error| error.to_string())
+    }
+
     /// 锁内重读并把 Active 对齐到选中的 Release，返回 Active 的字节。
     async fn materialize(&self, active: &Path) -> Result<Vec<u8>, String> {
         let bundled = self.bundled.clone();
         let active_path = active.to_path_buf();
-        with_file_lock(active, &LockOptions::default(), async || {
+        self.locked(active.to_path_buf(), async move || {
             let (selected, _) = materialize_locked(&bundled, &active_path).await?;
             Ok(selected)
         })
         .await
-        .map_err(|error| error.to_string())
     }
 
     /// `applyRemoteRelease`：`updated` / `unchanged` / `stale`。
     async fn apply_remote(&self, active: &Path, release: Release) -> Result<&'static str, String> {
         let bundled = self.bundled.clone();
         let active_path = active.to_path_buf();
-        with_file_lock(active, &LockOptions::default(), async || {
+        self.locked(active.to_path_buf(), async move || {
             let (_, current) = materialize_locked(&bundled, &active_path).await?;
             if release.revision < current.revision {
                 return Ok("stale");
@@ -396,7 +426,6 @@ impl BuiltinSource {
             Ok("updated")
         })
         .await
-        .map_err(|error| error.to_string())
     }
 
     /// `refresh({ force })`：同一时刻只有一个刷新在途，并发调用共享结果。
@@ -431,7 +460,7 @@ impl BuiltinSource {
         let acquired = {
             let (control, endpoint, lease_id) =
                 (paths.control.clone(), endpoint.clone(), lease_id.clone());
-            with_file_lock(&paths.control, &LockOptions::default(), async || {
+            self.locked(paths.control.clone(), async move || {
                 let current = read_control(&control).await;
                 let same = current["endpointKey"] == endpoint.as_str();
                 if same && current["leaseUntil"].as_f64().unwrap_or(0.0) > now as f64 {
@@ -465,8 +494,7 @@ impl BuiltinSource {
                 write_control(&control, &Value::Object(next)).await?;
                 Ok(None)
             })
-            .await
-            .map_err(|error| error.to_string())?
+            .await?
         };
         if let Some(reason) = acquired {
             log::debug(format!("ZCode Built-in 刷新检查: skipped ({reason})"));
@@ -505,34 +533,41 @@ impl BuiltinSource {
 
     async fn finish_lease(&self, control: &Path, endpoint: &str, lease_id: &str, success: bool) {
         let now = (self.now)();
-        let result = with_file_lock(control, &LockOptions::default(), async || {
-            let current = read_control(control).await;
-            if current["endpointKey"] != endpoint || current["leaseId"] != lease_id {
-                return Ok(());
-            }
-            let previous = current["failureCount"].as_u64().unwrap_or(0);
-            let failure_count = if success { 0 } else { previous + 1 };
-            let delay = if success {
-                HOUR_MS
-            } else {
-                let exponent = failure_count.saturating_sub(1).min(32) as u32;
-                FAILURE_BASE_DELAY_MS
-                    .saturating_mul(2i64.saturating_pow(exponent))
-                    .min(HOUR_MS)
-            };
-            write_control(
-                control,
-                &json!({
-                    "schemaVersion": 1,
-                    "endpointKey": endpoint,
-                    "leaseUntil": 0,
-                    "nextEligibleAt": now + delay,
-                    "failureCount": failure_count,
-                }),
-            )
-            .await
-        })
-        .await;
+        let (path, endpoint, lease_id) = (
+            control.to_path_buf(),
+            endpoint.to_owned(),
+            lease_id.to_owned(),
+        );
+        let control = path.clone();
+        let result = self
+            .locked(path, async move || {
+                let current = read_control(&control).await;
+                if current["endpointKey"] != endpoint || current["leaseId"] != lease_id {
+                    return Ok(());
+                }
+                let previous = current["failureCount"].as_u64().unwrap_or(0);
+                let failure_count = if success { 0 } else { previous + 1 };
+                let delay = if success {
+                    HOUR_MS
+                } else {
+                    let exponent = failure_count.saturating_sub(1).min(32) as u32;
+                    FAILURE_BASE_DELAY_MS
+                        .saturating_mul(2i64.saturating_pow(exponent))
+                        .min(HOUR_MS)
+                };
+                write_control(
+                    &control,
+                    &json!({
+                        "schemaVersion": 1,
+                        "endpointKey": endpoint,
+                        "leaseUntil": 0,
+                        "nextEligibleAt": now + delay,
+                        "failureCount": failure_count,
+                    }),
+                )
+                .await
+            })
+            .await;
         if let Err(error) = result {
             log::warn(format!("ZCode Built-in 刷新控制文件写入失败: {error}"));
         }
@@ -611,6 +646,7 @@ mod tests {
     ) -> Arc<BuiltinSource> {
         let bundled = dir.join("bundled.json");
         BuiltinSource::with_clock(
+            &zcode_host_base::testing::spawner(),
             bundled,
             BuiltinEnvironment {
                 config_root: dir.join("v2"),

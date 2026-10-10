@@ -8,7 +8,7 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
-use zcode_host_kit::{Args, Reply, RpcError, ServiceBuilder};
+use zcode_host_kit::{Args, EventHub, Overflow, Reply, RpcError, ServiceBuilder};
 
 use super::repo::{RepoFilter, TaskRepo};
 use super::{Partitions, SessionSignals, TaskSource, WorkspaceEvent, WorkspaceEvents};
@@ -56,7 +56,9 @@ impl TaskService {
         Arc::new(Self {
             repo,
             events,
-            signals: SessionSignals::new(),
+            // 会话终态迁移，订阅者是 TaskLifecycle（同步转成终态 / ready 事件）。落后 1024 条说明它卡住，
+            // 结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+            signals: EventHub::new("task-session-signals", 1024, Overflow::CloseSubscriber),
             runtime,
         })
     }
@@ -455,13 +457,21 @@ mod tests {
 
     fn runtime() -> AgentRuntime {
         AgentRuntime::new(
+            &zcode_host_base::testing::spawner(),
             crate::agent::AgentRuntimeConfig {
                 base_env: Default::default(),
                 command_vars: Default::default(),
                 fallback_cwd: None,
             },
-            crate::settings::SettingStore::new(std::path::Path::new("/nonexistent")),
-            crate::providers::ProviderRuntime::new(None, "/nonexistent/p.json".into()),
+            crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                std::path::Path::new("/nonexistent"),
+            ),
+            crate::providers::ProviderRuntime::new(
+                &zcode_host_base::testing::spawner(),
+                None,
+                "/nonexistent/p.json".into(),
+            ),
         )
     }
 
@@ -475,7 +485,7 @@ mod tests {
         ])
         .await
         .unwrap();
-        let events = WorkspaceEvents::new();
+        let events = crate::tasks::workspace_events();
         let mut seen = Box::pin(events.subscribe_filtered(|event| event.workspace_key == "/w"));
         let task = TaskService::new(repo.clone(), events, runtime());
         let target = WorkspaceTarget::local("/w");

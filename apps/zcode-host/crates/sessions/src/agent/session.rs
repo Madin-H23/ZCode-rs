@@ -584,7 +584,8 @@ pub fn service(sessions: Arc<SessionService>) -> ServiceBuilder {
 pub fn warm_up(runtime: AgentRuntime, targets: Vec<WorkspaceTarget>) {
     for target in targets {
         let runtime = runtime.clone();
-        tokio::spawn(async move {
+        let spawner = runtime.spawner().clone();
+        drop(spawner.spawn("warm-up", async move {
             let result = runtime.initialize(&target).await;
             let workspace = &target.workspace_path;
             if result["available"] == true {
@@ -599,7 +600,7 @@ pub fn warm_up(runtime: AgentRuntime, targets: Vec<WorkspaceTarget>) {
                     result["reason"].as_str().unwrap_or("unknown")
                 ));
             }
-        });
+        }));
     }
 }
 
@@ -624,13 +625,21 @@ mod tests {
 
     fn offline_sessions() -> Arc<SessionService> {
         let runtime = AgentRuntime::new(
+            &zcode_host_base::testing::spawner(),
             crate::agent::AgentRuntimeConfig {
                 base_env: Default::default(),
                 command_vars: Default::default(),
                 fallback_cwd: None,
             },
-            crate::settings::SettingStore::new(std::path::Path::new("/nonexistent")),
-            crate::providers::ProviderRuntime::new(None, "/nonexistent/p.json".into()),
+            crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                std::path::Path::new("/nonexistent"),
+            ),
+            crate::providers::ProviderRuntime::new(
+                &zcode_host_base::testing::spawner(),
+                None,
+                "/nonexistent/p.json".into(),
+            ),
         );
         let api = AgentApi::new(
             runtime,

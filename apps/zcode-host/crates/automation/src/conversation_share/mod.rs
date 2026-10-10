@@ -244,6 +244,7 @@ pub fn install(
         .join("workspace")
         .join("default");
     let importer = Importer::new(
+        &area.spawner,
         area.agent.clone(),
         Some(area.tasks.clone()),
         client.clone(),
@@ -251,11 +252,19 @@ pub fn install(
         share_web_url,
     );
     let cleanup = importer.clone();
-    tokio::spawn(async move { cleanup.cleanup_abandoned().await });
+    drop(area.spawner.spawn("share-cleanup-abandoned", async move {
+        cleanup.cleanup_abandoned().await
+    }));
     let service = Arc::new(ShareService {
         client,
         importer,
-        publish_progress: zcode_host_kit::EventHub::new(),
+        // 发布进度（最后一条是终态，不能合并），订阅者是 Renderer 订阅；落后 256 条说明转发卡住，结束它的
+        // 订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+        publish_progress: zcode_host_kit::EventHub::new(
+            "share-publish-progress",
+            256,
+            zcode_host_kit::Overflow::CloseSubscriber,
+        ),
     });
     registry.implement(channel(service.clone()));
     Some(Box::new(service))

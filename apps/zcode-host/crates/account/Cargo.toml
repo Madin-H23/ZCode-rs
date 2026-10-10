@@ -30,6 +30,7 @@ sha2.workspace = true
 tokio.workspace = true
 url.workspace = true
 zip.workspace = true
+zcode-async.workspace = true
 zcode-host-control.workspace = true
 zcode-host-kit.workspace = true
 

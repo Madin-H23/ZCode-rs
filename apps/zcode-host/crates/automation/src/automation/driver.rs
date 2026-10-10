@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::{Stream, StreamExt};
 use serde_json::{Map, Value, json};
-use zcode_host_kit::{EventHub, RpcError, log};
+use zcode_async::Spawner;
+use zcode_host_kit::{EventHub, Overflow, RpcError, log};
 
 use crate::agent::extensions::UseReason;
 use crate::agent::sessions_index::{IndexEvent, SessionsIndexObserver};
@@ -140,7 +141,9 @@ fn command_error(kind: &str, ack: &Value, context: &str) -> RpcError {
 }
 
 impl TaskDriver {
+    /// 观察 sessions-index 的常驻任务 `task-driver-observe` 在 `spawner` 的作用域里。
     pub fn start(
+        spawner: &Spawner,
         agent: AgentRuntime,
         tasks: Arc<TaskService>,
         observer: &SessionsIndexObserver,
@@ -148,20 +151,22 @@ impl TaskDriver {
         let driver = Arc::new(Self {
             agent,
             tasks,
-            terminal: EventHub::new(),
+            // 订阅者是 bots 的回复观察与 automation 的等待方（同步过滤后结束或转发），每轮一条；落后 1024 条
+            // 说明订阅者卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+            terminal: EventHub::new("automation-terminal", 1024, Overflow::CloseSubscriber),
             client_id: format!("host-services-{}", uuid_v7()),
             active_inputs: Mutex::new(HashMap::new()),
         });
         let mut events = Box::pin(observer.events().subscribe());
         let weak = Arc::downgrade(&driver);
-        tokio::spawn(async move {
+        drop(spawner.spawn_resident("task-driver-observe", async move {
             while let Some(event) = events.next().await {
                 let Some(driver) = weak.upgrade() else {
                     return;
                 };
                 driver.observe(&event);
             }
-        });
+        }));
         driver
     }
 

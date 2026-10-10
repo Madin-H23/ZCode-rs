@@ -16,7 +16,7 @@ use super::provisioning::ProvisioningSource;
 use super::{RemoteConfig, install_with};
 use crate::agent::WorkspaceTarget;
 use crate::tasks::controller::Controller;
-use crate::tasks::{Partitions, TaskSource, WorkspaceEvents};
+use crate::tasks::{Partitions, TaskSource, workspace_events};
 
 fn context(connection: u64) -> CallContext {
     CallContext {
@@ -91,7 +91,7 @@ async fn agent_scope_stages_routes_and_cleans_up_ownership() {
         );
         Ok(json!({"ack": {"subscriptionId": "sub-1"}}))
     });
-    let channel = RemoteAgentChannel::new(client);
+    let channel = RemoteAgentChannel::new(&zcode_host_base::testing::spawner(), client);
     let desktop = context(1);
     let target = json!({"workspacePath": "/w", "workspaceIdentity": "remote:docker:c:/w", "sessionId": "s1"});
 
@@ -323,8 +323,12 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
     let mut router = ControlRouter::default();
     let workspaces = install_with(
         RemoteConfig {
+            spawner: zcode_host_base::testing::spawner(),
             transport: Arc::new(transport),
-            settings: crate::settings::SettingStore::new(home.path()),
+            settings: crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                home.path(),
+            ),
             control: Arc::new(Control(sink)),
             provisioning: ProvisioningSource::for_test(home.path()),
             media_range_enabled: true,
@@ -333,19 +337,25 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
         &mut router,
     );
     let runtime = crate::agent::AgentRuntime::new(
+        &zcode_host_base::testing::spawner(),
         crate::agent::AgentRuntimeConfig {
             base_env: Default::default(),
             command_vars: Default::default(),
             fallback_cwd: None,
         },
-        crate::settings::SettingStore::new(home.path()),
-        crate::providers::ProviderRuntime::new(None, home.path().join("pc.json")),
+        crate::settings::SettingStore::new(&zcode_host_base::testing::spawner(), home.path()),
+        crate::providers::ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
+            None,
+            home.path().join("pc.json"),
+        ),
     );
     let local = Arc::new(LocalTasks(Mutex::new(Vec::new())));
     let controller = Controller::start(
+        &zcode_host_base::testing::spawner(),
         local.clone(),
         crate::agent::sessions_index::SessionsIndexObserver::start(runtime),
-        WorkspaceEvents::new(),
+        workspace_events(),
     );
     workspaces.sources().attach_to(&controller);
     let service = crate::tasks::controller::service(controller.clone()).build(None);
@@ -515,8 +525,12 @@ async fn remote_resource_facts_reach_main() {
     let mut router = ControlRouter::default();
     let _workspaces = install_with(
         RemoteConfig {
+            spawner: zcode_host_base::testing::spawner(),
             transport: Arc::new(transport),
-            settings: crate::settings::SettingStore::new(home.path()),
+            settings: crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                home.path(),
+            ),
             control: Arc::new(Control(sink)),
             provisioning: ProvisioningSource::for_test(home.path()),
             media_range_enabled: true,
@@ -580,8 +594,12 @@ async fn remote_attachments_route_usage_and_share_like_node() {
     let mut router = ControlRouter::default();
     let workspaces = install_with(
         RemoteConfig {
+            spawner: zcode_host_base::testing::spawner(),
             transport: Arc::new(transport),
-            settings: crate::settings::SettingStore::new(home.path()),
+            settings: crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                home.path(),
+            ),
             control: Arc::new(Control(sink)),
             provisioning: ProvisioningSource::for_test(home.path()),
             media_range_enabled: true,

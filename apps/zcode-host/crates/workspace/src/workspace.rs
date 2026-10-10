@@ -4,11 +4,13 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use serde_json::Value;
+use zcode_async::{Spawner, TaskScope};
 use zcode_host_control::ControlRouter;
 use zcode_host_kit::{ChannelRegistry, RpcError};
 
 use crate::agent::api::AgentApi;
 use crate::agent::runtime::AgentRuntime;
+use crate::file_watcher::FileWatchers;
 use crate::git::commit_message::{TextGenerator, runtime_locale};
 use crate::git::{self, CommitMessageSupport, checkpoint, repo::GitRepo};
 use crate::main_bridge::MainBridge;
@@ -46,6 +48,8 @@ impl TextGenerator for AgentTextGenerator {
 }
 
 pub struct WorkspaceDeps<'a> {
+    /// 工作区的作用域（`host/services/workspace`）：终端、文件监听、git 的任务在它的子作用域里。
+    pub spawner: &'a Spawner,
     pub environment: &'a HostEnvironment,
     pub child_env: &'a ProcessEnv,
     pub settings: SettingStore,
@@ -59,11 +63,18 @@ pub struct WorkspaceDeps<'a> {
 /// Host 退出时需要回收的工作区资源。
 pub struct Workspace {
     terminals: Terminals,
+    file_watchers: FileWatchers,
+    /// `file-watchers`、`terminals`、`git` 三个子作用域，随工作区存在。
+    _scopes: [TaskScope; 3],
 }
 
 impl Workspace {
     pub fn shutdown(&self) {
         self.terminals.dispose_all();
+        // 缺陷修复：Host 退出时原来不释放文件监听（Node 的 disposeServiceResources 会调用它的
+        // disposeAll），页面没有逐个 unwatch 的监听连同它们的防抖任务一直留到进程结束，关闭报告把它们
+        // 列为被中止的任务。现在与终端一样在有序收尾里释放。
+        self.file_watchers.dispose_all();
     }
 }
 
@@ -72,11 +83,19 @@ pub fn install(
     registry: &mut ChannelRegistry,
     router: &mut ControlRouter,
 ) -> Workspace {
-    registry.implement(file_watcher::service(file_watcher::FileWatchers::new()));
-    let terminals = Terminals::new(deps.child_env.clone(), deps.settings);
+    let child = |name: &str| deps.spawner.child(name.to_owned());
+    let (watchers, terminal_tasks, git_tasks) =
+        (child("file-watchers"), child("terminals"), child("git"));
+    let file_watchers = FileWatchers::new(&watchers.spawner());
+    registry.implement(file_watcher::service(file_watchers.clone()));
+    let terminals = Terminals::new(
+        &terminal_tasks.spawner(),
+        deps.child_env.clone(),
+        deps.settings,
+    );
     registry.implement(terminal::service(terminals.clone()));
 
-    let repo = GitRepo::new(deps.child_env);
+    let repo = GitRepo::new(&git_tasks.spawner(), deps.child_env);
     let generator: Arc<dyn TextGenerator> = Arc::new(AgentTextGenerator {
         agent: deps.agent_api,
         providers: deps.providers,
@@ -90,6 +109,7 @@ pub fn install(
     ));
     let data_root = deps.environment.data_base_dir.join(".zcode");
     registry.implement(checkpoint::service(checkpoint::Checkpoints::new(
+        &git_tasks.spawner(),
         repo,
         data_root,
         deps.environment.app_config_dir(),
@@ -102,5 +122,9 @@ pub fn install(
         .set_media_path_authorizer(authorizer.clone());
     registry.implement(media_preview::service(Some(authorizer)));
     registry.implement(prompt_attachment_transfer::service());
-    Workspace { terminals }
+    Workspace {
+        terminals,
+        file_watchers,
+        _scopes: [watchers, terminal_tasks, git_tasks],
+    }
 }

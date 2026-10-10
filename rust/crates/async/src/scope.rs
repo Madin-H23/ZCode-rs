@@ -241,6 +241,21 @@ impl Spawner {
         })
     }
 
+    /// 启动一个常驻任务：没有自己的收口步骤、随作用域一直运行的循环（轮询、事件转发、owner 任务）。
+    /// 作用域收到取消信号（[`TaskScope::close`] 的第一步，或父作用域的取消）时，future 在当前等待点
+    /// 被丢弃、任务正常结束，句柄得到 `Ok(None)`；`close` 因此不把它列为被中止的任务。对任务本身来说，
+    /// 这与被中止没有区别：都是在一个等待点上丢弃 future。
+    pub fn spawn_resident<F>(&self, name: &'static str, future: F) -> Task<Option<F::Output>>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.spawn(
+            name,
+            self.0.cancel.clone().run_until_cancelled_owned(future),
+        )
+    }
+
     /// 在阻塞线程池里运行同步代码。已经开始运行的阻塞任务无法被中止。
     pub fn spawn_blocking<F, T>(&self, name: &'static str, work: F) -> Task<T>
     where

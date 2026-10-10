@@ -4,11 +4,12 @@ use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
-use futures_util::FutureExt;
+use futures_util::stream::FuturesUnordered;
+use futures_util::{FutureExt, StreamExt};
 use serde_json::Value;
 use tokio::sync::mpsc;
-use tokio::task::{JoinError, JoinSet};
 use tokio::time::{Instant, MissedTickBehavior};
+use zcode_async::{OwnedTask, TaskError};
 use zcode_host_kit::log;
 
 use super::settle::{self, InFlight, OffPeakRetry, Trigger};
@@ -62,7 +63,8 @@ pub(super) struct Actor {
     retry: OffPeakRetry,
     /// 上次上报的执行中计数；None 表示还没上报过。
     last_active_count: Option<u64>,
-    dispatches: JoinSet<Settlement>,
+    /// 在途派发：由 actor 持有的结构化任务（丢弃即中止），actor 等待并结算它们。
+    dispatches: FuturesUnordered<OwnedTask<Settlement>>,
     #[cfg(test)]
     ticks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -76,7 +78,7 @@ impl Actor {
             off_peak_in_flight: HashSet::new(),
             retry: OffPeakRetry::default(),
             last_active_count: None,
-            dispatches: JoinSet::new(),
+            dispatches: FuturesUnordered::new(),
             #[cfg(test)]
             ticks: std::sync::Arc::default(),
         }
@@ -116,7 +118,7 @@ impl Actor {
             tokio::select! {
                 biased;
                 command = commands.recv() => break command,
-                Some(joined) = self.dispatches.join_next(), if !self.dispatches.is_empty() => {
+                Some(joined) = self.dispatches.next(), if !self.dispatches.is_empty() => {
                     self.settle(joined, &wake).await;
                 }
                 () = wake.notified() => self.tick(&wake).await,
@@ -260,12 +262,12 @@ impl Actor {
         };
         let dispatch = self.deps.cron.dispatch(request);
         let run_id = run_id.to_owned();
-        self.dispatches.spawn(async move {
+        self.dispatches.push(zcode_async::owned(async move {
             Settlement::Cron {
                 run_id,
                 result: caught(dispatch).await,
             }
-        });
+        }));
     }
 
     /// 退避中的任务立即释放认领等下轮（进程内退避表；每轮 claim + release 两次写，任务数小，可忽略）。
@@ -287,12 +289,12 @@ impl Actor {
         };
         let dispatch = self.deps.off_peak_dispatch.dispatch(request);
         let task_id = id.clone();
-        self.dispatches.spawn(async move {
+        self.dispatches.push(zcode_async::owned(async move {
             Settlement::OffPeak {
                 id: task_id,
                 result: caught(dispatch).await,
             }
-        });
+        }));
         log::info(format!("[scheduler] off-peak dispatch requested task={id}"));
         Ok(())
     }
@@ -311,7 +313,7 @@ impl Actor {
         }
     }
 
-    async fn settle(&mut self, joined: Result<Settlement, JoinError>, wake: &WakeSignal) {
+    async fn settle(&mut self, joined: Result<Settlement, TaskError>, wake: &WakeSignal) {
         let now = self.now();
         match joined {
             Ok(Settlement::Cron { run_id, result }) => {
@@ -353,10 +355,12 @@ impl Actor {
     /// 退出：先结算已经完成的派发，再取消在途派发，最后释放仍在途的认领（避免下次启动等认领超时）。
     async fn dispose(&mut self) {
         let wake = self.deps.wake.clone();
-        self.dispatches.abort_all();
-        while let Some(joined) = self.dispatches.join_next().await {
+        for dispatch in self.dispatches.iter() {
+            dispatch.abort();
+        }
+        while let Some(joined) = self.dispatches.next().await {
             // 取消前已经完成的派发（prompt 已发出）照常结算，不能当作未派发释放。
-            if !matches!(&joined, Err(error) if error.is_cancelled()) {
+            if !matches!(&joined, Err(TaskError::Aborted)) {
                 self.settle(joined, &wake).await;
             }
         }

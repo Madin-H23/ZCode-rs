@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex, Weak};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use sha2::Digest;
-use zcode_host_kit::{RpcError, log};
+use zcode_async::Spawner;
+use zcode_host_kit::{RpcError, Serial, log};
 
 use super::account_providers::AccountProviderSource;
 use super::auth::AccountRequestAuth;
@@ -107,25 +108,36 @@ pub fn captured_telemetry_env(vars: &BTreeMap<String, String>) -> BTreeMap<Strin
 
 struct Tracked {
     process: Weak<AgentProcess>,
-    /// 串行化同一进程的读取与交付；值是已确认收到的 revision。
-    received: Arc<tokio::sync::Mutex<Option<String>>>,
+    /// 同一进程的读取与交付在这个 owner 任务里逐个执行（实例的作用域里，随实例结束）。
+    delivery: Serial,
+    /// 已确认收到的 revision；只在 `delivery` 的工作里读写。
+    received: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Clone)]
 pub struct AccountConfigSync {
+    /// 账号的作用域：推送账号层变化的常驻任务在这里。
+    spawner: Spawner,
     source: AccountProviderSource,
     processes: Arc<Mutex<HashMap<(String, u64), Tracked>>>,
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 impl AccountConfigSync {
-    pub fn new(source: AccountProviderSource) -> Self {
+    pub fn new(spawner: &Spawner, source: AccountProviderSource) -> Self {
         Self {
+            spawner: spawner.clone(),
             source,
             processes: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    fn slot(&self, process: &Arc<AgentProcess>) -> Arc<tokio::sync::Mutex<Option<String>>> {
+    fn slot(&self, process: &Arc<AgentProcess>) -> (Serial, Arc<Mutex<Option<String>>>) {
         let mut processes = self
             .processes
             .lock()
@@ -136,18 +148,19 @@ impl AccountConfigSync {
                 .upgrade()
                 .is_some_and(|process| !process.client.is_closed())
         });
-        processes
+        let tracked = processes
             .entry((process.key.clone(), process.generation))
             .or_insert_with(|| Tracked {
                 process: Arc::downgrade(process),
-                received: Arc::new(tokio::sync::Mutex::new(None)),
-            })
-            .received
-            .clone()
+                // 一个进程的交付一次一个；排队超过 8 个时提交方等待。
+                delivery: Serial::start(process.tasks(), "account-config-delivery", 8),
+                received: Arc::new(Mutex::new(None)),
+            });
+        (tracked.delivery.clone(), tracked.received.clone())
     }
 
-    /// `syncAccountProviderConfigToClient`。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// `syncAccountProviderConfigToClient`。读取与交付在进程的 owner 任务里逐个执行：较早读到的快照
+    /// 不会在较新的之后交付（原来由跨读取与请求持有的 tokio 锁保证）。实例已结束时返回错误。
     pub async fn sync(&self, process: &Arc<AgentProcess>, reason: &str) -> Result<(), RpcError> {
         // 原生核心必须显式声明不支持；未声明时照常同步。
         if process
@@ -157,37 +170,17 @@ impl AccountConfigSync {
         {
             return Ok(());
         }
-        let slot = self.slot(process);
-        let mut received = slot.lock().await;
-        let snapshot = self
-            .source
-            .read()
+        let (delivery, received) = self.slot(process);
+        let (source, process, reason) = (self.source.clone(), process.clone(), reason.to_owned());
+        delivery
+            .run(async move { deliver(&source, &process, &received, &reason).await })
             .await
-            .map_err(|message| RpcError::new("Error", message))?;
-        if received.as_deref() == Some(snapshot.revision.as_str()) {
-            return Ok(());
-        }
-        let params = json!({
-            "revision": snapshot.revision,
-            "basedOnZCodeBuiltinRevision": snapshot.based_on_builtin_revision,
-            "providers": snapshot.providers,
-            "states": snapshot.states,
-        });
-        let result = process
-            .request_value("provider/updateAccountConfig", &params)
-            .await?;
-        if result["receivedRevision"] != snapshot.revision.as_str() {
-            return Err(RpcError::new(
-                "Error",
-                "Account Config 接收回执版本与交付版本不一致",
-            ));
-        }
-        *received = Some(snapshot.revision.clone());
-        log::info(format!(
-            "[zcode-agent] account provider config 已交付到 ZCode agent reason={reason} providerCount={} status={}",
-            result["providerCount"], result["status"]
-        ));
-        Ok(())
+            .unwrap_or_else(|stopped| {
+                Err(RpcError::new(
+                    "Error",
+                    format!("account config delivery stopped: {stopped}"),
+                ))
+            })
     }
 
     /// 任一仍在运行的已用进程（App 用量读全局会话库，任意 workspace 的 CLI 都可以）。
@@ -200,11 +193,12 @@ impl AccountConfigSync {
             .find(|process| !process.client.is_closed())
     }
 
-    /// 账号层变化：推送给仍在运行、用过的进程（`handleAccountProviderConfigChanged`）。
+    /// 账号层变化：推送给仍在运行、用过的进程（`handleAccountProviderConfigChanged`）。推送是账号作用域
+    /// 里的常驻任务 `account-config-push`。
     pub fn start_push(&self) {
         let sync = self.clone();
         let mut changes = Box::pin(self.source.changes().subscribe());
-        tokio::spawn(async move {
+        drop(self.spawner.spawn_resident("account-config-push", async move {
             while let Some(reason) = changes.next().await {
                 let processes: Vec<Arc<AgentProcess>> = sync
                     .processes
@@ -223,8 +217,45 @@ impl AccountConfigSync {
                     }
                 }
             }
-        });
+        }));
     }
+}
+
+/// 一次交付（在进程的交付 owner 任务里执行）：读当前快照，进程已收到这个 revision 时跳过。
+async fn deliver(
+    source: &AccountProviderSource,
+    process: &AgentProcess,
+    received: &Mutex<Option<String>>,
+    reason: &str,
+) -> Result<(), RpcError> {
+    let snapshot = source
+        .read()
+        .await
+        .map_err(|message| RpcError::new("Error", message))?;
+    if lock(received).as_deref() == Some(snapshot.revision.as_str()) {
+        return Ok(());
+    }
+    let params = json!({
+        "revision": snapshot.revision,
+        "basedOnZCodeBuiltinRevision": snapshot.based_on_builtin_revision,
+        "providers": snapshot.providers,
+        "states": snapshot.states,
+    });
+    let result = process
+        .request_value("provider/updateAccountConfig", &params)
+        .await?;
+    if result["receivedRevision"] != snapshot.revision.as_str() {
+        return Err(RpcError::new(
+            "Error",
+            "Account Config 接收回执版本与交付版本不一致",
+        ));
+    }
+    *lock(received) = Some(snapshot.revision.clone());
+    log::info(format!(
+        "[zcode-agent] account provider config 已交付到 ZCode agent reason={reason} providerCount={} status={}",
+        result["providerCount"], result["status"]
+    ));
+    Ok(())
 }
 
 type PendingKey = (String, u64, String, String);

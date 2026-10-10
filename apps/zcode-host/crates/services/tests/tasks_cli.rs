@@ -26,7 +26,7 @@ use zcode_host_services::settings::SettingStore;
 use zcode_host_services::tasks::context::{TaskContext, TaskPaths};
 use zcode_host_services::tasks::lifecycle::TaskLifecycle;
 use zcode_host_services::tasks::service::TaskService;
-use zcode_host_services::tasks::{WorkspaceEvents, syncer};
+use zcode_host_services::tasks::{syncer, workspace_events};
 use zcode_host_services::tasks_index::TasksIndex;
 
 /// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
@@ -183,23 +183,33 @@ async fn task_lifecycle_against_rust_cli() {
         ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
     ]);
     let command_vars = runtime_vars();
-    let settings = SettingStore::new(home.path());
+    let settings = SettingStore::new(&zcode_host_services::testing::spawner(), home.path());
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env,
             command_vars,
             fallback_cwd: None,
         },
         settings.clone(),
-        ProviderRuntime::new(Some(builtin), personal),
+        ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
+            Some(builtin),
+            personal,
+        ),
     );
     let index = TasksIndex::open(home.path().join(".zcode/v2/tasks-index.sqlite"), |_| {})
         .await
         .unwrap();
-    let events = WorkspaceEvents::new();
+    let events = workspace_events();
     let tasks = TaskService::new(Arc::new(index.clone()), events.clone(), runtime.clone());
     let observer = SessionsIndexObserver::start(runtime.clone());
-    let _syncer = syncer::start(&observer, runtime.clone(), tasks.clone());
+    syncer::start(
+        &zcode_host_services::testing::spawner(),
+        &observer,
+        runtime.clone(),
+        tasks.clone(),
+    );
     let context = TaskContext::new(
         TaskPaths {
             user_home: home.path().into(),
@@ -211,7 +221,7 @@ async fn task_lifecycle_against_rust_cli() {
         runtime.clone(),
         settings,
     );
-    let lifecycle = TaskLifecycle::start(context.clone());
+    let lifecycle = TaskLifecycle::start(&zcode_host_services::testing::spawner(), context.clone());
     let key = workspace_path.clone();
     let mut workspace_events = Box::pin(events.subscribe_filtered(move |e| e.workspace_key == key));
     let mut terminal = Box::pin(lifecycle.terminal_outcomes().subscribe());
@@ -338,6 +348,7 @@ async fn claude_import_against_rust_cli() {
         .join("../../../../config/provider/zcode-builtin.json");
     let home_text = home.path().to_string_lossy().into_owned();
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: BTreeMap::from([
                 ("HOME".to_owned(), home_text.clone()),
@@ -348,13 +359,17 @@ async fn claude_import_against_rust_cli() {
             command_vars: runtime_vars(),
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
-        ProviderRuntime::new(Some(builtin), personal),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
+        ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
+            Some(builtin),
+            personal,
+        ),
     );
     let index = TasksIndex::open(home.path().join(".zcode/v2/tasks-index.sqlite"), |_| {})
         .await
         .unwrap();
-    let events = WorkspaceEvents::new();
+    let events = workspace_events();
     let tasks = TaskService::new(Arc::new(index.clone()), events.clone(), runtime.clone());
     let context = TaskContext::new(
         TaskPaths {
@@ -365,9 +380,9 @@ async fn claude_import_against_rust_cli() {
         index.clone(),
         tasks,
         runtime.clone(),
-        SettingStore::new(home.path()),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
     );
-    let lifecycle = TaskLifecycle::start(context);
+    let lifecycle = TaskLifecycle::start(&zcode_host_services::testing::spawner(), context);
     // 一个普通会话、一个侧链会话、一个 worktree 下的会话；只有第一个可导入。
     let project = home.path().join(".claude/projects/-tmp-project");
     std::fs::create_dir_all(project.join("subagents")).unwrap();

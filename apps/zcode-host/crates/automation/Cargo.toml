@@ -34,6 +34,7 @@ sha2.workspace = true
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tokio.workspace = true
 url.workspace = true
+zcode-async.workspace = true
 zcode-host-control.workspace = true
 zcode-host-kit.workspace = true
 

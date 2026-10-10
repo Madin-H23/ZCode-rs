@@ -86,11 +86,17 @@ async fn make_temp_dir(root: &Path) -> std::io::Result<PathBuf> {
 }
 
 impl Checkpoints {
-    pub fn new(repo: GitRepo, data_root: PathBuf, app_config_dir: PathBuf) -> Self {
+    /// manifest IO 的 owner 任务在 `spawner` 的作用域里。
+    pub fn new(
+        spawner: &zcode_async::Spawner,
+        repo: GitRepo,
+        data_root: PathBuf,
+        app_config_dir: PathBuf,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 repo,
-                store: CheckpointStore::new(app_config_dir.join("checkpoints")),
+                store: CheckpointStore::new(spawner, app_config_dir.join("checkpoints")),
                 index_root: data_root.join("git-checkpoint-index"),
             }),
         }

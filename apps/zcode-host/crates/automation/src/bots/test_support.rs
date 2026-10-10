@@ -234,7 +234,7 @@ pub fn default_view() -> Value {
 impl Default for FakeTasks {
     fn default() -> Self {
         Self {
-            terminal: EventHub::new(),
+            terminal: EventHub::new("test", 1024, zcode_host_kit::Overflow::CloseSubscriber),
             created: Mutex::default(),
             sent: Mutex::default(),
             resolved: Mutex::default(),
@@ -650,10 +650,15 @@ pub fn bots_with_remote(
         .unwrap();
     }
     let bots = Bots::new(BotsDeps {
-        repo: BotsRepo::new(config_dir.clone()),
-        credentials: CredentialStore::new(&config_dir, "test"),
+        spawner: zcode_host_base::testing::spawner(),
+        repo: BotsRepo::new(&zcode_host_base::testing::spawner(), config_dir.clone()),
+        credentials: CredentialStore::new(
+            &zcode_host_base::testing::spawner(),
+            &config_dir,
+            "test",
+        ),
         providers: Arc::new(Providers::new(Endpoints::local(origin)).unwrap()),
-        settings: SettingStore::new(dir),
+        settings: SettingStore::new(&zcode_host_base::testing::spawner(), dir),
         tasks,
         remote,
         attachments_dir: config_dir.join("bot-attachments"),

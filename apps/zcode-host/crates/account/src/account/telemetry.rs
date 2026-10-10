@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
+use zcode_async::Spawner;
 use zcode_host_control::{ControlSink, HostToMain};
 
 const INTERVAL: Duration = Duration::from_secs(60);
@@ -94,12 +95,13 @@ fn sample(
     }))
 }
 
-pub fn start_host_resource_samples(control: Arc<dyn ControlSink>) {
+/// 采样是 `spawner` 作用域里的常驻任务 `host-resource-samples`。
+pub fn start_host_resource_samples(spawner: &Spawner, control: Arc<dyn ControlSink>) {
     let cpus = std::thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(1)
         .clamp(1, 4096);
-    tokio::spawn(async move {
+    drop(spawner.spawn_resident("host-resource-samples", async move {
         let mut baseline = cpu_time_us().map(|cpu| (cpu, Instant::now()));
         loop {
             tokio::time::sleep(INTERVAL).await;
@@ -114,7 +116,7 @@ pub fn start_host_resource_samples(control: Arc<dyn ControlSink>) {
                 ));
             }
         }
-    });
+    }));
 }
 
 #[cfg(test)]

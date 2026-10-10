@@ -24,6 +24,7 @@ use std::net::Ipv4Addr;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, bail};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -58,32 +59,148 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args> {
     Ok(Args { allowed_origins })
 }
 
-/// 控制消息只入队，由单独的写任务按顺序写入 stdout。
-struct StdoutControl(mpsc::UnboundedSender<HostToMain>);
+/// Host → Main 队列的容量（条，控制消息与日志合计）。
+///
+/// 发送方是同步的 [`ControlSink::send`]（Gateway 的连接循环、各 service 的任意线程），不能等待；
+/// 控制消息又多是 Main 在等的应答，不能悄悄丢。正常情况下每秒只有几条，写任务写满管道时才积压：
+/// 积压到这个数说明 Main 已经很久不读 stdout（挂起），继续缓存只会让 Host 的内存无界增长。此时丢弃
+/// 新消息并计数，写任务恢复时补一条 error 日志说明丢了多少（docs/specs/rust-u2-task-scope.md §6.2）。
+const CONTROL_QUEUE: usize = 65_536;
+/// 队列里日志最多占的条数。日志是诊断信息：占满名额时丢弃新日志并计数，恢复时补一条 warn；其余
+/// 名额留给控制消息。
+const LOG_QUEUE: usize = 8_192;
+
+/// 满了而被丢弃的消息数；写任务在下一次写出时报告并清零。
+#[derive(Default)]
+struct Dropped {
+    control: AtomicU64,
+    logs: AtomicU64,
+}
+
+/// 队列里的一条消息：日志占用 [`LOG_QUEUE`] 的名额，写出时归还。
+enum Queued {
+    Control(HostToMain),
+    Log(HostToMain),
+}
+
+/// 控制消息与日志只入队，由单独的写任务按入队顺序写入 stdout。
+///
+/// 两者共用一条队列：一条日志与它前后的控制消息在 Main 看到的顺序就是 Host 发出的顺序（例如先说明
+/// 启动为什么失败的 warn，再是 `database-startup-state: failed`）。分成两条队列、控制消息优先时这个
+/// 顺序会反过来。满了的策略见 [`CONTROL_QUEUE`] 与 [`LOG_QUEUE`]。
+#[derive(Clone)]
+struct StdoutControl {
+    messages: mpsc::Sender<Queued>,
+    /// 队列里还没写出的日志条数。
+    queued_logs: Arc<AtomicUsize>,
+    dropped: Arc<Dropped>,
+}
+
+impl StdoutControl {
+    fn new() -> (Self, mpsc::Receiver<Queued>) {
+        let (messages, queue) = mpsc::channel(CONTROL_QUEUE);
+        let control = Self {
+            messages,
+            queued_logs: Arc::default(),
+            dropped: Arc::default(),
+        };
+        (control, queue)
+    }
+
+    /// 写任务取出一条消息：日志归还它占的名额。
+    fn take(&self, queued: Queued) -> HostToMain {
+        match queued {
+            Queued::Control(message) => message,
+            Queued::Log(message) => {
+                self.queued_logs.fetch_sub(1, Ordering::Relaxed);
+                message
+            }
+        }
+    }
+}
 
 impl ControlSink for StdoutControl {
     fn send(&self, message: HostToMain) {
-        let _ = self.0.send(message);
+        if let Err(mpsc::error::TrySendError::Full(_)) =
+            self.messages.try_send(Queued::Control(message))
+        {
+            self.dropped.control.fetch_add(1, Ordering::Relaxed);
+        }
     }
 }
 
 impl log::LogSink for StdoutControl {
     fn log(&self, level: LogLevel, message: String) {
-        let _ = self.0.send(HostToMain::Log {
+        // 先占名额再入队：并发的日志不会一起越过上限。
+        if self.queued_logs.fetch_add(1, Ordering::Relaxed) >= LOG_QUEUE {
+            self.queued_logs.fetch_sub(1, Ordering::Relaxed);
+            self.dropped.logs.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        let log = HostToMain::Log {
             level,
             source: "zcode-host",
             message,
-        });
+        };
+        if let Err(error) = self.messages.try_send(Queued::Log(log)) {
+            self.queued_logs.fetch_sub(1, Ordering::Relaxed);
+            if matches!(error, mpsc::error::TrySendError::Full(_)) {
+                self.dropped.logs.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 }
 
-async fn write_control(mut messages: mpsc::UnboundedReceiver<HostToMain>) {
+async fn write_line(stdout: &mut tokio::io::Stdout, message: &HostToMain) -> bool {
+    let line = encode_line(message);
+    stdout.write_all(line.as_bytes()).await.is_ok() && stdout.flush().await.is_ok()
+}
+
+/// 等写任务写完此前入队的全部消息的请求（Host 退出前）。
+type Flush = tokio::sync::oneshot::Sender<()>;
+
+/// Host 退出前等写任务写完已入队消息的时限：Main 不读 stdout 时不让退出一直等。
+const FLUSH_ON_EXIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+async fn write_control(
+    control: StdoutControl,
+    mut queue: mpsc::Receiver<Queued>,
+    mut flushes: mpsc::Receiver<Flush>,
+) {
+    let dropped = control.dropped.clone();
     let mut stdout = tokio::io::stdout();
-    while let Some(message) = messages.recv().await {
-        let line = encode_line(&message);
-        if stdout.write_all(line.as_bytes()).await.is_err() || stdout.flush().await.is_err() {
+    loop {
+        let message = tokio::select! {
+            biased;
+            Some(queued) = queue.recv() => control.take(queued),
+            // 队列空了才轮到它（biased）：此前入队的消息都已写出。
+            Some(flush) = flushes.recv() => {
+                let _ = flush.send(());
+                continue;
+            }
+            else => return,
+        };
+        if !write_line(&mut stdout, &message).await {
             log::error("control stdout closed");
             return;
+        }
+        for (count, level, what) in [
+            (&dropped.control, LogLevel::Error, "control messages"),
+            (&dropped.logs, LogLevel::Warn, "log lines"),
+        ] {
+            let lost = count.swap(0, Ordering::Relaxed);
+            if lost > 0 {
+                let report = HostToMain::Log {
+                    level,
+                    source: "zcode-host",
+                    message: format!(
+                        "control stdout fell behind; dropped {lost} {what} while Main was not reading"
+                    ),
+                };
+                if !write_line(&mut stdout, &report).await {
+                    return;
+                }
+            }
         }
     }
 }
@@ -142,26 +259,36 @@ async fn run(args: Args) -> Result<()> {
         .context("bind 127.0.0.1")?;
     let port = listener.local_addr()?.port();
 
-    let (control_tx, control_rx) = mpsc::unbounded_channel();
+    let (control, queue) = StdoutControl::new();
+    let (flush_tx, flush_rx) = mpsc::channel(1);
     // 控制写任务由 run 拥有、在 run 返回时结束：它要比 Host 的根作用域活得久，关闭作用域之后
     // （shutdown 的最后一步）仍能写出此前入队的控制消息。
-    let _control_writer = zcode_async::owned(write_control(control_rx));
+    let _control_writer = zcode_async::owned(write_control(control.clone(), queue, flush_rx));
+    // 缺陷修复：run 返回时写任务随句柄被中止，关闭作用域之后才入队的消息（关闭报告等最后几条日志）
+    // 可能还没写出就丢了。现在退出前先等写任务把已入队的消息写完（有上限）。
+    let flush = async move || {
+        let (done, flushed) = tokio::sync::oneshot::channel();
+        if flush_tx.send(done).await.is_ok() {
+            let _ = tokio::time::timeout(FLUSH_ON_EXIT, flushed).await;
+        }
+    };
     let core = HostCore::new(
         HostConfig {
             ws_port: port,
             environment,
             outbound_limits,
         },
-        Arc::new(StdoutControl(control_tx.clone())),
+        Arc::new(control.clone()),
     );
     let policy = Arc::new(ws::Policy::new(port, args.allowed_origins));
-    drop(core.spawner().spawn(
+    // 监听是常驻任务：Host 退出关闭根作用域时随取消信号结束。
+    drop(core.spawner().spawn_resident(
         "websocket-listener",
         ws::serve(listener, core.clone(), policy),
     ));
-    let _ = control_tx.send(HostToMain::HostEndpointReady { ws_port: port });
+    control.send(HostToMain::HostEndpointReady { ws_port: port });
     // 结构化日志经控制通道交给 Main 实时落盘；Main 收到首条结构化日志后不再缓存 stderr。
-    log::set_sink(Box::new(StdoutControl(control_tx.clone())));
+    log::set_sink(Box::new(control.clone()));
     log::info(format!("listening on 127.0.0.1:{port}"));
     if let Some(note) = outbound_note {
         log::warn(note);
@@ -175,7 +302,8 @@ async fn run(args: Args) -> Result<()> {
                 Ok(message) => {
                     if core.on_control(message) == ControlOutcome::Shutdown {
                         log::info("dispose received; exiting");
-                        core.shutdown().await;
+                        drop(core.shutdown().await);
+                        flush().await;
                         return Ok(());
                     }
                 }
@@ -184,7 +312,8 @@ async fn run(args: Args) -> Result<()> {
             // Main 退出或关闭控制通道时 Host 随之退出，与 CLI 对 stdin EOF 的处理一致。
             Ok(None) => {
                 log::info("control stdin closed; exiting");
-                core.shutdown().await;
+                drop(core.shutdown().await);
+                flush().await;
                 return Ok(());
             }
             Err(error) => bail!("control stdin failed: {error}"),
@@ -299,5 +428,67 @@ fn host(args: Vec<OsString>) -> ExitCode {
             log::error(format!("{error:#}"));
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zcode_host_kit::log::LogSink;
+
+    use super::*;
+
+    fn log_text(queued: Queued) -> Option<String> {
+        match queued {
+            Queued::Log(HostToMain::Log { message, .. }) => Some(message),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn logs_and_control_messages_keep_the_order_they_were_sent_in() {
+        let (control, mut queue) = StdoutControl::new();
+        control.log(LogLevel::Warn, "why".into());
+        control.send(HostToMain::HostEndpointReady { ws_port: 1 });
+        control.log(LogLevel::Info, "after".into());
+        assert_eq!(log_text(queue.try_recv().unwrap()).as_deref(), Some("why"));
+        assert!(matches!(
+            queue.try_recv(),
+            Ok(Queued::Control(HostToMain::HostEndpointReady {
+                ws_port: 1
+            }))
+        ));
+        assert_eq!(
+            log_text(queue.try_recv().unwrap()).as_deref(),
+            Some("after")
+        );
+    }
+
+    #[test]
+    fn logs_beyond_their_share_are_dropped_and_counted() {
+        let (control, mut queue) = StdoutControl::new();
+        for index in 0..LOG_QUEUE + 3 {
+            control.log(LogLevel::Info, index.to_string());
+        }
+        assert_eq!(control.dropped.logs.load(Ordering::Relaxed), 3);
+        // 控制消息不受日志名额影响。
+        control.send(HostToMain::HostEndpointReady { ws_port: 1 });
+        assert_eq!(control.dropped.control.load(Ordering::Relaxed), 0);
+        assert_eq!(queue.len(), LOG_QUEUE + 1);
+        // 写任务取走一条日志就腾出一个名额。
+        let first = control.take(queue.try_recv().unwrap());
+        assert!(matches!(first, HostToMain::Log { message, .. } if message == "0"));
+        control.log(LogLevel::Info, "fits again".into());
+        assert_eq!(control.dropped.logs.load(Ordering::Relaxed), 3);
+        assert_eq!(queue.len(), LOG_QUEUE + 1);
+    }
+
+    #[test]
+    fn control_messages_beyond_the_queue_are_dropped_and_counted() {
+        let (control, queue) = StdoutControl::new();
+        for _ in 0..CONTROL_QUEUE + 2 {
+            control.send(HostToMain::HostEndpointReady { ws_port: 1 });
+        }
+        assert_eq!(control.dropped.control.load(Ordering::Relaxed), 2);
+        assert_eq!(queue.len(), CONTROL_QUEUE);
     }
 }

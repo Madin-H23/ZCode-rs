@@ -104,13 +104,18 @@ impl Utf8Stream {
     }
 }
 
+/// 终端输入队列的容量（块）。满了说明 shell 长时间不读输入：之后的写入失败（与真实终端的输入
+/// 缓冲写满时丢弃输入相同），见 `Terminals::write`（docs/specs/rust-u2-task-scope.md §6.2）。
+pub const INPUT_QUEUE: usize = 1024;
+
 /// 正在运行的读写通道。
 pub struct PtyIo {
-    pub input: mpsc::UnboundedSender<String>,
+    pub input: mpsc::Sender<String>,
     /// 读端到 EOF（所有 slave 端关闭）或出错时完成。
     pub reader_done: oneshot::Receiver<()>,
+    /// Unix 上的读写任务（在终端的作用域里）；Windows 上是随伪控制台关闭而结束的阻塞线程。
     #[cfg(unix)]
-    tasks: Vec<tokio::task::AbortHandle>,
+    tasks: Vec<zcode_async::Task<()>>,
 }
 
 impl PtyIo {
@@ -183,10 +188,7 @@ mod unix_io {
         }
     }
 
-    pub async fn write(
-        fd: Arc<AsyncFd<File>>,
-        mut input: tokio::sync::mpsc::UnboundedReceiver<String>,
-    ) {
+    pub async fn write(fd: Arc<AsyncFd<File>>, mut input: tokio::sync::mpsc::Receiver<String>) {
         while let Some(data) = input.recv().await {
             let mut bytes = data.as_bytes();
             while !bytes.is_empty() {
@@ -208,8 +210,10 @@ mod unix_io {
 }
 
 /// 启动读写；每块输出解码后交给 `on_data`（可能在任意线程调用）。`paused` 为 true 时不读（流控的门）。
+/// Unix 上读写是 `spawner`（终端的作用域）里的任务 `pty-reader` / `pty-writer`。
 #[cfg(unix)]
 pub fn start(
+    spawner: &zcode_async::Spawner,
     master: &dyn MasterPty,
     paused: watch::Receiver<bool>,
     on_data: impl Fn(String) + Send + Sync + 'static,
@@ -218,9 +222,9 @@ pub fn start(
         .as_raw_fd()
         .ok_or_else(|| std::io::Error::other("pty master has no file descriptor"))?;
     let fd = unix_io::open(raw)?;
-    let (input, receiver) = mpsc::unbounded_channel();
+    let (input, receiver) = mpsc::channel(INPUT_QUEUE);
     let (done, reader_done) = oneshot::channel();
-    let reader = tokio::spawn({
+    let reader = spawner.spawn("pty-reader", {
         let fd = fd.clone();
         async move {
             let mut decoder = Utf8Stream::default();
@@ -238,16 +242,18 @@ pub fn start(
             let _ = done.send(());
         }
     });
-    let writer = tokio::spawn(unix_io::write(fd, receiver));
+    let writer = spawner.spawn("pty-writer", unix_io::write(fd, receiver));
     Ok(PtyIo {
         input,
         reader_done,
-        tasks: vec![reader.abort_handle(), writer.abort_handle()],
+        tasks: vec![reader, writer],
     })
 }
 
+/// Windows 上读写是两个阻塞线程（ConPTY 的读写句柄是同步的），随伪控制台关闭、输入发送端释放而结束。
 #[cfg(windows)]
 pub fn start(
+    _spawner: &zcode_async::Spawner,
     master: &dyn MasterPty,
     mut paused: watch::Receiver<bool>,
     on_data: impl Fn(String) + Send + Sync + 'static,
@@ -257,15 +263,13 @@ pub fn start(
     let to_io = |error: anyhow::Error| std::io::Error::other(error.to_string());
     let mut reader = master.try_clone_reader().map_err(to_io)?;
     let mut writer = master.take_writer().map_err(to_io)?;
-    let (input, mut receiver) = mpsc::unbounded_channel::<String>();
+    let (input, mut receiver) = mpsc::channel::<String>(INPUT_QUEUE);
     let (done, reader_done) = oneshot::channel();
-    // 读线程是阻塞线程：经运行时句柄等流控的门。
-    let runtime = tokio::runtime::Handle::current();
     std::thread::spawn(move || {
         let mut decoder = Utf8Stream::default();
         let mut buffer = vec![0u8; 64 * 1024];
         loop {
-            runtime.block_on(super::flow::wait_open(&mut paused));
+            super::flow::wait_open_blocking(&mut paused);
             let Ok(read) = reader.read(&mut buffer) else {
                 break;
             };

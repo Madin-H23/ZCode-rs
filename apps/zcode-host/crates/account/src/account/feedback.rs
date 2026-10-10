@@ -12,7 +12,7 @@ use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
 use tokio::sync::watch;
 use zcode_host_control::ControlRouter;
-use zcode_host_kit::{EventHub, Reply, RpcError, ServiceBuilder, log, replies};
+use zcode_host_kit::{EventHub, Overflow, Reply, RpcError, ServiceBuilder, log, replies};
 
 use super::credential::{CredentialStore, node_platform};
 use super::net::{ApiClient, ApiRequest, node_arch, uuid_v4};
@@ -405,7 +405,9 @@ impl Feedback {
             app_config_dir,
             feedback_root: data_root.join("feedback"),
             app_version,
-            progress: EventHub::new(),
+            // 上传进度（每块一条，最后一条是终态，不能合并丢掉），订阅者是 Renderer 订阅；落后 1024 条说明
+            // 转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+            progress: EventHub::new("feedback-progress", 1024, Overflow::CloseSubscriber),
             uploads: Arc::new(Mutex::new(HashMap::new())),
             creates: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -1392,7 +1394,7 @@ async fn create_diagnostic_archive(
     let source = source.to_path_buf();
     let output_root = output_root.to_path_buf();
     let app_version = app_version.to_owned();
-    tokio::task::spawn_blocking(move || -> Result<Value, String> {
+    zcode_async::blocking(move || -> Result<Value, String> {
         use std::io::Write;
         let budget = max_total.min(MAX_LOG_TOTAL_BYTES);
         std::fs::create_dir_all(&output_root).map_err(|e| e.to_string())?;
@@ -1716,7 +1718,8 @@ mod tests {
         .await;
         *oss_origin.lock().unwrap() = server.origin.clone();
         let dir = tempfile::tempdir().unwrap();
-        let credentials = CredentialStore::new(dir.path(), "secret");
+        let credentials =
+            CredentialStore::new(&zcode_host_base::testing::spawner(), dir.path(), "secret");
         let api = ApiClient::with_network(
             endpoints_for(&server.origin),
             dir.path().to_path_buf(),

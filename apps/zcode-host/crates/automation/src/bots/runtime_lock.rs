@@ -11,7 +11,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::fs;
-use tokio::task::JoinHandle;
+use zcode_async::OwnedTask;
 
 pub const RETRY_MS: u64 = 10_000;
 const LEASE_MS: u128 = 30_000;
@@ -22,7 +22,8 @@ pub struct RuntimeLock {
     path: PathBuf,
     nonce: String,
     bot_id: String,
-    heartbeat: JoinHandle<()>,
+    /// 续租任务由锁持有：锁被释放或丢弃时随之中止。
+    heartbeat: OwnedTask<()>,
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -146,11 +147,11 @@ pub async fn acquire(
             Some(false) => continue,
             Some(true) => {
                 let lease = path.join(format!("lease-{nonce}"));
-                let heartbeat = tokio::spawn(async move {
+                let heartbeat = zcode_async::owned(async move {
                     loop {
                         tokio::time::sleep(HEARTBEAT).await;
                         let lease = lease.clone();
-                        let _ = tokio::task::spawn_blocking(move || {
+                        let _ = zcode_async::blocking(move || {
                             std::fs::File::options()
                                 .write(true)
                                 .open(&lease)

@@ -19,6 +19,7 @@ use std::sync::{Arc, OnceLock};
 
 use futures_util::future::BoxFuture;
 use serde_json::Value;
+use zcode_async::Spawner;
 use zcode_host_control::ControlRouter;
 use zcode_host_kit::ChannelRegistry;
 
@@ -55,6 +56,9 @@ pub struct AccountLink {
 
 /// 本区域共享的依赖。
 pub struct Area {
+    /// 本区域的作用域（`host/services/automation`）：子模块的任务在这里或它的子作用域里
+    /// （docs/specs/rust-u2-task-scope.md §6.1）。
+    pub spawner: Spawner,
     /// Host 内部 task 驱动（建会话、发输入、终态），automation、闲时任务、bots 共用。
     pub driver: Arc<driver::TaskDriver>,
     pub context: Arc<ServiceContext>,
@@ -82,6 +86,7 @@ pub struct Area {
 impl Area {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        spawner: &Spawner,
         context: Arc<ServiceContext>,
         bridge: MainBridge,
         settings: SettingStore,
@@ -93,8 +98,9 @@ impl Area {
         credentials: crate::account::credential::CredentialStore,
         oauth: crate::account::oauth_repo::OAuthCredentialRepo,
     ) -> Self {
-        let driver = driver::TaskDriver::start(agent.clone(), tasks.clone(), &observer);
+        let driver = driver::TaskDriver::start(spawner, agent.clone(), tasks.clone(), &observer);
         Self {
+            spawner: spawner.clone(),
             driver,
             context,
             bridge,
@@ -162,6 +168,7 @@ impl AreaHandle {
             None => Arc::new(crate::scheduler::OffPeakUnavailable),
         };
         crate::scheduler::Scheduler::start(
+            &self.area.spawner,
             crate::scheduler::SchedulerDeps {
                 automations: self.service.clone(),
                 off_peak: crate::tasks_index::off_peak_repo::OffPeakRepo::new(
@@ -187,7 +194,10 @@ pub fn install(
     let (service, cron) = install_automation(&area);
     parts.extend(crate::cua_permission::install(&area, registry, router));
     parts.extend(crate::conversation_share::install(&area, registry, router));
-    let bots = crate::bots::install(&area, registry, router);
+    // Bots 的作用域由 AreaHandle 持有（随 Host 存在）。
+    let bots_scope = area.spawner.child("bots");
+    let bots = crate::bots::install(&area, &bots_scope.spawner(), registry, router);
+    parts.push(Box::new(bots_scope));
     let off_peak = crate::off_peak::install(&area, registry).map(|installed| {
         parts.push(installed.keepalive);
         installed.dispatcher

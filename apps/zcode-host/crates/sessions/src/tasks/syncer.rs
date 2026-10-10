@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use tokio::task::JoinHandle;
+use zcode_async::Spawner;
 use zcode_host_kit::log;
 
 use super::meta;
@@ -40,18 +40,20 @@ pub struct Syncer {
     tasks: Arc<TaskService>,
 }
 
+/// 同步是 `spawner`（tasks 的作用域）里的常驻任务 `task-index-syncer`，随作用域结束。
 pub fn start(
+    spawner: &Spawner,
     observer: &SessionsIndexObserver,
     runtime: AgentRuntime,
     tasks: Arc<TaskService>,
-) -> JoinHandle<()> {
+) {
     let mut events = Box::pin(observer.events().subscribe());
     let syncer = Syncer { runtime, tasks };
-    tokio::spawn(async move {
+    drop(spawner.spawn_resident("task-index-syncer", async move {
         while let Some(event) = events.next().await {
             syncer.handle(&event).await;
         }
-    })
+    }));
 }
 
 impl Syncer {
@@ -294,19 +296,27 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::tasks::WorkspaceEvents;
     use crate::tasks::repo::memory::MemoryRepo;
     use crate::tasks::repo::{RepoFilter, TaskRepo};
+    use crate::tasks::workspace_events;
 
     fn runtime() -> AgentRuntime {
         AgentRuntime::new(
+            &zcode_host_base::testing::spawner(),
             crate::agent::AgentRuntimeConfig {
                 base_env: Default::default(),
                 command_vars: Default::default(),
                 fallback_cwd: None,
             },
-            crate::settings::SettingStore::new(std::path::Path::new("/nonexistent")),
-            crate::providers::ProviderRuntime::new(None, "/nonexistent/p.json".into()),
+            crate::settings::SettingStore::new(
+                &zcode_host_base::testing::spawner(),
+                std::path::Path::new("/nonexistent"),
+            ),
+            crate::providers::ProviderRuntime::new(
+                &zcode_host_base::testing::spawner(),
+                None,
+                "/nonexistent/p.json".into(),
+            ),
         )
     }
 
@@ -317,7 +327,7 @@ mod tests {
     #[tokio::test]
     async fn baseline_seeds_silently_and_terminal_patches_broadcast() {
         let repo = Arc::new(MemoryRepo::default());
-        let events = WorkspaceEvents::new();
+        let events = workspace_events();
         let mut seen = Box::pin(events.subscribe());
         let tasks = TaskService::new(repo.clone(), events, runtime());
         let syncer = Syncer {

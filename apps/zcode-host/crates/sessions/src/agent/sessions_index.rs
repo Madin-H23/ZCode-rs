@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use tokio::task::AbortHandle;
-use zcode_host_kit::{EventHub, log};
+use zcode_async::Task;
+use zcode_host_kit::{EventHub, Overflow, log};
 
 use super::runtime::{AgentRuntime, FrameKind, WorkspaceTarget};
 use super::service::uuid_v4;
@@ -45,7 +45,7 @@ pub enum IndexEvent {
 
 struct Watched {
     generation: u64,
-    task: AbortHandle,
+    task: Task<()>,
     sessions: HashMap<String, Value>,
 }
 
@@ -69,25 +69,31 @@ impl SessionsIndexObserver {
             runtime: runtime.clone(),
             connection_id: format!("host-{}", uuid_v4()),
             watched: Mutex::new(HashMap::new()),
-            events: EventHub::new(),
+            // 订阅者是 syncer（每条事件写一次 tasks-index）与 controller；快照是一条事件，增量每次会话
+            // 摘要变化一条。4096 条约是卡住几分钟的量，满了结束落后的订阅（rust-u2-task-scope.md §6.2）。
+            events: EventHub::new("sessions-index-events", 4096, Overflow::CloseSubscriber),
         });
         let mut lifecycle = Box::pin(runtime.lifecycle().subscribe());
         let weak = Arc::downgrade(&observer);
-        tokio::spawn(async move {
-            while let Some(event) = lifecycle.next().await {
-                let Some(observer) = weak.upgrade() else {
-                    return;
-                };
-                let Some((target, generation, available)) = lifecycle_target(&event) else {
-                    continue;
-                };
-                if available {
-                    observer.watch(target, generation);
-                } else {
-                    observer.unwatch(target, generation);
-                }
-            }
-        });
+        drop(
+            runtime
+                .spawner()
+                .spawn_resident("sessions-index-lifecycle", async move {
+                    while let Some(event) = lifecycle.next().await {
+                        let Some(observer) = weak.upgrade() else {
+                            return;
+                        };
+                        let Some((target, generation, available)) = lifecycle_target(&event) else {
+                            continue;
+                        };
+                        if available {
+                            observer.watch(target, generation);
+                        } else {
+                            observer.unwatch(target, generation);
+                        }
+                    }
+                }),
+        );
         observer
     }
 
@@ -113,33 +119,37 @@ impl SessionsIndexObserver {
         let key = target.key();
         let observer = Arc::downgrade(self);
         let task_target = target;
-        let task = tokio::spawn(async move {
-            let Some(strong) = observer.upgrade() else {
-                return;
-            };
-            let runtime = strong.runtime.clone();
-            let connection_id = strong.connection_id.clone();
-            drop(strong);
-            let result = follow(
-                observer,
-                runtime,
-                connection_id,
-                task_target.clone(),
-                generation,
-            )
-            .await;
-            if let Err(error) = result {
-                log::debug(format!(
-                    "sessions-index observer for {} stopped: {error}",
-                    task_target.key()
-                ));
-            }
-        });
+        // 跟随一代实例的 sessions-index 帧；实例 unavailable 或被下一代替换时中止。
+        let task = self
+            .runtime
+            .spawner()
+            .spawn("sessions-index-follow", async move {
+                let Some(strong) = observer.upgrade() else {
+                    return;
+                };
+                let runtime = strong.runtime.clone();
+                let connection_id = strong.connection_id.clone();
+                drop(strong);
+                let result = follow(
+                    observer,
+                    runtime,
+                    connection_id,
+                    task_target.clone(),
+                    generation,
+                )
+                .await;
+                if let Err(error) = result {
+                    log::debug(format!(
+                        "sessions-index observer for {} stopped: {error}",
+                        task_target.key()
+                    ));
+                }
+            });
         let previous = self.lock().insert(
             key,
             Watched {
                 generation,
-                task: task.abort_handle(),
+                task,
                 sessions: HashMap::new(),
             },
         );

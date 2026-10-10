@@ -40,6 +40,11 @@ pub const CAPABILITY_TTL: Duration = Duration::from_secs(30);
 /// 与 WebSocket transport 发 Close 的时限相同：对端不读时不让 dispose 一直等。
 const CONNECTION_CLOSE_GRACE: Duration = Duration::from_secs(1);
 
+/// service 收尾之后，关闭根作用域时等仍在运行的任务自行结束的时限（rust-u2-task-scope.md §6.4）。
+/// 常驻任务随取消信号立即结束；其余任务正常应在 service 的有序收尾里已经结束，过了这个时限还在的
+/// 被中止并以 warn 列出。
+const TASK_SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
+
 #[derive(Debug, Clone)]
 pub struct HostConfig {
     pub ws_port: u16,
@@ -78,6 +83,8 @@ struct Inner {
     /// 根作用域 `host`。它的任务（连接循环、transport、启动）持有 `HostCore` 的克隆，所以作用域不会
     /// 随最后一个外部克隆释放；[`HostCore::shutdown`] 显式关闭它。
     scope: TaskScope,
+    /// `host/services`：交给组装根，各 service 的作用域在它下面（rust-u2-task-scope.md §6.1）。
+    services: TaskScope,
 }
 
 impl HostCore {
@@ -92,6 +99,7 @@ impl HostCore {
         });
         let telemetry = rpc_telemetry::RpcTelemetry::new(control.clone(), scope.spawner());
         let gateway = Gateway::new(scope.spawner(), telemetry.clone(), config.outbound_limits);
+        let services = scope.spawner().child("services");
         Self {
             inner: Arc::new(Inner {
                 config,
@@ -105,6 +113,7 @@ impl HostCore {
                 startup: Mutex::new(None),
                 gateway,
                 scope,
+                services,
             }),
         }
     }
@@ -193,9 +202,10 @@ impl HostCore {
     }
 
     /// Host 退出：先关闭全部连接（docs/specs/rust-u2-gateway.md §2.4），再冲刷 RPC 遥测并回收子进程
-    /// （CLI 进程树）；未初始化时只冲刷遥测。最后关闭根作用域：还没结束的连接、transport 与启动任务
-    /// 被中止，列进日志（rust-u2-task-scope.md §5）。
-    pub async fn shutdown(&self) {
+    /// （CLI 进程树）；未初始化时只冲刷遥测。最后关闭根作用域（rust-u2-task-scope.md §5、§6.4）：常驻
+    /// 任务随取消信号结束，其余任务至多再等 [`TASK_SHUTDOWN_GRACE`]，仍在运行的被中止并以 warn 列出；
+    /// 正常退出时列表为空，记一条 info。返回被中止的任务（`<作用域路径>: <任务名>`）。
+    pub async fn shutdown(&self) -> Vec<String> {
         // 先以 HostShutdown 关闭全部连接并等 transport 发出 Close，再停止 service：Renderer 收到
         // 4005 而不是 transport 任务被中止后的 1006；连接按正常路径收口时 service 还在。
         self.inner.gateway.shutdown(CONNECTION_CLOSE_GRACE).await;
@@ -209,9 +219,15 @@ impl HostCore {
         if let Some(installed) = installed {
             installed.shutdown().await;
         }
-        // 这些任务都不观察取消信号，宽限期没有意义：立即中止。
-        let aborted = self.inner.scope.close(Duration::ZERO).await;
-        log::info(format!("host tasks aborted at shutdown: {aborted:?}"));
+        let aborted = self.inner.scope.close(TASK_SHUTDOWN_GRACE).await;
+        if aborted.is_empty() {
+            log::info("host tasks at shutdown: none left running");
+        } else {
+            log::warn(format!(
+                "host tasks still running {TASK_SHUTDOWN_GRACE:?} after the services shut down; aborting: {aborted:?}"
+            ));
+        }
+        aborted
     }
 
     /// InitLocal 之后的启动顺序（docs/specs/rust-host-r2.md §5.1）：
@@ -297,7 +313,13 @@ impl HostCore {
         });
         let mut registry = ChannelRegistry::from_contract(contract::embedded());
         let mut router = ControlRouter::default();
-        let installed = zcode_host_services::install(context, storage, &mut registry, &mut router);
+        let installed = zcode_host_services::install(
+            &self.inner.services.spawner(),
+            context,
+            storage,
+            &mut registry,
+            &mut router,
+        );
         *self.lock_router() = router;
         *self
             .inner

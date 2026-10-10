@@ -187,7 +187,11 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
     std::fs::create_dir_all(&config_dir).unwrap();
 
     // 已登录的 Z.ai 账号：与 Node 相同的凭据键与加密格式。
-    let credentials = CredentialStore::new(&config_dir, &credential_secret(&vars));
+    let credentials = CredentialStore::new(
+        &zcode_host_services::testing::spawner(),
+        &config_dir,
+        &credential_secret(&vars),
+    );
     credentials
         .save("oauth:active_provider", "zai")
         .await
@@ -220,16 +224,26 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         .join("../../../../config/provider/zcode-builtin.json")
         .canonicalize()
         .unwrap();
-    let settings = SettingStore::new(home.path());
-    let providers = ProviderRuntime::new(Some(builtin), config_dir.join("provider_config.json"));
+    let settings = SettingStore::new(&zcode_host_services::testing::spawner(), home.path());
+    let providers = ProviderRuntime::new(
+        &zcode_host_services::testing::spawner(),
+        Some(builtin),
+        config_dir.join("provider_config.json"),
+    );
     let context = ServiceContext {
         environment,
         init: InitLocal::default(),
         control: Arc::new(NullSink),
     };
-    let account = AccountStack::new(&context, &settings, &providers);
+    let account = AccountStack::new(
+        &zcode_host_services::testing::spawner(),
+        &context,
+        &settings,
+        &providers,
+    );
     vars.extend(runtime_vars());
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: vars.clone(),
             command_vars: vars.clone(),

@@ -30,6 +30,8 @@ fn user_home(
 pub struct SettingsSync {
     settings: SettingStore,
     home: PathBuf,
+    /// 共享配置文件的写入方（与扩展区共用）。
+    writes: crate::extensions::cli_config::ConfigWrites,
 }
 
 async fn exists(path: &std::path::Path) -> bool {
@@ -39,12 +41,14 @@ async fn exists(path: &std::path::Path) -> bool {
 impl SettingsSync {
     pub fn new(
         settings: SettingStore,
+        writes: crate::extensions::cli_config::ConfigWrites,
         vars: &std::collections::BTreeMap<String, String>,
         user_home_fallback: &std::path::Path,
     ) -> Self {
         Self {
             settings,
             home: user_home(vars, user_home_fallback),
+            writes,
         }
     }
 
@@ -118,6 +122,7 @@ impl SettingsSync {
             workspace: request["workspacePath"]
                 .as_str()
                 .filter(|path| !path.is_empty()),
+            writes: &self.writes,
         }
     }
 
@@ -214,12 +219,17 @@ mod tests {
     #[tokio::test]
     async fn first_run_flag_and_agents_file_copy() {
         let home = tempfile::tempdir().unwrap();
-        let settings = SettingStore::new(home.path());
+        let settings = SettingStore::new(&zcode_host_base::testing::spawner(), home.path());
         let vars = std::collections::BTreeMap::from([(
             "HOME".to_owned(),
             home.path().display().to_string(),
         )]);
-        let sync = SettingsSync::new(settings, &vars, home.path());
+        let sync = SettingsSync::new(
+            settings,
+            crate::extensions::cli_config::ConfigWrites::start(&zcode_host_base::testing::spawner()),
+            &vars,
+            home.path(),
+        );
         assert_eq!(
             sync.first_run_prompt_state().await,
             json!({"handled": false})

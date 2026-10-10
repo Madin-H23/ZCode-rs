@@ -22,6 +22,7 @@ serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 zcode-shared.workspace = true
+zcode-async.workspace = true
 zcode-host-control.workspace = true
 zcode-host-kit.workspace = true
 zcode-host-rpc.workspace = true

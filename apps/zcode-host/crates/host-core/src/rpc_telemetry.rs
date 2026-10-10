@@ -129,20 +129,23 @@ impl RpcTelemetry {
 
     fn start_timer(&self) {
         let weak = self.this.clone();
-        drop(self.spawner.spawn("rpc-telemetry-flush", async move {
-            let mut interval = tokio::time::interval(FLUSH_INTERVAL);
-            interval.tick().await;
-            loop {
-                interval.tick().await;
-                let Some(telemetry) = weak.upgrade() else {
-                    return;
-                };
-                if telemetry.lock().stopped {
-                    return;
-                }
-                telemetry.flush();
-            }
-        }));
+        drop(
+            self.spawner
+                .spawn_resident("rpc-telemetry-flush", async move {
+                    let mut interval = tokio::time::interval(FLUSH_INTERVAL);
+                    interval.tick().await;
+                    loop {
+                        interval.tick().await;
+                        let Some(telemetry) = weak.upgrade() else {
+                            return;
+                        };
+                        if telemetry.lock().stopped {
+                            return;
+                        }
+                        telemetry.flush();
+                    }
+                }),
+        );
     }
 
     /// `flushHostNetworkTelemetryBatch`：一次最多发 200 条；发送失败不影响 Host 主流程。

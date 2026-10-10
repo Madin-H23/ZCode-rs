@@ -2,7 +2,8 @@
 //! commands、memory、hooks、mcp-sync、subagents。
 //!
 //! 这些 channel 都是无状态的文件系统视图：每次调用重新扫描，Host 不缓存；与 Main、CLI、Node Host
-//! 共享的配置文件一律经 [`cli_config::update`] 持跨进程锁读改写。
+//! 共享的配置文件一律经 [`cli_config::ConfigWrites`] 持跨进程锁读改写（本进程内唯一的写入方）。
+//! 扩展区的任务在 `host/services/extensions` 里（docs/specs/rust-u2-task-scope.md §6.1）。
 pub mod archive;
 pub mod cli_config;
 pub mod commands;
@@ -26,20 +27,28 @@ use std::future::Future;
 use std::path::Path;
 
 use serde_json::Value;
+use zcode_async::Spawner;
 use zcode_host_kit::{Reply, RpcError, ServiceBuilder};
 
-/// 路径根：用户目录（`HOME` / `USERPROFILE`）与数据根（`{dataBaseDir}/.zcode`）。
-#[derive(Debug, Clone)]
+/// 扩展区各 service 共用的上下文：路径根（用户目录 `HOME` / `USERPROFILE` 与数据根
+/// `{dataBaseDir}/.zcode`）、扩展区的作用域，以及共享配置文件的写入方。
+#[derive(Clone)]
 pub struct Roots {
     pub home: String,
     pub data_root: String,
+    /// 扩展区的作用域：各 service 的 owner 任务在这里。
+    pub tasks: Spawner,
+    pub writes: cli_config::ConfigWrites,
 }
 
 impl Roots {
-    pub fn new(home: &Path, data_base_dir: &Path) -> Self {
+    /// 在 `spawner`（扩展区的作用域）里启动共享配置文件的写入方。
+    pub fn new(spawner: &Spawner, home: &Path, data_base_dir: &Path) -> Self {
         Self {
             home: fsx::path_str(home),
             data_root: fsx::join(&fsx::path_str(data_base_dir), &[".zcode"]),
+            tasks: spawner.clone(),
+            writes: cli_config::ConfigWrites::start(spawner),
         }
     }
 
@@ -72,23 +81,28 @@ pub async fn read_cli_config_lenient(roots: &Roots) -> serde_json::Map<String, s
 }
 
 /// 持锁读改写 `config.json`，读取语义同 [`read_cli_config_lenient`]；`mutate` 返回 `false` 时不写。
-pub async fn update_cli_config_lenient<T>(
+pub async fn update_cli_config_lenient<T: Send + 'static>(
     roots: &Roots,
-    mutate: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> (bool, T),
+    mutate: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> (bool, T) + Send + 'static,
 ) -> Result<T, zcode_host_kit::RpcError> {
-    cli_config::update(&roots.cli_config_path(), |raw| {
-        let mut config = raw
-            .as_deref()
-            .and_then(json::parse_record)
-            .unwrap_or_default();
-        let (write, value) = mutate(&mut config);
-        Ok(if write {
-            cli_config::Update::Write(json::pretty_line(&serde_json::Value::Object(config)), value)
-        } else {
-            cli_config::Update::Skip(value)
+    roots
+        .writes
+        .update(&roots.cli_config_path(), |raw| {
+            let mut config = raw
+                .as_deref()
+                .and_then(json::parse_record)
+                .unwrap_or_default();
+            let (write, value) = mutate(&mut config);
+            Ok(if write {
+                cli_config::Update::Write(
+                    json::pretty_line(&serde_json::Value::Object(config)),
+                    value,
+                )
+            } else {
+                cli_config::Update::Skip(value)
+            })
         })
-    })
-    .await
+        .await
 }
 
 /// 注册一个方法：第 0 个位置参数（缺省为 `null`）交给 `call`。

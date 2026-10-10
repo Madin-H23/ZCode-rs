@@ -181,3 +181,27 @@ async fn a_child_created_after_close_is_already_closed() {
         Err(TaskError::ScopeClosed)
     );
 }
+
+/// 常驻任务随作用域的取消信号结束：`close` 不把它列为被中止，父作用域的取消同样传到子作用域；
+/// 自己先结束时句柄得到结果。
+#[tokio::test]
+async fn resident_tasks_end_on_the_cancel_signal_and_are_not_reported_as_aborted() {
+    let (scope, _) = scope();
+    let spawner = scope.spawner();
+    let child = spawner.child("services/agent");
+    let dropped = Arc::new(AtomicBool::new(false));
+    let guard = Dropped(dropped.clone());
+    let resident = child.spawner().spawn_resident("poll", async move {
+        let _guard = guard;
+        std::future::pending::<()>().await;
+    });
+    let finished = spawner.spawn_resident("quick", async { 7 });
+    assert_eq!(finished.await, Ok(Some(7)));
+    assert_eq!(scope.close(SOON).await, Vec::<String>::new());
+    assert_eq!(resident.await, Ok(None));
+    assert!(dropped.load(Ordering::SeqCst));
+    assert_eq!(
+        spawner.spawn_resident("late", async {}).await,
+        Err(TaskError::ScopeClosed)
+    );
+}

@@ -9,7 +9,7 @@ use zcode_host_kit::{Reply, RpcError, ServiceBuilder};
 use zcode_kit::js::string::trim as js_trim;
 
 use super::archive::{self, Entry, Flavor};
-use super::cli_config::{self, Update};
+use super::cli_config::Update;
 use super::skill_sync::truthy;
 use super::{Roots, bind, bytes_param, bytes_value, check_write_access, fsx, json as js};
 use crate::support::collate::locale_compare;
@@ -852,33 +852,35 @@ impl PluginSyncService {
     ) -> Result<(), RpcError> {
         let path = self.roots.cli_config_path();
         let resolved = fsx::resolve(plugin_path, &[]);
-        let id = id.to_owned();
-        cli_config::update(&path, |raw| {
-            let mut config = parse_config_or_empty(raw.as_deref(), &path)?;
-            let mut plugins = js::record(config.get("plugins"));
-            let dirs = string_array_non_blank(plugins.get("dirs"));
-            let mut next_dirs = dirs.clone();
-            if !dirs.iter().any(|dir| fsx::resolve(dir, &[]) == resolved) {
-                next_dirs.push(resolved.clone());
-            }
-            plugins.insert("dirs".into(), json!(next_dirs));
-            let mut enabled_plugins = js::record(plugins.get("enabledPlugins"));
-            match enabled {
-                Some(flag) => {
-                    enabled_plugins.insert(id.clone(), json!(flag));
-                    plugins.insert("enabledPlugins".into(), Value::Object(enabled_plugins));
+        let (id, owned) = (id.to_owned(), path.clone());
+        self.roots
+            .writes
+            .update(&path, move |raw| {
+                let mut config = parse_config_or_empty(raw.as_deref(), &owned)?;
+                let mut plugins = js::record(config.get("plugins"));
+                let dirs = string_array_non_blank(plugins.get("dirs"));
+                let mut next_dirs = dirs.clone();
+                if !dirs.iter().any(|dir| fsx::resolve(dir, &[]) == resolved) {
+                    next_dirs.push(resolved.clone());
                 }
-                None if !enabled_plugins.is_empty() => {
-                    plugins.insert("enabledPlugins".into(), Value::Object(enabled_plugins));
+                plugins.insert("dirs".into(), json!(next_dirs));
+                let mut enabled_plugins = js::record(plugins.get("enabledPlugins"));
+                match enabled {
+                    Some(flag) => {
+                        enabled_plugins.insert(id, json!(flag));
+                        plugins.insert("enabledPlugins".into(), Value::Object(enabled_plugins));
+                    }
+                    None if !enabled_plugins.is_empty() => {
+                        plugins.insert("enabledPlugins".into(), Value::Object(enabled_plugins));
+                    }
+                    None => {
+                        // `{...plugins, dirs, ...{}}`：原有非对象的 enabledPlugins 原样保留。
+                    }
                 }
-                None => {
-                    // `{...plugins, dirs, ...{}}`：原有非对象的 enabledPlugins 原样保留。
-                }
-            }
-            config.insert("plugins".into(), Value::Object(plugins));
-            Ok(Update::Write(js::pretty_line(&Value::Object(config)), ()))
-        })
-        .await
+                config.insert("plugins".into(), Value::Object(plugins));
+                Ok(Update::Write(js::pretty_line(&Value::Object(config)), ()))
+            })
+            .await
     }
 
     pub async fn import_plugins(&self, params: Value) -> Result<Value, RpcError> {
@@ -1254,7 +1256,11 @@ mod tests {
             ),
         )
         .unwrap();
-        let local = PluginSyncService::new(Roots::new(home.path(), home.path()));
+        let local = PluginSyncService::new(Roots::new(
+            &zcode_host_base::testing::spawner(),
+            home.path(),
+            home.path(),
+        ));
         let list = local.list_local_candidates().await.unwrap();
         let candidate = &list["candidates"][0];
         assert_eq!(candidate["version"], "1.0");
@@ -1265,7 +1271,11 @@ mod tests {
             .await
             .unwrap();
         let remote_home = tempfile::tempdir().unwrap();
-        let remote = PluginSyncService::new(Roots::new(remote_home.path(), remote_home.path()));
+        let remote = PluginSyncService::new(Roots::new(
+            &zcode_host_base::testing::spawner(),
+            remote_home.path(),
+            remote_home.path(),
+        ));
         let imported = remote
             .import_plugins(json!({ "archive": exported["archive"] }))
             .await
@@ -1297,7 +1307,11 @@ mod tests {
             r#"{"name":"m","pluginRoot":"plugins","plugins":[{"name":"a","source":"./a","dependencies":["b@m"]},{"name":"b"}]}"#,
         )
         .unwrap();
-        let service = PluginSyncService::new(Roots::new(home.path(), home.path()));
+        let service = PluginSyncService::new(Roots::new(
+            &zcode_host_base::testing::spawner(),
+            home.path(),
+            home.path(),
+        ));
         let exported = service
             .export_marketplace_source(json!({
                 "marketplaceId": "m",
@@ -1308,7 +1322,11 @@ mod tests {
             .unwrap();
         assert_eq!(exported["pluginNames"], json!(["a", "b"]));
         let remote_home = tempfile::tempdir().unwrap();
-        let remote = PluginSyncService::new(Roots::new(remote_home.path(), remote_home.path()));
+        let remote = PluginSyncService::new(Roots::new(
+            &zcode_host_base::testing::spawner(),
+            remote_home.path(),
+            remote_home.path(),
+        ));
         let imported = remote
             .import_marketplace_source(json!({ "archive": exported["archive"] }))
             .await

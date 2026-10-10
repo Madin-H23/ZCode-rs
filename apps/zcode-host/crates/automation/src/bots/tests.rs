@@ -144,7 +144,7 @@ fn feishu_messages_parse_like_the_provider() {
 #[tokio::test]
 async fn bot_credentials_use_the_shared_store() {
     let dir = tempfile::tempdir().unwrap();
-    let store = CredentialStore::new(dir.path(), "s");
+    let store = CredentialStore::new(&zcode_host_base::testing::spawner(), dir.path(), "s");
     store.save("bot:a:credential", "secret-1").await.unwrap();
     assert_eq!(
         store.load("bot:a:credential").await.unwrap().as_deref(),
@@ -171,7 +171,10 @@ async fn repo_imports_legacy_files_once() {
         legacy["input"].to_string(),
     )
     .unwrap();
-    let repo = BotsRepo::new(dir.path().to_path_buf());
+    let repo = BotsRepo::new(
+        &zcode_host_base::testing::spawner(),
+        dir.path().to_path_buf(),
+    );
     assert_eq!(repo.read_config().await.unwrap(), legacy["output"]);
     let written = std::fs::read_to_string(dir.path().join("bot-config.v3.json")).unwrap();
     assert_eq!(

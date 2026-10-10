@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
-use tokio::task::AbortHandle;
+use zcode_async::{Spawner, Task};
 use zcode_host_kit::log;
 
 use super::client::{ClientError, ServerClient};
@@ -41,6 +41,8 @@ pub type StopRunning = Arc<
 >;
 
 pub struct OffPeakService {
+    /// 闲时任务服务的作用域（automation 区域的作用域）。
+    spawner: Spawner,
     repo: OffPeakRepo,
     client: ServerClient,
     providers: ProviderRuntime,
@@ -55,7 +57,7 @@ struct SyncState {
     stopped: bool,
     running: bool,
     failures: u32,
-    timer: Option<AbortHandle>,
+    timer: Option<Task<Option<()>>>,
 }
 
 fn non_empty_text(value: &Value) -> bool {
@@ -105,7 +107,9 @@ fn text(value: &Value, key: &str) -> Option<String> {
 }
 
 impl OffPeakService {
+    /// 同步定时器与取消后的结算在 `spawner` 的作用域里。
     pub fn new(
+        spawner: &Spawner,
         repo: OffPeakRepo,
         client: ServerClient,
         providers: ProviderRuntime,
@@ -114,6 +118,7 @@ impl OffPeakService {
         stop_running: Option<StopRunning>,
     ) -> Arc<Self> {
         Arc::new(Self {
+            spawner: spawner.clone(),
             repo,
             client,
             providers,
@@ -328,7 +333,9 @@ impl OffPeakService {
         }
         let service = self.clone();
         let settled = cancelled.clone();
-        tokio::spawn(async move { service.settle_one(&settled).await });
+        drop(self.spawner.spawn("off-peak-settle", async move {
+            service.settle_one(&settled).await
+        }));
         Ok(Some(cancelled))
     }
 
@@ -549,16 +556,14 @@ impl OffPeakService {
             timer.abort();
         }
         let weak = Arc::downgrade(self);
-        state.timer = Some(
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(delay_ms.max(0) as u64)).await;
-                if let Some(service) = weak.upgrade() {
-                    service.lock().timer = None;
-                    service.run_sync_cycle().await;
-                }
-            })
-            .abort_handle(),
-        );
+        // 下一轮同步的定时器：常驻（关闭作用域时随取消信号结束，不算被中止的工作）。
+        state.timer = Some(self.spawner.spawn_resident("off-peak-sync", async move {
+            tokio::time::sleep(Duration::from_millis(delay_ms.max(0) as u64)).await;
+            if let Some(service) = weak.upgrade() {
+                service.lock().timer = None;
+                service.run_sync_cycle().await;
+            }
+        }));
     }
 
     /// 单次同步周期。

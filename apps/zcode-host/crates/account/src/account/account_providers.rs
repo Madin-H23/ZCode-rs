@@ -10,7 +10,8 @@ use futures_util::StreamExt;
 use serde_json::{Map, Value, json};
 use sha2::Digest;
 use tokio::sync::oneshot;
-use zcode_host_kit::{EventHub, log};
+use zcode_async::Spawner;
+use zcode_host_kit::{EventHub, Overflow, log};
 
 use super::auth::{AccountRequestAuth, AccountSettings, CodingPlanKeys, read_account_settings};
 use super::availability::{Availability, AvailabilityProvider, AvailabilityResolver};
@@ -147,6 +148,8 @@ pub struct AccountProviderSource {
 }
 
 struct Inner {
+    /// 账号的作用域：刷新与变化订阅在这里。
+    tasks: Spawner,
     runtime: ProviderRuntime,
     settings: SettingStore,
     auth: AccountRequestAuth,
@@ -159,6 +162,7 @@ struct Inner {
 
 impl AccountProviderSource {
     pub fn new(
+        spawner: &Spawner,
         runtime: ProviderRuntime,
         settings: SettingStore,
         auth: AccountRequestAuth,
@@ -168,13 +172,16 @@ impl AccountProviderSource {
         runtime.attach_account_layer();
         Self {
             inner: Arc::new(Inner {
+                tasks: spawner.clone(),
                 runtime,
                 settings,
                 auth,
                 keys,
                 availability,
                 state: Mutex::new(SourceState::default()),
-                changed: EventHub::new(),
+                // 订阅者是 CLI 热同步（按原因逐次推送，原因进日志），一次变化一条；落后 256 条说明它卡住，
+                // 结束它的订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+                changed: EventHub::new("account-providers-changed", 256, Overflow::CloseSubscriber),
             }),
         }
     }
@@ -194,14 +201,15 @@ impl AccountProviderSource {
     pub fn start(&self) {
         let source = self.clone();
         let mut builtin = Box::pin(self.inner.runtime.builtin_changes().subscribe());
-        tokio::spawn(async move {
+        let tasks = &self.inner.tasks;
+        drop(tasks.spawn_resident("account-builtin-changes", async move {
             while builtin.next().await.is_some() {
                 let _ = source.refresh("config:zcodeBuiltin:file-changed").await;
             }
-        });
+        }));
         let source = self.clone();
         let mut settings = Box::pin(self.inner.settings.on_updated().subscribe());
-        tokio::spawn(async move {
+        drop(tasks.spawn_resident("account-setting-changes", async move {
             while let Some(keys) = settings.next().await {
                 let keys: Vec<&String> = keys
                     .iter()
@@ -218,11 +226,11 @@ impl AccountProviderSource {
                     let _ = source.refresh(&reason).await;
                 }
             }
-        });
+        }));
         let source = self.clone();
-        tokio::spawn(async move {
+        drop(tasks.spawn("account-first-read", async move {
             let _ = source.read().await;
-        });
+        }));
     }
 
     /// 当前快照；还没有时触发首轮刷新并等待。
@@ -252,7 +260,13 @@ impl AccountProviderSource {
         };
         if start {
             let source = self.clone();
-            tokio::spawn(async move { source.run_loop().await });
+            drop(
+                self.inner
+                    .tasks
+                    .spawn("account-provider-refresh", async move {
+                        source.run_loop().await
+                    }),
+            );
         }
         receiver
             .await

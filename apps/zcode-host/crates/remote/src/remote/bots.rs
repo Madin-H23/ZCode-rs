@@ -16,6 +16,7 @@ use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use futures_util::{FutureExt, StreamExt};
 use serde_json::{Map, Value, json};
+use zcode_async::Spawner;
 use zcode_host_control::{ClientMode, ControlRouter};
 use zcode_host_kit::{CallContext, Reply, RpcError, RpcValue, ServiceChannel, log};
 use zcode_host_rpc::RpcClient;
@@ -96,15 +97,64 @@ impl Shared {
     }
 }
 
+/// 一次就绪检查，并发的使用方共享它的结果。
+type ReadyFlight = futures_util::future::Shared<BoxFuture<'static, Result<(), String>>>;
+
 /// `getRuntimeServices` 的就绪闸：远端 Model Selection 与 App 运行时偏好都就绪后才算可用；失败不缓存，
 /// 下次使用重试（同 Node 失败时不写缓存）。
 struct Readiness {
     shared: Arc<Shared>,
-    ready: AtomicBool,
-    init: tokio::sync::Mutex<()>,
+    ready: Arc<AtomicBool>,
+    /// 进行中的就绪检查（single-flight）；失败后清掉。原来是跨检查持有的 tokio 锁
+    /// （docs/specs/rust-u2-task-scope.md §6.3）。
+    flight: Mutex<Option<ReadyFlight>>,
+}
+
+/// 就绪检查本身：确认远端 Model Selection 就绪，再推 App 运行时偏好（推送期间版本变了就再推）。
+async fn check_ready(
+    client: RpcClient,
+    shared: Arc<Shared>,
+    ready: Arc<AtomicBool>,
+) -> Result<(), String> {
+    client
+        .call("model-selection", "getView", Vec::new())
+        .await
+        .map_err(message)?;
+    loop {
+        let (revision, cached) = {
+            let preferences = shared.preferences();
+            (preferences.revision, preferences.latest.clone())
+        };
+        let preferences = match cached {
+            Some(preferences) => preferences,
+            None => {
+                let settings = shared.settings.get().await;
+                json!({
+                    "askUserQuestionAutoResolutionEnabled":
+                        settings["askUserQuestionAutoResolutionEnabled"] != false,
+                    "modelIoFullRetentionEnabled": settings["modelIoFullRetentionEnabled"] == true,
+                })
+            }
+        };
+        client
+            .call(
+                "zcode-agent",
+                "syncAppRuntimePreferences",
+                vec![RpcValue::Json(preferences)],
+            )
+            .await
+            .map_err(message)?;
+        if revision == shared.preferences().revision {
+            break;
+        }
+    }
+    ready.store(true, Ordering::SeqCst);
+    Ok(())
 }
 
 struct PortInner {
+    /// 远端连接的作用域：Bot 的会话帧转发在这里。
+    spawner: Spawner,
     client: RpcClient,
     tasks: Arc<RemoteTaskOps>,
     agent: Arc<RemoteAgentChannel>,
@@ -122,6 +172,7 @@ pub struct RemotePort(Arc<PortInner>);
 impl RemotePort {
     fn new(handle: &RemoteHandle, shared: Option<Arc<Shared>>) -> Self {
         Self(Arc::new(PortInner {
+            spawner: handle.connection.spawner(),
             client: handle.connection.client.clone(),
             tasks: handle.tasks.clone(),
             agent: handle.agent.clone(),
@@ -129,8 +180,8 @@ impl RemotePort {
             targets: Mutex::new(HashMap::new()),
             readiness: shared.map(|shared| Readiness {
                 shared,
-                ready: AtomicBool::new(false),
-                init: tokio::sync::Mutex::new(()),
+                ready: Arc::new(AtomicBool::new(false)),
+                flight: Mutex::new(None),
             }),
         }))
     }
@@ -161,8 +212,8 @@ impl PortInner {
             .unwrap_or_else(|| WorkspaceTarget::local(key.to_owned()))
     }
 
-    /// 首次使用前：确认远端 Model Selection 就绪，再推 App 运行时偏好（推送期间版本变了就再推）。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// 首次使用前：确认远端 Model Selection 就绪，再推 App 运行时偏好。并发的首次使用共享同一次检查；
+    /// 失败后清掉这一次，下次使用重试。
     async fn ready(&self) -> Result<(), String> {
         let Some(readiness) = &self.readiness else {
             return Ok(());
@@ -170,44 +221,34 @@ impl PortInner {
         if readiness.ready.load(Ordering::SeqCst) {
             return Ok(());
         }
-        let _init = readiness.init.lock().await;
-        if readiness.ready.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        self.client
-            .call("model-selection", "getView", Vec::new())
-            .await
-            .map_err(message)?;
-        loop {
-            let (revision, cached) = {
-                let preferences = readiness.shared.preferences();
-                (preferences.revision, preferences.latest.clone())
-            };
-            let preferences = match cached {
-                Some(preferences) => preferences,
-                None => {
-                    let settings = readiness.shared.settings.get().await;
-                    json!({
-                        "askUserQuestionAutoResolutionEnabled":
-                            settings["askUserQuestionAutoResolutionEnabled"] != false,
-                        "modelIoFullRetentionEnabled": settings["modelIoFullRetentionEnabled"] == true,
-                    })
-                }
-            };
-            self.client
-                .call(
-                    "zcode-agent",
-                    "syncAppRuntimePreferences",
-                    vec![RpcValue::Json(preferences)],
+        let flight = readiness
+            .flight
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert_with(|| {
+                check_ready(
+                    self.client.clone(),
+                    readiness.shared.clone(),
+                    readiness.ready.clone(),
                 )
-                .await
-                .map_err(message)?;
-            if revision == readiness.shared.preferences().revision {
-                break;
+                .boxed()
+                .shared()
+            })
+            .clone();
+        let result = flight.clone().await;
+        if result.is_err() {
+            let mut current = readiness
+                .flight
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if current
+                .as_ref()
+                .is_some_and(|current| current.ptr_eq(&flight))
+            {
+                *current = None;
             }
         }
-        readiness.ready.store(true, Ordering::SeqCst);
-        Ok(())
+        result
     }
 
     fn carrier(&self) -> Value {
@@ -352,8 +393,11 @@ async fn subscribe(
             }),
     );
     let client = inner.client.clone();
-    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Value>();
-    tokio::spawn(async move {
+    // 交给 Bot 消费者的逻辑帧队列有界，满了转发任务等待（与本地 Bot 相同，见
+    // `crate::bots::subscribe_conversation`）；转发任务在远端连接的作用域里。
+    let (sender, mut receiver) = tokio::sync::mpsc::channel::<Value>(1024);
+    let spawner = inner.spawner.clone();
+    drop(spawner.spawn("remote-bot-conversation-frames", async move {
         let _scope = scope;
         let mut assembler = Assembler::new();
         let mut cursor: Option<u64> = None;
@@ -385,7 +429,7 @@ async fn subscribe(
             });
             if let (Some(logical), true) = (logical, in_order) {
                 cursor = logical["toSeq"].as_u64();
-                if sender.send(logical).is_err() {
+                if sender.send(logical).await.is_err() {
                     break;
                 }
                 continue;
@@ -407,7 +451,7 @@ async fn subscribe(
                 break;
             }
         }
-    });
+    }));
     Ok(futures_util::stream::poll_fn(move |context| receiver.poll_recv(context)).boxed())
 }
 
@@ -758,6 +802,8 @@ impl TaskPort for RemotePort {
 /// 重连服务（Node 远端集合不注入 `remoteWorkspaceService`）。
 pub(super) fn connection_bots(local: &Arc<Bots>, handle: &RemoteHandle) -> Arc<Bots> {
     Bots::new(BotsDeps {
+        // 这条连接的 Bots 实例的任务随连接结束。
+        spawner: handle.connection.spawner(),
         repo: local.repo.clone(),
         credentials: local.credentials.clone(),
         providers: local.providers.clone(),

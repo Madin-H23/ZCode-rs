@@ -518,8 +518,9 @@ impl CommandsService {
     }
 
     async fn set_override(&self, file_path: &str, enabled: bool) -> Result<(), RpcError> {
-        update_cli_config_lenient(&self.roots, |config| {
-            set_override(config, file_path, enabled);
+        let file_path = file_path.to_owned();
+        update_cli_config_lenient(&self.roots, move |config| {
+            set_override(config, &file_path, enabled);
             (true, ())
         })
         .await
@@ -590,9 +591,10 @@ impl CommandsService {
             && let Some(previous) = before.get(old).copied()
         {
             // 禁用状态按文件路径存放；改名会换路径，必须迁移，否则刚禁用的命令改名后重新启用。
-            update_cli_config_lenient(&self.roots, |config| {
-                set_override(config, old, true);
-                set_override(config, &new_path, previous);
+            let (old, renamed) = (old.clone(), new_path.clone());
+            update_cli_config_lenient(&self.roots, move |config| {
+                set_override(config, &old, true);
+                set_override(config, &renamed, previous);
                 (true, ())
             })
             .await?;

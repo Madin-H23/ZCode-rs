@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde_json::{Map, Value, json};
 use zcode_host_kit::{Reply, RpcError, ServiceBuilder, log};
 
-use super::cli_config::{self, Update};
+use super::cli_config::Update;
 use super::skill_sync::truthy;
 use super::{Roots, bind, check_write_access, fsx, json as js};
 use crate::agent::{AgentRuntime, RuntimePolicy, WorkspaceTarget};
@@ -239,18 +239,22 @@ impl McpSyncService {
         if !changed {
             return servers;
         }
-        let result = cli_config::update(path, |raw| {
-            let Some(current) = parse_object(raw.as_deref(), path)? else {
-                return Ok(Update::Skip(()));
-            };
-            let (fresh, changed) = migrate_legacy(&server_map(&current, nested));
-            if !changed {
-                return Ok(Update::Skip(()));
-            }
-            let next = with_server_map(&current, nested, fresh);
-            Ok(Update::Write(js::pretty_line(&Value::Object(next)), ()))
-        })
-        .await;
+        let owned = path.to_owned();
+        let result = self
+            .roots
+            .writes
+            .update(path, move |raw| {
+                let Some(current) = parse_object(raw.as_deref(), &owned)? else {
+                    return Ok(Update::Skip(()));
+                };
+                let (fresh, changed) = migrate_legacy(&server_map(&current, nested));
+                if !changed {
+                    return Ok(Update::Skip(()));
+                }
+                let next = with_server_map(&current, nested, fresh);
+                Ok(Update::Write(js::pretty_line(&Value::Object(next)), ()))
+            })
+            .await;
         if let Err(error) = result {
             log::warn(format!(
                 "[mcp-sync] legacy enable migration failed: {path} {}",
@@ -464,18 +468,21 @@ impl McpSyncService {
         }
         let config = payload.get("config").cloned();
         let upsert = action == "upsert";
-        cli_config::update(&path, |raw| {
-            let current = parse_object(raw.as_deref(), &path)?.unwrap_or_default();
-            let mut servers = server_map(&current, true);
-            if upsert {
-                servers.insert(name.clone(), config.clone().unwrap_or(Value::Null));
-            } else {
-                js::delete(&mut servers, &name);
-            }
-            let next = with_server_map(&current, true, servers);
-            Ok(Update::Write(js::pretty_line(&Value::Object(next)), ()))
-        })
-        .await
+        let owned = path.clone();
+        self.roots
+            .writes
+            .update(&path, move |raw| {
+                let current = parse_object(raw.as_deref(), &owned)?.unwrap_or_default();
+                let mut servers = server_map(&current, true);
+                if upsert {
+                    servers.insert(name.clone(), config.clone().unwrap_or(Value::Null));
+                } else {
+                    js::delete(&mut servers, &name);
+                }
+                let next = with_server_map(&current, true, servers);
+                Ok(Update::Write(js::pretty_line(&Value::Object(next)), ()))
+            })
+            .await
     }
 
     async fn write_server_enabled(
@@ -500,25 +507,28 @@ impl McpSyncService {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_owned();
-        cli_config::update(&path, |raw| {
-            let current = parse_object(raw.as_deref(), &path)?.unwrap_or_default();
-            let mut servers = server_map(&current, descriptor.nested);
-            let Some(server) = servers
-                .get(name)
-                .filter(|server| server.is_object())
-                .cloned()
-            else {
-                return Ok(Update::Skip(()));
-            };
-            // 停用状态写在 server 配置对象内，不把目录路径写到 mcp 顶层。
-            servers.insert(name.to_owned(), set_server_enabled(&server, enabled));
-            let mut next = with_server_map(&current, descriptor.nested, servers);
-            if let Some(cleaned) = remove_legacy_override(&next, &directory, name) {
-                next = cleaned;
-            }
-            Ok(Update::Write(js::pretty_line(&Value::Object(next)), ()))
-        })
-        .await
+        let (owned, name) = (path.clone(), name.to_owned());
+        self.roots
+            .writes
+            .update(&path, move |raw| {
+                let current = parse_object(raw.as_deref(), &owned)?.unwrap_or_default();
+                let mut servers = server_map(&current, descriptor.nested);
+                let Some(server) = servers
+                    .get(&name)
+                    .filter(|server| server.is_object())
+                    .cloned()
+                else {
+                    return Ok(Update::Skip(()));
+                };
+                // 停用状态写在 server 配置对象内，不把目录路径写到 mcp 顶层。
+                servers.insert(name.clone(), set_server_enabled(&server, enabled));
+                let mut next = with_server_map(&current, descriptor.nested, servers);
+                if let Some(cleaned) = remove_legacy_override(&next, &directory, &name) {
+                    next = cleaned;
+                }
+                Ok(Update::Write(js::pretty_line(&Value::Object(next)), ()))
+            })
+            .await
     }
 
     async fn cleanup_legacy_override(&self, location: &Value, name: &str) -> Result<(), RpcError> {
@@ -528,14 +538,17 @@ impl McpSyncService {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_owned();
-        cli_config::update(&path, |raw| {
-            let current = parse_object(raw.as_deref(), &path)?.unwrap_or_default();
-            Ok(match remove_legacy_override(&current, &directory, name) {
-                Some(next) => Update::Write(js::pretty_line(&Value::Object(next)), ()),
-                None => Update::Skip(()),
+        let (owned, name) = (path.clone(), name.to_owned());
+        self.roots
+            .writes
+            .update(&path, move |raw| {
+                let current = parse_object(raw.as_deref(), &owned)?.unwrap_or_default();
+                Ok(match remove_legacy_override(&current, &directory, &name) {
+                    Some(next) => Update::Write(js::pretty_line(&Value::Object(next)), ()),
+                    None => Update::Skip(()),
+                })
             })
-        })
-        .await
+            .await
     }
 
     pub async fn import(&self, params: Value) -> Result<Value, RpcError> {
@@ -566,53 +579,61 @@ impl McpSyncService {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        cli_config::update(&target, |raw| {
-            let current = parse_object(raw.as_deref(), &target)?.unwrap_or_default();
-            let mut target_servers = server_map(&current, true);
-            let mut results = Vec::new();
-            let mut changed = false;
-            for server in &servers {
-                let name = server
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_owned();
-                let key = name_key(&name);
-                if target_servers.get(&name).is_some_and(truthy) {
-                    results.push(json!({ "name": name, "status": "skipped", "path": target }));
-                    continue;
+        let path = target.clone();
+        self.roots
+            .writes
+            .update(&path, move |raw| {
+                let current = parse_object(raw.as_deref(), &target)?.unwrap_or_default();
+                let mut target_servers = server_map(&current, true);
+                let mut results = Vec::new();
+                let mut changed = false;
+                for server in &servers {
+                    let name = server
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned();
+                    let key = name_key(&name);
+                    if target_servers.get(&name).is_some_and(truthy) {
+                        results.push(json!({ "name": name, "status": "skipped", "path": target }));
+                        continue;
+                    }
+                    if let Some(record) = existing.get(&key) {
+                        results.push(
+                            json!({ "name": name, "status": "skipped", "path": record.path }),
+                        );
+                        continue;
+                    }
+                    let enabled = server.get("enabled").is_some_and(truthy);
+                    let config = server.get("config").cloned().unwrap_or(Value::Null);
+                    let rewritten = rewrite_filesystem_config(
+                        &name,
+                        set_server_enabled(&config, enabled),
+                        &paths,
+                    );
+                    target_servers.insert(name.clone(), rewritten.clone());
+                    existing.insert(
+                        key,
+                        Record {
+                            name: name.clone(),
+                            config: rewritten,
+                            enabled,
+                            source: "zcode",
+                            path: target.clone(),
+                        },
+                    );
+                    results.push(json!({ "name": name, "status": "synced", "path": target }));
+                    changed = true;
                 }
-                if let Some(record) = existing.get(&key) {
-                    results.push(json!({ "name": name, "status": "skipped", "path": record.path }));
-                    continue;
-                }
-                let enabled = server.get("enabled").is_some_and(truthy);
-                let config = server.get("config").cloned().unwrap_or(Value::Null);
-                let rewritten =
-                    rewrite_filesystem_config(&name, set_server_enabled(&config, enabled), &paths);
-                target_servers.insert(name.clone(), rewritten.clone());
-                existing.insert(
-                    key,
-                    Record {
-                        name: name.clone(),
-                        config: rewritten,
-                        enabled,
-                        source: "zcode",
-                        path: target.clone(),
-                    },
-                );
-                results.push(json!({ "name": name, "status": "synced", "path": target }));
-                changed = true;
-            }
-            let result = json!({ "results": results });
-            Ok(if changed {
-                let next = with_server_map(&current, true, target_servers);
-                Update::Write(js::pretty_line(&Value::Object(next)), result)
-            } else {
-                Update::Skip(result)
+                let result = json!({ "results": results });
+                Ok(if changed {
+                    let next = with_server_map(&current, true, target_servers);
+                    Update::Write(js::pretty_line(&Value::Object(next)), result)
+                } else {
+                    Update::Skip(result)
+                })
             })
-        })
-        .await
+            .await
     }
 
     pub async fn list_workspace_statuses(&self, params: Value) -> Result<Value, RpcError> {
@@ -1017,7 +1038,14 @@ mod tests {
             r#"{"other":1,"mcp":{"servers":{"a":{"command":"x","enable":false,"enabled":true}}}}"#,
         )
         .unwrap();
-        let service = McpSyncService::new(Roots::new(home.path(), home.path()), None);
+        let service = McpSyncService::new(
+            Roots::new(
+                &zcode_host_base::testing::spawner(),
+                home.path(),
+                home.path(),
+            ),
+            None,
+        );
         let loaded = service.load(json!({})).await.unwrap();
         assert_eq!(loaded["servers"][0]["enabled"], false);
         let text = std::fs::read_to_string(config_dir.join("config.json")).unwrap();

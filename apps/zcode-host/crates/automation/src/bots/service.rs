@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
-use zcode_host_kit::{Args, Reply, RpcError, ServiceBuilder, log};
+use zcode_async::{Spawner, Task};
+use zcode_host_kit::{Args, Reply, RpcError, Serial, ServiceBuilder, log};
 
 use super::channel::{Polling, PollingRuntimes};
 use super::feishu::api::AppCredentials;
@@ -39,6 +40,8 @@ pub struct BindCode {
 }
 
 pub struct BotsDeps {
+    /// Bots 的作用域：通道运行时（各有子作用域）、订阅、typing 与后台发送都在这里。
+    pub spawner: Spawner,
     pub repo: BotsRepo,
     pub credentials: CredentialStore,
     pub providers: Arc<Providers>,
@@ -70,10 +73,11 @@ pub struct TransientCard {
 pub struct Typing {
     pub bot: Value,
     pub target: super::providers::TypingTarget,
-    pub repeat: Option<tokio::task::AbortHandle>,
+    pub repeat: Option<Task<()>>,
 }
 
 pub struct Bots {
+    pub(crate) spawner: Spawner,
     pub repo: BotsRepo,
     pub credentials: CredentialStore,
     pub providers: Arc<Providers>,
@@ -88,8 +92,8 @@ pub struct Bots {
     pub(crate) runtimes: Runtimes,
     pub(crate) telegram_runtimes: PollingRuntimes,
     pub(crate) weixin_runtimes: PollingRuntimes,
-    /// 每个聊天上下文串行处理入站消息（`enqueueInboundProcessing`）。
-    pub(crate) inbound_queues: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// 每个聊天上下文串行处理入站消息（`enqueueInboundProcessing`）：每个上下文一个 owner 任务。
+    pub(crate) inbound_queues: Mutex<HashMap<String, Serial>>,
     /// 2 分钟内处理过的入站消息（`recentInboundDeliveryAtByKey`）。
     pub(crate) recent_inbound: Mutex<HashMap<String, i64>>,
     /// 本进程发起、尚未观察到终态的任务（`runningTasks`）。
@@ -102,7 +106,7 @@ pub struct Bots {
     pub(crate) pending_tasks: Mutex<HashMap<String, HashMap<String, TaskEntry>>>,
     pub(crate) pending_workspaces: Mutex<HashMap<String, HashMap<String, Value>>>,
     /// 已订阅的会话流（`streamSubscriptions`，键为 `workspaceKey::taskId`）。
-    pub(crate) watches: Mutex<HashMap<String, Option<tokio::task::AbortHandle>>>,
+    pub(crate) watches: Mutex<HashMap<String, Option<Task<()>>>>,
     /// taskId → 运行中的 typing。
     pub(crate) typing: Mutex<HashMap<String, Typing>>,
     /// taskId → /status 的最新进展（`liveStatusProgressByTaskId`）。
@@ -192,6 +196,10 @@ fn random_code() -> String {
 impl Bots {
     pub fn new(deps: BotsDeps) -> Arc<Self> {
         Arc::new(Self {
+            runtimes: Runtimes::new(&deps.spawner),
+            telegram_runtimes: PollingRuntimes::new(&deps.spawner, "telegram-refresh"),
+            weixin_runtimes: PollingRuntimes::new(&deps.spawner, "weixin-refresh"),
+            spawner: deps.spawner,
             repo: deps.repo,
             credentials: deps.credentials,
             providers: deps.providers,
@@ -202,9 +210,6 @@ impl Bots {
             background: deps.background,
             bind_codes: Mutex::new(HashMap::new()),
             runtime_status: Mutex::new(HashMap::new()),
-            runtimes: Runtimes::default(),
-            telegram_runtimes: PollingRuntimes::default(),
-            weixin_runtimes: PollingRuntimes::default(),
             inbound_queues: Mutex::new(HashMap::new()),
             recent_inbound: Mutex::new(HashMap::new()),
             running: Mutex::new(HashSet::new()),
@@ -223,6 +228,11 @@ impl Bots {
             card_backoff_ms: Mutex::new(super::watch::CARD_BACKOFF_BASE_MS),
             closed: AtomicBool::new(false),
         })
+    }
+
+    /// Bots 的作用域（远端 attachment 派生的 Bots 在它的远端会话作用域里时不同）。
+    pub fn spawner(&self) -> &Spawner {
+        &self.spawner
     }
 
     /// 已进入 Host 退出：通道运行时的启动入口据此不再登记新运行时。

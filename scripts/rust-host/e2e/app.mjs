@@ -146,7 +146,8 @@ export async function assertCleanQuit(host, home, quit) {
 /**
  * Host 日志里的异常报告（docs/specs/rust-u2-gateway.md §2.3、§2.4，rust-u2-task-scope.md）：任务 panic
  * （作用域上报 `task panicked: scope=…`，以及 panic hook 的 `panic: panicked at …`）、出站积压越过上限而
- * 关闭连接、退出时 runtime 任务没有收口而被中止（`aborting, still running`）；runtime 的 JSONL 日志里的
+ * 关闭连接、退出时 runtime 任务没有收口而被中止（`aborting, still running`）、Host 退出时根作用域里仍有
+ * 任务要中止（`host tasks still running … aborting`，rust-u2-task-scope.md §6.4）；runtime 的 JSONL 日志里的
  * `task.panicked` 与关闭时仍在运行而被中止的任务。这些都不该在正常场景里出现；
  * 场景故意制造的（例如故障注入的 panic）用模块导出 `expectedHostLog`（正则数组）声明。
  */

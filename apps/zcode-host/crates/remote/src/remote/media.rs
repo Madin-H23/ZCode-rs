@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::task::AbortHandle;
+use zcode_async::{Spawner, TaskScope};
 use zcode_host_kit::{
     CallContext, CallFuture, EventStream, Reply, RpcError, RpcValue, ServiceChannel, log,
 };
@@ -177,7 +177,8 @@ struct State {
     /// token → previewId
     tokens: HashMap<String, String>,
     port: Option<u16>,
-    server: Option<AbortHandle>,
+    /// 代理的作用域（监听与各连接）：dispose 时释放，监听与仍在服务的连接一并中止。
+    server: Option<TaskScope>,
 }
 
 impl State {
@@ -192,9 +193,10 @@ pub struct MediaPreviewProxy {
     me: Weak<MediaPreviewProxy>,
     client: RpcClient,
     scope: RemoteScope,
+    /// 远端连接的作用域：代理的作用域是它的子作用域。
+    spawner: Spawner,
     state: Mutex<State>,
     disposed: AtomicBool,
-    listening: tokio::sync::Mutex<()>,
 }
 
 /// 一个请求槽：每租约与整个 Host 两级上限，释放时同时归还。
@@ -213,14 +215,15 @@ impl Drop for Slot {
 }
 
 impl MediaPreviewProxy {
-    pub fn new(client: RpcClient, scope: RemoteScope) -> Arc<Self> {
+    /// 代理的监听与连接在 `spawner`（远端连接的作用域）的子作用域 `media-proxy` 里。
+    pub fn new(spawner: &Spawner, client: RpcClient, scope: RemoteScope) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
+            spawner: spawner.clone(),
             client,
             scope,
             state: Mutex::new(State::default()),
             disposed: AtomicBool::new(false),
-            listening: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -251,34 +254,46 @@ impl MediaPreviewProxy {
         Ok((stat["type"] == "file", stat["size"].as_u64()))
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
-    async fn ensure_listening(&self) -> Result<(), RpcError> {
-        let _guard = self.listening.lock().await;
-        if self.lock().port.is_some() {
+    /// 第一次需要时监听回环端口。绑定回环地址是立即完成的系统调用：用 std 的 listener 在状态锁里
+    /// 同步完成（锁内不 await），并发的调用不会各自绑定一个端口。原来用一把跨 await 的 tokio 锁。
+    fn ensure_listening(&self) -> Result<(), RpcError> {
+        let mut state = self.lock();
+        if state.port.is_some() {
             return Ok(());
         }
-        let listener = TcpListener::bind(("127.0.0.1", 0)).await.map_err(|error| {
+        let failed = |error: std::io::Error| {
             fault(format!(
                 "Remote media preview proxy failed to listen: {error}"
             ))
-        })?;
+        };
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).map_err(failed)?;
+        listener.set_nonblocking(true).map_err(failed)?;
+        let listener = TcpListener::from_std(listener).map_err(failed)?;
         let port = listener
             .local_addr()
             .map_err(|error| fault(error.to_string()))?
             .port();
-        let proxy = self.me.clone();
-        let server = tokio::spawn(async move {
-            loop {
-                let Ok((stream, _)) = listener.accept().await else {
-                    continue;
-                };
-                let Some(proxy) = proxy.upgrade() else { return };
-                tokio::spawn(async move { proxy.serve(stream).await });
-            }
-        });
-        let mut state = self.lock();
+        // 缺陷修复：原来 dispose 只中止监听任务，已接受的连接任务是分离的，dispose 之后仍在服务。
+        // 现在监听与连接都在代理自己的作用域里，dispose 时一并结束。
+        let server = self.spawner.child("media-proxy");
+        let (proxy, connections) = (self.me.clone(), server.spawner());
+        drop(
+            server
+                .spawner()
+                .spawn_resident("media-proxy-accept", async move {
+                    loop {
+                        let Ok((stream, _)) = listener.accept().await else {
+                            continue;
+                        };
+                        let Some(proxy) = proxy.upgrade() else { return };
+                        drop(connections.spawn("media-proxy-connection", async move {
+                            proxy.serve(stream).await
+                        }));
+                    }
+                }),
+        );
         state.port = Some(port);
-        state.server = Some(server.abort_handle());
+        state.server = Some(server);
         Ok(())
     }
 
@@ -312,7 +327,7 @@ impl MediaPreviewProxy {
         if kind != expected {
             return Err(fault(format!("Unsupported media preview format: {path}")));
         }
-        self.ensure_listening().await?;
+        self.ensure_listening()?;
         let now = now_ms();
         let lease = Lease {
             preview_id: crate::agent::service::uuid_v4(),
@@ -381,9 +396,7 @@ impl MediaPreviewProxy {
         let mut state = self.lock();
         state.leases.clear();
         state.tokens.clear();
-        if let Some(server) = state.server.take() {
-            server.abort();
-        }
+        drop(state.server.take());
     }
 
     fn acquire(self: &Arc<Self>, preview_id: &str) -> Option<Slot> {
@@ -657,6 +670,50 @@ impl ServiceChannel for MediaPreviewChannel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 缺陷修复的回归测试（docs/specs/rust-u2-task-scope.md §6.1）：dispose 之后，代理已接受、还在等请求
+    /// 头的连接随之结束。原来只中止监听任务，这样的连接任务一直留着、连接不关闭。
+    #[tokio::test]
+    async fn dispose_ends_connections_the_proxy_accepted() {
+        let scope = zcode_async::TaskScope::root("connection", |panic| panic!("{panic:?}"));
+        let (_remote, client) = super::super::fake_remote::FakeRemote::start();
+        let proxy = MediaPreviewProxy::new(
+            &scope.spawner(),
+            client,
+            RemoteScope {
+                remote_session_id: "s1".into(),
+                workspace_path: "/w".into(),
+                workspace_identity: "remote:docker:c:/w".into(),
+            },
+        );
+        proxy.ensure_listening().unwrap();
+        let port = proxy.lock().port.unwrap();
+        let mut idle = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let connection = "connection/media-proxy: media-proxy-connection".to_owned();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !scope.spawner().running().contains(&connection) {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "{:?}",
+                scope.spawner().running()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        proxy.dispose();
+        let mut buffer = [0u8; 1];
+        let read = tokio::time::timeout(std::time::Duration::from_secs(5), idle.read(&mut buffer))
+            .await
+            .expect("the accepted connection is closed on dispose");
+        assert_eq!(read.unwrap(), 0);
+        while !scope.spawner().running().is_empty() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "{:?}",
+                scope.spawner().running()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
 
     #[test]
     fn ranges_follow_parse_range() {

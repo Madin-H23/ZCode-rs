@@ -41,7 +41,12 @@ impl Fixture {
             .collect(),
         );
         let data = home.path().join(".zcode");
-        let checkpoints = Checkpoints::new(GitRepo::new(&env), data.clone(), data.join("v2"));
+        let checkpoints = Checkpoints::new(
+            &zcode_host_base::testing::spawner(),
+            GitRepo::new(&zcode_host_base::testing::spawner(), &env),
+            data.clone(),
+            data.join("v2"),
+        );
         Self {
             channel: channel(service(checkpoints)),
             home,

@@ -157,17 +157,23 @@ async fn import_installs_artifacts_then_cleans_up_when_the_session_cannot_be_cre
     let client = Arc::new(ShareClient::new(format!("{origin}/api/v1"), no_token()).unwrap());
     // 没有可用模型：createSession 走写门禁失败，导入必须回滚本次目录。
     let agent = AgentRuntime::new(
+        &zcode_host_base::testing::spawner(),
         crate::agent::AgentRuntimeConfig {
             base_env: Default::default(),
             command_vars: Default::default(),
             fallback_cwd: None,
         },
-        crate::settings::SettingStore::new(dir.path()),
-        crate::providers::ProviderRuntime::new(None, dir.path().join("p.json")),
+        crate::settings::SettingStore::new(&zcode_host_base::testing::spawner(), dir.path()),
+        crate::providers::ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
+            None,
+            dir.path().join("p.json"),
+        ),
     );
     let workspace = dir.path().join("ws");
     std::fs::create_dir_all(&workspace).unwrap();
     let importer = Importer::new(
+        &zcode_host_base::testing::spawner(),
         agent,
         None,
         client,

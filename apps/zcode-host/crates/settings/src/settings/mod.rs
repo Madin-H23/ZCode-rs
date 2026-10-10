@@ -1,28 +1,31 @@
 //! `setting` channel（packages/services/src/setting/settingService.ts）。
 //!
 //! 文件固定在 `<home>/.zcode/v2/setting.json`（home 取 `ZCODE_DESKTOP_HOME_DIR`，否则 HOME）。
-//! 读改写全程持跨进程锁（S0 修复后的语义），进程内另有写队列保证 `get` 不会越过已入队的写入。
+//! 读改写全程持跨进程锁（S0 修复后的语义）；进程内的写入由 owner 任务 `setting-writes`
+//! （[`Serial`]，docs/specs/rust-u2-task-scope.md §6.3）按提交顺序逐个执行，`get` 不会越过已提交的写入。
 //!
 //! App 级 Host 下 `SettingStore` 是 `setting.json` 的唯一写入方（docs/specs/rust-u4-app-host.md §2.6）：
 //! 每次成功写入（`setting` channel、Main 的 `setting-write`、Host 内部写入方、读取时补写迁移标记）
 //! 都在写队列内把写入后的完整设置交给变更出口；composition root 把它转成 `setting-changed` 发给 Main。
 //!
 //! ```text
-//! 写入方 ─update_reporting─► 写队列 ─► 文件锁内：读 → 合并 → 原子写 → 重读完整设置
-//!                                    └► 仍在写队列内：report(结果) → 变更出口(完整设置) → onDidUpdate 键
+//! 写入方 ─update_reporting─► owner 任务 ─► 文件锁内：读 → 合并 → 原子写 → 重读完整设置
+//!                                       └► 仍在 owner 任务里：report(结果) → 变更出口(完整设置) → onDidUpdate 键
 //! ```
-//! 结果先于它引起的变更通知；变更通知按写入顺序发出（同一写队列）。
+//! 结果先于它引起的变更通知；变更通知按写入顺序发出（同一个 owner 任务）。写入方放弃等待不会打断
+//! 已经开始的读改写。
 pub mod data_dir;
 pub mod schema;
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Map, Value};
 use tokio::fs;
-use tokio::sync::Mutex;
-use zcode_host_kit::{EventHub, Reply, RpcError, ServiceBuilder, log};
+use zcode_async::Spawner;
+use zcode_host_kit::{EventHub, Overflow, Reply, RpcError, Serial, ServiceBuilder, log};
 
 use crate::store::{LockOptions, atomic_write_text, with_file_lock};
 use schema::Patch;
@@ -50,8 +53,8 @@ pub struct SettingStore {
 struct Inner {
     file: PathBuf,
     home: PathBuf,
-    /// 进程内写队列；跨进程互斥由文件锁负责。
-    queue: Mutex<()>,
+    /// 进程内写入的 owner 任务；跨进程互斥由文件锁负责。
+    writes: Serial,
     /// Host 内部监听（相当于 observableSettingService.onDidUpdate），携带 patch 的键。
     updated: EventHub<Vec<String>>,
     changed: Option<ChangeSink>,
@@ -94,23 +97,26 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 }
 
 impl SettingStore {
-    /// 没有变更出口的 store（测试与不需要通知 Main 的场景）。
-    pub fn new(home: &Path) -> Self {
-        Self::build(home, None)
+    /// 没有变更出口的 store（测试与不需要通知 Main 的场景）。写入的 owner 任务在 `spawner` 的作用域里。
+    pub fn new(spawner: &Spawner, home: &Path) -> Self {
+        Self::build(spawner, home, None)
     }
 
     /// composition root 用：每次成功写入后把完整设置交给 `changed`。
-    pub fn with_change_sink(home: &Path, changed: ChangeSink) -> Self {
-        Self::build(home, Some(changed))
+    pub fn with_change_sink(spawner: &Spawner, home: &Path, changed: ChangeSink) -> Self {
+        Self::build(spawner, home, Some(changed))
     }
 
-    fn build(home: &Path, changed: Option<ChangeSink>) -> Self {
+    fn build(spawner: &Spawner, home: &Path, changed: Option<ChangeSink>) -> Self {
         Self {
             inner: Arc::new(Inner {
                 file: home.join(".zcode").join("v2").join("setting.json"),
                 home: home.to_owned(),
-                queue: Mutex::new(()),
-                updated: EventHub::new(),
+                // 设置写入很少（窗口尺寸、缩放、选择）；排队超过 64 个时写入方等待。
+                writes: Serial::start(spawner, "setting-writes", 64),
+                // 订阅者（数据目录迁移、账号 provider、远端预配）按 patch 的键决定是否响应，不能合并；
+                // 设置写入一次一条，落后 256 条说明订阅者卡住，结束它的订阅（rust-u2-task-scope.md §6.2）。
+                updated: EventHub::new("setting-updated", 256, Overflow::CloseSubscriber),
                 changed,
             }),
         }
@@ -177,18 +183,32 @@ impl SettingStore {
         }
     }
 
-    /// 在进程内队列和跨进程锁内执行一次读改写；`settle` 在释放文件锁之后、仍持有写队列时同步执行，
-    /// 写入结果与变更通知因此按写入顺序发出。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
-    async fn locked<T>(
+    /// 在 owner 任务里、跨进程锁内执行一次读改写；`settle` 在释放文件锁之后、下一次写入开始之前同步
+    /// 执行，写入结果与变更通知因此按写入顺序发出。
+    async fn locked<T, Operation, Written>(
         &self,
-        operation: impl AsyncFnOnce() -> anyhow::Result<T>,
-        settle: impl FnOnce(&anyhow::Result<T>),
-    ) -> anyhow::Result<T> {
-        let _queue = self.inner.queue.lock().await;
-        let result = with_file_lock(&self.inner.file, &LockOptions::default(), operation).await;
-        settle(&result);
-        result
+        operation: Operation,
+        settle: impl FnOnce(&anyhow::Result<T>) + Send + 'static,
+    ) -> anyhow::Result<T>
+    where
+        Operation: FnOnce(SettingStore) -> Written + Send + 'static,
+        Written: Future<Output = anyhow::Result<T>> + Send,
+        T: Send + 'static,
+    {
+        let store = self.clone();
+        self.inner
+            .writes
+            .run(async move {
+                let file = store.inner.file.clone();
+                let result = with_file_lock(&file, &LockOptions::default(), async move || {
+                    operation(store).await
+                })
+                .await;
+                settle(&result);
+                result
+            })
+            .await
+            .unwrap_or_else(|stopped| Err(anyhow::anyhow!(stopped)))
     }
 
     /// 写入后的完整设置（与 `get` 读到的相同）；在文件锁内调用。
@@ -223,25 +243,26 @@ impl SettingStore {
     }
 
     pub async fn get(&self) -> Value {
-        // 先等已入队的写入完成，保证读到已提交的选择。
-        drop(self.inner.queue.lock().await);
+        // 先等已提交的写入完成，保证读到已提交的选择：owner 任务按顺序执行，空工作排在它们之后。
+        let _ = self.inner.writes.run(async {}).await;
         let result = self.read().await;
         if !result.needs_persist {
             return result.settings;
         }
+        let publisher = self.clone();
         let persisted = self
             .locked(
-                async || {
-                    let latest = self.read().await;
+                async |store: SettingStore| {
+                    let latest = store.read().await;
                     if !latest.needs_persist {
                         return Ok(None);
                     }
-                    self.write(&latest.settings, &latest.raw, true).await?;
-                    Ok(Some(self.written_snapshot().await))
+                    store.write(&latest.settings, &latest.raw, true).await?;
+                    Ok(Some(store.written_snapshot().await))
                 },
-                |result| {
+                move |result| {
                     if let Ok(Some(setting)) = result {
-                        self.publish_change(setting);
+                        publisher.publish_change(setting);
                     }
                 },
             )
@@ -256,22 +277,25 @@ impl SettingStore {
         self.update_reporting(patch, expected, |_| {}).await
     }
 
-    /// 同 [`Self::update`]；`report` 在写队列内、变更通知之前收到结果（Main 的 `setting-write` 用它保证
-    /// `setting-write-result` 先于它引起的 `setting-changed`）。
+    /// 同 [`Self::update`]；`report` 在 owner 任务里、变更通知之前收到结果（Main 的 `setting-write` 用它
+    /// 保证 `setting-write-result` 先于它引起的 `setting-changed`）。
     pub async fn update_reporting(
         &self,
         patch: &Patch,
         expected: Option<&Patch>,
-        report: impl FnOnce(&Result<(), RpcError>),
+        report: impl FnOnce(&Result<(), RpcError>) + Send + 'static,
     ) -> Result<(), RpcError> {
         let has_selections = patch
             .iter()
             .any(|(key, _)| key == "providerFamilyConnectionSelections");
+        let (patch, expected) = (patch.clone(), expected.cloned());
+        let keys: Vec<String> = patch.iter().map(|(key, _)| key.clone()).collect();
+        let publisher = self.clone();
         let written = self
             .locked(
-                async || {
-                    let current = self.read().await;
-                    if let Some(expected) = expected {
+                async move |store: SettingStore| {
+                    let current = store.read().await;
+                    if let Some(expected) = &expected {
                         let expected_value = |key: &str| {
                             expected
                                 .iter()
@@ -296,7 +320,7 @@ impl SettingStore {
                             anyhow::bail!("Account connection settings changed");
                         }
                     }
-                    let mut merged = schema::merge(&current.settings, patch)
+                    let mut merged = schema::merge(&current.settings, &patch)
                         .ok_or_else(|| anyhow::anyhow!("ZodError: merged settings are invalid"))?;
                     if let Some(recent) = merged
                         .get_mut("recentProjects")
@@ -306,17 +330,15 @@ impl SettingStore {
                         recent.retain(|item| seen.insert(item.to_string()));
                         recent.truncate(MAX_RECENT_PROJECTS);
                     }
-                    self.write(&merged, &current.raw, has_selections).await?;
-                    Ok(self.written_snapshot().await)
+                    store.write(&merged, &current.raw, has_selections).await?;
+                    Ok(store.written_snapshot().await)
                 },
-                |result| {
+                move |result| {
                     let reported = result.as_ref().map(|_| ()).map_err(write_error);
                     report(&reported);
                     if let Ok(setting) = result {
-                        self.publish_change(setting);
-                        self.inner
-                            .updated
-                            .emit(patch.iter().map(|(key, _)| key.clone()).collect());
+                        publisher.publish_change(setting);
+                        publisher.inner.updated.emit(keys);
                     }
                 },
             )
@@ -389,7 +411,7 @@ mod tests {
     #[tokio::test]
     async fn missing_file_returns_defaults_without_writing() {
         let home = tempfile::tempdir().unwrap();
-        let store = SettingStore::new(home.path());
+        let store = SettingStore::new(&zcode_host_base::testing::spawner(), home.path());
         assert_eq!(store.get().await, schema::default_settings());
         assert!(!store.file().exists());
     }
@@ -397,7 +419,7 @@ mod tests {
     #[tokio::test]
     async fn update_persists_pretty_json_and_keeps_legacy_fields() {
         let home = tempfile::tempdir().unwrap();
-        let store = SettingStore::new(home.path());
+        let store = SettingStore::new(&zcode_host_base::testing::spawner(), home.path());
         std::fs::create_dir_all(store.file().parent().unwrap()).unwrap();
         std::fs::write(
             store.file(),
@@ -416,7 +438,7 @@ mod tests {
     #[tokio::test]
     async fn migration_flags_trigger_one_persist_on_read() {
         let home = tempfile::tempdir().unwrap();
-        let store = SettingStore::new(home.path());
+        let store = SettingStore::new(&zcode_host_base::testing::spawner(), home.path());
         std::fs::create_dir_all(store.file().parent().unwrap()).unwrap();
         std::fs::write(store.file(), r#"{"locale":"en-US"}"#).unwrap();
         let settings = store.get().await;
@@ -429,7 +451,7 @@ mod tests {
     #[tokio::test]
     async fn corrupt_file_is_quarantined() {
         let home = tempfile::tempdir().unwrap();
-        let store = SettingStore::new(home.path());
+        let store = SettingStore::new(&zcode_host_base::testing::spawner(), home.path());
         std::fs::create_dir_all(store.file().parent().unwrap()).unwrap();
         std::fs::write(store.file(), ":wq").unwrap();
         assert_eq!(store.get().await, schema::default_settings());
@@ -449,6 +471,7 @@ mod tests {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = seen.clone();
         let store = SettingStore::with_change_sink(
+            &zcode_host_base::testing::spawner(),
             home,
             Arc::new(move |setting: &Value| {
                 sink.lock()
@@ -530,7 +553,7 @@ mod tests {
     #[tokio::test]
     async fn expected_account_settings_guard_rejects_stale_writes() {
         let home = tempfile::tempdir().unwrap();
-        let store = SettingStore::new(home.path());
+        let store = SettingStore::new(&zcode_host_base::testing::spawner(), home.path());
         let patch = schema::parse_patch(&json!({"providerFamilyDomain": "zai"})).unwrap();
         let expected = schema::parse_patch(&json!({"providerFamilyDomain": "bigmodel"})).unwrap();
         let error = store.update(&patch, Some(&expected)).await.unwrap_err();

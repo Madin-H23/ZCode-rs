@@ -42,7 +42,11 @@ async fn personal_writes_are_canonical_for_typescript() {
     let dir = tempfile::tempdir().unwrap();
     let personal = dir.path().join("provider_config.json");
     let builtin = root.join("config/provider/zcode-builtin.json");
-    let runtime = ProviderRuntime::new(Some(builtin), personal.clone());
+    let runtime = ProviderRuntime::new(
+        &zcode_host_services::testing::spawner(),
+        Some(builtin),
+        personal.clone(),
+    );
     let writer = PersonalWriter::new(runtime.clone());
     writer
         .create_provider(&json!({"providerName": "Mine", "initialConfig": {

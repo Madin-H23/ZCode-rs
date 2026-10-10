@@ -52,7 +52,8 @@ pub fn endpoints_for(origin: &str) -> Endpoints {
 pub async fn harness(route: super::net::testing::Route) -> Harness {
     let server = serve(route).await;
     let dir = tempfile::tempdir().unwrap();
-    let credentials = CredentialStore::new(dir.path(), "secret");
+    let credentials =
+        CredentialStore::new(&zcode_host_base::testing::spawner(), dir.path(), "secret");
     let api = ApiClient::with_network(
         endpoints_for(&server.origin),
         dir.path().to_path_buf(),
@@ -61,6 +62,7 @@ pub async fn harness(route: super::net::testing::Route) -> Harness {
     let clock = Arc::new(AtomicI64::new(now_ms()));
     let tick = clock.clone();
     let service = OAuthService::with_clock(
+        &zcode_host_base::testing::spawner(),
         OAuthCredentialRepo::new(credentials.clone()),
         api,
         Arc::new(move || tick.load(Ordering::SeqCst)),

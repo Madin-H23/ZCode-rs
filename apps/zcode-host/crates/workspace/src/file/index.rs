@@ -386,7 +386,7 @@ impl IndexCache {
             }
         }
         let scan_root: PathBuf = root.to_path_buf();
-        let entries_list = tokio::task::spawn_blocking(move || scan(&scan_root, &rules))
+        let entries_list = zcode_async::blocking(move || scan(&scan_root, &rules))
             .await
             .map_err(std::io::Error::other)??;
         let index = Arc::new(WorkspaceIndex {

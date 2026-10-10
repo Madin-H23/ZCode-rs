@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-use futures_util::future::BoxFuture;
 use serde_json::Value;
 use url::Url;
 use zcode_host_kit::log;
@@ -547,9 +546,9 @@ fn error_message(error: &reqwest::Error) -> String {
     message
 }
 
-/// 响应 401 的观察者：参数是最终请求 URL 与请求头，由登录态决定是否退出。
-pub type UnauthorizedHandler =
-    Arc<dyn Fn(String, HeaderList) -> BoxFuture<'static, ()> + Send + Sync>;
+/// 响应 401 的观察者：参数是最终请求 URL 与请求头，由登录态决定是否退出。同步调用、不能阻塞：
+/// 需要异步处理的实现自己在所属的作用域里启动任务（docs/specs/rust-u2-task-scope.md §6.1）。
+pub type UnauthorizedHandler = Arc<dyn Fn(String, HeaderList) + Send + Sync>;
 
 enum NetworkSource {
     Settings(SettingStore),
@@ -565,7 +564,8 @@ struct Inner {
     endpoints: Endpoints,
     source_headers: SourceHeaders,
     network: NetworkSource,
-    options: tokio::sync::Mutex<Option<NetworkOptions>>,
+    /// 首次读取后缓存的网络选项；锁只保护这个值，持锁期间不 await。
+    options: Mutex<Option<NetworkOptions>>,
     clients: Mutex<HashMap<String, reqwest::Client>>,
     unauthorized: RwLock<Option<UnauthorizedHandler>>,
 }
@@ -590,7 +590,7 @@ impl ApiClient {
                 source_headers: SourceHeaders::new(endpoints.clone(), app_config_dir),
                 endpoints,
                 network,
-                options: tokio::sync::Mutex::new(None),
+                options: Mutex::new(None),
                 clients: Mutex::new(HashMap::new()),
                 unauthorized: RwLock::new(None),
             }),
@@ -613,10 +613,10 @@ impl ApiClient {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handler);
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// 首次调用时读取并缓存。并发的首次调用各自读取设置（锁外），先写入的为准，之后都读缓存；
+    /// 原来读取期间持 tokio 锁，其他调用方排队等它。
     async fn network_options(&self) -> NetworkOptions {
-        let mut cached = self.inner.options.lock().await;
-        if let Some(options) = cached.as_ref() {
+        if let Some(options) = self.lock_options().as_ref() {
             return options.clone();
         }
         let options = match &self.inner.network {
@@ -625,8 +625,14 @@ impl ApiClient {
                 NetworkOptions::from_settings(&settings.get().await)
             }
         };
-        *cached = Some(options.clone());
-        options
+        self.lock_options().get_or_insert(options).clone()
+    }
+
+    fn lock_options(&self) -> std::sync::MutexGuard<'_, Option<NetworkOptions>> {
+        self.inner
+            .options
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     async fn client_for(
@@ -664,11 +670,10 @@ impl ApiClient {
             ),
             None => None,
         };
-        let client = tokio::task::spawn_blocking(move || {
-            build_client(proxy.as_deref(), ca, follow_redirects)
-        })
-        .await
-        .map_err(|error| error.to_string())??;
+        let client =
+            zcode_async::blocking(move || build_client(proxy.as_deref(), ca, follow_redirects))
+                .await
+                .map_err(|error| error.to_string())??;
         self.inner
             .clients
             .lock()
@@ -768,7 +773,7 @@ impl ApiClient {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
             if let Some(handler) = handler {
-                tokio::spawn(handler(url.clone(), headers.clone()));
+                handler(url.clone(), headers.clone());
             }
         }
         // 最终 URL（重定向后）；调用方用它确认响应仍属于发起时的端点。
@@ -1238,10 +1243,7 @@ mod tests {
         );
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         client.set_unauthorized_handler(Arc::new(move |url, headers| {
-            let sender = sender.clone();
-            Box::pin(async move {
-                let _ = sender.send((url, headers.get("authorization").map(str::to_owned)));
-            })
+            let _ = sender.send((url, headers.get("authorization").map(str::to_owned)));
         }));
         let response = client
             .request(ApiRequest::get(format!("{}/me", server.origin)).bearer("jwt"))

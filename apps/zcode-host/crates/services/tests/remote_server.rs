@@ -163,12 +163,17 @@ async fn remote_workspace_against_a_real_zcode_server() {
     let mut router = ControlRouter::default();
     let remote = install_with(
         RemoteConfig {
+            spawner: zcode_host_services::testing::spawner(),
             transport: Arc::new(transport),
-            settings: SettingStore::new(&local_home),
+            settings: SettingStore::new(&zcode_host_services::testing::spawner(), &local_home),
             control: Arc::new(Control(sink)),
             provisioning: ProvisioningSource {
                 personal_config_file: local_home.join(".zcode/v2/provider_config.json"),
-                credentials: CredentialStore::new(&local_home.join(".zcode/v2"), "test-secret"),
+                credentials: CredentialStore::new(
+                    &zcode_host_services::testing::spawner(),
+                    &local_home.join(".zcode/v2"),
+                    "test-secret",
+                ),
             },
             media_range_enabled: true,
             wsl_idle_ttl: Duration::from_secs(60),
@@ -564,6 +569,8 @@ async fn connector_transport_relays_server_and_backend_channels() {
     let connection = tokio::time::timeout(
         Duration::from_secs(60),
         transport.connect(ConnectParams {
+            spawner: zcode_host_services::testing::spawner(),
+            request_id: "connector-test".into(),
             target: json!({"kind": "docker", "container": "local-test"}),
             remote_assets: json!({}),
             remote_runtime_network: None,

@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
-use tokio::sync::Mutex as AsyncMutex;
+use zcode_async::Spawner;
+use zcode_host_kit::Serial;
 use zcode_host_kit::{EventHub, log};
 
 use super::client::{ShareClient, decode_rows, encode_uri_component};
@@ -211,6 +212,9 @@ fn title_prefix(locale: Option<&str>) -> &'static str {
 
 type InFlight = tokio::sync::watch::Receiver<Option<Result<Value, ShareError>>>;
 
+/// 已完成的导入：(按导入键, 按分享码与 workspace 去重)。
+type Completed = (HashMap<String, Value>, HashMap<String, Value>);
+
 pub struct Importer {
     agent: AgentRuntime,
     /// 会话创建后同步 tasks-index 并广播（zcodeSessionService.createSession 的 immediate 分支）。
@@ -219,15 +223,18 @@ pub struct Importer {
     conversation_root: PathBuf,
     share_web_url: String,
     index_path: PathBuf,
-    completed: Mutex<(HashMap<String, Value>, HashMap<String, Value>)>,
+    completed: Arc<Mutex<Completed>>,
     in_flight: Mutex<HashMap<String, InFlight>>,
-    index_lock: AsyncMutex<()>,
+    /// 索引文件的写入在这个 owner 任务里逐个执行（docs/specs/rust-u2-task-scope.md §6.3）。
+    index_writes: Serial,
     loaded: tokio::sync::OnceCell<()>,
     progress: EventHub<Value>,
 }
 
 impl Importer {
+    /// 索引写入的 owner 任务 `share-import-index` 在 `spawner` 的作用域里。
     pub fn new(
+        spawner: &Spawner,
         agent: AgentRuntime,
         tasks: Option<Arc<crate::tasks::service::TaskService>>,
         client: Arc<ShareClient>,
@@ -242,11 +249,18 @@ impl Importer {
             conversation_root,
             share_web_url: share_web_url.trim_end_matches('/').to_owned(),
             index_path,
-            completed: Mutex::new((HashMap::new(), HashMap::new())),
+            completed: Arc::default(),
             in_flight: Mutex::new(HashMap::new()),
-            index_lock: AsyncMutex::new(()),
+            // 每次导入完成写一次；排队超过 16 个时写入方等待。
+            index_writes: Serial::start(spawner, "share-import-index", 16),
             loaded: tokio::sync::OnceCell::new(),
-            progress: EventHub::new(),
+            // 导入进度（最后一条是终态，不能合并），订阅者是 Renderer 订阅；落后 256 条说明转发卡住，结束它的
+            // 订阅（docs/specs/rust-u2-task-scope.md §6.2）。
+            progress: EventHub::new(
+                "share-import-progress",
+                256,
+                zcode_host_kit::Overflow::CloseSubscriber,
+            ),
         })
     }
 
@@ -263,7 +277,7 @@ impl Importer {
         }));
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, (HashMap<String, Value>, HashMap<String, Value>)> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Completed> {
         self.completed
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -328,24 +342,34 @@ impl Importer {
         }
     }
 
-    /// `persistCompletedImportIndex`：串行写，临时文件 + rename。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// `persistCompletedImportIndex`：串行写，临时文件 + rename。写入在 owner 任务里逐个执行，每次在轮到
+    /// 自己时才取内存索引的快照，最后一次写入的总是最新的索引（原来由跨写入持有的 tokio 锁保证）。
     async fn persist_index(&self) -> std::io::Result<()> {
-        let _guard = self.index_lock.lock().await;
-        let data: Map<String, Value> = self.lock().0.clone().into_iter().collect();
-        let temporary = self
-            .index_path
-            .with_file_name(format!(".zcode-share-imports.json.{}.tmp", uuid_v4()));
-        if let Some(parent) = self.index_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let result = async {
-            tokio::fs::write(&temporary, Value::Object(data).to_string()).await?;
-            tokio::fs::rename(&temporary, &self.index_path).await
-        }
-        .await;
-        let _ = tokio::fs::remove_file(&temporary).await;
-        result
+        let (completed, index_path) = (self.completed.clone(), self.index_path.clone());
+        self.index_writes
+            .run(async move {
+                let data: Map<String, Value> = completed
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .0
+                    .clone()
+                    .into_iter()
+                    .collect();
+                let temporary = index_path
+                    .with_file_name(format!(".zcode-share-imports.json.{}.tmp", uuid_v4()));
+                if let Some(parent) = index_path.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+                let result = async {
+                    tokio::fs::write(&temporary, Value::Object(data).to_string()).await?;
+                    tokio::fs::rename(&temporary, &index_path).await
+                }
+                .await;
+                let _ = tokio::fs::remove_file(&temporary).await;
+                result
+            })
+            .await
+            .map_err(|stopped| std::io::Error::other(stopped.to_string()))?
     }
 
     /// `importShare`：已完成的直接复用（`reused:true`），在途的合并到同一个结果。

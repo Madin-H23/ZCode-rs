@@ -3,7 +3,12 @@
 //! 与 TS 相同：id 从 "0" 递增；输出块原样逐帧转发，没有缓冲与重放（订阅前的输出丢失，Renderer
 //! 创建后立即 resize，shell 收到 SIGWINCH 会重绘提示符）；dispose 后不再发 exit；未知 id 的
 //! write / resize 报 `Terminal not found`，dispose 静默忽略。实例属于整个 Host，不随连接清理。
-//! 与 TS 不同：读输出的连接积压过高时暂停读 PTY（`flow.rs`，docs/specs/rust-u2-gateway.md §2.3）。
+//! 与 TS 不同：读输出的连接积压过高时暂停读 PTY（`flow.rs`，docs/specs/rust-u2-gateway.md §2.3）；
+//! 输入队列有界（[`pty::INPUT_QUEUE`]），shell 长时间不读输入时之后的写入失败。
+//!
+//! 任务归属（docs/specs/rust-u2-task-scope.md §6.1）：每个终端有自己的作用域 `terminal:<id>`（PTY 的读写
+//! 任务），由它的监视任务 `terminal-supervise`（在终端区的作用域里）持有；子进程退出、输出收尾之后释放，
+//! 终端启动的任务不会活过终端。
 mod flow;
 pub mod launch;
 pub mod profile;
@@ -19,7 +24,11 @@ use portable_pty::{Child, ChildKiller, MasterPty};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
-use zcode_host_kit::{EventHub, EventStream, Reply, RpcError, ServiceBuilder, log, replies};
+use tokio::sync::mpsc::error::TrySendError;
+use zcode_async::{Spawner, TaskScope};
+use zcode_host_kit::{
+    EventHub, EventStream, Overflow, Reply, RpcError, ServiceBuilder, log, replies,
+};
 
 use crate::settings::SettingStore;
 use crate::support::env::ProcessEnv;
@@ -30,7 +39,9 @@ const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_millis(200);
 
 struct Terminal {
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
-    input: mpsc::UnboundedSender<String>,
+    input: mpsc::Sender<String>,
+    /// 输入队列满了而被拒绝的写入（只用于日志）。
+    rejected: AtomicU64,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     data: EventHub<Value>,
     exit: EventHub<Value>,
@@ -41,7 +52,7 @@ impl Terminal {
     async fn close_master(&self) {
         let master = lock(&self.master).take();
         if let Some(master) = master {
-            let _ = tokio::task::spawn_blocking(move || drop(master)).await;
+            let _ = zcode_async::blocking(move || drop(master)).await;
         }
     }
 }
@@ -98,6 +109,8 @@ pub struct Terminals {
 }
 
 struct Inner {
+    /// 终端区的作用域：各终端的监视任务在这里，终端的作用域是它的子作用域。
+    spawner: Spawner,
     env: ProcessEnv,
     settings: SettingStore,
     next_id: AtomicU64,
@@ -106,9 +119,10 @@ struct Inner {
 }
 
 impl Terminals {
-    pub fn new(env: ProcessEnv, settings: SettingStore) -> Self {
+    pub fn new(spawner: &Spawner, env: ProcessEnv, settings: SettingStore) -> Self {
         Self {
             inner: Arc::new(Inner {
+                spawner: spawner.clone(),
                 env,
                 settings,
                 next_id: AtomicU64::new(0),
@@ -152,7 +166,7 @@ impl Terminals {
         };
         let spawned = {
             let (shell, cwd) = (shell.clone(), cwd.clone());
-            tokio::task::spawn_blocking(move || pty::spawn(&shell, &cwd, &env, cols, rows))
+            zcode_async::blocking(move || pty::spawn(&shell, &cwd, &env, cols, rows))
                 .await
                 .map_err(|error| failed(error.to_string()))?
                 .map_err(|error| failed(format!("{error:#}")))?
@@ -162,11 +176,15 @@ impl Terminals {
             child,
             mut killer,
         } = spawned;
-        let data = EventHub::new();
-        let exit = EventHub::new();
+        // 订阅者是 Renderer 的 `onDynamicData` / `onDynamicExit`（Gateway 立即搬进出站队列，saturated 时
+        // 由流控暂停读 PTY）；落后 4096 块说明转发卡住，结束它的订阅（docs/specs/rust-u2-task-scope.md
+        // §6.2）。退出事件每个终端一条。
+        let data = EventHub::new("terminal-data", 4096, Overflow::CloseSubscriber);
+        let exit = EventHub::new("terminal-exit", 16, Overflow::CloseSubscriber);
         let emitter = data.clone();
         let paused = self.inner.flow.open(&id);
-        let io = match pty::start(master.as_ref(), paused, move |text| {
+        let scope = self.inner.spawner.child(format!("terminal:{id}"));
+        let io = match pty::start(&scope.spawner(), master.as_ref(), paused, move |text| {
             emitter.emit(Value::String(text))
         }) {
             Ok(io) => io,
@@ -179,17 +197,22 @@ impl Terminals {
         let terminal = Arc::new(Terminal {
             master: Mutex::new(Some(master)),
             input: io.input.clone(),
+            rejected: AtomicU64::new(0),
             killer: Mutex::new(killer),
             data,
             exit,
         });
         lock(&self.inner.terminals).insert(id.clone(), terminal.clone());
-        tokio::spawn(supervise(
-            Arc::downgrade(&self.inner),
-            id.clone(),
-            terminal,
-            child,
-            io,
+        drop(self.inner.spawner.spawn(
+            "terminal-supervise",
+            supervise(
+                Arc::downgrade(&self.inner),
+                id.clone(),
+                scope,
+                terminal,
+                child,
+                io,
+            ),
         ));
 
         let mut response = Map::new();
@@ -212,11 +235,26 @@ impl Terminals {
         Ok(Value::Object(response))
     }
 
-    /// 写入排队后立即返回（与 node-pty 相同，没有大小限制与流控）。
+    /// 写入排队后立即返回（同步入队：同一连接的写入按到达顺序排队）。队列满（shell 长时间不读输入）时
+    /// 这次写入失败、计数并记 warn：与真实终端的输入缓冲写满时丢弃输入相同，而且调用方看得见。
     pub fn write(&self, id: &str, data: String) -> Result<(), RpcError> {
         let terminal = self.get(id)?;
-        let _ = terminal.input.send(data);
-        Ok(())
+        match terminal.input.try_send(data) {
+            Ok(()) | Err(TrySendError::Closed(_)) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                let rejected = terminal.rejected.fetch_add(1, Ordering::Relaxed) + 1;
+                if rejected.is_power_of_two() {
+                    log::warn(format!(
+                        "terminal {id} input queue is full ({} chunks); rejected {rejected} writes so far",
+                        pty::INPUT_QUEUE
+                    ));
+                }
+                Err(RpcError::new(
+                    "Error",
+                    format!("Terminal input queue is full: {id}"),
+                ))
+            }
+        }
     }
 
     pub fn resize(&self, id: &str, cols: f64, rows: f64) -> Result<(), RpcError> {
@@ -249,7 +287,9 @@ impl Terminals {
             log::debug(format!("terminal {id} kill failed: {error}"));
         }
         if cfg!(windows) {
-            tokio::spawn(async move { terminal.close_master().await });
+            drop(self.inner.spawner.spawn("terminal-close", async move {
+                terminal.close_master().await
+            }));
         }
     }
 
@@ -285,14 +325,16 @@ impl Terminals {
 }
 
 /// 子进程退出后：等输出读完（最多 200 ms）、关闭 pty，再发 exit 并移除；已 dispose 的不再发 exit。
+/// 持有终端的作用域 `scope`，最后释放它。
 async fn supervise(
     owner: Weak<Inner>,
     id: String,
+    scope: TaskScope,
     terminal: Arc<Terminal>,
     mut child: Box<dyn Child + Send + Sync>,
     mut io: PtyIo,
 ) {
-    let status = tokio::task::spawn_blocking(move || child.wait()).await;
+    let status = zcode_async::blocking(move || child.wait()).await;
     // 子进程已退出：剩余输出有限（PTY 缓冲），不再按流控暂停，照常读完。
     if let Some(inner) = owner.upgrade() {
         inner.flow.close(&id);
@@ -332,6 +374,7 @@ async fn supervise(
     }
     terminal.data.close();
     terminal.exit.close();
+    drop(scope);
 }
 
 #[derive(Deserialize)]
@@ -432,6 +475,10 @@ mod tests {
     use zcode_host_kit::{CallContext, FlowState, RpcValue};
 
     fn terminals(home: &std::path::Path) -> Terminals {
+        terminals_in(&zcode_host_base::testing::spawner(), home)
+    }
+
+    fn terminals_in(spawner: &zcode_async::Spawner, home: &std::path::Path) -> Terminals {
         let env = ProcessEnv::new(
             [
                 ("PATH", "/usr/bin:/bin"),
@@ -443,7 +490,73 @@ mod tests {
             .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
             .collect(),
         );
-        Terminals::new(env, SettingStore::new(home))
+        Terminals::new(
+            spawner,
+            env,
+            SettingStore::new(&zcode_host_base::testing::spawner(), home),
+        )
+    }
+
+    /// 终端的任务属于它的作用域：dispose 之后（子进程退出、输出收尾），终端区里不再有它的任何任务。
+    #[tokio::test]
+    async fn a_disposed_terminal_leaves_no_tasks_behind() {
+        let home = tempfile::tempdir().unwrap();
+        let scope = zcode_async::TaskScope::root("terminals", |panic| panic!("{panic:?}"));
+        let terminals = terminals_in(&scope.spawner(), home.path());
+        let terminal = channel(service(terminals.clone()));
+        let created = call(&terminal, "create", json!({"cols": 80, "rows": 24}))
+            .await
+            .unwrap();
+        let id = created["id"].as_str().unwrap().to_owned();
+        let running = scope.spawner().running();
+        for task in [
+            "terminals: terminal-supervise".to_owned(),
+            format!("terminals/terminal:{id}: pty-reader"),
+            format!("terminals/terminal:{id}: pty-writer"),
+        ] {
+            assert!(running.contains(&task), "{running:?}");
+        }
+        terminals.dispose(&id);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while !scope.spawner().running().is_empty() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "{:?}",
+                scope.spawner().running()
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// 输入队列满（shell 不读输入）时之后的写入失败，而不是无限缓存。
+    #[tokio::test]
+    async fn writes_beyond_the_input_queue_fail() {
+        let home = tempfile::tempdir().unwrap();
+        let terminals = terminals(home.path());
+        let created = terminals
+            .create(Some(80.0), Some(24.0), None)
+            .await
+            .unwrap();
+        let id = created["id"].as_str().unwrap().to_owned();
+        // 切到 raw 模式并在前台运行一个不读输入的命令：之后没有人读输入，PTY 输入缓冲写满后写任务阻塞
+        // （canonical 模式下行缓冲满了会丢弃输入，写端不会阻塞）。
+        terminals
+            .write(&id, "stty raw -echo; sleep 30\n".to_owned())
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let chunk = "x".repeat(4 * 1024);
+        let mut failed = None;
+        for _ in 0..(pty::INPUT_QUEUE + 64) {
+            if let Err(error) = terminals.write(&id, chunk.clone()) {
+                failed = Some(error);
+                break;
+            }
+        }
+        assert_eq!(
+            failed.map(|error| error.message),
+            Some(format!("Terminal input queue is full: {id}"))
+        );
+        terminals.dispose(&id);
     }
 
     async fn read_until(events: &mut EventStream, needle: &str) -> String {

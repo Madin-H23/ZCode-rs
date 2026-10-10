@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use zcode_async::{Spawner, TaskScope};
 use zcode_host_kit::log;
 
 const DEFAULT_PORT: u16 = 45_197;
@@ -94,15 +95,8 @@ struct Shared {
 
 pub struct Gateway {
     origin: String,
-    task: Option<tokio::task::AbortHandle>,
-}
-
-impl Drop for Gateway {
-    fn drop(&mut self) {
-        if let Some(task) = &self.task {
-            task.abort();
-        }
-    }
+    /// 网关的作用域（监听与各连接）：网关释放时一并中止。复用已有实例时没有。
+    _scope: Option<TaskScope>,
 }
 
 fn now_ms() -> i64 {
@@ -114,7 +108,12 @@ fn now_ms() -> i64 {
 
 impl Gateway {
     /// 绑定端口：`port` 覆盖（测试用 0 取临时端口），否则 `ZCODE_OFFPEAK_MOCK_PORT`，再否则固定端口。
-    pub async fn start(vars: &BTreeMap<String, String>, port: Option<u16>) -> anyhow::Result<Self> {
+    /// 监听与连接在 `spawner` 的子作用域 `off-peak-mock-gateway` 里。
+    pub async fn start(
+        spawner: &Spawner,
+        vars: &BTreeMap<String, String>,
+        port: Option<u16>,
+    ) -> anyhow::Result<Self> {
         let port = port.unwrap_or_else(|| {
             vars.get("ZCODE_OFFPEAK_MOCK_PORT")
                 .and_then(|raw| raw.trim().parse::<u16>().ok())
@@ -128,7 +127,10 @@ impl Gateway {
                 log::info(format!(
                     "off-peak mock gateway reusing existing instance at {origin}"
                 ));
-                return Ok(Self { origin, task: None });
+                return Ok(Self {
+                    origin,
+                    _scope: None,
+                });
             }
             Err(error) => return Err(error.into()),
         };
@@ -142,23 +144,33 @@ impl Gateway {
             }),
             config,
         });
-        let task = tokio::spawn(async move {
-            loop {
-                let Ok((stream, _)) = listener.accept().await else {
-                    continue;
-                };
-                let shared = shared.clone();
-                tokio::spawn(async move {
-                    if let Err(error) = serve(stream, shared).await {
-                        log::debug(format!("off-peak mock gateway connection failed: {error}"));
+        // 缺陷修复：原来只有监听任务随网关释放被中止，已接受的连接任务是分离的，网关释放后仍在运行。
+        // 现在监听与连接都在网关自己的作用域里，网关释放时一并结束。
+        let scope = spawner.child("off-peak-mock-gateway");
+        let connections = scope.spawner();
+        drop(
+            scope
+                .spawner()
+                .spawn_resident("mock-gateway-accept", async move {
+                    loop {
+                        let Ok((stream, _)) = listener.accept().await else {
+                            continue;
+                        };
+                        let shared = shared.clone();
+                        drop(connections.spawn("mock-gateway-connection", async move {
+                            if let Err(error) = serve(stream, shared).await {
+                                log::debug(format!(
+                                    "off-peak mock gateway connection failed: {error}"
+                                ));
+                            }
+                        }));
                     }
-                });
-            }
-        });
+                }),
+        );
         log::info(format!("off-peak mock gateway listening at {origin}"));
         Ok(Self {
             origin,
-            task: Some(task.abort_handle()),
+            _scope: Some(scope),
         })
     }
 

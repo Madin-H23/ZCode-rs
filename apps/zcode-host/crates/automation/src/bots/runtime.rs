@@ -2,6 +2,9 @@
 //!
 //! 每个已启用且配好 App ID / App Secret 的飞书 Bot 一条长连接；配置变更后按「最新一次刷新」对齐
 //! （较早的刷新发现自己过期就停止）。连接前先拿跨进程运行锁，其他 ZCode 进程持有时让出并每 10 秒重试。
+//!
+//! 任务归属（docs/specs/rust-u2-task-scope.md §6.1）：每条长连接有自己的作用域 `feishu:<botId>`，由运行
+//! 时表里的条目持有，停止时等连接收尾后随条目释放；对齐（刷新）在 owner 任务 `feishu-refresh` 里逐个执行。
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,8 +14,8 @@ use futures_util::FutureExt;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
-use zcode_host_kit::log;
+use zcode_async::{Spawner, Task, TaskScope};
+use zcode_host_kit::{Serial, log};
 
 use super::feishu::callback_payload;
 use super::feishu::cards;
@@ -24,14 +27,27 @@ use super::service::{Bots, guard, text};
 struct Entry {
     stop: watch::Sender<bool>,
     fingerprint: String,
-    done: JoinHandle<()>,
+    done: Task<()>,
+    /// 这条长连接的作用域：条目释放（停止并收尾之后）时随之释放。
+    _scope: TaskScope,
 }
 
-#[derive(Default)]
 pub struct Runtimes {
     entries: std::sync::Mutex<HashMap<String, Entry>>,
     generation: AtomicU64,
-    queue: tokio::sync::Mutex<()>,
+    /// 对齐的 owner 任务：刷新逐个执行，只有最新一次会走完（`createLatestRuntimeRefreshQueue`）。
+    refreshes: Serial,
+}
+
+impl Runtimes {
+    pub fn new(spawner: &Spawner) -> Self {
+        Self {
+            entries: std::sync::Mutex::default(),
+            generation: AtomicU64::new(0),
+            // 配置变更触发；排队超过 8 个时提交方等待（较早的发现自己过期会立即返回）。
+            refreshes: Serial::start(spawner, "feishu-refresh", 8),
+        }
+    }
 }
 
 /// `createBotConnectionFingerprint`：sha256(JSON.stringify(parts))。
@@ -66,18 +82,26 @@ impl Bots {
     /// `scheduleRefresh`（飞书）：后台对齐长连接，失败只记日志。
     pub(crate) fn schedule_feishu_refresh(self: &Arc<Self>) {
         let bots = self.clone();
-        tokio::spawn(async move {
+        drop(self.spawner.spawn("feishu-schedule-refresh", async move {
             if let Err(error) = bots.refresh_feishu().await {
                 log::warn(format!("refresh Feishu WebSocket failed: {error:#}"));
             }
-        });
+        }));
     }
 
-    /// 串行对齐；只有最新一次刷新会走完（`createLatestRuntimeRefreshQueue`）。
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
+    /// 串行对齐；只有最新一次刷新会走完（`createLatestRuntimeRefreshQueue`）。代次在入队之前递增，
+    /// 对齐在 owner 任务里逐个执行（原来由跨整个对齐持有的 tokio 锁串行）。
     pub async fn refresh_feishu(self: &Arc<Self>) -> anyhow::Result<()> {
         let generation = self.runtimes.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        let _turn = self.runtimes.queue.lock().await;
+        let bots = self.clone();
+        self.runtimes
+            .refreshes
+            .run(async move { bots.refresh_feishu_turn(generation).await })
+            .await
+            .unwrap_or_else(|stopped| Err(anyhow::anyhow!(stopped)))
+    }
+
+    async fn refresh_feishu_turn(self: &Arc<Self>, generation: u64) -> anyhow::Result<()> {
         let is_latest = || self.runtimes.generation.load(Ordering::SeqCst) == generation;
         if !is_latest() {
             return Ok(());
@@ -148,7 +172,8 @@ impl Bots {
         );
         let (stop, stop_rx) = watch::channel(false);
         let bots = self.clone();
-        let done = tokio::spawn(async move {
+        let scope = self.spawner.child(format!("feishu:{id}"));
+        let done = scope.spawner().spawn("feishu-websocket", async move {
             let provider = bot["provider"].clone();
             let id = text(&bot, "id").unwrap_or_default().to_owned();
             bots.clone().run_bot(bot, stop_rx).await;
@@ -170,6 +195,7 @@ impl Bots {
                 stop,
                 fingerprint: print,
                 done,
+                _scope: scope,
             },
         );
     }

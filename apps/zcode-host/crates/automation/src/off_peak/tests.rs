@@ -233,6 +233,7 @@ async fn gateway_and_client_follow_the_ticket_state_machine() {
         ("ZCODE_OFFPEAK_MOCK_READY_DELAY_MS", "0"),
     ]);
     let client = ServerClient::new(
+        &zcode_host_base::testing::spawner(),
         vars.clone(),
         CredentialSource::new(vars, None),
         None,
@@ -302,6 +303,7 @@ fn providers(dir: &Path) -> ProviderRuntime {
     )
     .unwrap();
     ProviderRuntime::new(
+        &zcode_host_base::testing::spawner(),
         Some(
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../../../config/provider/zcode-builtin.json"),
@@ -319,8 +321,10 @@ async fn service_creates_pauses_continues_and_cancels_with_the_mock_gateway() {
     let wakes = Arc::new(AtomicUsize::new(0));
     let wake_counter = wakes.clone();
     let service = OffPeakService::new(
+        &zcode_host_base::testing::spawner(),
         OffPeakRepo::new(index),
         ServerClient::new(
+            &zcode_host_base::testing::spawner(),
             vars.clone(),
             CredentialSource::new(vars.clone(), None),
             None,
@@ -406,4 +410,45 @@ async fn service_creates_pauses_continues_and_cancels_with_the_mock_gateway() {
     );
     service.delete_task(&id).await.unwrap();
     assert!(service.get(&id).await.unwrap().is_none());
+}
+
+/// 缺陷修复的回归测试（docs/specs/rust-u2-task-scope.md §6.1）：mock 网关释放时，已接受的连接任务随它
+/// 结束。原来只有监听任务被中止，空闲的连接任务一直留着。
+#[tokio::test]
+async fn dropping_the_mock_gateway_ends_its_connections() {
+    let scope = zcode_async::TaskScope::root("automation", |panic| panic!("{panic:?}"));
+    let vars = mock_vars(&[]);
+    let gateway = super::gateway::Gateway::start(&scope.spawner(), &vars, Some(0))
+        .await
+        .unwrap();
+    let address = gateway.origin().trim_start_matches("http://").to_owned();
+    let mut idle = tokio::net::TcpStream::connect(&address).await.unwrap();
+    let connection = "automation/off-peak-mock-gateway: mock-gateway-connection".to_owned();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !scope.spawner().running().contains(&connection) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{:?}",
+            scope.spawner().running()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    drop(gateway);
+    // 连接任务结束、服务端关闭连接：客户端读到 EOF（原来连接任务还在，读一直等）。
+    let mut buffer = [0u8; 1];
+    let read = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::io::AsyncReadExt::read(&mut idle, &mut buffer),
+    )
+    .await
+    .expect("the connection is closed when the gateway is dropped");
+    assert_eq!(read.unwrap(), 0);
+    while !scope.spawner().running().is_empty() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{:?}",
+            scope.spawner().running()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }

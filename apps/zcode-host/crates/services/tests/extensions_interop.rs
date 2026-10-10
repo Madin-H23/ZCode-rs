@@ -78,7 +78,7 @@ async fn rust_and_typescript_writers_do_not_lose_config_updates() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert!(ready.exists(), "TS writer did not start");
-    let roots = Roots::new(&home, &home);
+    let roots = Roots::new(&zcode_host_services::testing::spawner(), &home, &home);
     let commands = commands::CommandsService::new(roots.clone());
     let mcp = mcp_sync::McpSyncService::new(roots, None);
     for index in 0..COUNT {
@@ -133,7 +133,11 @@ async fn archives_are_interchangeable_with_typescript() {
     std::fs::create_dir_all(skill.join("assets")).unwrap();
     std::fs::write(skill.join("SKILL.md"), "---\nname: demo\n---\nbody\n").unwrap();
     std::fs::write(skill.join("assets/data.txt"), "data").unwrap();
-    let rust_sync = skill_sync::SkillSyncService::new(Roots::new(&home, &home));
+    let rust_sync = skill_sync::SkillSyncService::new(Roots::new(
+        &zcode_host_services::testing::spawner(),
+        &home,
+        &home,
+    ));
     let candidates = rust_sync.list_local_candidates().await.unwrap();
     let exported = rust_sync
         .export_archive(json!({"skillIds":[candidates["candidates"][0]["id"]]}))
@@ -184,7 +188,11 @@ async fn archives_are_interchangeable_with_typescript() {
         format!("{{\"plugins\":{{\"dirs\":[\"{}\"]}}}}", plugin.display()),
     )
     .unwrap();
-    let plugin_sync = plugin_sync::PluginSyncService::new(Roots::new(&home, &home));
+    let plugin_sync = plugin_sync::PluginSyncService::new(Roots::new(
+        &zcode_host_services::testing::spawner(),
+        &home,
+        &home,
+    ));
     let plugins = plugin_sync.list_local_candidates().await.unwrap();
     let exported = plugin_sync
         .export_plugins(json!({"pluginIds":[plugins["candidates"][0]["id"]]}))
@@ -246,7 +254,11 @@ async fn archives_are_interchangeable_with_typescript() {
     .unwrap();
     assert!(status.success());
     let remote_home = base.join("remote-home");
-    let remote = skill_sync::SkillSyncService::new(Roots::new(&remote_home, &remote_home));
+    let remote = skill_sync::SkillSyncService::new(Roots::new(
+        &zcode_host_services::testing::spawner(),
+        &remote_home,
+        &remote_home,
+    ));
     let imported = remote
         .import_archive(json!({
             "archive": zcode_host_services::extensions::bytes_value(&std::fs::read(&ts_archive).unwrap()),

@@ -6,6 +6,10 @@
 //! - host-core 为 `scope.kind = "remote"` 的 attachment 解析 scoped channel 表并登记断开租约；
 //! - Bot 远端运行时（[`bots::RemoteBotRuntime`]，§2.9）；
 //! - Host 退出时释放全部远端连接。
+//!
+//! 任务归属（docs/specs/rust-u2-task-scope.md §6.1）：本区域的作用域 `host/services/remote` 放注册表、
+//! 控制消息与 Provisioning 监听的任务；每条远端连接有自己的作用域 `connection:<requestId>`（传输、
+//! 连接上的事件转发、任务跟踪、attachment 的 agent scope 与 Bots），连接释放时关闭。
 pub mod agent_scope;
 pub mod bots;
 pub mod media;
@@ -26,7 +30,7 @@ use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use serde_json::{Map, Value, json};
 use tokio::sync::watch;
-use tokio::task::AbortHandle;
+use zcode_async::{Spawner, Task};
 use zcode_host_control::{ClientMode, ControlRouter, ControlSink, HostToMain, LogLevel};
 use zcode_host_kit::{ChannelRegistry, RpcValue, log};
 
@@ -53,7 +57,8 @@ pub struct RemoteHandle {
     pub tasks: Arc<tasks::RemoteTaskOps>,
     /// 远端 attachment 的 `bots` channel 背后的 Bots 实例（第一次 attach 时建，§2.9.8）。
     bots: OnceLock<Arc<crate::bots::service::Bots>>,
-    background: Vec<AbortHandle>,
+    /// 连接上的常驻转发（运行时偏好桥、资源遥测）；释放时先停，连接的作用域关闭时兜底。
+    background: Vec<Task<Option<()>>>,
 }
 
 impl RegistryHandle for RemoteHandle {
@@ -79,6 +84,8 @@ impl RegistryHandle for RemoteHandle {
 }
 
 pub struct RemoteConfig {
+    /// 远端区域的作用域（`host/services/remote`）。
+    pub spawner: Spawner,
     pub transport: Arc<dyn Transport>,
     pub settings: SettingStore,
     pub control: Arc<dyn ControlSink>,
@@ -102,6 +109,7 @@ struct Lease {
 }
 
 pub struct RemoteWorkspaces {
+    spawner: Spawner,
     registry: RemoteRegistry<RemoteHandle>,
     sources: Arc<sources::RemoteSources>,
     control: Arc<dyn ControlSink>,
@@ -110,7 +118,7 @@ pub struct RemoteWorkspaces {
     media_range_enabled: bool,
     leases: Mutex<Vec<Lease>>,
     /// Host 生命周期内的后台任务（Provisioning 触发监听），退出时结束。
-    background: Mutex<Vec<AbortHandle>>,
+    background: Mutex<Vec<Task<Option<()>>>>,
     /// requestId → 连接日志是否仍在上报（连接 settle 后停止，同 `remoteConnectionProgressContext`）。
     progress: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     /// Bot 远端运行时（注入本地 Bots 的 `RemoteBots`）。
@@ -147,8 +155,10 @@ impl RemoteWorkspaces {
             let control = config.control.clone();
             let progress_for_connect = progress.clone();
             let owner = weak.clone();
+            let connect_spawner = config.spawner.clone();
             let mut options = RegistryOptions::new(Arc::new(move |request: ConnectRequest| {
-                let (transport, settings, control, progress, owner) = (
+                let (spawner, transport, settings, control, progress, owner) = (
+                    connect_spawner.clone(),
                     transport.clone(),
                     settings.clone(),
                     control.clone(),
@@ -156,7 +166,10 @@ impl RemoteWorkspaces {
                     owner.clone(),
                 );
                 Box::pin(async move {
-                    connect_handle(transport, settings, control, progress, owner, request).await
+                    connect_handle(
+                        spawner, transport, settings, control, progress, owner, request,
+                    )
+                    .await
                 }) as BoxFuture<'static, _>
             }));
             options.release_workspace = Some(Arc::new(|handle: Arc<RemoteHandle>, context| {
@@ -198,7 +211,7 @@ impl RemoteWorkspaces {
                 }
             });
             options.wsl_idle_ttl = config.wsl_idle_ttl;
-            let registry = RemoteRegistry::new(options);
+            let registry = RemoteRegistry::new(&config.spawner, options);
             let bots_runtime = bots::RemoteBotRuntime::new(
                 weak.clone(),
                 config.settings.clone(),
@@ -206,7 +219,8 @@ impl RemoteWorkspaces {
                 crate::main_bridge::MainBridge::new(config.control.clone()),
             );
             Self {
-                sources: sources::RemoteSources::new(registry.clone()),
+                sources: sources::RemoteSources::new(&config.spawner, registry.clone()),
+                spawner: config.spawner,
                 registry,
                 control: config.control,
                 settings: config.settings,
@@ -327,12 +341,26 @@ impl RemoteWorkspaces {
         let remote = self.clone();
         router.on("dispose-remote-workspace-session", move |message| {
             let remote = remote.clone();
-            tokio::spawn(async move { remote.on_dispose(message).await });
+            drop(
+                remote
+                    .spawner
+                    .clone()
+                    .spawn("remote-dispose-session", async move {
+                        remote.on_dispose(message).await
+                    }),
+            );
         });
         let remote = self.clone();
         router.on("provider-provisioning-execute", move |message| {
             let remote = remote.clone();
-            tokio::spawn(async move { remote.on_provisioning(message).await });
+            drop(
+                remote
+                    .spawner
+                    .clone()
+                    .spawn("remote-provisioning", async move {
+                        remote.on_provisioning(message).await
+                    }),
+            );
         });
     }
 
@@ -360,7 +388,8 @@ impl RemoteWorkspaces {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(request_id.clone(), active.clone());
-        tokio::spawn(async move {
+        let spawner = self.spawner.clone();
+        drop(spawner.spawn("remote-connect-request", async move {
             let result = self
                 .registry
                 .connect(RegistryConnectParams {
@@ -395,7 +424,7 @@ impl RemoteWorkspaces {
                     self.send(json!({"type": "remote-workspace-connect-failed", "requestId": request_id, "error": error}));
                 }
             }
-        });
+        }));
     }
 
     /// 重连成功后替换同 path + identity 的离线旧 session（controller 原子替换由 sources 负责）。
@@ -457,7 +486,7 @@ impl RemoteWorkspaces {
             });
         }
         let id_for_log = id.clone();
-        tokio::spawn(async move {
+        drop(self.spawner.spawn("remote-bind-ready", async move {
             let mut ready = ready;
             if let Ok(result) = ready.wait_for(Option::is_some).await
                 && let Some(Err(error)) = result.clone()
@@ -466,7 +495,7 @@ impl RemoteWorkspaces {
                     "failed to prepare bound remote workspace, remoteSessionId={id_for_log}: {error}"
                 ));
             }
-        });
+        }));
         if let Some(previous) = previous {
             self.sources.remove_source(&previous);
         }
@@ -624,6 +653,7 @@ impl RemoteWorkspaces {
             registry.register(
                 "media-preview",
                 Arc::new(media::MediaPreviewChannel(media::MediaPreviewProxy::new(
+                    &handle.connection.spawner(),
                     client,
                     scope.clone(),
                 ))),
@@ -647,7 +677,7 @@ impl RemoteWorkspaces {
         })
     }
 
-    fn lock_background(&self) -> std::sync::MutexGuard<'_, Vec<AbortHandle>> {
+    fn lock_background(&self) -> std::sync::MutexGuard<'_, Vec<Task<Option<()>>>> {
         self.background
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -675,6 +705,7 @@ impl RemoteWorkspaces {
 /// 建立一条远端连接（registry 的 connect 回调）：读设置得到下载代理与 WSL 运行时网络，经传输建连，
 /// 再挂上运行时偏好桥。
 async fn connect_handle(
+    spawner: Spawner,
     transport: Arc<dyn Transport>,
     settings: SettingStore,
     control: Arc<dyn ControlSink>,
@@ -735,6 +766,8 @@ async fn connect_handle(
     });
     let connection = transport
         .connect(ConnectParams {
+            spawner,
+            request_id: request.request_id.clone(),
             target: request.target.raw().clone(),
             remote_assets: request.remote_assets,
             remote_runtime_network,
@@ -744,17 +777,21 @@ async fn connect_handle(
         })
         .await?;
     let connection = Arc::new(connection);
+    let tasks_spawner = connection.spawner();
     let mut background = vec![runtime_preferences_bridge(
+        &tasks_spawner,
         connection.client.clone(),
         settings,
     )];
     background.extend(resource_telemetry(
+        &tasks_spawner,
         &connection.client,
         &control,
         telemetry_environment_key(&request.target),
     ));
     // 运行中任务数（WSL 释放屏障）回到 registry。
     let tracker = tasks::TaskTracker::new(
+        &tasks_spawner,
         connection.client.clone(),
         control,
         Arc::new(move |path: &str, identity: Option<&str>, count: u64| {
@@ -774,7 +811,7 @@ async fn connect_handle(
         tracker,
         tasks,
         bots: OnceLock::new(),
-        agent: RemoteAgentChannel::new(connection.client.clone()),
+        agent: RemoteAgentChannel::new(&tasks_spawner, connection.client.clone()),
         connection,
         target: request.target,
         background,
@@ -785,7 +822,9 @@ async fn connect_handle(
 ///
 /// 连接器由 Main 经 `ZCODE_HOST_NODE_EXEC_PATH`（Electron）与 `ZCODE_REMOTE_CONNECTOR_PATH`
 /// （`out/host/remoteConnector.js`）给出；缺任一项时建连明确失败。
+/// `spawner` 是远端区域的作用域（`host/services/remote`）。
 pub fn install(
+    spawner: &Spawner,
     context: &crate::ServiceContext,
     sources: provisioning::ProvisioningSources,
     controller: &Arc<crate::tasks::controller::Controller>,
@@ -819,6 +858,7 @@ pub fn install(
     };
     let remote = install_with(
         RemoteConfig {
+            spawner: spawner.clone(),
             transport,
             settings: sources.settings.clone(),
             control: context.control.clone(),
@@ -834,6 +874,7 @@ pub fn install(
     );
     remote.sources.attach_to(controller);
     remote.lock_background().extend(provisioning::watch_sources(
+        &remote.spawner,
         &sources,
         context.control.clone(),
     ));
@@ -859,10 +900,11 @@ fn telemetry_environment_key(target: &RemoteTarget) -> String {
 /// 远端 CLI / MCP 的资源事实转给 Main（`registerHostServiceResourceTelemetry`，runtimeSurface
 /// 为 remote）：远端 stdio server 以 trusted-host-relay 角色提供这些事件，Host 只透传。
 fn resource_telemetry(
+    spawner: &Spawner,
     client: &zcode_host_rpc::RpcClient,
     control: &Arc<dyn ControlSink>,
     environment_key: String,
-) -> Vec<AbortHandle> {
+) -> Vec<Task<Option<()>>> {
     // (远端事件, Main 消息类型, 载荷字段, 是否带 environmentKey)
     const EVENTS: [(&str, &str, &str, bool); 4] = [
         (
@@ -890,7 +932,7 @@ fn resource_telemetry(
         .map(|(event, kind, field, with_environment)| {
             let mut events = client.listen("zcode-agent", event, RpcValue::Undefined);
             let (control, environment_key) = (control.clone(), environment_key.clone());
-            tokio::spawn(async move {
+            spawner.spawn_resident("remote-resource-telemetry", async move {
                 while let Some(payload) = events.next().await {
                     let mut message = Map::new();
                     message.insert("type".into(), json!(kind));
@@ -902,22 +944,22 @@ fn resource_telemetry(
                     control.send(raw(Value::Object(message)));
                 }
             })
-            .abort_handle()
         })
         .collect()
 }
 
 /// 远端 Agent 的 app-global 偏好仍以本机设置为权威（`runtimePreferencesBridge`）。
 fn runtime_preferences_bridge(
+    spawner: &Spawner,
     client: zcode_host_rpc::RpcClient,
     settings: SettingStore,
-) -> AbortHandle {
+) -> Task<Option<()>> {
     let mut requests = client.listen(
         "zcode-agent",
         "onDynamicSessionRuntimePreferencesRequest",
         RpcValue::Undefined,
     );
-    tokio::spawn(async move {
+    spawner.spawn_resident("remote-preferences-bridge", async move {
         while let Some(request) = requests.next().await {
             let request = request.into_json();
             let Some(request_id) = request["requestId"].as_str().map(str::to_owned) else {
@@ -947,7 +989,6 @@ fn runtime_preferences_bridge(
             }
         }
     })
-    .abort_handle()
 }
 
 #[cfg(test)]

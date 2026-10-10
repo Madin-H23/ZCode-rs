@@ -274,20 +274,33 @@ async fn core_chat_flow(command_vars: BTreeMap<String, String>) {
     let personal = provider_config(home.path(), port);
     let builtin = builtin_providers();
     let base_env = base_env(home.path());
-    let providers = ProviderRuntime::new(Some(builtin), personal);
+    let providers = ProviderRuntime::new(
+        &zcode_host_services::testing::spawner(),
+        Some(builtin),
+        personal,
+    );
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env,
             command_vars,
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
         providers,
     );
-    let events = AgentEvents::start(runtime.extensions(), None);
+    let events = AgentEvents::start(
+        &zcode_host_services::testing::spawner(),
+        runtime.extensions(),
+        None,
+    );
     let api = AgentApi::new(runtime.clone(), home.path(), events, None);
     let members = zcode_host_services::agent::members::agent_service(&api).build(None);
-    let channel = AgentChannel::new(api.clone(), Some(members));
+    let channel = AgentChannel::new(
+        &zcode_host_services::testing::spawner(),
+        api.clone(),
+        Some(members),
+    );
     let observer = SessionsIndexObserver::start(runtime.clone());
     let mut index_events = Box::pin(observer.events().subscribe());
     let context = CallContext {
@@ -658,18 +671,31 @@ async fn an_embedded_runtime_panic_only_restarts_its_own_workspace() {
     let mut env = base_env(home.path());
     env.insert("ZCODE_RUNTIME_FAULT_MARKER".to_owned(), FAULT.to_owned());
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: env,
             command_vars: runtime_vars(),
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
-        ProviderRuntime::new(Some(builtin_providers()), personal),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
+        ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
+            Some(builtin_providers()),
+            personal,
+        ),
     );
-    let events = AgentEvents::start(runtime.extensions(), None);
+    let events = AgentEvents::start(
+        &zcode_host_services::testing::spawner(),
+        runtime.extensions(),
+        None,
+    );
     let api = AgentApi::new(runtime.clone(), home.path(), events, None);
     let members = zcode_host_services::agent::members::agent_service(&api).build(None);
-    let channel = AgentChannel::new(api.clone(), Some(members));
+    let channel = AgentChannel::new(
+        &zcode_host_services::testing::spawner(),
+        api.clone(),
+        Some(members),
+    );
     let context = CallContext {
         connection: 1,
         attachment_id: "test".into(),
@@ -752,13 +778,15 @@ async fn an_embedded_runtime_that_ends_on_its_own_logs_why() {
     // workspace 目录不存在且没有回退目录：runtime 在准备阶段以错误结束。
     let missing = home.path().join("no-such-workspace");
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: base_env(home.path()),
             command_vars: runtime_vars(),
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
         ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
             Some(builtin_providers()),
             home.path().join("provider_config.json"),
         ),
@@ -809,18 +837,31 @@ async fn a_replayable_attachment_streams_and_recovers_against_the_runtime() {
     tokio::spawn(serve_mock_model(listener));
     let personal = provider_config(home.path(), port);
     let runtime = AgentRuntime::new(
+        &zcode_host_services::testing::spawner(),
         AgentRuntimeConfig {
             base_env: base_env(home.path()),
             command_vars: runtime_vars(),
             fallback_cwd: None,
         },
-        SettingStore::new(home.path()),
-        ProviderRuntime::new(Some(builtin_providers()), personal),
+        SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
+        ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
+            Some(builtin_providers()),
+            personal,
+        ),
     );
-    let events = AgentEvents::start(runtime.extensions(), None);
+    let events = AgentEvents::start(
+        &zcode_host_services::testing::spawner(),
+        runtime.extensions(),
+        None,
+    );
     let api = AgentApi::new(runtime.clone(), home.path(), events, None);
     let members = zcode_host_services::agent::members::agent_service(&api).build(None);
-    let channel = AgentChannel::new(api.clone(), Some(members));
+    let channel = AgentChannel::new(
+        &zcode_host_services::testing::spawner(),
+        api.clone(),
+        Some(members),
+    );
     let target = json!({"workspacePath": workspace_path});
     let connect = |connection: u64| {
         let channel = &channel;

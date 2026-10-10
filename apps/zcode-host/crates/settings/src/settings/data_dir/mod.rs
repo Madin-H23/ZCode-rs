@@ -143,7 +143,7 @@ mod tests {
     fn mover(home: &std::path::Path, current: &std::path::Path, windows: bool) -> DataDirMove {
         let vars = BTreeMap::from([("ProgramFiles".to_owned(), "C:\\Program Files".to_owned())]);
         DataDirMove::with_paths(
-            SettingStore::new(home),
+            SettingStore::new(&zcode_host_base::testing::spawner(), home),
             &current.to_string_lossy(),
             &home.to_string_lossy(),
             vars,

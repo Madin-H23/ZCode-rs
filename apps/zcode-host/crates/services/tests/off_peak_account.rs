@@ -145,7 +145,11 @@ async fn logged_in_coding_plan_drives_off_peak_requests() {
     std::fs::create_dir_all(&config_dir).unwrap();
 
     // 已登录的 Z.ai 账号，选中个人 Coding Plan（与 Node 相同的凭据键与加密格式）。
-    let credentials = CredentialStore::new(&config_dir, &credential_secret(&vars));
+    let credentials = CredentialStore::new(
+        &zcode_host_services::testing::spawner(),
+        &config_dir,
+        &credential_secret(&vars),
+    );
     credentials
         .save("oauth:active_provider", "zai")
         .await
@@ -178,14 +182,23 @@ async fn logged_in_coding_plan_drives_off_peak_requests() {
         .join("../../../../config/provider/zcode-builtin.json")
         .canonicalize()
         .unwrap();
-    let settings = SettingStore::new(home.path());
-    let providers = ProviderRuntime::new(Some(builtin), config_dir.join("provider_config.json"));
+    let settings = SettingStore::new(&zcode_host_services::testing::spawner(), home.path());
+    let providers = ProviderRuntime::new(
+        &zcode_host_services::testing::spawner(),
+        Some(builtin),
+        config_dir.join("provider_config.json"),
+    );
     let context = ServiceContext {
         environment,
         init: InitLocal::default(),
         control: Arc::new(NullSink),
     };
-    let account = AccountStack::new(&context, &settings, &providers);
+    let account = AccountStack::new(
+        &zcode_host_services::testing::spawner(),
+        &context,
+        &settings,
+        &providers,
+    );
     let (_broadcast, broadcaster) = zcode_host_services::broadcast::service_with_sender();
     account.start(broadcaster);
 
@@ -216,6 +229,7 @@ async fn logged_in_coding_plan_drives_off_peak_requests() {
 
     // 取号：Node offPeakServerClient 的头（来源头 + 双凭证 + request id），origin 来自 ZCODE_BASE_URL。
     let client = ServerClient::new(
+        &zcode_host_services::testing::spawner(),
         vars.clone(),
         source.clone(),
         Some(account.api.source_headers().clone()),
