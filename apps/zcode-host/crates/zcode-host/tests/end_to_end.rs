@@ -699,8 +699,7 @@ async fn a_normal_dispose_leaves_no_tasks_to_abort() {
     assert_eq!(rpc.next().await.0, json!([201, 2]));
     host.send(json!({"type": "dispose"})).await;
     let mut reports = Vec::new();
-    while let Ok(Ok(Some(line))) =
-        tokio::time::timeout(STEP_TIMEOUT, host.stdout.next_line()).await
+    while let Ok(Ok(Some(line))) = tokio::time::timeout(STEP_TIMEOUT, host.stdout.next_line()).await
     {
         let message: Value = serde_json::from_str(&line).unwrap();
         let text = message["message"].as_str().unwrap_or_default();
@@ -711,6 +710,9 @@ async fn a_normal_dispose_leaves_no_tasks_to_abort() {
     assert!(wait_exit(&mut host.child).await.success());
     assert_eq!(
         reports,
-        [(json!("info"), "host tasks at shutdown: none left running".to_owned())]
+        [(
+            json!("info"),
+            "host tasks at shutdown: none left running".to_owned()
+        )]
     );
 }
