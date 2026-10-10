@@ -4,6 +4,7 @@ pub use zcode_kit::js::json as js_json;
 pub use zcode_kit::js::string as js_string;
 pub use zcode_shared::{option_map, workspace_identity};
 
+pub mod agent_description;
 pub mod agent_profile;
 pub mod attachment_upload;
 pub mod background;

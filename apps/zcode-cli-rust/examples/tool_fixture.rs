@@ -13,7 +13,26 @@ async fn main() -> anyhow::Result<()> {
     while let Some(line) = lines.next_line().await? {
         let input: Value = serde_json::from_str(&line)?;
         let result = if input["definitions"] == true {
-            json!({"definitions":tools.definitions()})
+            let mut definitions = tools.definitions();
+            if let Some(input_format) = input.get("inputFormat") {
+                tools.model_definitions(&mut definitions, input_format);
+            }
+            if let Some(profiles) = input.get("profiles") {
+                let profiles: Vec<zcode_cli_rust::domain::subagent::Profile> =
+                    serde_json::from_value(profiles.clone())?;
+                if let Some(agent) = definitions
+                    .iter_mut()
+                    .find(|tool| tool["function"]["name"] == "Agent")
+                {
+                    let base = agent["function"]["description"]
+                        .as_str()
+                        .unwrap_or_default();
+                    agent["function"]["description"] =
+                        zcode_cli_rust::domain::agent_description::description(base, &profiles)
+                            .into();
+                }
+            }
+            json!({"definitions":definitions})
         } else {
             match tools
                 .call(

@@ -60,14 +60,9 @@ pub(super) async fn run(
         .iter_mut()
         .find(|d| d["function"]["name"] == "Agent")
     {
-        let descriptions = profiles
-            .iter()
-            .map(|p| format!("- {}: {}", p.name, p.description))
-            .collect::<Vec<_>>()
-            .join("\n");
         let base = agent["function"]["description"].as_str().unwrap_or("");
         agent["function"]["description"] =
-            format!("{base}\n\nCurrent profile catalog (authoritative):\n{descriptions}").into();
+            crate::domain::agent_description::description(base, &profiles).into();
     }
     super::plugin_reference::inject(tools, history, (&skills, &definitions), sink, cancel).await?;
     if let Some(instructions) = manual {

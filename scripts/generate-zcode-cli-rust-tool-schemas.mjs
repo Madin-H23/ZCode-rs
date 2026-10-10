@@ -1,4 +1,5 @@
-// Run with node --import tsx. Input schemas are generated from current TS contracts.
+// Run with node --import tsx. Schemas and descriptions come from current TS contracts.
+import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { format } from "oxfmt";
 import { askUserQuestionToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/ask-user-question.ts";
@@ -7,7 +8,19 @@ import { createAgentToolEntry } from "../apps/zcode-cli/packages/core/src/tool/h
 import { sendMessageToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/send-message.ts";
 import { webFetchToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/webfetch.ts";
 import { webSearchToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/websearch.ts";
-import { normalizeAgentProfiles } from "../apps/zcode-cli/packages/core/src/subagent/profile.ts";
+import {
+  normalizeAgentProfiles,
+  formatAgentProfilesForPrompt,
+} from "../apps/zcode-cli/packages/core/src/subagent/profile.ts";
+import { formatExploreAllowedToolsForAgentDescription } from "../apps/zcode-cli/packages/core/src/subagent/explore-tools.ts";
+import { readToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/read.ts";
+import { writeToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/write.ts";
+import { editToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/edit.ts";
+import { globToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/glob.ts";
+import { grepToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/grep.ts";
+import { createBashToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/bash.ts";
+import { taskOutputToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/task-output.ts";
+import { taskStopToolEntry } from "../apps/zcode-cli/packages/core/src/tool/handlers/task-stop.ts";
 import { buildExploreAgentPrompt } from "../apps/zcode-cli/packages/core/src/subagent/explore.ts";
 import { buildSubagentCommonNotes } from "../apps/zcode-cli/packages/core/src/subagent/system-prompt.ts";
 import { buildPersistentAgentMemoryPrompt } from "../apps/zcode-cli/packages/core/src/subagent/persistent-memory-prompt.ts";
@@ -38,7 +51,55 @@ const schemas = {};
 for (const [name, file, key] of tools) {
   schemas[name] = (await import(`../apps/zcode-cli/packages/contracts/src/tools/${file}.ts`))[key];
 }
+// Rust 当前保留独立 Glob/Grep；这里只选择对应文本分支，不启用新能力。
+const branch = { embeddedSearchEnabled: false, dynamicWorkflowEnabled: false };
+const agentDescription = createAgentToolEntry(branch).metadata.description;
+const defaultCatalog = formatAgentProfilesForPrompt([], branch);
+assert.equal(agentDescription.split(defaultCatalog).length, 2);
+function profileSegments(tools) {
+  const profile = {
+    name: "{name}",
+    description: "{description}",
+    source: "project",
+    systemPrompt: "",
+    tools,
+  };
+  const line = formatAgentProfilesForPrompt([profile], branch).split("\n").at(-1);
+  const segments = line.split(/\{(?:name|description|tools)\}/u);
+  assert.equal(segments.length, tools ? 4 : 3);
+  return segments;
+}
 for (const [file, data] of [
+  [
+    "tool_descriptions.json",
+    {
+      ...Object.fromEntries(
+        [
+          readToolEntry,
+          writeToolEntry,
+          editToolEntry,
+          globToolEntry,
+          grepToolEntry,
+          createBashToolEntry(branch),
+          taskOutputToolEntry,
+          taskStopToolEntry,
+        ].map((entry) => [entry.metadata.name, entry.metadata.description]),
+      ),
+      ReadPdf: readToolEntry.resolveModelContract({
+        model: { properties: { inputFormat: { supportsPdf: true } } },
+      }).description,
+    },
+  ],
+  [
+    "../domain/agent_catalog.json",
+    {
+      defaultCatalog,
+      header: defaultCatalog.split("\n")[0],
+      withoutTools: profileSegments(undefined),
+      withTools: profileSegments(["{tools}"]),
+      exploreTools: formatExploreAllowedToolsForAgentDescription(branch),
+    },
+  ],
   [
     "agent_memory_templates.json",
     Object.fromEntries(
@@ -65,7 +126,7 @@ for (const [file, data] of [
   [
     "agent_descriptions.json",
     {
-      Agent: createAgentToolEntry({ dynamicWorkflowEnabled: false }).metadata.description,
+      Agent: agentDescription,
       SendMessage: sendMessageToolEntry.metadata.description,
     },
   ],
@@ -91,7 +152,7 @@ for (const [file, data] of [
     },
   ],
 ]) {
-  const directory = file === "../domain/agent_profiles.json" ? "domain" : "tools";
+  const directory = file.startsWith("../domain/") ? "domain" : "tools";
   const name = file.replace("../domain/", "");
   const path = new URL(`../apps/zcode-cli-rust/crates/${directory}/src/${name}`, import.meta.url);
   const formatted = await format(path.pathname, `${JSON.stringify(data, null, 2)}\n`);

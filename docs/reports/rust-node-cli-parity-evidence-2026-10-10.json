@@ -1,0 +1,2068 @@
+{
+  "auditDate": "2026-10-10",
+  "sourceCommit": "e2d7b0bd912ad6324825b1f802e561dd09c3b8fb",
+  "scope": "Current locally built Node CLI and Rust debug binary; synthetic localhost provider/MCP; no real vendor/account/UI validation.",
+  "caveats": [
+    "Description lengths and firstDiff use JavaScript UTF-16 code units.",
+    "Fixture root paths in MCP/Write/Search summaries were replaced with named placeholders; comparison booleans were computed before replacement.",
+    "Wire hashes reflect original raw requests including runtime-generated IDs and paths. Raw inequality alone is not a semantic-failure criterion.",
+    "This is evidence data, not an automated regression gate. Not all cases record a first byte or JSON path.",
+    "Probe scripts and full capture/log files remain in the temporary audit directory; manifest hashes identify them."
+  ],
+  "fixture": {
+    "baseUserInputs": ["plain hello there", "please use Read"],
+    "readFile": "first\nhello 世界\nlast\n",
+    "providerModelId": "model-a",
+    "baseShell": "/bin/bash",
+    "hostPreferences": {
+      "memoryEnabled": false,
+      "nativeSearchEnhancementsEnabled": true
+    },
+    "readCases": {
+      "ordinary": "a\nb\n",
+      "empty": "",
+      "offset-zero": {
+        "content": "a\nb\n",
+        "offset": 0
+      },
+      "many-lines": "2100 lines x0 through x2099, no final newline",
+      "token-cap": "90000 repetitions of 中, no explicit limit",
+      "explicit-token-cap": {
+        "content": "90000 repetitions of 中",
+        "limit": 1
+      },
+      "gbkHex": "c4e3bac3",
+      "crlf": "a\r\nb\r\n"
+    }
+  },
+  "counts": {
+    "baseProtocolRequests": 18,
+    "edgeModelRequests": 12,
+    "midConversationSystemRequests": 2,
+    "mcpReadCwdRequests": 44,
+    "totalModelRequests": 76,
+    "directReadCases": 8,
+    "directWriteSearchCases": 8
+  },
+  "protocolRequests": [
+    {
+      "api": "openai-chat-completions",
+      "phases": {
+        "node": "passed",
+        "rust": "passed"
+      },
+      "requests": {
+        "node": 3,
+        "rust": 3
+      },
+      "rawFirstEqual": false,
+      "nodeTopKeys": [
+        "model",
+        "messages",
+        "tools",
+        "tool_choice",
+        "stream",
+        "stream_options",
+        "max_completion_tokens"
+      ],
+      "rustTopKeys": [
+        "model",
+        "stream",
+        "stream_options",
+        "max_tokens",
+        "tools",
+        "messages",
+        "max_completion_tokens"
+      ],
+      "nodeTools": [
+        "Agent",
+        "AskUserQuestion",
+        "Bash",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "CronUpdate",
+        "Edit",
+        "EnterPlanMode",
+        "ExitPlanMode",
+        "Read",
+        "Skill",
+        "TaskOutput",
+        "TaskStop",
+        "TodoRead",
+        "TodoWrite",
+        "WebFetch",
+        "Write",
+        "SendMessage",
+        "ReadSessionContext"
+      ],
+      "rustTools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Bash",
+        "TaskOutput",
+        "TaskStop",
+        "Skill",
+        "AskUserQuestion",
+        "TodoRead",
+        "TodoWrite",
+        "Agent",
+        "SendMessage",
+        "WebFetch",
+        "EnterPlanMode",
+        "ExitPlanMode"
+      ],
+      "descriptions": [
+        {
+          "name": "Agent",
+          "equal": false,
+          "nodeChars": 1946,
+          "rustChars": 2709,
+          "firstDiff": 911,
+          "nodeExcerpt": "Read, Bash, WebFetch, WebSearch, TodoWrite)\n\nWhen using the Agent tool, specify a subagent",
+          "rustExcerpt": "Glob, Grep, Read, Bash, WebFetch, WebSearch, TodoWrite)\n\nWhen using the Agent tool, specif",
+          "schemaEqual": true
+        },
+        {
+          "name": "AskUserQuestion",
+          "equal": true,
+          "nodeChars": 1786,
+          "rustChars": 1786,
+          "firstDiff": 1786,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "Bash",
+          "equal": false,
+          "nodeChars": 1032,
+          "rustChars": 162,
+          "firstDiff": 7,
+          "nodeExcerpt": "s a bash command and returns its output.\n\n- Working directory persists between calls, but ",
+          "rustExcerpt": " a shell command in the workspace. run_in_background returns a task ID and output path. Us",
+          "schemaEqual": true
+        },
+        {
+          "name": "Edit",
+          "equal": false,
+          "nodeChars": 360,
+          "rustChars": 89,
+          "firstDiff": 0,
+          "nodeExcerpt": "Performs exact string replacement in a file.\n\n- You must Read the file in this conversatio",
+          "rustExcerpt": "Replace a unique exact string, or every occurrence with replace_all. Read the file first.",
+          "schemaEqual": true
+        },
+        {
+          "name": "EnterPlanMode",
+          "equal": false,
+          "nodeChars": 4011,
+          "rustChars": 3997,
+          "firstDiff": 2496,
+          "nodeExcerpt": "`find`/Glob, `grep`/Grep, and Read\n2. Understand existing patterns and architecture\n3. Des",
+          "rustExcerpt": "Glob, Grep, and Read\n2. Understand existing patterns and architecture\n3. Design an impleme",
+          "schemaEqual": true
+        },
+        {
+          "name": "ExitPlanMode",
+          "equal": true,
+          "nodeChars": 1917,
+          "rustChars": 1917,
+          "firstDiff": 1917,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "Read",
+          "equal": false,
+          "nodeChars": 784,
+          "rustChars": 83,
+          "firstDiff": 4,
+          "nodeExcerpt": "s a file from the local filesystem.\n\n- `file_path` must be an absolute path.\n- Reads up to",
+          "rustExcerpt": " a text file with 1-based numbered lines. Use offset and limit for large files.",
+          "schemaEqual": true
+        },
+        {
+          "name": "Skill",
+          "equal": true,
+          "nodeChars": 1315,
+          "rustChars": 1315,
+          "firstDiff": 1315,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "TaskOutput",
+          "equal": false,
+          "nodeChars": 1049,
+          "rustChars": 96,
+          "firstDiff": 0,
+          "nodeExcerpt": "DEPRECATED: Background tasks return their output file path in the tool result, and you rec",
+          "rustExcerpt": "Retrieve a session-owned background shell task's output. block waits up to timeout millise",
+          "schemaEqual": true
+        },
+        {
+          "name": "TaskStop",
+          "equal": false,
+          "nodeChars": 203,
+          "rustChars": 81,
+          "firstDiff": 0,
+          "nodeExcerpt": "\n- Stops a running background task by its ID\n- Takes a task_id parameter identifying the t",
+          "rustExcerpt": "Stop a session-owned background shell task and wait for its process tree to exit.",
+          "schemaEqual": true
+        },
+        {
+          "name": "TodoRead",
+          "equal": true,
+          "nodeChars": 34,
+          "rustChars": 34,
+          "firstDiff": 34,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "TodoWrite",
+          "equal": true,
+          "nodeChars": 370,
+          "rustChars": 370,
+          "firstDiff": 370,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "WebFetch",
+          "equal": true,
+          "nodeChars": 374,
+          "rustChars": 374,
+          "firstDiff": 374,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "Write",
+          "equal": false,
+          "nodeChars": 240,
+          "rustChars": 78,
+          "firstDiff": 0,
+          "nodeExcerpt": "Writes a file to the local filesystem, overwriting if one exists.\n\nWhen to use: creating a",
+          "rustExcerpt": "Create or overwrite a text file. Read existing files fully before overwriting.",
+          "schemaEqual": true
+        },
+        {
+          "name": "SendMessage",
+          "equal": true,
+          "nodeChars": 509,
+          "rustChars": 509,
+          "firstDiff": 509,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        }
+      ],
+      "firstRequestBodyDetails": {
+        "node": {
+          "fields": {
+            "model": "model-a",
+            "tool_choice": "auto",
+            "stream": true,
+            "stream_options": {
+              "include_usage": true
+            },
+            "max_completion_tokens": 32000
+          },
+          "messageShapes": [
+            {
+              "role": "system",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "user",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "user",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            }
+          ],
+          "fixtureUserMessage": {
+            "role": "user",
+            "content": "plain hello there"
+          },
+          "rawUtf8Bytes": 46974,
+          "rawSha256": "c03be158654d450398145e2c2b85ec9aca31e7fbe8d51f964f586823ddb9ee91"
+        },
+        "rust": {
+          "fields": {
+            "model": "model-a",
+            "stream": true,
+            "stream_options": {
+              "include_usage": true
+            },
+            "max_tokens": 32000,
+            "max_completion_tokens": 32000
+          },
+          "messageShapes": [
+            {
+              "role": "system",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "system",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "system",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "user",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "user",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            }
+          ],
+          "fixtureUserMessage": {
+            "role": "user",
+            "content": "plain hello there"
+          },
+          "rawUtf8Bytes": 35968,
+          "rawSha256": "7f55d84b37cbb18df026e23f2bd045c0e8d9c365ee230c0f5bb64832209215b6"
+        }
+      }
+    },
+    {
+      "api": "anthropic-messages",
+      "phases": {
+        "node": "passed",
+        "rust": "passed"
+      },
+      "requests": {
+        "node": 3,
+        "rust": 3
+      },
+      "rawFirstEqual": false,
+      "nodeTopKeys": [
+        "model",
+        "max_tokens",
+        "metadata",
+        "system",
+        "messages",
+        "tools",
+        "tool_choice",
+        "stream"
+      ],
+      "rustTopKeys": ["model", "stream", "max_tokens", "system", "messages", "tools", "metadata"],
+      "nodeTools": [
+        "Agent",
+        "AskUserQuestion",
+        "Bash",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "CronUpdate",
+        "Edit",
+        "EnterPlanMode",
+        "ExitPlanMode",
+        "Read",
+        "Skill",
+        "TaskOutput",
+        "TaskStop",
+        "TodoRead",
+        "TodoWrite",
+        "WebFetch",
+        "Write",
+        "SendMessage",
+        "ReadSessionContext"
+      ],
+      "rustTools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Bash",
+        "TaskOutput",
+        "TaskStop",
+        "Skill",
+        "AskUserQuestion",
+        "TodoRead",
+        "TodoWrite",
+        "Agent",
+        "SendMessage",
+        "WebFetch",
+        "EnterPlanMode",
+        "ExitPlanMode"
+      ],
+      "descriptions": [
+        {
+          "name": "Agent",
+          "equal": false,
+          "nodeChars": 1946,
+          "rustChars": 2709,
+          "firstDiff": 911,
+          "nodeExcerpt": "Read, Bash, WebFetch, WebSearch, TodoWrite)\n\nWhen using the Agent tool, specify a subagent",
+          "rustExcerpt": "Glob, Grep, Read, Bash, WebFetch, WebSearch, TodoWrite)\n\nWhen using the Agent tool, specif",
+          "schemaEqual": true
+        },
+        {
+          "name": "AskUserQuestion",
+          "equal": true,
+          "nodeChars": 1786,
+          "rustChars": 1786,
+          "firstDiff": 1786,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "Bash",
+          "equal": false,
+          "nodeChars": 1032,
+          "rustChars": 162,
+          "firstDiff": 7,
+          "nodeExcerpt": "s a bash command and returns its output.\n\n- Working directory persists between calls, but ",
+          "rustExcerpt": " a shell command in the workspace. run_in_background returns a task ID and output path. Us",
+          "schemaEqual": true
+        },
+        {
+          "name": "Edit",
+          "equal": false,
+          "nodeChars": 360,
+          "rustChars": 89,
+          "firstDiff": 0,
+          "nodeExcerpt": "Performs exact string replacement in a file.\n\n- You must Read the file in this conversatio",
+          "rustExcerpt": "Replace a unique exact string, or every occurrence with replace_all. Read the file first.",
+          "schemaEqual": true
+        },
+        {
+          "name": "EnterPlanMode",
+          "equal": false,
+          "nodeChars": 4011,
+          "rustChars": 3997,
+          "firstDiff": 2496,
+          "nodeExcerpt": "`find`/Glob, `grep`/Grep, and Read\n2. Understand existing patterns and architecture\n3. Des",
+          "rustExcerpt": "Glob, Grep, and Read\n2. Understand existing patterns and architecture\n3. Design an impleme",
+          "schemaEqual": true
+        },
+        {
+          "name": "ExitPlanMode",
+          "equal": true,
+          "nodeChars": 1917,
+          "rustChars": 1917,
+          "firstDiff": 1917,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "Read",
+          "equal": false,
+          "nodeChars": 784,
+          "rustChars": 83,
+          "firstDiff": 4,
+          "nodeExcerpt": "s a file from the local filesystem.\n\n- `file_path` must be an absolute path.\n- Reads up to",
+          "rustExcerpt": " a text file with 1-based numbered lines. Use offset and limit for large files.",
+          "schemaEqual": true
+        },
+        {
+          "name": "Skill",
+          "equal": true,
+          "nodeChars": 1315,
+          "rustChars": 1315,
+          "firstDiff": 1315,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "TaskOutput",
+          "equal": false,
+          "nodeChars": 1049,
+          "rustChars": 96,
+          "firstDiff": 0,
+          "nodeExcerpt": "DEPRECATED: Background tasks return their output file path in the tool result, and you rec",
+          "rustExcerpt": "Retrieve a session-owned background shell task's output. block waits up to timeout millise",
+          "schemaEqual": true
+        },
+        {
+          "name": "TaskStop",
+          "equal": false,
+          "nodeChars": 203,
+          "rustChars": 81,
+          "firstDiff": 0,
+          "nodeExcerpt": "\n- Stops a running background task by its ID\n- Takes a task_id parameter identifying the t",
+          "rustExcerpt": "Stop a session-owned background shell task and wait for its process tree to exit.",
+          "schemaEqual": true
+        },
+        {
+          "name": "TodoRead",
+          "equal": true,
+          "nodeChars": 34,
+          "rustChars": 34,
+          "firstDiff": 34,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "TodoWrite",
+          "equal": true,
+          "nodeChars": 370,
+          "rustChars": 370,
+          "firstDiff": 370,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "WebFetch",
+          "equal": true,
+          "nodeChars": 374,
+          "rustChars": 374,
+          "firstDiff": 374,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "Write",
+          "equal": false,
+          "nodeChars": 240,
+          "rustChars": 78,
+          "firstDiff": 0,
+          "nodeExcerpt": "Writes a file to the local filesystem, overwriting if one exists.\n\nWhen to use: creating a",
+          "rustExcerpt": "Create or overwrite a text file. Read existing files fully before overwriting.",
+          "schemaEqual": true
+        },
+        {
+          "name": "SendMessage",
+          "equal": true,
+          "nodeChars": 509,
+          "rustChars": 509,
+          "firstDiff": 509,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        }
+      ],
+      "firstRequestBodyDetails": {
+        "node": {
+          "fields": {
+            "model": "model-a",
+            "max_tokens": 32000,
+            "tool_choice": {
+              "type": "auto"
+            },
+            "stream": true
+          },
+          "messageShapes": [
+            {
+              "role": "user",
+              "type": null,
+              "contentType": "list",
+              "cacheControl": null
+            }
+          ],
+          "fixtureUserMessage": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# currentDate\nToday's date is 2026-10-10.\n\n      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>\n"
+              },
+              {
+                "type": "text",
+                "text": "plain hello there",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              }
+            ]
+          },
+          "rawUtf8Bytes": 46740,
+          "rawSha256": "7741a153dceed62369c1280fafef23bf5b53a9f3344ca4b4caf01d4be79e374d"
+        },
+        "rust": {
+          "fields": {
+            "model": "model-a",
+            "stream": true,
+            "max_tokens": 32000
+          },
+          "messageShapes": [
+            {
+              "role": "user",
+              "type": null,
+              "contentType": "list",
+              "cacheControl": null
+            }
+          ],
+          "fixtureUserMessage": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# currentDate\nToday's date is 2026-10-10.\n\n      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>\n"
+              },
+              {
+                "type": "text",
+                "text": "plain hello there"
+              }
+            ]
+          },
+          "rawUtf8Bytes": 35694,
+          "rawSha256": "845826bb76fe463f825657425e7460552fd32f85e533900eb72c902b3b8dfcae"
+        }
+      }
+    },
+    {
+      "api": "openai-responses",
+      "phases": {
+        "node": "passed",
+        "rust": "passed"
+      },
+      "requests": {
+        "node": 3,
+        "rust": 3
+      },
+      "rawFirstEqual": false,
+      "nodeTopKeys": ["model", "input", "tools", "tool_choice", "stream", "max_output_tokens"],
+      "rustTopKeys": ["model", "stream", "store", "include", "max_output_tokens", "input", "tools"],
+      "nodeTools": [
+        "Agent",
+        "AskUserQuestion",
+        "Bash",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "CronUpdate",
+        "Edit",
+        "EnterPlanMode",
+        "ExitPlanMode",
+        "Read",
+        "Skill",
+        "TaskOutput",
+        "TaskStop",
+        "TodoRead",
+        "TodoWrite",
+        "WebFetch",
+        "Write",
+        "SendMessage",
+        "ReadSessionContext"
+      ],
+      "rustTools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Bash",
+        "TaskOutput",
+        "TaskStop",
+        "Skill",
+        "AskUserQuestion",
+        "TodoRead",
+        "TodoWrite",
+        "Agent",
+        "SendMessage",
+        "WebFetch",
+        "EnterPlanMode",
+        "ExitPlanMode"
+      ],
+      "descriptions": [
+        {
+          "name": "Agent",
+          "equal": false,
+          "nodeChars": 1946,
+          "rustChars": 2709,
+          "firstDiff": 911,
+          "nodeExcerpt": "Read, Bash, WebFetch, WebSearch, TodoWrite)\n\nWhen using the Agent tool, specify a subagent",
+          "rustExcerpt": "Glob, Grep, Read, Bash, WebFetch, WebSearch, TodoWrite)\n\nWhen using the Agent tool, specif",
+          "schemaEqual": true
+        },
+        {
+          "name": "AskUserQuestion",
+          "equal": true,
+          "nodeChars": 1786,
+          "rustChars": 1786,
+          "firstDiff": 1786,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "Bash",
+          "equal": false,
+          "nodeChars": 1032,
+          "rustChars": 162,
+          "firstDiff": 7,
+          "nodeExcerpt": "s a bash command and returns its output.\n\n- Working directory persists between calls, but ",
+          "rustExcerpt": " a shell command in the workspace. run_in_background returns a task ID and output path. Us",
+          "schemaEqual": true
+        },
+        {
+          "name": "Edit",
+          "equal": false,
+          "nodeChars": 360,
+          "rustChars": 89,
+          "firstDiff": 0,
+          "nodeExcerpt": "Performs exact string replacement in a file.\n\n- You must Read the file in this conversatio",
+          "rustExcerpt": "Replace a unique exact string, or every occurrence with replace_all. Read the file first.",
+          "schemaEqual": true
+        },
+        {
+          "name": "EnterPlanMode",
+          "equal": false,
+          "nodeChars": 4011,
+          "rustChars": 3997,
+          "firstDiff": 2496,
+          "nodeExcerpt": "`find`/Glob, `grep`/Grep, and Read\n2. Understand existing patterns and architecture\n3. Des",
+          "rustExcerpt": "Glob, Grep, and Read\n2. Understand existing patterns and architecture\n3. Design an impleme",
+          "schemaEqual": true
+        },
+        {
+          "name": "ExitPlanMode",
+          "equal": true,
+          "nodeChars": 1917,
+          "rustChars": 1917,
+          "firstDiff": 1917,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "Read",
+          "equal": false,
+          "nodeChars": 784,
+          "rustChars": 83,
+          "firstDiff": 4,
+          "nodeExcerpt": "s a file from the local filesystem.\n\n- `file_path` must be an absolute path.\n- Reads up to",
+          "rustExcerpt": " a text file with 1-based numbered lines. Use offset and limit for large files.",
+          "schemaEqual": true
+        },
+        {
+          "name": "Skill",
+          "equal": true,
+          "nodeChars": 1315,
+          "rustChars": 1315,
+          "firstDiff": 1315,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "TaskOutput",
+          "equal": false,
+          "nodeChars": 1049,
+          "rustChars": 96,
+          "firstDiff": 0,
+          "nodeExcerpt": "DEPRECATED: Background tasks return their output file path in the tool result, and you rec",
+          "rustExcerpt": "Retrieve a session-owned background shell task's output. block waits up to timeout millise",
+          "schemaEqual": true
+        },
+        {
+          "name": "TaskStop",
+          "equal": false,
+          "nodeChars": 203,
+          "rustChars": 81,
+          "firstDiff": 0,
+          "nodeExcerpt": "\n- Stops a running background task by its ID\n- Takes a task_id parameter identifying the t",
+          "rustExcerpt": "Stop a session-owned background shell task and wait for its process tree to exit.",
+          "schemaEqual": true
+        },
+        {
+          "name": "TodoRead",
+          "equal": true,
+          "nodeChars": 34,
+          "rustChars": 34,
+          "firstDiff": 34,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "TodoWrite",
+          "equal": true,
+          "nodeChars": 370,
+          "rustChars": 370,
+          "firstDiff": 370,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "WebFetch",
+          "equal": true,
+          "nodeChars": 374,
+          "rustChars": 374,
+          "firstDiff": 374,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        },
+        {
+          "name": "Write",
+          "equal": false,
+          "nodeChars": 240,
+          "rustChars": 78,
+          "firstDiff": 0,
+          "nodeExcerpt": "Writes a file to the local filesystem, overwriting if one exists.\n\nWhen to use: creating a",
+          "rustExcerpt": "Create or overwrite a text file. Read existing files fully before overwriting.",
+          "schemaEqual": true
+        },
+        {
+          "name": "SendMessage",
+          "equal": true,
+          "nodeChars": 509,
+          "rustChars": 509,
+          "firstDiff": 509,
+          "nodeExcerpt": "",
+          "rustExcerpt": "",
+          "schemaEqual": true
+        }
+      ],
+      "firstRequestBodyDetails": {
+        "node": {
+          "fields": {
+            "model": "model-a",
+            "tool_choice": "auto",
+            "stream": true,
+            "max_output_tokens": 32000
+          },
+          "messageShapes": [
+            {
+              "role": "system",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "system",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "system",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "user",
+              "type": null,
+              "contentType": "list",
+              "cacheControl": null
+            },
+            {
+              "role": "user",
+              "type": null,
+              "contentType": "list",
+              "cacheControl": null
+            }
+          ],
+          "fixtureUserMessage": {
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "plain hello there"
+              }
+            ]
+          },
+          "rawUtf8Bytes": 46791,
+          "rawSha256": "56dc4fcec33720af10311e6eeca39f693faee77530d4c76cd37194bca5d8f55e"
+        },
+        "rust": {
+          "fields": {
+            "model": "model-a",
+            "stream": true,
+            "store": false,
+            "include": ["reasoning.encrypted_content"],
+            "max_output_tokens": 32000
+          },
+          "messageShapes": [
+            {
+              "role": "system",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "system",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "system",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "user",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            },
+            {
+              "role": "user",
+              "type": null,
+              "contentType": "str",
+              "cacheControl": null
+            }
+          ],
+          "fixtureUserMessage": {
+            "role": "user",
+            "content": "plain hello there"
+          },
+          "rawUtf8Bytes": 35992,
+          "rawSha256": "588caa344262cfa765bd6d6aa60c4afe0990b047954be97c6ab54ae6e1a84dd1"
+        }
+      }
+    }
+  ],
+  "modelEdgeCases": [
+    {
+      "scenario": "signature-repair",
+      "phases": {
+        "node": "passed",
+        "rust": "Error: rust: {\"code\":\"invalid_model_request\",\"message\":\"Provider rejected the model request.\",\"recoverable\":false,\"at\":1791636879374,\"source\":\"provider\",\"attribution\":{\"source\":\"provider\",\"reason\":\"invalid_request\",\"providerId\":\"personal:fixture\",\"modelId\":\"model-a\",\"retryable\":false,\"statusCode\":400}}"
+      },
+      "requests": {
+        "node": 3,
+        "rust": 2
+      },
+      "nodeSignedSecond": true,
+      "nodeSignedRetry": false,
+      "rustSignedSecond": true
+    },
+    {
+      "scenario": "anthropic-refusal",
+      "phases": {
+        "node": "passed",
+        "rust": "Error: rust: {\"code\":\"invalid_model_response\",\"message\":\"Provider response was invalid or incomplete.\",\"recoverable\":false,\"at\":1791636882544,\"source\":\"provider\",\"attribution\":{\"source\":\"provider\",\"reason\":\"invalid_response\",\"providerId\":\"personal:fixture\",\"modelId\":\"model-a\",\"retryable\":false}}"
+      },
+      "requests": {
+        "node": 1,
+        "rust": 1
+      }
+    },
+    {
+      "scenario": "chat-content-filter",
+      "phases": {
+        "node": "passed",
+        "rust": "Error: rust: {\"code\":\"invalid_model_response\",\"message\":\"Provider response was invalid or incomplete.\",\"recoverable\":false,\"at\":1791636885809,\"source\":\"provider\",\"attribution\":{\"source\":\"provider\",\"reason\":\"invalid_response\",\"providerId\":\"personal:fixture\",\"modelId\":\"model-a\",\"retryable\":false}}"
+      },
+      "requests": {
+        "node": 1,
+        "rust": 1
+      }
+    },
+    {
+      "scenario": "chat-length-tool",
+      "phases": {
+        "node": "passed",
+        "rust": "Error: rust: {\"code\":\"invalid_model_response\",\"message\":\"Provider response was invalid or incomplete.\",\"recoverable\":false,\"at\":1791636889136,\"source\":\"provider\",\"attribution\":{\"source\":\"provider\",\"reason\":\"invalid_response\",\"providerId\":\"personal:fixture\",\"modelId\":\"model-a\",\"retryable\":false}}"
+      },
+      "requests": {
+        "node": 2,
+        "rust": 1
+      }
+    }
+  ],
+  "midConversationSystem": [
+    {
+      "scenario": "chat-mid-system",
+      "phases": {
+        "node": "passed",
+        "rust": "passed"
+      },
+      "requests": {
+        "node": 1,
+        "rust": 1
+      },
+      "finalMessages": {
+        "node": {
+          "role": "system",
+          "content": "Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supercedes any other instructions you have received.\n## Plan Workflow\n\n### Phase 1: Initial Understanding\nGoal: Gain a comprehensive understanding of the user's request by reading through code and asking them questions. Critical: In this phase you should only use the Explore subagent type.\n\n1. Focus on understanding the user's request and the code associated with their request. Actively search for existing functions, utilities, and patterns that can be reused — avoid proposing new code when suitable implementations already exist.\n\n2. **Launch up to 3 Explore agents IN PARALLEL** (single message, multiple tool calls) to efficiently explore the codebase.\n   - Use 1 agent when the task is isolated to known files, the user provided specific file paths, or you're making a small targeted change.\n   - Use multiple agents when: the scope is uncertain, multiple areas of the codebase are involved, or you need to understand existing patterns before planning.\n   - Quality over quantity - 3 agents maximum, but you should try to use the minimum number of agents necessary (usually just 1)\n   - If using multiple agents: Provide each agent with a specific search focus or area to explore. Example: One agent searches for existing implementations, another explores related components, a third investigating testing patterns\n\n### Phase 2: Design\nGoal: Design an implementation approach.\n\n**Guidelines:**\n- Use the context gathered in Phase 1, including relevant files and code paths.\n- Account for the user's requirements and constraints.\n- Produce a concrete implementation plan that is detailed enough to execute.\n- Consider useful perspectives for the task type:\n  - New feature: simplicity vs performance vs maintainability\n  - Bug fix: root cause vs workaround vs prevention\n  - Refactoring: minimal change vs clean architecture\n\n### Phase 3: Review\nGoal: Review the plan(s) from Phase 2 and ensure alignment with the user's intentions.\n1. Read the critical files to deepen your understanding\n2. Ensure that the plans align with the user's original request\n3. Use AskUserQuestion to clarify any remaining questions with the user\n\n### Phase 4: Call ExitPlanMode\nAt the very end of your turn, once you have asked the user questions and are happy with your final plan - you should always call ExitPlanMode to indicate to the user that you are done planning.\nThis is critical - your turn should only end with either using the AskUserQuestion tool OR calling ExitPlanMode. Do not stop unless it's for these 2 reasons\n\n**Important:** Use AskUserQuestion ONLY to clarify requirements or choose between approaches. Use ExitPlanMode to request plan approval. Do NOT ask about plan approval in any other way - no text questions, no AskUserQuestion. Phrases like \"Is this plan okay?\", \"Should I proceed?\", \"How does this plan look?\", \"Any changes before we start?\", or similar MUST use ExitPlanMode.\n\nNOTE: At any point in time through this workflow you should feel free to ask the user questions or clarifications using the AskUserQuestion tool. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins."
+        },
+        "rust": {
+          "role": "user",
+          "content": "<system-reminder>\nPlan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supercedes any other instructions you have received.\n## Plan Workflow\n\n### Phase 1: Initial Understanding\nGoal: Gain a comprehensive understanding of the user's request by reading through code and asking them questions. Critical: In this phase you should only use the Explore subagent type.\n\n1. Focus on understanding the user's request and the code associated with their request. Actively search for existing functions, utilities, and patterns that can be reused — avoid proposing new code when suitable implementations already exist.\n\n2. **Launch up to 3 Explore agents IN PARALLEL** (single message, multiple tool calls) to efficiently explore the codebase.\n   - Use 1 agent when the task is isolated to known files, the user provided specific file paths, or you're making a small targeted change.\n   - Use multiple agents when: the scope is uncertain, multiple areas of the codebase are involved, or you need to understand existing patterns before planning.\n   - Quality over quantity - 3 agents maximum, but you should try to use the minimum number of agents necessary (usually just 1)\n   - If using multiple agents: Provide each agent with a specific search focus or area to explore. Example: One agent searches for existing implementations, another explores related components, a third investigating testing patterns\n\n### Phase 2: Design\nGoal: Design an implementation approach.\n\n**Guidelines:**\n- Use the context gathered in Phase 1, including relevant files and code paths.\n- Account for the user's requirements and constraints.\n- Produce a concrete implementation plan that is detailed enough to execute.\n- Consider useful perspectives for the task type:\n  - New feature: simplicity vs performance vs maintainability\n  - Bug fix: root cause vs workaround vs prevention\n  - Refactoring: minimal change vs clean architecture\n\n### Phase 3: Review\nGoal: Review the plan(s) from Phase 2 and ensure alignment with the user's intentions.\n1. Read the critical files to deepen your understanding\n2. Ensure that the plans align with the user's original request\n3. Use AskUserQuestion to clarify any remaining questions with the user\n\n### Phase 4: Call ExitPlanMode\nAt the very end of your turn, once you have asked the user questions and are happy with your final plan - you should always call ExitPlanMode to indicate to the user that you are done planning.\nThis is critical - your turn should only end with either using the AskUserQuestion tool OR calling ExitPlanMode. Do not stop unless it's for these 2 reasons\n\n**Important:** Use AskUserQuestion ONLY to clarify requirements or choose between approaches. Use ExitPlanMode to request plan approval. Do NOT ask about plan approval in any other way - no text questions, no AskUserQuestion. Phrases like \"Is this plan okay?\", \"Should I proceed?\", \"How does this plan look?\", \"Any changes before we start?\", or similar MUST use ExitPlanMode.\n\nNOTE: At any point in time through this workflow you should feel free to ask the user questions or clarifications using the AskUserQuestion tool. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins.\n</system-reminder>"
+        }
+      }
+    }
+  ],
+  "directReadCases": [
+    {
+      "name": "ordinary",
+      "equal": true,
+      "nodeError": false,
+      "rustError": false,
+      "nodeLength": 10,
+      "rustLength": 10,
+      "firstDiff": 10,
+      "nodeExcerpt": "",
+      "rustExcerpt": "",
+      "nodeLines": 3,
+      "rustLines": 3
+    },
+    {
+      "name": "empty",
+      "equal": false,
+      "nodeError": false,
+      "rustError": false,
+      "nodeLength": 126,
+      "rustLength": 87,
+      "firstDiff": 46,
+      "nodeExcerpt": "is shorter than the provided offset (1). The file has 1 lines.</system-reminder>",
+      "rustExcerpt": "the contents are empty.</system-reminder>",
+      "nodeLines": 1,
+      "rustLines": 0
+    },
+    {
+      "name": "offset-zero",
+      "equal": false,
+      "nodeError": false,
+      "rustError": false,
+      "nodeLength": 10,
+      "rustLength": 10,
+      "firstDiff": 0,
+      "nodeExcerpt": "0\ta\n1\tb\n2\t",
+      "rustExcerpt": "1\ta\n2\tb\n3\t",
+      "nodeLines": 3,
+      "rustLines": 3
+    },
+    {
+      "name": "many-lines",
+      "equal": false,
+      "nodeError": false,
+      "rustError": false,
+      "nodeLength": 20882,
+      "rustLength": 19782,
+      "firstDiff": 19782,
+      "nodeExcerpt": "\n2001\tx2000\n2002\tx2001\n2003\tx2002\n2004\tx2003\n2005\tx2004\n2006\tx2005\n2007\tx2006\n2008\tx2007\n2009\tx2008\n2010\tx2009\n2011\tx2010\n2012\tx2011\n2013\tx2012\n2014\tx2013\n2015\tx2014\n2016\tx2015\n2017\tx2016\n2018\tx2017\n2019\tx2018\n2020\tx2019",
+      "rustExcerpt": "",
+      "nodeLines": 2100,
+      "rustLines": 2000
+    },
+    {
+      "name": "token-cap",
+      "equal": false,
+      "nodeError": true,
+      "rustError": false,
+      "nodeLength": 197,
+      "rustLength": 21939,
+      "firstDiff": 0,
+      "nodeExcerpt": "File content (263.7KB) exceeds maximum allowed size (256KB). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
+      "rustExcerpt": "<system-reminder>Partial view; use offset and limit to continue reading.</system-reminder>\n\n1\t中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中",
+      "rustLines": 1
+    },
+    {
+      "name": "explicit-token-cap",
+      "equal": false,
+      "nodeError": true,
+      "rustError": false,
+      "nodeLength": 204,
+      "rustLength": 21939,
+      "firstDiff": 0,
+      "nodeExcerpt": "File content (60000 tokens) exceeds maximum allowed tokens (25000). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
+      "rustExcerpt": "<system-reminder>Partial view; use offset and limit to continue reading.</system-reminder>\n\n1\t中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中",
+      "rustLines": 1
+    },
+    {
+      "name": "gbk",
+      "equal": false,
+      "nodeError": false,
+      "rustError": true,
+      "nodeLength": 4,
+      "rustLength": 30,
+      "firstDiff": 0,
+      "nodeExcerpt": "1\t你好",
+      "rustExcerpt": "Read requires valid UTF-8 text",
+      "nodeLines": 1
+    },
+    {
+      "name": "crlf",
+      "equal": true,
+      "nodeError": false,
+      "rustError": false,
+      "nodeLength": 10,
+      "rustLength": 10,
+      "firstDiff": 10,
+      "nodeExcerpt": "",
+      "rustExcerpt": "",
+      "nodeLines": 3,
+      "rustLines": 3
+    }
+  ],
+  "mcpReadCwdCases": {
+    "phases": {
+      "node": {
+        "multi-text": "passed",
+        "structured": "passed",
+        "empty-structured": "passed",
+        "error": "passed",
+        "resource": "passed",
+        "audio": "passed",
+        "image": "passed",
+        "read-one": "passed",
+        "read-again": "passed",
+        "cd-in": "passed",
+        "pwd": "passed"
+      },
+      "rust": {
+        "multi-text": "passed",
+        "structured": "passed",
+        "empty-structured": "passed",
+        "error": "passed",
+        "resource": "passed",
+        "audio": "passed",
+        "image": "passed",
+        "read-one": "passed",
+        "read-again": "passed",
+        "cd-in": "passed",
+        "pwd": "passed"
+      }
+    },
+    "summaries": [
+      {
+        "case": "multi-text",
+        "equal": false,
+        "node": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_multi-text",
+            "content": "alpha\n\nbeta"
+          }
+        ],
+        "rust": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_multi-text",
+            "content": "alpha\nbeta"
+          }
+        ]
+      },
+      {
+        "case": "structured",
+        "equal": false,
+        "node": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_structured",
+            "content": "alpha\n\nStructured content:\n{\n  \"ok\": true,\n  \"count\": 2\n}"
+          }
+        ],
+        "rust": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_structured",
+            "content": "alpha\n{\"ok\":true,\"count\":2}"
+          }
+        ]
+      },
+      {
+        "case": "empty-structured",
+        "equal": false,
+        "node": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_empty-structured",
+            "content": "alpha"
+          }
+        ],
+        "rust": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_empty-structured",
+            "content": "alpha\n{}"
+          }
+        ]
+      },
+      {
+        "case": "error",
+        "equal": false,
+        "node": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_error",
+            "content": "MCP tool returned an error:\nfixture error"
+          }
+        ],
+        "rust": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_error",
+            "content": "fixture error"
+          }
+        ]
+      },
+      {
+        "case": "resource",
+        "equal": false,
+        "node": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_resource",
+            "content": "MCP resource content:\n{\n  \"uri\": \"fixture://note\",\n  \"mimeType\": \"text/plain\",\n  \"text\": \"fixture resource\"\n}"
+          }
+        ],
+        "rust": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_resource",
+            "content": "fixture resource"
+          }
+        ]
+      },
+      {
+        "case": "audio",
+        "equal": false,
+        "node": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_audio",
+            "content": "[MCP audio content omitted: audio/wav]"
+          }
+        ],
+        "rust": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_audio",
+            "content": "{\"type\":\"audio\",\"data\":\"YWJjZA==\",\"mimeType\":\"audio/wav\"}"
+          }
+        ]
+      },
+      {
+        "case": "image",
+        "equal": false,
+        "node": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_image",
+            "content": "[Attached image/png: MCP image]"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Tool result media from mcp__fixture__fixture:"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+                }
+              }
+            ]
+          }
+        ],
+        "rust": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_image",
+            "content": "{\"type\":\"image\",\"data\":\"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=\",\"mimeType\":\"image/png\"}"
+          }
+        ]
+      },
+      {
+        "case": "read-one",
+        "equal": true,
+        "node": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_read-one",
+            "content": "1\tfirst\n2\thello 世界\n3\tlast\n4\t"
+          }
+        ],
+        "rust": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_read-one",
+            "content": "1\tfirst\n2\thello 世界\n3\tlast\n4\t"
+          }
+        ]
+      },
+      {
+        "case": "read-again",
+        "equal": false,
+        "node": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_read-again",
+            "content": "Wasted call — file unchanged since your last Read. Refer to that earlier tool_result instead."
+          }
+        ],
+        "rust": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_read-again",
+            "content": "1\tfirst\n2\thello 世界\n3\tlast\n4\t"
+          }
+        ]
+      },
+      {
+        "case": "cd-in",
+        "equal": true,
+        "node": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_cd-in",
+            "content": "<fixture-root>/workspace/sub"
+          }
+        ],
+        "rust": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_cd-in",
+            "content": "<fixture-root>/workspace/sub"
+          }
+        ]
+      },
+      {
+        "case": "pwd",
+        "equal": false,
+        "node": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_pwd",
+            "content": "<fixture-root>/workspace/sub"
+          }
+        ],
+        "rust": [
+          {
+            "role": "tool",
+            "tool_call_id": "call_fixture_pwd",
+            "content": "<fixture-root>/workspace"
+          }
+        ]
+      }
+    ]
+  },
+  "mcpCalls": [
+    {
+      "kind": "node",
+      "params": {
+        "name": "fixture",
+        "arguments": {
+          "case": "multi-text"
+        },
+        "_meta": {
+          "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+          "span_id": "d2dca128-faf0-46",
+          "parent_span_id": "7f6ea0bc-9a8e-42",
+          "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+          "turn_id": "turn_d7a88a82-1e26-418c-9755-5867fbefc2db",
+          "runtime_scope": "main",
+          "workspace_path": "<fixture-root>/workspace",
+          "workspace_key": "<fixture-root>/workspace",
+          "client_mode": "desktop-continuous",
+          "delivery_kind": "desktop-continuous",
+          "com.zcode/request-context": {
+            "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+            "span_id": "d2dca128-faf0-46",
+            "parent_span_id": "7f6ea0bc-9a8e-42",
+            "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+            "turn_id": "turn_d7a88a82-1e26-418c-9755-5867fbefc2db",
+            "runtime_scope": "main",
+            "workspace_path": "<fixture-root>/workspace",
+            "workspace_key": "<fixture-root>/workspace",
+            "client_mode": "desktop-continuous",
+            "delivery_kind": "desktop-continuous"
+          }
+        }
+      }
+    },
+    {
+      "kind": "node",
+      "params": {
+        "name": "fixture",
+        "arguments": {
+          "case": "structured"
+        },
+        "_meta": {
+          "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+          "span_id": "8ec3f74a-4bd0-4c",
+          "parent_span_id": "e9e67fb9-f217-47",
+          "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+          "turn_id": "turn_673bec3e-e07d-41b0-bc9c-d42506a5f11a",
+          "runtime_scope": "main",
+          "workspace_path": "<fixture-root>/workspace",
+          "workspace_key": "<fixture-root>/workspace",
+          "client_mode": "desktop-continuous",
+          "delivery_kind": "desktop-continuous",
+          "com.zcode/request-context": {
+            "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+            "span_id": "8ec3f74a-4bd0-4c",
+            "parent_span_id": "e9e67fb9-f217-47",
+            "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+            "turn_id": "turn_673bec3e-e07d-41b0-bc9c-d42506a5f11a",
+            "runtime_scope": "main",
+            "workspace_path": "<fixture-root>/workspace",
+            "workspace_key": "<fixture-root>/workspace",
+            "client_mode": "desktop-continuous",
+            "delivery_kind": "desktop-continuous"
+          }
+        }
+      }
+    },
+    {
+      "kind": "node",
+      "params": {
+        "name": "fixture",
+        "arguments": {
+          "case": "empty-structured"
+        },
+        "_meta": {
+          "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+          "span_id": "8560b2cd-7d09-4e",
+          "parent_span_id": "8f2f38b0-1cd0-4f",
+          "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+          "turn_id": "turn_342164df-7542-42f0-bf1d-11fbe0c7901a",
+          "runtime_scope": "main",
+          "workspace_path": "<fixture-root>/workspace",
+          "workspace_key": "<fixture-root>/workspace",
+          "client_mode": "desktop-continuous",
+          "delivery_kind": "desktop-continuous",
+          "com.zcode/request-context": {
+            "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+            "span_id": "8560b2cd-7d09-4e",
+            "parent_span_id": "8f2f38b0-1cd0-4f",
+            "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+            "turn_id": "turn_342164df-7542-42f0-bf1d-11fbe0c7901a",
+            "runtime_scope": "main",
+            "workspace_path": "<fixture-root>/workspace",
+            "workspace_key": "<fixture-root>/workspace",
+            "client_mode": "desktop-continuous",
+            "delivery_kind": "desktop-continuous"
+          }
+        }
+      }
+    },
+    {
+      "kind": "node",
+      "params": {
+        "name": "fixture",
+        "arguments": {
+          "case": "error"
+        },
+        "_meta": {
+          "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+          "span_id": "90d7b52d-ebca-4a",
+          "parent_span_id": "c6ad3975-018c-41",
+          "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+          "turn_id": "turn_b70368a0-7f90-45a0-8ea9-7310527a29ce",
+          "runtime_scope": "main",
+          "workspace_path": "<fixture-root>/workspace",
+          "workspace_key": "<fixture-root>/workspace",
+          "client_mode": "desktop-continuous",
+          "delivery_kind": "desktop-continuous",
+          "com.zcode/request-context": {
+            "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+            "span_id": "90d7b52d-ebca-4a",
+            "parent_span_id": "c6ad3975-018c-41",
+            "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+            "turn_id": "turn_b70368a0-7f90-45a0-8ea9-7310527a29ce",
+            "runtime_scope": "main",
+            "workspace_path": "<fixture-root>/workspace",
+            "workspace_key": "<fixture-root>/workspace",
+            "client_mode": "desktop-continuous",
+            "delivery_kind": "desktop-continuous"
+          }
+        }
+      }
+    },
+    {
+      "kind": "node",
+      "params": {
+        "name": "fixture",
+        "arguments": {
+          "case": "resource"
+        },
+        "_meta": {
+          "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+          "span_id": "3d347c11-b024-42",
+          "parent_span_id": "bedfcc82-5bdd-45",
+          "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+          "turn_id": "turn_12c475a9-ea96-4c39-af77-d7585effdfc5",
+          "runtime_scope": "main",
+          "workspace_path": "<fixture-root>/workspace",
+          "workspace_key": "<fixture-root>/workspace",
+          "client_mode": "desktop-continuous",
+          "delivery_kind": "desktop-continuous",
+          "com.zcode/request-context": {
+            "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+            "span_id": "3d347c11-b024-42",
+            "parent_span_id": "bedfcc82-5bdd-45",
+            "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+            "turn_id": "turn_12c475a9-ea96-4c39-af77-d7585effdfc5",
+            "runtime_scope": "main",
+            "workspace_path": "<fixture-root>/workspace",
+            "workspace_key": "<fixture-root>/workspace",
+            "client_mode": "desktop-continuous",
+            "delivery_kind": "desktop-continuous"
+          }
+        }
+      }
+    },
+    {
+      "kind": "node",
+      "params": {
+        "name": "fixture",
+        "arguments": {
+          "case": "audio"
+        },
+        "_meta": {
+          "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+          "span_id": "569f6737-edbb-47",
+          "parent_span_id": "3408430a-2ee1-41",
+          "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+          "turn_id": "turn_8be3c146-b3d1-49f4-a4bc-c8fcc9c06194",
+          "runtime_scope": "main",
+          "workspace_path": "<fixture-root>/workspace",
+          "workspace_key": "<fixture-root>/workspace",
+          "client_mode": "desktop-continuous",
+          "delivery_kind": "desktop-continuous",
+          "com.zcode/request-context": {
+            "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+            "span_id": "569f6737-edbb-47",
+            "parent_span_id": "3408430a-2ee1-41",
+            "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+            "turn_id": "turn_8be3c146-b3d1-49f4-a4bc-c8fcc9c06194",
+            "runtime_scope": "main",
+            "workspace_path": "<fixture-root>/workspace",
+            "workspace_key": "<fixture-root>/workspace",
+            "client_mode": "desktop-continuous",
+            "delivery_kind": "desktop-continuous"
+          }
+        }
+      }
+    },
+    {
+      "kind": "node",
+      "params": {
+        "name": "fixture",
+        "arguments": {
+          "case": "image"
+        },
+        "_meta": {
+          "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+          "span_id": "bcdef18f-c254-41",
+          "parent_span_id": "6cea9467-60c8-40",
+          "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+          "turn_id": "turn_a3bdf828-36ce-445b-af3c-dbdf4a7e92e0",
+          "runtime_scope": "main",
+          "workspace_path": "<fixture-root>/workspace",
+          "workspace_key": "<fixture-root>/workspace",
+          "client_mode": "desktop-continuous",
+          "delivery_kind": "desktop-continuous",
+          "com.zcode/request-context": {
+            "trace_id": "5c01f4a5-ef72-4aaa-940a-61c735b39ac4",
+            "span_id": "bcdef18f-c254-41",
+            "parent_span_id": "6cea9467-60c8-40",
+            "session_id": "sess_7557fc41-4809-4884-8163-0804d3aaa4b7",
+            "turn_id": "turn_a3bdf828-36ce-445b-af3c-dbdf4a7e92e0",
+            "runtime_scope": "main",
+            "workspace_path": "<fixture-root>/workspace",
+            "workspace_key": "<fixture-root>/workspace",
+            "client_mode": "desktop-continuous",
+            "delivery_kind": "desktop-continuous"
+          }
+        }
+      }
+    },
+    {
+      "kind": "rust",
+      "params": {
+        "_meta": {
+          "progressToken": 1
+        },
+        "name": "fixture",
+        "arguments": {
+          "case": "multi-text"
+        }
+      }
+    },
+    {
+      "kind": "rust",
+      "params": {
+        "_meta": {
+          "progressToken": 2
+        },
+        "name": "fixture",
+        "arguments": {
+          "case": "structured"
+        }
+      }
+    },
+    {
+      "kind": "rust",
+      "params": {
+        "_meta": {
+          "progressToken": 3
+        },
+        "name": "fixture",
+        "arguments": {
+          "case": "empty-structured"
+        }
+      }
+    },
+    {
+      "kind": "rust",
+      "params": {
+        "_meta": {
+          "progressToken": 4
+        },
+        "name": "fixture",
+        "arguments": {
+          "case": "error"
+        }
+      }
+    },
+    {
+      "kind": "rust",
+      "params": {
+        "_meta": {
+          "progressToken": 5
+        },
+        "name": "fixture",
+        "arguments": {
+          "case": "resource"
+        }
+      }
+    },
+    {
+      "kind": "rust",
+      "params": {
+        "_meta": {
+          "progressToken": 6
+        },
+        "name": "fixture",
+        "arguments": {
+          "case": "audio"
+        }
+      }
+    },
+    {
+      "kind": "rust",
+      "params": {
+        "_meta": {
+          "progressToken": 7
+        },
+        "name": "fixture",
+        "arguments": {
+          "case": "image"
+        }
+      }
+    }
+  ],
+  "directWriteSearchCases": [
+    {
+      "case": "unread-write",
+      "node": {
+        "error": "File has not been read yet. Read it first before writing to it."
+      },
+      "rust": {
+        "error": "write_file_not_read: Read the file before overwriting"
+      }
+    },
+    {
+      "case": "empty-file-write",
+      "node": {
+        "data": {
+          "type": "create",
+          "filePath": "<workspace>/empty-file-write.txt",
+          "content": "x",
+          "structuredPatch": [],
+          "originalFile": null,
+          "userModified": false
+        },
+        "content": "File created successfully at: <workspace>/empty-file-write.txt (file state is current in your context — no need to Read it back)"
+      },
+      "rust": {
+        "data": {
+          "type": "update",
+          "filePath": "<workspace>/empty-file-write.txt",
+          "content": "x",
+          "originalFile": "",
+          "structuredPatch": [
+            {
+              "oldStart": 1,
+              "oldLines": 0,
+              "newStart": 1,
+              "newLines": 1,
+              "lines": ["+x"]
+            }
+          ],
+          "userModified": false
+        },
+        "content": "The file <workspace>/empty-file-write.txt has been updated successfully. (file state is current in your context — no need to Read it back)",
+        "display": {
+          "kind": "file_diff",
+          "filePath": "<workspace>/empty-file-write.txt",
+          "additions": 1,
+          "deletions": 0,
+          "structuredPatch": [
+            {
+              "oldStart": 1,
+              "oldLines": 0,
+              "newStart": 1,
+              "newLines": 1,
+              "lines": ["+x"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "case": "multi-diff-write",
+      "node": {
+        "data": {
+          "type": "update",
+          "filePath": "<workspace>/multi-diff-write.txt",
+          "content": "A\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\nP\n",
+          "structuredPatch": [
+            {
+              "oldStart": 1,
+              "oldLines": 4,
+              "newStart": 1,
+              "newLines": 4,
+              "lines": ["-a", "+A", " b", " c", " d"]
+            },
+            {
+              "oldStart": 13,
+              "oldLines": 4,
+              "newStart": 13,
+              "newLines": 4,
+              "lines": [" m", " n", " o", "-p", "+P"]
+            }
+          ],
+          "originalFile": "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\n",
+          "userModified": false
+        },
+        "content": "The file <workspace>/multi-diff-write.txt has been updated successfully. (file state is current in your context — no need to Read it back)"
+      },
+      "rust": {
+        "data": {
+          "type": "update",
+          "filePath": "<workspace>/multi-diff-write.txt",
+          "content": "A\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\nP\n",
+          "originalFile": "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\n",
+          "structuredPatch": [
+            {
+              "oldStart": 1,
+              "oldLines": 16,
+              "newStart": 1,
+              "newLines": 16,
+              "lines": [
+                "-a",
+                "-b",
+                "-c",
+                "-d",
+                "-e",
+                "-f",
+                "-g",
+                "-h",
+                "-i",
+                "-j",
+                "-k",
+                "-l",
+                "-m",
+                "-n",
+                "-o",
+                "-p",
+                "+A",
+                "+b",
+                "+c",
+                "+d",
+                "+e",
+                "+f",
+                "+g",
+                "+h",
+                "+i",
+                "+j",
+                "+k",
+                "+l",
+                "+m",
+                "+n",
+                "+o",
+                "+P"
+              ]
+            }
+          ],
+          "userModified": false
+        },
+        "content": "The file <workspace>/multi-diff-write.txt has been updated successfully. (file state is current in your context — no need to Read it back)",
+        "display": {
+          "kind": "file_diff",
+          "filePath": "<workspace>/multi-diff-write.txt",
+          "additions": 16,
+          "deletions": 16,
+          "structuredPatch": [
+            {
+              "oldStart": 1,
+              "oldLines": 16,
+              "newStart": 1,
+              "newLines": 16,
+              "lines": [
+                "-a",
+                "-b",
+                "-c",
+                "-d",
+                "-e",
+                "-f",
+                "-g",
+                "-h",
+                "-i",
+                "-j",
+                "-k",
+                "-l",
+                "-m",
+                "-n",
+                "-o",
+                "-p",
+                "+A",
+                "+b",
+                "+c",
+                "+d",
+                "+e",
+                "+f",
+                "+g",
+                "+h",
+                "+i",
+                "+j",
+                "+k",
+                "+l",
+                "+m",
+                "+n",
+                "+o",
+                "+P"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "case": "simple-files",
+      "node": {
+        "content": "Found 1 file\nsimple-files.txt",
+        "chars": 29,
+        "matches": 1,
+        "truncated": false
+      },
+      "rust": {
+        "content": "simple-files.txt",
+        "chars": 16,
+        "matches": 1,
+        "truncated": false
+      },
+      "modelEqual": false
+    },
+    {
+      "case": "no-files",
+      "node": {
+        "content": "No files found",
+        "chars": 14,
+        "matches": 0,
+        "truncated": false
+      },
+      "rust": {
+        "content": "No matches found",
+        "chars": 16,
+        "matches": 0,
+        "truncated": false
+      },
+      "modelEqual": false
+    },
+    {
+      "case": "long-line",
+      "node": {
+        "content": "long-line.txt:1:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx needle",
+        "chars": 723,
+        "lines": 1,
+        "matches": 1,
+        "truncated": false
+      },
+      "rust": {
+        "content": "long-line.txt:1:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx needle",
+        "chars": 723,
+        "lines": 1,
+        "matches": 1,
+        "truncated": false
+      },
+      "modelEqual": true
+    },
+    {
+      "case": "limit-results",
+      "node": {
+        "content": "limit-results.txt:1:needle0\nlimit-results.txt:2:needle1\nlimit-results.txt:3:needle2\nlimit-results.txt:4:needle3\nlimit-re...xt:247:needle246\nlimit-results.txt:248:needle247\nlimit-results.txt:249:needle248\nlimit-results.txt:250:needle249\n\n[Showing results with pagination = limit: 250]",
+        "chars": 7829,
+        "lines": 250,
+        "matches": 260,
+        "truncated": true
+      },
+      "rust": {
+        "content": "limit-results.txt:1:needle0\nlimit-results.txt:2:needle1\nlimit-results.txt:3:needle2\nlimit-results.txt:4:needle3\nlimit-re...limit-results.txt:248:needle247\nlimit-results.txt:249:needle248\nlimit-results.txt:250:needle249\n(Results truncated; use offset/head_limit or narrow the search.)",
+        "chars": 7846,
+        "lines": 250,
+        "matches": 260,
+        "truncated": true
+      },
+      "modelEqual": false
+    },
+    {
+      "case": "large-file",
+      "node": {
+        "content": "Found 1 file\nlarge-file.txt",
+        "chars": 27,
+        "matches": 1,
+        "truncated": false
+      },
+      "rust": {
+        "error": "grep_too_large: narrow the search; file exceeds 16 MiB"
+      },
+      "modelEqual": false
+    }
+  ],
+  "fixtureDrift": [
+    {
+      "path": "$.searchDescription",
+      "rustFixture": "Search the web. Returns result blocks with titles and URLs. US-only.\n\n- The current month is September 2026 — use this when searching for recent information.\n- `allowed_domains` / `blocked_domains` filter results.\n- After answering from results, end with a \"Sources:\" list of the URLs you used as markdown links.",
+      "nodeCurrent": "Search the web. Returns result blocks with titles and URLs. US-only.\n\n- The current month is October 2026 — use this when searching for recent information.\n- `allowed_domains` / `blocked_domains` filter results.\n- After answering from results, end with a \"Sources:\" list of the URLs you used as markdown links."
+    }
+  ],
+  "verification": {
+    "typecheck": "passed",
+    "lint": {
+      "exitCode": 0,
+      "warnings": 140,
+      "errors": 0
+    },
+    "cargoWorkspace": {
+      "passed": 407,
+      "resultBlocksIncludingEmpty": 46
+    },
+    "integrationTypecheck": "passed",
+    "nodeStorageScenarios": 18,
+    "npmLauncher": {
+      "passed": 13
+    },
+    "officialRustTestEntry": {
+      "passed": false,
+      "failure": "dated WebSearch description fixture September 2026 versus October 2026"
+    },
+    "integrationFull": {
+      "tests": 301,
+      "passed": 298,
+      "failed": 3
+    },
+    "failedFilesSequentialRerun": {
+      "tests": 17,
+      "passed": 16,
+      "failed": 1,
+      "remainingFailure": "EPIPE: Protocol writer stopped; exit 1 expected 0"
+    }
+  },
+  "localArtifactManifest": [
+    {
+      "name": "probe.mjs",
+      "sha256": "6d64d2f3b16357b246101f11fceb01966b6e2897a0190ef48eacc73e2f63a638",
+      "bytes": 5834
+    },
+    {
+      "name": "tool-probe.mjs",
+      "sha256": "a7c6819813e0dc98dbfcf715748b2d2ebff63108676c3e18af820364c526e695",
+      "bytes": 2075
+    },
+    {
+      "name": "model-edge-probe.mjs",
+      "sha256": "7b8ae07df3f884e371f5f66c2bf0bf64bbf7873282247c7a2861ee657efefbea",
+      "bytes": 4623
+    },
+    {
+      "name": "model-mid-system-probe.mjs",
+      "sha256": "0118ad286de6702be1b568e32a8ffedb8c45657df908b9e3df1ab8a943af9b3e",
+      "bytes": 4661
+    },
+    {
+      "name": "mcp-tools-probe.mjs",
+      "sha256": "115d6ffb7edf8801e9e7a0686f859eb142f71d535b52d0cfd62fac12b86c9de0",
+      "bytes": 6271
+    },
+    {
+      "name": "write-search-probe.mjs",
+      "sha256": "71d0450f8683e6f335cbe566d6922a45c9e6187ab99da7ce05fa2304f8fdf674",
+      "bytes": 3273
+    },
+    {
+      "name": "typecheck.log",
+      "sha256": "273c28a94a1f47f4d564070b400cee2e6426dba6799f830d4f14f27213b4757e",
+      "bytes": 268
+    },
+    {
+      "name": "lint.log",
+      "sha256": "df8249fb15264f073b04c7c10eebb8ee22b145d513d67ea51a33cb6a74161512",
+      "bytes": 65146
+    },
+    {
+      "name": "cargo-workspace.log",
+      "sha256": "718994dad6d4c03d3c4c89a7bb7129f3fb438f50f033f493e381329500540036",
+      "bytes": 46309
+    },
+    {
+      "name": "integration-tests.log",
+      "sha256": "be68444b5164bb391e6ff93b89e80c6002bfa13028049e66e795bd857b20a25c",
+      "bytes": 48663
+    },
+    {
+      "name": "failed-files-rerun.log",
+      "sha256": "cd03ee6515d7bd3a1f3ecf066a96f0008d07fb6abab3f5b2a5f0db2d8ec10022",
+      "bytes": 3352
+    },
+    {
+      "name": "rust-tests-built.log",
+      "sha256": "d9ffe82c5bcb7bcc2ab63ab1f7fafaca761a1310ef54bd7cb0de78e8181a8b8d",
+      "bytes": 1413
+    },
+    {
+      "name": "node-storage-check.log",
+      "sha256": "a6d196e5c38bc7755e75ee9684077d98ed52736926988111b09e8050daf2a0e3",
+      "bytes": 539
+    },
+    {
+      "name": "npm-launcher-tests.log",
+      "sha256": "4ca37fa24b99a5f1fc9f81e068b54ee887bbaa46f4f1ed145169ef1092ac7c4d",
+      "bytes": 1341
+    }
+  ]
+}
