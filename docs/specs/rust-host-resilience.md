@@ -22,7 +22,7 @@
 
 3. **有界重试**：U4 起 App 级一个计数（只有一个 Host，[rust-u4-app-host.md](rust-u4-app-host.md) §2.8），任意 60 s 内最多自动重启 3 次，第 n 次之前等待 500 ms、2 s、5 s。超出后不再自动重启；失败页的“重新加载”触发一次重启并清空计数。
 4. **用户看到的状态**（Renderer）：
-   - WebSocket 在连上之后关闭，或收到 Main 的“正在重启”通知：立即切到“本地服务已断开，正在重启”页面（带进度动画和第 n/3 次），不再显示无法操作的旧界面。挂起的调用照旧立即被拒绝（rust-host-r0.md 规则 5）。
+   - WebSocket 在连上之后关闭（状态码不是 2.5 的“Host 还在”码），或收到 Main 的“正在重启”通知：立即切到“本地服务已断开，正在重启”页面（带进度动画和第 n/3 次），不再显示无法操作的旧界面。挂起的调用照旧立即被拒绝（rust-host-r0.md 规则 5）。
    - 收到“已放弃”通知：显示“本地服务多次意外退出”，提供“重新加载”和“退出”。重新加载由页面自身 `location.reload()` 触发，这次 dom-ready 让 Main 拉起新 Host；退出走启动控制的 `exit`。放弃期间新打开的主窗口直接收到“已放弃”，显示同一页面，不触发重启。
 5. **CLI 与会话**：旧 Host 的 CLI 在 stdin EOF 后自行退出，正在进行的 run 中断（与 Node Host 崩溃相同）。新 Host 按窗口创建时的预热名单拉起 CLI，其余懒启动。会话事实在 CLI 的持久化存储里，reload 后按已有恢复逻辑展示。
 6. **未发送的草稿**：与手动 reload 相同。
@@ -57,6 +57,28 @@
 
 证据：临时在门禁里打印判据后并发压测，失败那次 reload 后 `providerFamilyDomain: null`、`hasUsableProvider: true`；同一轮通过的运行都是 `"zai"`。
 
+### 2.5 Host 主动关闭连接：重新接入同一个 Host
+
+用户决定（2026-10-10）。Gateway 关闭连接时在 WebSocket Close 中给出状态码与原因（[rust-u2-gateway.md](rust-u2-gateway.md) §2.6）。修复前 Renderer 把连上之后的任何关闭都当成 Host 退出（2.1.4）：Host 因出站积压越过上限关闭窗口的连接时自己仍在运行，Main 不会重启它，窗口一直停在“正在重连”，只能退出 App。
+
+1. **只有已知的“Host 还在”状态码触发重新接入**。今天只有一个：4001 `outbound-backlog`（出站积压越过上限：Renderer 长时间没有读，Host 丢弃了这条连接的积压）。其余一律保持今天的处理：
+
+   | 关闭                                                                            | 窗口的本地连接                                  | 远端 scope 连接                                                 |
+   | ------------------------------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
+   | 4001 `outbound-backlog`                                                         | 重新接入（下面 2–5）                            | 重新接入（同一个页面 reload，远端 scope 一并重新接入）          |
+   | 4005 `host-shutdown`、1011 `internal-error`、1006（异常断开）、其他或未知状态码 | 显示“正在重连”，等待 Main（2.1.4）              | 不处理（与今天相同：该远端会话的调用被拒绝）                    |
+   | 4002 `detached`、4003 `scope-unavailable`、4004 `scope-closed`                  | 同上（Main 今天不会对本地 attachment 这样关闭） | 不处理：远端 workspace 的断开与重连由 Main 的远端会话管理器负责 |
+
+   判断只看状态码；reason 用于日志。握手完成之前的关闭不在这里：照旧显示启动失败页（`transport_closed`）。
+
+2. **重新接入的方式：页面 reload**。与 2.1.2 的理由相同：Renderer 的连接缓存与 store 以服务对象为 key，reload 由页面生命周期统一清空。reload 的 dom-ready 让 Main 为这个页面签发新的一次性 endpoint（App 级 Host 已就绪时立即签发，[rust-u4-app-host.md](rust-u4-app-host.md) §2.1），页面重新接入同一个 Host；会话由 runtime 持有，reload 后按已有恢复逻辑展示（快照）。不新增 IPC。
+3. **有界重试（防止循环）**：同一个窗口任意 60 s 内最多自动重新接入 3 次，第 n 次之前等待 500 ms、2 s、5 s（与 Host 自动重启的数值相同）。等待期间显示“正在重新连接”页（`data-state="reattaching"`，带第 n/3 次），只提供“退出”。第 4 次（60 s 内）不再 reload，显示“与 ZCode 服务的连接多次中断”页（`data-state="closed"`），提供“重新加载”与“退出”；“重新加载”清空计数后 reload。
+   - 计数是这个窗口的，跨 reload 保留：存在页面的 `sessionStorage`（每个窗口一份，随窗口关闭消失；Main 不参与）。只记自动重新接入的时间；超过 60 s 的记录不计。
+   - `sessionStorage` 读写失败时按次数已用完处理（直接显示“连接多次中断”页），保证不会无限 reload。
+   - 一个页面只按第一次关闭决定一次：之后再关闭的连接（例如本地与远端 scope 先后被关闭）不再计数，也不改变已决定的结果。
+4. **与 Host 重启的关系**：等待期间收到 Main 的连接状态通知（Host 也退出了），取消计划中的 reload，显示 Main 给的状态（2.1.4）；之后由 Main 在新一代就绪后 reload。“连接多次中断”页同样被 Main 的通知取代；Main 的“已放弃”页仍不被覆盖。
+5. **只改 Rust Host 路径**：Node Host 的窗口用 MessagePort，不经过 WebSocket，不受影响。
+
 ## 3. 状态所有者
 
 | 状态                                             | 唯一所有者                                                                                                                |
@@ -67,6 +89,8 @@
 | 启动状态的中继与 Renderer 侧镜像                 | Main `databaseStartupRelay`（不变）                                                                                       |
 | Renderer endpoint 的签发时机                     | Main：按 Host 报告的 ready 触发                                                                                           |
 | “本地服务已断开”页面状态                         | Renderer 启动代码（`main.tsx`），只消费 Main 通知与连接关闭                                                               |
+| 自动重新接入的次数（2.5）                        | Renderer（`hostConnectionClose.ts`），存在窗口的 `sessionStorage`，跨 reload 保留                                         |
+| 连接的关闭原因                                   | Host 的 Gateway（[rust-u2-gateway.md](rust-u2-gateway.md) §2.6），经 WebSocket Close 交给 Renderer                        |
 | 连接积压字节与饱和边沿                           | Rust Host 接入层（`ws.rs` 的 `FlowGauge`）                                                                                |
 | 已向各 workspace 转发的流控状态                  | `zcode-agent` 连接 scope（`agent/flow.rs`）                                                                               |
 
@@ -123,6 +147,33 @@ Renderer 读慢 → TCP 缓冲满 → ws 写任务 send 挂起 → FlowGauge 积
 写任务追上 → 积压 ≤ 256 KiB → drained，同一路径；连接关闭 → closed（排在已入队的边沿之后）
 ```
 
+### 4.4 Host 主动关闭连接 → 重新接入
+
+```mermaid
+sequenceDiagram
+    participant P as Renderer（窗口页面）
+    participant S as sessionStorage（这个窗口）
+    participant H as Rust Host（Gateway）
+    participant M as Main（App Host owner）
+    Note over P: 主线程卡住，不读 WebSocket
+    H->>H: 出站积压越过上限：关闭连接，原因 OutboundBacklog
+    H-->>P: Close 4001 outbound-backlog（写完正在写的消息后发出，等对端回 Close 至多 1 s）
+    P->>S: 读 60 s 内的自动重新接入记录（n − 1 次）
+    alt n ≤ 3
+        P->>S: 记下这一次
+        P->>P: 显示“正在重新连接”（第 n/3 次），等待 500 ms / 2 s / 5 s
+        P->>P: location.reload()
+        P->>M: DOM ready
+        M->>H: issue-attachment-endpoint{windowId}（Host 就绪，立即签发）
+        M->>P: startup state + endpoint
+        P->>H: WebSocket 握手 → [200] → 挂载 Root，会话按快照恢复
+    else n = 4
+        P->>P: 显示“连接多次中断”（重新加载 / 退出）
+        P->>S: 点“重新加载”：清空记录，再 reload
+    end
+    Note over P,M: 等待期间收到 Main 的 host-connection-state：取消 reload，按 4.1 处理
+```
+
 ## 5. 有意与 Node Host 不同之处
 
 | Node Host                                                                         | Rust Host                                                   | 理由                                                                                                  |
@@ -134,19 +185,21 @@ Renderer 读慢 → TCP 缓冲满 → ws 写任务 send 挂起 → FlowGauge 积
 
 ## 6. 验收
 
-| 场景                                                                                                  | 验证方式                                                                                |
-| ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| 重启策略：退避序列、60 s 内第 4 次放弃、窗口外的退出不计入                                            | `packages/desktop/test/rustHostRestartPolicy.test.ts`（node:test）                      |
-| 启动重试：失败 → retry（错误 attemptId 被忽略）→ 新 attemptId、sequence 递增 → ready；snapshot 重发   | `crates/zcode-host/tests/startup_retry.rs`（真实二进制）                                |
-| 启动重试真实 App：迁移失败页 → 等 30 s 以上 → 移除故障 → Retry → 进入主界面；Exit 退出 App            | E2E `resilience-startup`（两个主窗口）                                                  |
-| CLI 崩溃 → 懒重启：只杀本次隔离运行的 CLI，再发消息成功                                               | E2E `resilience-cli-crash`                                                              |
-| Renderer reload → 重新 attach，会话仍能流式                                                           | E2E `resilience-reload`                                                                 |
-| 设置快照加载前 provider 启动门禁保持 pending                                                          | `packages/ui/test/rootStartupGate.test.ts`；`resilience-reload` 并发压测                |
-| AskUserQuestion：模型提问，用户在界面作答，模型继续                                                   | E2E `resilience-ask-user`                                                               |
-| 图片附件经 attachmentBegin/Chunk/Commit 上传并被模型收到                                              | E2E `resilience-attachment`                                                             |
-| Rust Host 崩溃 → 自动重启 → 所有主窗口 reload 后可用；放弃后两个窗口都显示失败页，任一窗口 Retry 恢复 | E2E `resilience-host-crash`（两个主窗口）                                               |
-| 流控：积压超过高水位发 saturated、回落发 drained；scope 去重、补发、closed 之后不再发送               | `zcode-host` 的 `FlowGauge` 单元测试；`agent/flow.rs` 单元测试                          |
-| R2 性能：4 个 workspace 同时流式时控制 RPC p95 ≤ 20 ms                                                | `crates/zcode-host/tests/control_latency.rs`（真实 Host + 真实 CLI + mock 模型，无 UI） |
+| 场景                                                                                                                                                      | 验证方式                                                                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 重启策略：退避序列、60 s 内第 4 次放弃、窗口外的退出不计入                                                                                                | `packages/desktop/test/rustHostRestartPolicy.test.ts`（node:test）                          |
+| 启动重试：失败 → retry（错误 attemptId 被忽略）→ 新 attemptId、sequence 递增 → ready；snapshot 重发                                                       | `crates/zcode-host/tests/startup_retry.rs`（真实二进制）                                    |
+| 启动重试真实 App：迁移失败页 → 等 30 s 以上 → 移除故障 → Retry → 进入主界面；Exit 退出 App                                                                | E2E `resilience-startup`（两个主窗口）                                                      |
+| CLI 崩溃 → 懒重启：只杀本次隔离运行的 CLI，再发消息成功                                                                                                   | E2E `resilience-cli-crash`                                                                  |
+| Renderer reload → 重新 attach，会话仍能流式                                                                                                               | E2E `resilience-reload`                                                                     |
+| 设置快照加载前 provider 启动门禁保持 pending                                                                                                              | `packages/ui/test/rootStartupGate.test.ts`；`resilience-reload` 并发压测                    |
+| AskUserQuestion：模型提问，用户在界面作答，模型继续                                                                                                       | E2E `resilience-ask-user`                                                                   |
+| 图片附件经 attachmentBegin/Chunk/Commit 上传并被模型收到                                                                                                  | E2E `resilience-attachment`                                                                 |
+| Rust Host 崩溃 → 自动重启 → 所有主窗口 reload 后可用；放弃后两个窗口都显示失败页，任一窗口 Retry 恢复                                                     | E2E `resilience-host-crash`（两个主窗口）                                                   |
+| Host 主动关闭连接：状态码 → 动作（4001 重新接入，其余与今天相同）；60 s 内第 4 次放弃、超时记录不计、存储不可用时不 reload、等待期间 Main 通知取消 reload | `packages/desktop/test/hostConnectionClose.test.ts`（node:test）                            |
+| 越过出站上限 → 窗口自己 reload，接入同一个 Host，对话完整；连续越过时第 4 次显示“连接多次中断”，“重新加载”恢复                                            | E2E `gateway-close-recovery`（测试用小上限，[rust-u2-gateway.md](rust-u2-gateway.md) §2.6） |
+| 流控：积压超过高水位发 saturated、回落发 drained；scope 去重、补发、closed 之后不再发送                                                                   | `zcode-host` 的 `FlowGauge` 单元测试；`agent/flow.rs` 单元测试                              |
+| R2 性能：4 个 workspace 同时流式时控制 RPC p95 ≤ 20 ms                                                                                                    | `crates/zcode-host/tests/control_latency.rs`（真实 Host + 真实 CLI + mock 模型，无 UI）     |
 
 ## 7. 结果（2026-10-09，macOS）
 

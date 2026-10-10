@@ -129,6 +129,7 @@ Rust 开关下 Main 不再启动 scheduler 进程，也不再转发 `cron-run` /
 
 ### 2.8 Host 意外退出
 
+- 只有 Host 进程退出才走这里。Host 仍在运行、主动关闭某个窗口的连接（WebSocket Close 4001 `outbound-backlog`，[rust-u2-gateway.md](rust-u2-gateway.md) §2.6）不是 Host 退出：那个窗口自己 reload，在 dom-ready 时按 2.1 重新接入同一个 Host，不经过重启策略、不计入重启计数（[rust-host-resilience.md](rust-host-resilience.md) §2.5）。其余关闭码与异常断开照旧由 Renderer 显示“正在重连”，等待 Main 的通知。
 - 重启策略是 App 级的：60 s 内最多 3 次，退避 500 ms / 2 s / 5 s（数值不变）。
 - 顺序：所有主窗口收到连接状态（断开）→ Main 重启 Host → Host 就绪后 Main reload 所有主窗口 → 每个窗口在 dom-ready 时重新接入。
 - 退避期间用户手动 reload 的窗口不提前触发重启，等计划中的重启；新一代就绪后它直接拿到 endpoint，不再被 reload。
