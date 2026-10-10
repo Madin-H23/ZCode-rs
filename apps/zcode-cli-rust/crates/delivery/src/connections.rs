@@ -90,11 +90,13 @@ impl Delivery {
     }
 
     /// The connection closed: each of its subscriptions ends and releases its
-    /// pin, so a topic no other connection subscribes is released. The
-    /// embedder then tells the runtime the connection closed.
+    /// pin, so a topic no other connection subscribes is released, and its
+    /// subscribe requests still in flight register nothing when their reply
+    /// arrives. The embedder then tells the runtime the connection closed.
     pub fn close_connection<R>(&mut self, connection: &str, link: &mut impl Link<R>) {
         self.saturated.remove(connection);
         self.connections.remove(connection);
+        self.opening.retain(|_, c| c != connection);
         for id in self.ids(|s| s.connection == connection) {
             if let Some(sub) = self.subscriptions.remove(&id) {
                 link.release(sub.topic);

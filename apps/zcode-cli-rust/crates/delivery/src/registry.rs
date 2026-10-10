@@ -48,8 +48,14 @@ pub struct Delivery {
     pub(crate) connections: BTreeMap<String, Outlet>,
     /// Connections reported `saturated` (Node `pausedConnections`).
     pub(crate) saturated: BTreeSet<String>,
+    /// `TopicOpen` requests in flight: the connection each was issued for.
+    /// Closing a connection removes its entries, so a reply that arrives
+    /// later registers nothing. An entry whose call the embedder dropped
+    /// stays until its connection closes.
+    pub(crate) opening: BTreeMap<u64, String>,
     epoch: String,
     next_id: u64,
+    next_open: u64,
 }
 
 impl Default for Delivery {
@@ -58,8 +64,10 @@ impl Default for Delivery {
             subscriptions: BTreeMap::new(),
             connections: BTreeMap::new(),
             saturated: BTreeSet::new(),
+            opening: BTreeMap::new(),
             epoch: uuid::Uuid::new_v4().simple().to_string()[..12].to_owned(),
             next_id: 0,
+            next_open: 0,
         }
     }
 }
@@ -67,6 +75,18 @@ impl Default for Delivery {
 impl Delivery {
     pub(crate) fn get(&self, id: &str) -> Option<&Subscription> {
         self.subscriptions.get(id)
+    }
+
+    /// A `TopicOpen` for `connection` goes out; returns its open number.
+    pub(crate) fn open_started(&mut self, connection: &str) -> u64 {
+        self.next_open += 1;
+        self.opening.insert(self.next_open, connection.into());
+        self.next_open
+    }
+
+    /// The reply of open `open` arrived: whether its connection is still open.
+    pub(crate) fn open_finished(&mut self, open: u64) -> bool {
+        self.opening.remove(&open).is_some()
     }
 
     /// Registers the subscription answered by the runtime's `topicOpen` reply.
