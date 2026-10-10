@@ -23,7 +23,7 @@
 | 退出：SIGTERM → 进程树全部结束（8 个 workspace） |    1.50 s (1.41–2.48) |            0.24 s (0.24–0.25) |      1.41 s (1.24–1.42) |   −84% |
 
 - **内存是最大的差别。** Electron 自己的部分（Main、Renderer、GPU、network service 等辅助进程）三种配置相同，空闲时约 405 MiB，4 个 workspace 时约 465–490 MiB。差别全在其余部分：空闲时 A 约 460 MiB（Node Host 158、scheduler 55、预热的 TS CLI 170、它启动的 node_repl MCP 79），B 只有 Rust Host 的 40 MiB，C 约 180 MiB（Node Host 101、scheduler 55、Rust CLI 22）。每多一个 workspace，A 多一个 TS CLI（约 125 MiB）和一个 node_repl MCP（约 78 MiB），B 只多约 10 MiB（其中 Rust Host 约 2 MiB，其余是 Renderer 里多出的会话数据；Renderer 有 V8 回收时机带来的 ±10 MiB 起伏，这个数只能看量级）。所以 workspace 越多差距越大：8 个时整个 App 从 2.2 GiB 降到 0.54 GiB。
-- **流式时总 CPU 没有下降。** 1 路约 39–40%，4 路约 48–53%，三种配置的差别在噪声范围内。大头是 Renderer（26–34%）和 GPU（约 8%），三种配置相同。Host 与 runtime 的 CPU 确实少了（4 路时 A 14.7%、C 8.9%、B 5.9%），但 B 的 Renderer、Main 与 network service 进程反而多用了约 10 个百分点（见下文“意外”），抵消了这部分节省。
+- **流式时总 CPU 没有下降。** 1 路约 39–40%，4 路约 48–53%，三种配置的差别在噪声范围内。大头是 Renderer（26–34%）和 GPU（约 8%），三种配置相同。Host 与 runtime 的 CPU 确实少了（4 路时 A 14.7%、C 8.9%、B 5.9%），但 B 的 Renderer、Main 与 network service 进程反而多用了约 10 个百分点，抵消了这部分节省。后来的剖析（“流式 CPU 为什么持平”一节）表明其中 Main 与约一半的 Renderer 差别来自测量 harness 本身，不带 harness 时 B 的合计比 A 低 8–14 个点。
 - **启动、首条消息与退出明显更快。** B 的主界面可用时间是 A 的 44%，Host 数据库就绪 1.1 s 对 3.5 s。首条消息首段从 740 ms 降到 274 ms；以后每打开一个新 workspace，A 都要冷启动一个 TS CLI 子进程（首段约 760 ms），B 与 C 约 150 ms。退出时 B 只有 6 个进程要收，0.24 s 结束；A 有 23 个，1.4–2.5 s。
 - **界面响应没有差别。** 三种配置在 1 路和 4 路流式时都没有 Renderer 长任务（≥ 50 ms）；按键到字符上屏 p50 约 23–27 ms、最大约 35 ms；点侧栏切换会话到内容可见约 42–48 ms；mock 发出一段到它出现在 DOM 的 p50 在 28–55 ms，p95 在 50–70 ms。这些差别都在一帧到两帧之内，3 次之间的波动与配置之间的差别同量级。
 - **C 说明了 Host 与 runtime 各自的贡献。** 只把 runtime 换成 Rust（C），每个 workspace 的成本就从 193 MiB 降到 28 MiB，新 workspace 首段与 B 相同；但 Node Host 与 Node scheduler 仍在（约 155 MiB），启动慢约 0.8 s，退出与 A 同量级。B 在此基础上再省掉这两个 Node 进程，并把 runtime 收进 Host 进程（每个 workspace 约 10 MiB，而不是一个 22 MiB 的子进程）。
@@ -132,9 +132,140 @@ A 慢的可能原因有两处（从代码看出，没有逐段计时）：Node H
 ## 意外与需要跟进的地方
 
 - **A 每个 workspace 都起一个 node_repl MCP。** TS CLI 为官方插件（Browser Use / Computer Use 共用的 node_repl 宿主）启动 `zcode-node-repl-mcp`，每个约 78 MiB footprint、约 200 MiB RSS，占了 A 每个 workspace 成本的四成。B、C（Rust runtime）在这份开发检出里没有启动它：Rust 的官方插件定义里有 node_repl（`apps/zcode-cli-rust/crates/plugins/src/official.rs`），但本次没有查清是开发检出里没有播种插件目录，还是 Rust runtime 按需启动。所以这部分差别有一半是“功能没跑”，不全是实现效率。去掉 MCP 后 A 的合计：空闲 789 MiB、N = 4 约 1161 MiB、N = 8 约 1576 MiB、4 路流式约 1400 MiB，B 仍然分别少 42%、56%、66%、53%。
-- **B 的 Renderer、Main 与 network service 进程 CPU 更高。** 4 路流式时 B 的 Renderer 34.2%（A 28.2%、C 30.0%），Main 3.2%（A、C 0.7–0.8%），network service 等辅助进程 1.6%（A、C 0.1%）；1 路和工具负载时方向相同。A 与 C 的 Renderer 经 MessagePort 连 Node Host，B 的 Renderer 经回环 WebSocket 连 Rust Host，WebSocket 的数据要经过 Chromium 的 network service 进程，这是可能的原因，但没有验证；也可能是 Rust runtime 推送增量的频率不同（见上面的端到端延迟）。这部分抵消了 Host 与 runtime 省下的 CPU，值得单独剖析。
+- **B 的 Renderer、Main 与 network service 进程 CPU 更高。** 4 路流式时 B 的 Renderer 34.2%（A 28.2%、C 30.0%），Main 3.2%（A、C 0.7–0.8%），network service 等辅助进程 1.6%（A、C 0.1%）；1 路和工具负载时方向相同。A 与 C 的 Renderer 经 MessagePort 连 Node Host，B 的 Renderer 经回环 WebSocket 连 Rust Host，WebSocket 的数据要经过 Chromium 的 network service 进程，这是可能的原因，但没有验证；也可能是 Rust runtime 推送增量的频率不同（见上面的端到端延迟）。这部分抵消了 Host 与 runtime 省下的 CPU。原因已另行剖析，见下一节“流式 CPU 为什么持平”：Main 与大部分 Renderer 差别是测量 harness 的 CDP 造成的，network service 是回环 WebSocket 的真实成本。
 - **Read 的大文件行为不同。** 搭夹具时发现：不带 `limit` 读 3.7 MB 的文件，TS CLI 按 `READ_MAX_FILE_SIZE_BYTES`（256 KB）拒绝（工具结果约 200 字符），Rust runtime 直接返回前 2000 行（约 73 KB）。测量里改为显式 `limit: 2000`，两边读到相同的内容。这是一个对齐问题，需要另行确认哪一边符合预期。
 - 生成长会话时，TS CLI 在第 90 轮左右发给模型的请求里，最后一条用户消息不再是用户输入（推测是 runtime 追加的用户角色上下文）；mock 原来只看最后一条用户消息，因此答错。本次只改了 mock（从后往前找带提示词的用户消息），没有深究，也没有用 Rust runtime 驱动同样的 90 轮对照。
+
+## 流式 CPU 为什么持平
+
+2026-10-10 补充，分支 `perf/rust-app-cpu`（基于 `feat/rust-unified-host` 的 `40d99f7`；`40d99f7` 相对 `d5ff797` 只改了 Rust 测试，构建产物与上文相同）。上表里 4 路流式时 B 省下约 9 个点的 Host + runtime，却在 Renderer（+6.0）、Main（+2.4）与辅助进程（+1.5）上多用，合计持平。本节逐项给出证据。脚本是 `scripts/rust-host/perf/stream-cpu.mjs`（方法见本节末）。**已确认**表示有直接的运行时证据，**推测**表示只有间接证据或估算。
+
+### 结论
+
+1. **Main 的 +2.4 是测量假象（已确认）。** harness 用 Playwright 经 CDP 连着 Renderer，而 Playwright 总会打开 Network 域。B 的每个 WebSocket 帧因此都变成一条 `Network.webSocketFrameReceived` 事件（二进制载荷转成 base64），从 Renderer 经 Main（Electron 的 browser 进程）的 DevTools 线程转给 Playwright。A 的 MessagePort 消息 CDP 看不到，所以没有这份开销。断开 Playwright 后，B 的 Main 与 A 相同（0.2%）。流式期间 Rust Host 没有发任何控制消息，也没有日志行；Main 落盘的日志两边都是 0–2.5 行/s，全是 Renderer 的生命周期日志（例如会话保温到期）。所以日志转发、off-peak、资源采样都不是原因。
+2. **辅助进程的 +1.5 是真实成本（已确认）。** 这个进程是 Chromium 的 network service（命令行带 `--utility-sub-type=network.mojom.NetworkService`）。回环 WebSocket 的 TCP 读写与分帧都在这里完成，再经 mojo 交给 Renderer。A 的 MessagePort 从 Node Host 直达 Renderer，不经过它，A 里这个进程是 0.0%。成本约为每 100 KiB/s 0.9 个点，按条算每条消息约 45–60 µs。
+3. **Renderer 的 +6 不是稳定的差别。** 在报告条件下复测 7 + 7 次，B 只比 A 多 2.1 个点（中位数），逐次在 −4 到 +8 之间。这 2 个点大致分成两半：
+   - **一半仍是 CDP 假象**（机制已确认，份额是推测）。同一次运行里交替连着 Playwright（H）与断开 Playwright（C）测量，H − C 在 A 是 +0.1~+3.4，在 B 是 +4.9~+6.0。H 下 B 的 Renderer IO 线程每秒多发约 220 条 IPC，正好是每个 WebSocket 帧一条 CDP 事件；trace 里 B 的 Renderer 主线程 H 比 C 多 10–38 ms/s，A 没有这个差别。
+   - **另一半是真实的额外界面工作**（原因已确认，按 JS profile 量化）。不带 CDP 时，B 的 Renderer 主线程多出 13–31 ms/s，即 1.3–3 个点，而且回复越长多得越多。来源是 Rust runtime 推给界面的数据与 Node 不一致：
+     - (a) Rust runtime 在正文还在流式时，就给 assistantText 行加上了 `actions.canRetry`。`apps/zcode-cli-rust/crates/domain/src/history.rs` 的 `history_actions` 不看这一轮是否结束；Node 只在完成时加 actions。结果界面在流式中就有了 `latestAssistantTextRow`，`ConversationTurnGroup` 每次渲染都要对整段回复重新计算复制文本与代码评论投影（`resolveAssistantCopyText` + `projectAssistantCodeComments`）。回复约 17 KB 时这一项 4–5.5 ms/s，约 44 KB 时 9–10 ms/s，A 里接近 0。界面上看不出区别，两边在流式时都不显示操作栏。
+     - (b) Rust runtime 给每个文本分片都附带一条 `state.updated`。原因在 `apps/zcode-cli-rust/crates/domain/src/session_projection.rs`：`activeWorks[].startedAt` 取的是 `session.updated_at`，每个事件都会变；`stopTargetKind` 也恒为 `mixed`。Node 一轮只发两次 control。这样一来，30 ms 窗口里相邻的 `row.delta` 就无法合并：B 的 conversation 帧平均 1191 字节、含 4 个 op，A 是 533 字节、1 个 op。消息入口（解码与分发）因此在 4 个订阅时 A 11.8 ms/s、B 17.8 ms/s，只订阅可见会话时 A 7.3、B 9.1。
+     - (c) 传输本身：两边收到的消息数相同。WebSocket 每条消息是一个独立任务，MessagePort 一个任务常处理多条，但 trace 里两边主线程处理消息的任务合计都是约 190–210 ms/s，看不出净差别。
+   - 断开 CDP、用 ps 量整个 Renderer 进程时，A 与 B 没有稳定差别：4 个订阅时 32.9 vs 33.5，只订阅可见会话时 34.9 vs 34.6。也就是说，真实差别落在单次读数的噪声（±3 个点）以内。
+4. **大头是两边相同的底数。** 不带 CDP 与探针时，Renderer + GPU 约 43–44 个点，比 A 的 Host + runtime（13–22 个点）大得多。harness 本身在其中的份额：A 是 0–3.5 个点（探针每帧读一次 `document.body.textContent`，加上 CDP）；B 是 7–9 个点（Main 2.2–3.2，Renderer 4.9–6.0）。
+5. **“持平”本身也有噪声。** 本次按报告条件（带 harness）复测 7 + 7 次，合计中位数 A 71.1%、B 62.1%，B 低 9 个点；不带 harness 时 B 低 8–14 个点（只订阅可见会话时 49.5 vs 57.3，4 个订阅时 50.8 vs 64.8）。原报告的 3 + 3 次是在 load 15–39 下测的，A 自己就在 45.6–52.2 之间。本次 A 的 Renderer 与 runtime 子进程都比原报告高（37.5 vs 28.2、16.8 vs 11.3），没有查清是负载还是条件不同（本次多了一次 reload 与计数补丁，流也更长）。
+
+一句话：原报告里 B 省下的约 9 个点，被这几项抵消了：Main +2.4（测量假象）、network service +1.5（回环 WebSocket 的真实成本）、Renderer +6（复测只有 +2，一半是测量假象，一半是 Rust runtime 推给界面的数据差异，其余是噪声）。剩下的节省放在约 45 个点的相同底数上，就显得不多了。
+
+```mermaid
+flowchart LR
+  subgraph A["A：Node Host"]
+    CLI["TS CLI 子进程"] -- "stdio JSON" --> NH["Node Host（utility）"]
+    NH -- "MessagePort（mojo，直达）" --> RA["Renderer"]
+  end
+  subgraph B["B：Rust Host"]
+    RT["进程内 Rust runtime"] -- "进程内 JSON 行（tokio duplex）" --> RH["Rust Host"]
+    RH -- "回环 TCP / WebSocket" --> NS["network service 进程（+0.9~1.8）"]
+    NS -- "mojo（OnDataFrame + DataPipe）" --> RB["Renderer"]
+    RB -. "只在 CDP 开着 Network 域时：每帧一条事件" .-> M["Main（browser 进程）DevTools 线程（+2.2~3.2）"]
+    M -. "CDP WebSocket" .-> PW["Playwright（harness）"]
+  end
+```
+
+### 证据
+
+分进程 CPU（单核 %）。“报告条件”与 App 级报告的 4 路窗口相同（Playwright 连着、探针开着、打字 12 次、切换会话 4 次），7 + 7 次运行；其余列是 3 + 3 次（batch2）的中位数。H = Playwright 连着、探针开着；C = 断开 Playwright、暂停探针。同一次运行里 H、C 各交替两次，以抵消窗口先后的漂移。“4 个订阅”是刚切换过会话、4 个会话都在保温期（30 s）内；“1 个订阅”是保温结束后只订阅可见会话。
+
+| 角色            | 报告条件 A |        B | 4 个订阅 H A |        B | 4 个订阅 C A |        B | 1 个订阅 H A |        B | 1 个订阅 C A |        B |
+| --------------- | ---------: | -------: | -----------: | -------: | -----------: | -------: | -----------: | -------: | -----------: | -------: |
+| Main            |        1.6 |      4.5 |          0.4 |      3.4 |          0.4 |      0.2 |          0.3 |      2.4 |          0.2 |      0.2 |
+| Renderer        |       37.5 |     39.6 |         36.0 |     36.2 |         32.9 |     33.5 |         35.0 |     39.7 |         34.9 |     34.6 |
+| GPU             |       10.3 |      9.3 |          9.8 |      8.6 |         10.1 |      9.3 |          8.8 |      8.7 |          9.1 |      8.8 |
+| network service |        0.0 |      1.8 |          0.0 |      1.6 |          0.0 |      1.4 |          0.0 |      1.2 |          0.0 |      0.9 |
+| Host            |        4.3 |      6.8 |          4.2 |      6.4 |          3.7 |      6.3 |          2.4 |      5.5 |          2.4 |      5.3 |
+| runtime 子进程  |       16.8 |        — |         16.1 |        — |         16.7 |        — |         10.6 |        — |         10.7 |        — |
+| **合计**        |   **71.1** | **62.1** |     **65.8** | **56.0** |     **64.8** | **50.8** |     **57.1** | **58.1** |     **57.3** | **49.5** |
+
+Renderer 收到的消息。A、B 用同一个计数补丁，在 RPC 层计数（页面脚本运行之前包住 MessagePort 与 WebSocket 的 `message` 监听）；抓包 3 s，事后解码分类。
+
+| 指标                                               | A              | B                   |
+| -------------------------------------------------- | -------------- | ------------------- |
+| 报告条件：条/s，KiB/s                              | 289，133       | 298，199            |
+| 1 个订阅：条/s，KiB/s                              | 207，93        | 211，108            |
+| 其中 `stream.chunk` 等遥测事实（每个模型分片一条） | 189/s × 451 B  | 194/s × 424 B       |
+| 其中 conversation 帧（全部 complete，30 ms 窗口）  | 23.6/s × 533 B | 24.2/s × 1191 B     |
+| 4 个订阅时的 conversation 帧                       | 92/s × 530 B   | 96/s × 1190 B       |
+| 每轮的 control `state.updated`（400 段的一轮）     | 2              | 402                 |
+| React 提交（经 DevTools 全局 hook 计数）           | 70–88/s        | 77–89/s             |
+| CDP `Network.webSocketFrameReceived`（1 个订阅）   | —              | 222/s，与消息数相同 |
+
+没有分片帧，没有重复订阅，流式期间没有 sessions-index 帧，也没有 RPC 回复；Renderer 发出的消息 ≤ 5 条/s（只在打字时）。两边的消息数相同，B 多出的字节全部来自 conversation 帧。
+
+Main 与 Renderer 线程（1 个订阅，Chromium trace 5 s，线程 CPU ms/s；括号里是 ps）：
+
+| 指标                                                            |             A H |             A C |             B H |             B C |
+| --------------------------------------------------------------- | --------------: | --------------: | --------------: | --------------: |
+| Main 进程                                                       |      1.3 (0.3%) |      1.1 (0.2%) |     13.1 (2.4%) |      1.0 (0.2%) |
+| 其中 DevTools 线程 `DispatchProtocolMessage`（约 220–296 次/s） |               0 |               0 |             7.9 |               0 |
+| 其中 CrBrowserMain 的 `DevToolsSessionHost` 消息                |               0 |               0 |             3.4 |               0 |
+| Renderer IO 线程（B H：每秒约 220 次 IPC 发送）                 |             0.6 |             0.6 |             2.2 |             0.6 |
+| Renderer 主线程（逐次）                                         | 290 / 284 / 286 | 296 / 290 / 292 | 283 / 312 / 305 | 273 / 273 / 295 |
+
+另一个旁证来自 batch1：只暂停探针、Playwright 仍连着时，B 的 Main 仍是 3.3–3.8%（A 0.5%）。可见开销来自 CDP，不是探针。
+
+Renderer 主线程（C，直连 CDP 只开 Profiler，ms/s；Renderer 生产包的 hidden sourcemap 映射回源文件）：
+
+| 指标                                                         | 4 个订阅 A |       B | 1 个订阅 A |        B |
+| ------------------------------------------------------------ | ---------: | ------: | ---------: | -------: |
+| 非 idle 合计                                                 |      205.6 |   218.5 |      259.2 |    290.2 |
+| React 同步渲染（`scheduleImmediateRootScheduleTask` 微任务） |       92.9 |   100.3 |      141.7 |    160.1 |
+| 消息入口（`protocol.ts` / `websocket.ts`：解码与分发）       |       11.8 |    17.8 |        7.3 |      9.1 |
+| `ConversationTurnGroup` 的复制文本与代码评论投影             |    0.2–0.5 | 4.2–5.5 |    0.1–0.3 | 9.3–10.2 |
+
+两次 profile 时，可见会话的回复已流了约 50 s 与 125 s，长度约 17 KB（4 个订阅）与 44 KB（1 个订阅）。同一个界面在 B 下多做的工作，几乎都落在 (a) 与 (b) 两处。
+
+### Host（B 的 Rust Host，已确认）
+
+B 的 Host（含进程内 runtime）流式时 5–7%，A 是 Host 2.4–4.3 加 runtime 子进程 10.6–16.8。用同一源码、不剥符号的 release 构建（`cargo rustc --release -p zcode-host --bin zcode-host -- -C strip=none`，代码与测量用的二进制相同）做了两次 macOS `sample`（各 5 s）。非空闲样本按函数归类（inclusive，各项会重叠）如下：
+
+- runtime 的事件投影（`apply_event`）约 27%。其中 `publish` 约 15%：每个事件都重建完整的 `Session::patch()`（7.5%）再与上次做比较（`ConversationTopic::changed`，5%）。这正是 (b) 的源头。
+- 进程内 runtime 与 Host 之间仍走 JSON 行协议（`app_server::serve`、`ProtocolClient::handle_line`），约 11%；`serde_json::Value` 的解析、序列化、释放各占 7–9%。
+- 供应商配置每秒轮询一次（`ProviderRuntime::start_polling` → `reload`：读并解析两份 release JSON，再对个人配置做 sha256），约 10%。空闲时也在跑。
+- 遥测事实（`telemetry_chunk`、`emit_telemetry`、`Normalizer`，每个分片一条，含生成 UUID 的 `getentropy`）约 10–15%。
+- 模型 HTTP 流解码约 7–8%；WebSocket 写出（tungstenite + `sendto`）约 4–8%。
+- 按库算 self 时间：malloc/free 约 18%，tokio 调度与通道 9–19%。看不到日志（tracing）帧。
+
+### 底数：两边相同的 Renderer + GPU
+
+不带 CDP 与探针时，A 的 Renderer + GPU 约 43–44 个点（4 个订阅时 32.9 + 10.1，1 个订阅时 34.9 + 9.1）。带上 harness 是 44–46 个点，所以 harness 在 A 里只占 0–3.5 个点。这比原报告的 36 个点高，原因同上没有查清。1 个订阅、回复约 44 KB 时的构成（A，ms/s，单核 1000）：
+
+- Renderer 主线程约 290（trace）：
+  - React 同步渲染约 140。每秒提交 70–90 次，多于 60 Hz；`SessionPane` 按整个会话快照取数，每次提交都会重渲染它（从代码看出，推测）。
+  - 帧（样式、布局、绘制，`BeginMainFrame`）83–91。
+  - 每次渲染对整段回复的全文处理约 80：Markdown 解析（marked、remend、streamdown、micromark）约 44，查找索引 `conversationFindIndex` 9–11（查找栏没打开时也在建），正文行的代码评论投影约 8，文件引用约 6–7，轮次导航约 10。
+  - 消息解码与分发约 7。
+- Compositor 约 24，V8 后台线程（编译、GC）与光栅 10–45，GPU 进程约 55。
+- 回复越长，渲染越贵：可见会话的回复约 17 KB 时主线程非 idle 约 206，约 44 KB 时约 259（两次的订阅数也不同，只看量级）；全文处理随长度线性增长。
+
+### 改进选项（只列选项，未实现；按预计节省排序，均指 4 路流式）
+
+| #   | 选项                                                                                                                                     | 范围                      | 预计节省                                                                                                                 | 依据                                        |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| 1   | App 级测量在 CPU 采样窗口里断开 CDP（或至少不开 Network 域），再重做报告里的流式对比                                                     | 测量                      | 读数上 B −7~9 个点、A −0~3.5 个点（不是产品节省，但会改变结论）                                                          | 已确认（H/C 交替）                          |
+| 2   | 界面：流式时不对整段回复反复做全文处理。查找索引只在查找打开时建；代码评论、文件引用、Markdown 按段缓存或增量处理                        | UI，A、B 相同             | 2–4 个点（这几项合计约 80 ms/s 中的大部分），回复越长越多                                                                | 份额已确认（profile），节省是推测           |
+| 3   | 界面：store 更新按帧合并，React 每帧最多提交一次（现在 70–90 次/s）                                                                      | UI，A、B 相同             | 1–3 个点                                                                                                                 | 推测                                        |
+| 4   | Rust runtime 与 Node 对齐：`activeWorks.startedAt` 用轮次开始时间，流式文本只发 `row.delta`；并且只在 control 真变化时才构建、比较 patch | Rust runtime（B、C）      | 1–2 个点：conversation 帧字节 −55%，network service、Renderer 解码，以及 Host 的 patch 重建与比较（约 12% 的 Host 时间） | 原因已确认，节省是推测                      |
+| 5   | `stream.chunk` 遥测事实按窗口合并（现在每个分片一条，占消息数的 65–90%，约 80 KiB/s）                                                    | 两种 runtime 与 UI        | B 1–2 个点（network service 0.6–0.7，Renderer 分发，Host 遥测路径约 10–15%）；A 约 1 个点                                | 推测                                        |
+| 6   | Rust runtime 与 Node 对齐：流式中的正文行不带 `canRetry`（或界面在 running 时跳过复制文本投影）                                          | Rust runtime（B、C）或 UI | 0.4–1 个点，回复越长越多                                                                                                 | 原因已确认（抓包与 profile）                |
+| 7   | 进程内 runtime 与 Host 之间改为直接传结构化事件，不再序列化成 JSON 行                                                                    | Rust Host                 | 约 0.5–1 个点                                                                                                            | 推测（sample 份额约 11% 加上 Value 的处理） |
+| 8   | 供应商配置轮询改为文件监听或先比 mtime                                                                                                   | Rust Host                 | 约 0.5 个点，空闲时同样省                                                                                                | sample 份额已确认                           |
+| 9   | 传输：保留回环 WebSocket，靠 4、5 减少字节（network service 约 0.9 个点 / 100 KiB/s）；改走 MessagePort 需要经 Main 转发，不划算         | Rust Host / Renderer      | 随 4、5 降到约 0.3–0.5 个点                                                                                              | 比例已确认                                  |
+
+### 方法与偏差
+
+- 构建、mock 模型、隔离 HOME 与 8 个 workspace 的 profile 都与上文相同。每次运行先 reload 一次页面，让计数补丁（`rpc-tap.mjs`）先于页面脚本装上；然后起 4 路 20 ms 一段的长流（9000 段）。之后依次是：报告条件窗口；4 个订阅时 H/C 交替两轮（各 4 s）；再切一遍会话，C 下录 8 s Renderer CPU profile；等保温结束后，抓包 3 s，1 个订阅时 H/C 交替两轮（各 5 s），H、C 各录 5 s Chromium trace（Electron `contentTracing`，`toplevel` 与 `mojom` 类别）；C 下 Renderer 与 Main 各录 10 s CPU profile；最后 `sample` Host 5 s。每次运行都检查 4 路流覆盖了全部窗口、4 个订阅的窗口都在保温期内。
+- 运行批次：batch1（15:49–16:03，3 + 3 次，窗口先后排列；其中“断开”窗口落在保温结束之后，只用于报告条件窗口与“只暂停探针”的对照）；batch2（16:27–17:06，3 + 3 次，H/C 交替，上面各表的主要来源）；React 提交计数 1 + 1 次（17:22–17:30）；不剥符号的 Host 各 1 次（17:15、17:47）。A、B 交错运行。每次运行开始与结束的 1 分钟 load：batch1 为 5.0–17.0，batch2 为 6.9–33.1，提交计数为 12.4–22.2，不剥符号的两次为 10–75。机器上同时有其他会话在编译。
+- 单个窗口的 ps 读数波动约 ±3 个点；trace 与 profile 只有 5–10 s，只用来看构成，不用来比较合计。报告条件窗口与 batch1 中“连着 Playwright”的窗口都会被 CDP 放大 B 的读数，这正是本节要说明的问题。
+- 新增的测量脚本：`stream-cpu.mjs`（入口）、`stream-cpu-lib.mjs`、`stream-cpu-report.mjs`、`rpc-tap.mjs`（RPC 层计数、抓包解码、React 提交计数）、`cpu-profile.mjs`（直连 CDP 与 inspector 的 Profiler、sourcemap 映射）、`trace-summary.mjs`（contentTracing 汇总）、`host-sample.mjs`（`sample` 汇总）。harness 只做了测量所需的小改动：`e2e/app.mjs` 返回 CDP 与 inspector 端口，`e2e/main-process.mjs` 暴露原始的 inspector 调用，`page-probes.mjs` 可以暂停探针。产品代码没有改动。
 
 ## 方法
 

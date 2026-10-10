@@ -39,7 +39,7 @@ function distribution(values) {
 }
 
 /** 在首页 composer 选定 workspace（侧栏 New task → 选择项目菜单）。 */
-async function newTaskIn(page, workspaceName) {
+export async function newTaskIn(page, workspaceName) {
   await page.getByText("New task", { exact: true }).first().click();
   const picker = page.locator('[aria-label="Choose workspace"]').first();
   await picker.waitFor({ state: "visible", timeout: 30_000 });
