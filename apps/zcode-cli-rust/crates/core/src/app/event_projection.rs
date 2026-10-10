@@ -317,7 +317,7 @@ impl Engine {
                 );
                 finished = true;
                 s.api_retry = None;
-                s.run_id = None;
+                s.run = None;
                 // 修复：后台子代理的权限请求挂在根会话上、由子会话持有，根 run 结束不能把它们一起清掉，
                 // 否则子会话仍在等待却再也无法应答。
                 let waiters = &self.waiters;

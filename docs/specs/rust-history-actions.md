@@ -12,6 +12,42 @@
 - 截断采用一个 Store 事务：删除未来 rows/messages、保存元数据/重发输入与 ACK。row ID 单调且不复用，改变 epoch 后推送完整 snapshot。已执行 command 的幂等凭据必须独立于被截断的 row 保留。
 - 旧历史只有在能从已有 canonical 身份证明边界时才回填；无法证明的目标明确拒绝，不按文本猜测。
 
+## 行级 actions 的时机
+
+依据 Node `ProductProjection.materializeCommandRowActions`（`apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection.ts:1182-1304`）。界面是否显示入口只读 `row.actions`，不另看 phase（`packages/ui/src/v4/SessionPane.tsx` 的 retry 注释）。Rust 由 `Session::history_actions` 在每次非纯文本的发布里重算；run 结束时先清掉 run 再发布，所以结束这一轮的那次发布就带上新的 actions。
+
+| action                                  | 行                                        | 何时出现                                                                   |
+| --------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------- |
+| `canEdit` + `editDisposition: "rewind"` | 最新的 realUser `userInput`（有输入边界） | 运行中也有                                                                 |
+| `canRetry`                              | 最新一轮的最后一条 `assistantText`        | 没有进行中的 run，且该行 `state` 为 `complete`；流式中、被中断的回复都没有 |
+| `canFork`                               | 有稳定回复边界的 `assistantText`          | 当前轮的回复与 `canRetry` 一起在这一轮结束时出现；更早轮次的保持不变       |
+
+- 修复（2026-10-10）：以前 `canRetry` 不看这一轮是否结束，流式中的回复行就带上它（模型提交稳定回复后 `canFork` 也提前出现）。界面上看不出，但 `latestAssistantTextRow` 在流式中就存在，每次渲染都要对整段回复重算复制文本与代码评论投影（[性能报告](../reports/rust-app-performance-2026-10-10.md)「流式 CPU 为什么持平」(a)）。被中断的回复因此也带着 `canRetry`；现在与 Node 一样不带。
+- 与 Node 仍不同的地方（未改）：
+  - Node 取全时间线最新的 `assistantText`：最新一轮没有回复正文时（例如回复前就失败），`canRetry` 落在上一轮的回复上。Rust 的 actions 与 `retryTurn` 都只看最新一轮，两者一致，没有跟随。
+  - Node 的 `retryTurn` 要求目标行带 `canRetry`（`product-projection.ts:781-797`，否则 `guard.actionUnavailable`）；Rust 的 `retryTurn` 只校验“最新一轮的最新回复”，运行中或被中断的回复也接受。界面不再显示这些入口，命令层的差别留给以后对齐。
+  - Node 在 compact 进行中撤掉 `canEdit`、`canFork`；Rust 的手动压缩是一个普通 run（`activeWorks` 为 `primaryTurn`），没有这条。
+  - Node 只在 `turnHeader` 上给 `canRewindFiles`；Rust 另外在有 checkpoint 的 `userInput`、`assistantText` 上声明。
+
+验收：`crates/domain/src/history_tests.rs`（运行中、提交稳定回复后、结束后、被中断四种状态的整组 actions），`tests/suite/stream_projection.rs`（经 App 协议的一轮流式回复：应用每一帧后，running 或 streaming 的回复都不带 `canRetry`；结束后为 `{canRetry, canFork}`；桌面与手机两种订阅）。
+
+```mermaid
+sequenceDiagram
+    participant E as Engine（Session actor）
+    participant S as Session（run / rows / history）
+    participant D as Delivery（30 ms / 150 ms 窗口）
+    E->>S: admission：run = {id, startedAt = now}，轮次头 startedAt = now
+    E->>D: 发布 rows + control（running，activeWorks[].startedAt）
+    loop 每个文本分片
+        E->>S: 回复行追加文本
+        E->>D: 只有 row.delta（patch 不变；纯文本发布不重算 actions）
+    end
+    E->>S: ModelDone：回复行 complete，记稳定回复边界
+    E->>D: row.upserted（run 仍在：不给 canRetry / canFork）
+    E->>S: Finished：先 run = None，轮次头收口
+    E->>D: 同一次发布：回复行 {canRetry, canFork} + control（idle，activeWorks []）
+```
+
 ## 工作区恢复
 
 Write/Edit 在实际修改前保存有内容 hash 的原始字节 checkpoint，准备事实先提交，才允许写文件；记录创建、修改、BOM/CRLF、权限、目标路径和预期写后 hash。恢复使用 checkpoint 原字节，不反向猜 diff；备份按 hash 去重。只追踪可证明的工具修改，本包不追踪 Shell 或外部 MCP 的任意文件修改，因此不声称可完整撤销整个工作区；preview 只判断已有 Write/Edit checkpoint。

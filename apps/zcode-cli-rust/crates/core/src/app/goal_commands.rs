@@ -133,7 +133,10 @@ impl Engine {
                 let turn = self.clock.id();
                 let source = (c.client_id != "goal-background").then_some(c.command_id.as_str());
                 continuation(s, &goal, None, (&turn, source), now);
-                s.run_id = Some(self.clock.id());
+                s.run = Some(crate::domain::session::ForegroundRun {
+                    id: self.clock.id(),
+                    started_at: now,
+                });
                 s.phase = crate::domain::execution::Phase::Running;
                 s.last_error = None;
                 let text = continuation_text(&goal, None);
