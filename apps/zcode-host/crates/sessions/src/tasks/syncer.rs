@@ -309,7 +309,11 @@ mod tests {
                 &zcode_host_base::testing::spawner(),
                 std::path::Path::new("/nonexistent"),
             ),
-            crate::providers::ProviderRuntime::new(None, "/nonexistent/p.json".into()),
+            crate::providers::ProviderRuntime::new(
+                &zcode_host_base::testing::spawner(),
+                None,
+                "/nonexistent/p.json".into(),
+            ),
         )
     }
 

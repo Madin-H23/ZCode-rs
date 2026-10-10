@@ -240,7 +240,11 @@ async fn harness() -> Harness {
             fallback_cwd: None,
         },
         settings.clone(),
-        ProviderRuntime::new(Some(builtin), personal),
+        ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
+            Some(builtin),
+            personal,
+        ),
     );
     let index = TasksIndex::open(home.path().join(".zcode/v2/tasks-index.sqlite"), |_| {})
         .await

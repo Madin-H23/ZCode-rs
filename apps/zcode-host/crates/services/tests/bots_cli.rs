@@ -249,7 +249,11 @@ async fn bots_read_real_cli_conversations_through_v4_frames() {
     let builtin = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../config/provider/zcode-builtin.json");
     let home_text = home.path().to_string_lossy().into_owned();
-    let providers = ProviderRuntime::new(Some(builtin), personal);
+    let providers = ProviderRuntime::new(
+        &zcode_host_services::testing::spawner(),
+        Some(builtin),
+        personal,
+    );
     // 与 Bot 相同：草稿态的提交模型取目标 Host 的首选选择（带思考档位）。
     let (revision, resolved) = providers.snapshot().await;
     let selection = resolved.model_selection_view(revision, None)["preferredSelection"].clone();

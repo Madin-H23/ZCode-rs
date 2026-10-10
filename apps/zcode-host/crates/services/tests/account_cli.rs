@@ -221,7 +221,11 @@ async fn logged_in_account_reaches_model_selection_and_cli() {
         .canonicalize()
         .unwrap();
     let settings = SettingStore::new(&zcode_host_services::testing::spawner(), home.path());
-    let providers = ProviderRuntime::new(Some(builtin), config_dir.join("provider_config.json"));
+    let providers = ProviderRuntime::new(
+        &zcode_host_services::testing::spawner(),
+        Some(builtin),
+        config_dir.join("provider_config.json"),
+    );
     let context = ServiceContext {
         environment,
         init: InitLocal::default(),

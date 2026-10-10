@@ -302,6 +302,7 @@ fn providers(dir: &Path) -> ProviderRuntime {
     )
     .unwrap();
     ProviderRuntime::new(
+        &zcode_host_base::testing::spawner(),
         Some(
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../../../config/provider/zcode-builtin.json"),

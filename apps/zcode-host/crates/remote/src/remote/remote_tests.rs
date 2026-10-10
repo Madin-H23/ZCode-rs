@@ -342,7 +342,11 @@ async fn controller_projects_remote_sources_across_disconnect_and_reconnect() {
             fallback_cwd: None,
         },
         crate::settings::SettingStore::new(&zcode_host_base::testing::spawner(), home.path()),
-        crate::providers::ProviderRuntime::new(None, home.path().join("pc.json")),
+        crate::providers::ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
+            None,
+            home.path().join("pc.json"),
+        ),
     );
     let local = Arc::new(LocalTasks(Mutex::new(Vec::new())));
     let controller = Controller::start(

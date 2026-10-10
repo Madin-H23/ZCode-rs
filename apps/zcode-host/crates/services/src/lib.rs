@@ -151,6 +151,7 @@ pub fn install(
     registry.implement(settings::service(settings.clone()));
 
     let providers = providers::ProviderRuntime::new(
+        &scope("providers"),
         context
             .init
             .zcode_builtin_provider_config_file_path

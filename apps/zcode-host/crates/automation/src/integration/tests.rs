@@ -142,7 +142,11 @@ done
             ),
         ]);
         let settings = SettingStore::new(&zcode_host_base::testing::spawner(), home);
-        let providers = ProviderRuntime::new(None, home.join("provider_config.json"));
+        let providers = ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
+            None,
+            home.join("provider_config.json"),
+        );
         let context = ServiceContext {
             environment: HostEnvironment::capture(vars).unwrap(),
             init: InitLocal::default(),
@@ -189,7 +193,11 @@ done
         .unwrap();
         let builtin = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../config/provider/zcode-builtin.json");
-        let providers = ProviderRuntime::new(Some(builtin), personal);
+        let providers = ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
+            Some(builtin),
+            personal,
+        );
         let runtime = AgentRuntime::new(
             AgentRuntimeConfig {
                 base_env: BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]),

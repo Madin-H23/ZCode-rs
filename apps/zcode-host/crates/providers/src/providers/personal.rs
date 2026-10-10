@@ -2,10 +2,10 @@
 //! ProviderSettingsFacade 写路径、services/src/model-provider/providerSettingsConnectivity.ts）。
 //!
 //! 每个写操作：取当前快照（含 membership：继承模型名单与个人 revision）→ 持锁读文件 → 核对
-//! revision → 变换 → 规范化校验 → 私有原子写 → 重新加载并返回新视图。同一 provider 的写入串行。
-use std::collections::HashMap;
+//! revision → 变换 → 规范化校验 → 私有原子写 → 重新加载并返回新视图。整个编辑在 personal 文件的
+//! owner 任务里执行，本进程内的编辑按提交顺序逐个进行（docs/specs/rust-u2-task-scope.md §6.3）。
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 use sha2::Digest;
@@ -375,7 +375,6 @@ fn next_provider_label(seed: &str, rules: &[Value]) -> String {
 pub struct PersonalWriter {
     runtime: ProviderRuntime,
     file: PathBuf,
-    provider_tails: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -388,23 +387,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
 impl PersonalWriter {
     pub fn new(runtime: ProviderRuntime) -> Self {
         let file = runtime.personal_file().to_path_buf();
-        Self {
-            runtime,
-            file,
-            provider_tails: Arc::new(Mutex::new(HashMap::new())),
-        }
+        Self { runtime, file }
     }
 
-    fn provider_lock(&self, provider: &str) -> Arc<tokio::sync::Mutex<()>> {
-        self.provider_tails
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .entry(provider.to_owned())
-            .or_default()
-            .clone()
-    }
-
-    /// 读改写 personal 文件；`transform` 拿到 (当前配置, 当前 revision, 内置层)。
+    /// 读改写 personal 文件；`transform` 拿到 (当前配置, 当前 revision, 内置层)。只在 owner 任务里
+    /// （[`Self::serialized`] 的编辑中）调用。
     async fn update<R: Send>(
         &self,
         transform: impl FnOnce(&mut Personal, &str, &Builtin) -> Result<R, RpcError> + Send,
@@ -471,15 +458,21 @@ impl PersonalWriter {
         resolved.provider_settings_view(revision)
     }
 
-    #[expect(clippy::await_holding_invalid_type, reason = "存量，U2 改为 actor")]
-    async fn per_provider<R: Send>(
-        &self,
-        provider_id: &str,
-        run: impl AsyncFnOnce() -> Result<R, RpcError>,
-    ) -> Result<R, RpcError> {
-        let lock = self.provider_lock(provider_id);
-        let _guard = lock.lock().await;
-        run().await
+    /// 在 personal 文件的 owner 任务里执行一次编辑（读成员关系 → 读改写 → 读视图）：本进程内对这个文件
+    /// 的编辑按提交顺序逐个执行，同一 provider 的并发编辑不会因为读到旧 revision 而误报冲突
+    /// （docs/specs/rust-u2-task-scope.md §6.3）。编辑方放弃等待不打断已经开始的编辑。
+    async fn serialized<R, Edit, Edited>(&self, edit: Edit) -> Result<R, RpcError>
+    where
+        Edit: FnOnce(PersonalWriter) -> Edited + Send + 'static,
+        Edited: std::future::Future<Output = Result<R, RpcError>> + Send,
+        R: Send + 'static,
+    {
+        let writer = self.clone();
+        self.runtime
+            .personal_writes()
+            .run(async move { edit(writer).await })
+            .await
+            .unwrap_or_else(|stopped| Err(RpcError::new("Error", stopped.to_string())))
     }
 
     pub async fn create_provider(&self, input: &Value) -> Result<Value, RpcError> {
@@ -507,78 +500,81 @@ impl PersonalWriter {
             }
             None => None,
         };
-        let created = self
-            .update(move |personal, _, builtin| {
-                let template = match &template_id {
-                    Some(id) => Some(
-                        builtin
-                            .template(id)
-                            .ok_or_else(|| error(format!("Provider Template 不存在: {id}")))?
-                            .clone(),
-                    ),
-                    None => None,
-                };
-                let mut occupied = builtin.provider_ids();
-                occupied.extend(
-                    personal
-                        .providers
-                        .iter()
-                        .filter_map(|rule| rule["providerId"].as_str().map(str::to_owned)),
-                );
-                let provider_id = next_provider_id(&occupied, template_id.as_deref());
-                let seed =
-                    provider_name
-                        .clone()
-                        .unwrap_or_else(|| match (&template, &template_id) {
-                            (Some(template), Some(id)) => {
-                                let names = &template["templateNameMap"];
-                                names[locale.as_str()]
-                                    .as_str()
-                                    .map(str::trim)
-                                    .filter(|n| !n.is_empty())
-                                    .or_else(|| {
-                                        names["en-US"]
-                                            .as_str()
-                                            .map(str::trim)
-                                            .filter(|n| !n.is_empty())
-                                    })
-                                    .unwrap_or(id)
-                                    .to_owned()
-                            }
-                            _ => "new-provider".to_owned(),
-                        });
-                let label = next_provider_label(&seed, &effective_rules(builtin, personal));
-                let mut config = json!({"group": "standard-personal"});
-                if template_id.is_none() {
-                    config["access"] = json!({"type": "api-key"});
-                }
-                config["personalModelIds"] = json!([]);
-                config["modelOrder"] = json!([]);
-                if let Some(initial) = &initial {
-                    overlay(&mut config, initial);
-                }
-                let mut rule = json!({"providerId": provider_id});
-                if let Some(id) = &template_id {
-                    rule["templateId"] = json!(id);
-                }
-                rule["providerName"] = json!(label);
-                rule["config"] = canonical_provider_config(&config);
-                personal.providers.push(rule);
-                let current = normalize_provider_order(
-                    personal,
-                    personal.provider_order.as_deref().unwrap_or(&[]),
-                );
-                // 先排除再把新 provider 加到末尾。
-                let mut requested: Vec<String> = current
-                    .into_iter()
-                    .filter(|id| *id != provider_id)
-                    .collect();
-                requested.push(provider_id.clone());
-                personal.provider_order = Some(normalize_provider_order(personal, &requested));
-                Ok(provider_id)
-            })
-            .await?;
-        Ok(json!({"providerId": created, "view": self.view().await}))
+        self.serialized(move |writer| async move {
+            let created = writer
+                .update(move |personal, _, builtin| {
+                    let template = match &template_id {
+                        Some(id) => Some(
+                            builtin
+                                .template(id)
+                                .ok_or_else(|| error(format!("Provider Template 不存在: {id}")))?
+                                .clone(),
+                        ),
+                        None => None,
+                    };
+                    let mut occupied = builtin.provider_ids();
+                    occupied.extend(
+                        personal
+                            .providers
+                            .iter()
+                            .filter_map(|rule| rule["providerId"].as_str().map(str::to_owned)),
+                    );
+                    let provider_id = next_provider_id(&occupied, template_id.as_deref());
+                    let seed =
+                        provider_name
+                            .clone()
+                            .unwrap_or_else(|| match (&template, &template_id) {
+                                (Some(template), Some(id)) => {
+                                    let names = &template["templateNameMap"];
+                                    names[locale.as_str()]
+                                        .as_str()
+                                        .map(str::trim)
+                                        .filter(|n| !n.is_empty())
+                                        .or_else(|| {
+                                            names["en-US"]
+                                                .as_str()
+                                                .map(str::trim)
+                                                .filter(|n| !n.is_empty())
+                                        })
+                                        .unwrap_or(id)
+                                        .to_owned()
+                                }
+                                _ => "new-provider".to_owned(),
+                            });
+                    let label = next_provider_label(&seed, &effective_rules(builtin, personal));
+                    let mut config = json!({"group": "standard-personal"});
+                    if template_id.is_none() {
+                        config["access"] = json!({"type": "api-key"});
+                    }
+                    config["personalModelIds"] = json!([]);
+                    config["modelOrder"] = json!([]);
+                    if let Some(initial) = &initial {
+                        overlay(&mut config, initial);
+                    }
+                    let mut rule = json!({"providerId": provider_id});
+                    if let Some(id) = &template_id {
+                        rule["templateId"] = json!(id);
+                    }
+                    rule["providerName"] = json!(label);
+                    rule["config"] = canonical_provider_config(&config);
+                    personal.providers.push(rule);
+                    let current = normalize_provider_order(
+                        personal,
+                        personal.provider_order.as_deref().unwrap_or(&[]),
+                    );
+                    // 先排除再把新 provider 加到末尾。
+                    let mut requested: Vec<String> = current
+                        .into_iter()
+                        .filter(|id| *id != provider_id)
+                        .collect();
+                    requested.push(provider_id.clone());
+                    personal.provider_order = Some(normalize_provider_order(personal, &requested));
+                    Ok(provider_id)
+                })
+                .await?;
+            Ok(json!({"providerId": created, "view": writer.view().await}))
+        })
+        .await
     }
 
     pub async fn save_provider_overlay(
@@ -595,9 +591,9 @@ impl PersonalWriter {
         let config = config.clone();
         let metadata = metadata.cloned().unwrap_or(Value::Null);
         let id = provider_id.to_owned();
-        self.per_provider(provider_id, async || {
-            let membership = self.membership(&id).await?;
-            self.update(move |personal, revision, builtin| {
+        self.serialized(move |writer| async move {
+            let membership = writer.membership(&id).await?;
+            writer.update(move |personal, revision, builtin| {
                 check_membership(&membership, &id, revision)?;
                 let builtin_config = builtin.provider(&id);
                 let account =
@@ -704,7 +700,7 @@ impl PersonalWriter {
                 Ok(())
             })
             .await?;
-            Ok(self.view().await)
+            Ok(writer.view().await)
         })
         .await
     }
@@ -714,30 +710,36 @@ impl PersonalWriter {
             return Err(error("providerId 不能为空"));
         }
         let id = provider_id.to_owned();
-        self.per_provider(provider_id, async || {
-            self.update(move |personal, _, _| {
-                personal
-                    .providers
-                    .retain(|rule| rule["providerId"] != id.as_str());
-                personal.models.retain(|rule| rule.provider_id != id);
-                if let Some(order) = &mut personal.provider_order {
-                    order.retain(|candidate| *candidate != id);
-                }
-                Ok(())
-            })
-            .await?;
-            Ok(self.view().await)
+        self.serialized(move |writer| async move {
+            writer
+                .update(move |personal, _, _| {
+                    personal
+                        .providers
+                        .retain(|rule| rule["providerId"] != id.as_str());
+                    personal.models.retain(|rule| rule.provider_id != id);
+                    if let Some(order) = &mut personal.provider_order {
+                        order.retain(|candidate| *candidate != id);
+                    }
+                    Ok(())
+                })
+                .await?;
+            Ok(writer.view().await)
         })
         .await
     }
 
     pub async fn reorder_providers(&self, provider_ids: Vec<String>) -> Result<Value, RpcError> {
-        self.update(move |personal, _, _| {
-            personal.provider_order = Some(normalize_provider_order(personal, &provider_ids));
-            Ok(())
+        self.serialized(move |writer| async move {
+            writer
+                .update(move |personal, _, _| {
+                    personal.provider_order =
+                        Some(normalize_provider_order(personal, &provider_ids));
+                    Ok(())
+                })
+                .await?;
+            Ok(writer.view().await)
         })
-        .await?;
-        Ok(self.view().await)
+        .await
     }
 
     pub async fn reorder_models(
@@ -749,23 +751,24 @@ impl PersonalWriter {
             return Err(error("providerId 不能为空"));
         }
         let id = provider_id.to_owned();
-        self.per_provider(provider_id, async || {
-            let membership = self.membership(&id).await?;
-            self.update(move |personal, revision, builtin| {
-                check_membership(&membership, &id, revision)?;
-                let provider = writable_overlay(builtin, personal, &id)?;
-                let order = owned_order(
-                    &membership.inherited,
-                    &strings(&provider["personalModelIds"]),
-                    &model_ids,
-                );
-                let mut next = provider;
-                next["modelOrder"] = json!(order);
-                personal.set_config(&id, canonical_provider_config(&next));
-                Ok(())
-            })
-            .await?;
-            Ok(self.view().await)
+        self.serialized(move |writer| async move {
+            let membership = writer.membership(&id).await?;
+            writer
+                .update(move |personal, revision, builtin| {
+                    check_membership(&membership, &id, revision)?;
+                    let provider = writable_overlay(builtin, personal, &id)?;
+                    let order = owned_order(
+                        &membership.inherited,
+                        &strings(&provider["personalModelIds"]),
+                        &model_ids,
+                    );
+                    let mut next = provider;
+                    next["modelOrder"] = json!(order);
+                    personal.set_config(&id, canonical_provider_config(&next));
+                    Ok(())
+                })
+                .await?;
+            Ok(writer.view().await)
         })
         .await
     }
@@ -782,34 +785,35 @@ impl PersonalWriter {
         validate_model_config(config, "config")
             .map_err(|message| RpcError::new("ZodError", message))?;
         let config = config.clone();
-        self.per_provider(&id.clone(), async || {
-            let membership = self.membership(&id).await?;
-            self.update(move |personal, revision, builtin| {
-                check_membership(&membership, &id, revision)?;
-                let provider = writable_overlay(builtin, personal, &id)?;
-                if membership.inherited.contains(&model) {
-                    return Err(error(format!("Model 已存在: {id}/{model}")));
-                }
-                let mut personal_ids = strings(&provider["personalModelIds"]);
-                if personal_ids.contains(&model) {
-                    return Err(error(format!("Model 已存在: {id}/{model}")));
-                }
-                personal_ids.push(model.clone());
-                let order = owned_order(
-                    &membership.inherited,
-                    &personal_ids,
-                    &strings(&provider["modelOrder"]),
-                );
-                let mut next = provider;
-                next["personalModelIds"] = json!(personal_ids);
-                next["modelOrder"] = json!(order);
-                personal.set_config(&id, canonical_provider_config(&next));
-                let enabled = overlay_model_config(&config, &json!({"enabled": true}));
-                personal.set_exact(&id, &model, &enabled, use_recommended)?;
-                Ok(())
-            })
-            .await?;
-            Ok(self.view().await)
+        self.serialized(move |writer| async move {
+            let membership = writer.membership(&id).await?;
+            writer
+                .update(move |personal, revision, builtin| {
+                    check_membership(&membership, &id, revision)?;
+                    let provider = writable_overlay(builtin, personal, &id)?;
+                    if membership.inherited.contains(&model) {
+                        return Err(error(format!("Model 已存在: {id}/{model}")));
+                    }
+                    let mut personal_ids = strings(&provider["personalModelIds"]);
+                    if personal_ids.contains(&model) {
+                        return Err(error(format!("Model 已存在: {id}/{model}")));
+                    }
+                    personal_ids.push(model.clone());
+                    let order = owned_order(
+                        &membership.inherited,
+                        &personal_ids,
+                        &strings(&provider["modelOrder"]),
+                    );
+                    let mut next = provider;
+                    next["personalModelIds"] = json!(personal_ids);
+                    next["modelOrder"] = json!(order);
+                    personal.set_config(&id, canonical_provider_config(&next));
+                    let enabled = overlay_model_config(&config, &json!({"enabled": true}));
+                    personal.set_exact(&id, &model, &enabled, use_recommended)?;
+                    Ok(())
+                })
+                .await?;
+            Ok(writer.view().await)
         })
         .await
     }
@@ -826,40 +830,41 @@ impl PersonalWriter {
         if current == next_model {
             return Ok(self.view().await);
         }
-        self.per_provider(&id.clone(), async || {
-            let membership = self.membership(&id).await?;
-            self.update(move |personal, revision, _| {
-                check_membership(&membership, &id, revision)?;
-                let inherited = &membership.inherited;
-                if inherited.contains(&current) {
-                    return Err(error(format!("Built-in Model 不能重命名: {id}/{current}")));
-                }
-                let Some(provider) = personal.config(&id).cloned() else {
-                    return Err(error(format!("Personal Model 不存在: {id}/{current}")));
-                };
-                let personal_ids = strings(&provider["personalModelIds"]);
-                if !personal_ids.contains(&current) {
-                    return Err(error(format!("Personal Model 不存在: {id}/{current}")));
-                }
-                if personal_ids.contains(&next_model) || inherited.contains(&next_model) {
-                    return Err(error(format!("Model 已存在: {id}/{next_model}")));
-                }
-                let rename = |ids: Vec<String>| -> Vec<String> {
-                    ids.into_iter()
-                        .map(|m| if m == current { next_model.clone() } else { m })
-                        .collect()
-                };
-                let ids = rename(personal_ids);
-                let requested = rename(strings(&provider["modelOrder"]));
-                let mut next = provider;
-                next["personalModelIds"] = json!(ids);
-                next["modelOrder"] = json!(owned_order(inherited, &ids, &requested));
-                personal.set_config(&id, canonical_provider_config(&next));
-                personal.rename_exact(&id, &current, &next_model);
-                Ok(())
-            })
-            .await?;
-            Ok(self.view().await)
+        self.serialized(move |writer| async move {
+            let membership = writer.membership(&id).await?;
+            writer
+                .update(move |personal, revision, _| {
+                    check_membership(&membership, &id, revision)?;
+                    let inherited = &membership.inherited;
+                    if inherited.contains(&current) {
+                        return Err(error(format!("Built-in Model 不能重命名: {id}/{current}")));
+                    }
+                    let Some(provider) = personal.config(&id).cloned() else {
+                        return Err(error(format!("Personal Model 不存在: {id}/{current}")));
+                    };
+                    let personal_ids = strings(&provider["personalModelIds"]);
+                    if !personal_ids.contains(&current) {
+                        return Err(error(format!("Personal Model 不存在: {id}/{current}")));
+                    }
+                    if personal_ids.contains(&next_model) || inherited.contains(&next_model) {
+                        return Err(error(format!("Model 已存在: {id}/{next_model}")));
+                    }
+                    let rename = |ids: Vec<String>| -> Vec<String> {
+                        ids.into_iter()
+                            .map(|m| if m == current { next_model.clone() } else { m })
+                            .collect()
+                    };
+                    let ids = rename(personal_ids);
+                    let requested = rename(strings(&provider["modelOrder"]));
+                    let mut next = provider;
+                    next["personalModelIds"] = json!(ids);
+                    next["modelOrder"] = json!(owned_order(inherited, &ids, &requested));
+                    personal.set_config(&id, canonical_provider_config(&next));
+                    personal.rename_exact(&id, &current, &next_model);
+                    Ok(())
+                })
+                .await?;
+            Ok(writer.view().await)
         })
         .await
     }
@@ -867,34 +872,35 @@ impl PersonalWriter {
     pub async fn delete_model(&self, provider_id: &str, model_id: &str) -> Result<Value, RpcError> {
         let id = normalize_id("providerId", provider_id)?;
         let model = normalize_id("modelId", model_id)?;
-        self.per_provider(&id.clone(), async || {
-            let membership = self.membership(&id).await?;
-            self.update(move |personal, revision, _| {
-                check_membership(&membership, &id, revision)?;
-                if membership.inherited.contains(&model) {
-                    return Err(error(format!("Built-in Model 不能删除: {id}/{model}")));
-                }
-                let Some(provider) = personal.config(&id).cloned() else {
-                    return Err(error(format!("Personal Model 不存在: {id}/{model}")));
-                };
-                let ids: Vec<String> = strings(&provider["personalModelIds"]);
-                if !ids.contains(&model) {
-                    return Err(error(format!("Personal Model 不存在: {id}/{model}")));
-                }
-                let remaining: Vec<String> = ids.into_iter().filter(|m| *m != model).collect();
-                let mut next = provider.clone();
-                next["personalModelIds"] = json!(remaining);
-                next["modelOrder"] = json!(owned_order(
-                    &membership.inherited,
-                    &remaining,
-                    &strings(&provider["modelOrder"])
-                ));
-                personal.set_config(&id, canonical_provider_config(&next));
-                personal.delete_exact(&id, &model);
-                Ok(())
-            })
-            .await?;
-            Ok(self.view().await)
+        self.serialized(move |writer| async move {
+            let membership = writer.membership(&id).await?;
+            writer
+                .update(move |personal, revision, _| {
+                    check_membership(&membership, &id, revision)?;
+                    if membership.inherited.contains(&model) {
+                        return Err(error(format!("Built-in Model 不能删除: {id}/{model}")));
+                    }
+                    let Some(provider) = personal.config(&id).cloned() else {
+                        return Err(error(format!("Personal Model 不存在: {id}/{model}")));
+                    };
+                    let ids: Vec<String> = strings(&provider["personalModelIds"]);
+                    if !ids.contains(&model) {
+                        return Err(error(format!("Personal Model 不存在: {id}/{model}")));
+                    }
+                    let remaining: Vec<String> = ids.into_iter().filter(|m| *m != model).collect();
+                    let mut next = provider.clone();
+                    next["personalModelIds"] = json!(remaining);
+                    next["modelOrder"] = json!(owned_order(
+                        &membership.inherited,
+                        &remaining,
+                        &strings(&provider["modelOrder"])
+                    ));
+                    personal.set_config(&id, canonical_provider_config(&next));
+                    personal.delete_exact(&id, &model);
+                    Ok(())
+                })
+                .await?;
+            Ok(writer.view().await)
         })
         .await
     }
@@ -910,26 +916,27 @@ impl PersonalWriter {
         let Some(enabled) = enabled.as_bool() else {
             return Err(error("Model enabled 必须是 boolean"));
         };
-        self.per_provider(&id.clone(), async || {
-            let membership = self.membership(&id).await?;
-            self.update(move |personal, revision, _| {
-                check_membership(&membership, &id, revision)?;
-                let personal_ids = personal
-                    .config(&id)
-                    .map(|c| strings(&c["personalModelIds"]))
-                    .unwrap_or_default();
-                if !membership.inherited.contains(&model) && !personal_ids.contains(&model) {
-                    return Err(error(format!("Model 不存在: {id}/{model}")));
-                }
-                let config = overlay_model_config(
-                    &personal.get_exact(&id, &model).unwrap_or_else(|| json!({})),
-                    &json!({"enabled": enabled}),
-                );
-                personal.set_exact(&id, &model, &config, None)?;
-                Ok(())
-            })
-            .await?;
-            Ok(self.view().await)
+        self.serialized(move |writer| async move {
+            let membership = writer.membership(&id).await?;
+            writer
+                .update(move |personal, revision, _| {
+                    check_membership(&membership, &id, revision)?;
+                    let personal_ids = personal
+                        .config(&id)
+                        .map(|c| strings(&c["personalModelIds"]))
+                        .unwrap_or_default();
+                    if !membership.inherited.contains(&model) && !personal_ids.contains(&model) {
+                        return Err(error(format!("Model 不存在: {id}/{model}")));
+                    }
+                    let config = overlay_model_config(
+                        &personal.get_exact(&id, &model).unwrap_or_else(|| json!({})),
+                        &json!({"enabled": enabled}),
+                    );
+                    personal.set_exact(&id, &model, &config, None)?;
+                    Ok(())
+                })
+                .await?;
+            Ok(writer.view().await)
         })
         .await
     }
@@ -943,15 +950,15 @@ impl PersonalWriter {
             .map_err(|message| RpcError::new("ZodError", message))?;
         let use_recommended = input["useRecommendedConfig"].as_bool();
         let based_on = input["basedOnRevision"].clone();
-        self.per_provider(&id.clone(), async || {
-            let (revision, resolved, personal_revision) = self.runtime.snapshot_with_personal().await;
+        self.serialized(move |writer| async move {
+            let (revision, resolved, personal_revision) = writer.runtime.snapshot_with_personal().await;
             if based_on != json!(revision) {
                 return Err(error(format!(
                     "Provider Settings revision conflict: expected {based_on}, current {revision}"
                 )));
             }
             let membership = membership_of(&resolved, &id, personal_revision.clone())?;
-            self.update(move |personal, current_revision, _| {
+            writer.update(move |personal, current_revision, _| {
                 check_membership(&membership, &id, current_revision)?;
                 if current_revision != personal_revision {
                     return Err(error(format!(
@@ -999,7 +1006,7 @@ impl PersonalWriter {
                 Ok(())
             })
             .await?;
-            Ok(self.view().await)
+            Ok(writer.view().await)
         })
         .await
     }
@@ -1369,7 +1376,11 @@ mod tests {
     async fn create_add_rename_and_delete_round_trip_the_personal_file() {
         let dir = tempfile::tempdir().unwrap();
         let personal = dir.path().join("provider_config.json");
-        let runtime = ProviderRuntime::new(Some(builtin_path()), personal.clone());
+        let runtime = ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
+            Some(builtin_path()),
+            personal.clone(),
+        );
         let writer = PersonalWriter::new(runtime.clone());
         let created = writer
             .create_provider(&json!({"initialConfig": {"api": {"type": "openai-chat-completions", "baseUrl": "https://api.example.com/v1"}, "access": {"type": "api-key", "apiKey": "sk-x"}}}))
@@ -1478,7 +1489,11 @@ mod tests {
     async fn account_providers_reject_access_and_draft_checks_revision() {
         let dir = tempfile::tempdir().unwrap();
         let personal = dir.path().join("provider_config.json");
-        let runtime = ProviderRuntime::new(Some(builtin_path()), personal.clone());
+        let runtime = ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
+            Some(builtin_path()),
+            personal.clone(),
+        );
         let writer = PersonalWriter::new(runtime.clone());
         let error = writer
             .save_provider_overlay(

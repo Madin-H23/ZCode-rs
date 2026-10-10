@@ -358,7 +358,11 @@ async fn bot_initiated_resume_carries_session_tool_flags() {
             fallback_cwd: None,
         },
         crate::settings::SettingStore::new(&zcode_host_base::testing::spawner(), dir.path()),
-        crate::providers::ProviderRuntime::new(None, dir.path().join("provider_config.json")),
+        crate::providers::ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
+            None,
+            dir.path().join("provider_config.json"),
+        ),
     );
     let local = WorkspaceTarget::local("/tmp/ws-bot".to_owned());
     // 门禁都关时不写字段。

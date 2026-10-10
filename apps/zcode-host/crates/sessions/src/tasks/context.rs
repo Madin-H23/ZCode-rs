@@ -226,7 +226,11 @@ pub(crate) mod testing {
                 fallback_cwd: None,
             },
             settings.clone(),
-            crate::providers::ProviderRuntime::new(None, dir.join("p.json")),
+            crate::providers::ProviderRuntime::new(
+                &zcode_host_base::testing::spawner(),
+                None,
+                dir.join("p.json"),
+            ),
         );
         let index = TasksIndex::open(dir.join("tasks-index.sqlite"), |_| {})
             .await

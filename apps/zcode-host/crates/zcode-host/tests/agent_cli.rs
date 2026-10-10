@@ -274,7 +274,11 @@ async fn core_chat_flow(command_vars: BTreeMap<String, String>) {
     let personal = provider_config(home.path(), port);
     let builtin = builtin_providers();
     let base_env = base_env(home.path());
-    let providers = ProviderRuntime::new(Some(builtin), personal);
+    let providers = ProviderRuntime::new(
+        &zcode_host_services::testing::spawner(),
+        Some(builtin),
+        personal,
+    );
     let runtime = AgentRuntime::new(
         AgentRuntimeConfig {
             base_env,
@@ -664,7 +668,11 @@ async fn an_embedded_runtime_panic_only_restarts_its_own_workspace() {
             fallback_cwd: None,
         },
         SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
-        ProviderRuntime::new(Some(builtin_providers()), personal),
+        ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
+            Some(builtin_providers()),
+            personal,
+        ),
     );
     let events = AgentEvents::start(runtime.extensions(), None);
     let api = AgentApi::new(runtime.clone(), home.path(), events, None);
@@ -759,6 +767,7 @@ async fn an_embedded_runtime_that_ends_on_its_own_logs_why() {
         },
         SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
         ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
             Some(builtin_providers()),
             home.path().join("provider_config.json"),
         ),
@@ -815,7 +824,11 @@ async fn a_replayable_attachment_streams_and_recovers_against_the_runtime() {
             fallback_cwd: None,
         },
         SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
-        ProviderRuntime::new(Some(builtin_providers()), personal),
+        ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
+            Some(builtin_providers()),
+            personal,
+        ),
     );
     let events = AgentEvents::start(runtime.extensions(), None);
     let api = AgentApi::new(runtime.clone(), home.path(), events, None);

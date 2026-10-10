@@ -64,7 +64,11 @@ fn fixture() -> Fixture {
             fallback_cwd: None,
         },
         SettingStore::new(&zcode_host_base::testing::spawner(), dir.path()),
-        ProviderRuntime::new(None, dir.path().join("provider_config.json")),
+        ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
+            None,
+            dir.path().join("provider_config.json"),
+        ),
     );
     Fixture {
         _dir: dir,

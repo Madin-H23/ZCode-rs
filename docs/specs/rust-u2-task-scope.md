@@ -145,10 +145,11 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 
 `HostCore` 在根作用域下建 `host/services` 并把它的 `Spawner` 交给组装根 `install`；每个 service 在它下面有自己的子作用域，由 `Installed` 持有（不放全局、不用 `OnceLock`）。寿命比 service 短的所有者（runtime 实例、远端会话、终端、文件监听、Bot 通道……）再各有更小的作用域，所有者结束时关闭或释放它。常驻任务（随所有者一直运行、没有收口步骤的循环）用 `spawn_resident`，见 §3。
 
-| 作用域                   | 所有者      | 任务                                                                                                          | 何时结束                  |
-| ------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| `host/services`          | `HostCore`  | —                                                                                                             | Host 退出（根作用域关闭） |
-| `host/services/settings` | `Installed` | `setting-writes`（owner：`SettingStore` 的读改写）、`setting-write-requests`（常驻：Main 的 `setting-write`） | 随 Host                   |
+| 作用域                    | 所有者      | 任务                                                                                                                                                 | 何时结束                  |
+| ------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| `host/services`           | `HostCore`  | —                                                                                                                                                    | Host 退出（根作用域关闭） |
+| `host/services/settings`  | `Installed` | `setting-writes`（owner：`SettingStore` 的读改写）、`setting-write-requests`（常驻：Main 的 `setting-write`）                                        | 随 Host                   |
+| `host/services/providers` | `Installed` | `provider-config-poll`、`builtin-config-refresh`（常驻）、`personal-provider-writes`（owner：personal 文件的编辑）；解析在阻塞线程池里（`blocking`） | 随 Host                   |
 
 测试构造 service 时用 `zcode_host_base::testing::spawner()`：一个随测试进程存在、不关闭的根作用域。
 
@@ -192,9 +193,10 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 2. **owner 任务（actor）**：资源（一个文件、一条 stdin、一组状态）交给一个任务独占，调用方把工作交给它并等回执。进程内的写队列（`tokio::sync::Mutex<()>`）改为 `zcode_host_kit::Serial`：工作在 owner 任务里按提交顺序逐个执行；提交方放弃等待不打断已经开始的读改写；工作 panic 时提交方得到同一个 panic，owner 继续；队列有界，满了提交方等待；owner 是所在作用域的常驻任务，作用域关闭后提交方得到 `Stopped`。
 3. **`std::sync::Mutex`，锁内不 await**。
 
-| 位置                                    | 原来                                    | 现在                                                                                                                             |
-| --------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `settings/src/settings/mod.rs` `locked` | 写队列 `Mutex<()>` 跨文件锁与读改写持有 | owner 任务 `setting-writes`（`Serial`）：读改写与 `settle`（结果、变更通知）在里面按提交顺序执行；`get` 先提交一个空工作作为屏障 |
+| 位置                                                 | 原来                                                                               | 现在                                                                                                                                              |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings/src/settings/mod.rs` `locked`              | 写队列 `Mutex<()>` 跨文件锁与读改写持有                                            | owner 任务 `setting-writes`（`Serial`）：读改写与 `settle`（结果、变更通知）在里面按提交顺序执行；`get` 先提交一个空工作作为屏障                  |
+| `providers/src/providers/personal.rs` `per_provider` | 每个 provider 一个 `Mutex<()>`（表只增不减），跨“读成员关系 → 读改写 → 读视图”持有 | personal 文件的 owner 任务 `personal-provider-writes`：每个编辑整段在里面执行（含不按 provider 加锁的创建与重排），所有 `PersonalWriter` 实例共用 |
 
 ### 6.4 关闭报告
 

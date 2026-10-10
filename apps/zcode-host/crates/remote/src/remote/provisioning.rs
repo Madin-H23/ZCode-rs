@@ -292,6 +292,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sink = Arc::new(Sink(std::sync::Mutex::new(Vec::new())));
         let providers = crate::providers::ProviderRuntime::new(
+            &zcode_host_base::testing::spawner(),
             Some(builtin_path()),
             dir.path().join("provider_config.json"),
         );

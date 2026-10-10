@@ -191,7 +191,11 @@ async fn task_lifecycle_against_rust_cli() {
             fallback_cwd: None,
         },
         settings.clone(),
-        ProviderRuntime::new(Some(builtin), personal),
+        ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
+            Some(builtin),
+            personal,
+        ),
     );
     let index = TasksIndex::open(home.path().join(".zcode/v2/tasks-index.sqlite"), |_| {})
         .await
@@ -349,7 +353,11 @@ async fn claude_import_against_rust_cli() {
             fallback_cwd: None,
         },
         SettingStore::new(&zcode_host_services::testing::spawner(), home.path()),
-        ProviderRuntime::new(Some(builtin), personal),
+        ProviderRuntime::new(
+            &zcode_host_services::testing::spawner(),
+            Some(builtin),
+            personal,
+        ),
     );
     let index = TasksIndex::open(home.path().join(".zcode/v2/tasks-index.sqlite"), |_| {})
         .await
