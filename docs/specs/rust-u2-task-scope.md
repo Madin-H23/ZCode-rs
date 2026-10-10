@@ -41,6 +41,9 @@ impl Spawner {
     /// 子作用域：路径为 `<父路径>/<name>`，取消信号随父作用域传播。
     pub fn child(&self, name: impl Into<String>) -> TaskScope;
     pub fn spawn<F>(&self, name: &'static str, future: F) -> Task<F::Output>;
+    /// 常驻任务（没有自己收口步骤的循环）：作用域收到取消信号时 future 被丢弃、任务正常结束（`Ok(None)`），
+    /// `close` 不把它列为被中止的任务。
+    pub fn spawn_resident<F>(&self, name: &'static str, future: F) -> Task<Option<F::Output>>;
     pub fn spawn_blocking<F, T>(&self, name: &'static str, work: F) -> Task<T>;
     /// 作用域收到取消信号时完成；需要自行收口的任务用它。
     pub fn cancelled(&self) -> impl Future<Output = ()>;
@@ -68,6 +71,7 @@ pub async fn blocking<F, T>(work: F) -> Result<T, TaskError>;
 
 - `OwnedTask` 的 panic 只交给等待它的一方，不经作用域的上报函数（它没有作用域）；从不被等待、只会被中止的辅助任务不应包含可能 panic 的逻辑。
 
+- 常驻任务与被中止的任务一样在某个等待点上被丢弃，区别只在关闭日志：`close` 返回的是“本该在有序收口里结束、却还在运行”的任务，常驻循环不在其中。轮询、事件转发、owner 任务（actor）这类随所有者一直运行、没有收口步骤的循环用 `spawn_resident`；一次性的工作（请求、派发、写入）用 `spawn`，关闭时还没结束就是要排查的问题。
 - `spawn_blocking` 的任务无法被中止（线程里的同步代码不会让出）；关闭时它们计入“仍在运行”，宽限期过后不再等待。
 - 作用域内部状态用 `std::sync::Mutex` 保护，不跨 await 持有。
 
@@ -126,7 +130,7 @@ sequenceDiagram
 
 ## 5. 验收
 
-- `zcode-async` 的测试：panic 上报且句柄得到错误；释放作用域中止任务；`close` 的三步（自行结束的不算中止，超时的被中止并列出）；关闭后启动的任务不运行；子作用域随父作用域关闭；任务结束后不再出现在 `running` 里。
+- `zcode-async` 的测试：panic 上报且句柄得到错误；释放作用域中止任务；`close` 的三步（自行结束的不算中止，超时的被中止并列出）；关闭后启动的任务不运行；子作用域随父作用域关闭；任务结束后不再出现在 `running` 里；常驻任务随取消信号结束、不算中止。
 - `zcode-async` 的测试还覆盖 `owned` 与 `blocking`：丢弃句柄中止任务；panic 变成错误；结果原样返回；移动后的句柄让任务继续运行。
 - Host 与 runtime 的非测试代码中，`tokio::spawn` / `spawn_blocking` 只出现在 `zcode-async`（runtime 由边界脚本强制，例外见 4.1；Host 迁移后由 clippy 强制）。
 - runtime 嵌入测试（`apps/zcode-cli-rust/tests/embed.rs`）：实例因 EOF、Engine panic 或被嵌入方中止而结束之后，实例中没有仍在运行的任务；中止实例时，运行中的 run、标题请求与后台 Bash 任务随之结束（模型请求关闭、后台进程被回收）。
