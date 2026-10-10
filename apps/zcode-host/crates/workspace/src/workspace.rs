@@ -10,6 +10,7 @@ use zcode_host_kit::{ChannelRegistry, RpcError};
 
 use crate::agent::api::AgentApi;
 use crate::agent::runtime::AgentRuntime;
+use crate::file_watcher::FileWatchers;
 use crate::git::commit_message::{TextGenerator, runtime_locale};
 use crate::git::{self, CommitMessageSupport, checkpoint, repo::GitRepo};
 use crate::main_bridge::MainBridge;
@@ -62,6 +63,7 @@ pub struct WorkspaceDeps<'a> {
 /// Host 退出时需要回收的工作区资源。
 pub struct Workspace {
     terminals: Terminals,
+    file_watchers: FileWatchers,
     /// `file-watchers`、`terminals`、`git` 三个子作用域，随工作区存在。
     _scopes: [TaskScope; 3],
 }
@@ -69,6 +71,10 @@ pub struct Workspace {
 impl Workspace {
     pub fn shutdown(&self) {
         self.terminals.dispose_all();
+        // 缺陷修复：Host 退出时原来不释放文件监听（Node 的 disposeServiceResources 会调用它的
+        // disposeAll），页面没有逐个 unwatch 的监听连同它们的防抖任务一直留到进程结束，关闭报告把它们
+        // 列为被中止的任务。现在与终端一样在有序收尾里释放。
+        self.file_watchers.dispose_all();
     }
 }
 
@@ -80,9 +86,8 @@ pub fn install(
     let child = |name: &str| deps.spawner.child(name.to_owned());
     let (watchers, terminal_tasks, git_tasks) =
         (child("file-watchers"), child("terminals"), child("git"));
-    registry.implement(file_watcher::service(file_watcher::FileWatchers::new(
-        &watchers.spawner(),
-    )));
+    let file_watchers = FileWatchers::new(&watchers.spawner());
+    registry.implement(file_watcher::service(file_watchers.clone()));
     let terminals = Terminals::new(
         &terminal_tasks.spawner(),
         deps.child_env.clone(),
@@ -119,6 +124,7 @@ pub fn install(
     registry.implement(prompt_attachment_transfer::service());
     Workspace {
         terminals,
+        file_watchers,
         _scopes: [watchers, terminal_tasks, git_tasks],
     }
 }

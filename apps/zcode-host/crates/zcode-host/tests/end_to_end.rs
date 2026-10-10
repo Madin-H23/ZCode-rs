@@ -680,9 +680,9 @@ async fn dispose_and_closed_stdin_exit_cleanly() {
     assert!(wait_exit(&mut child).await.success());
 }
 
-/// 关闭报告（docs/specs/rust-u2-task-scope.md §5、§6.4）：服务装好、有一条 Renderer 连接与订阅时，
-/// 一次正常的 dispose 之后根作用域里没有需要中止的任务。常驻任务（监听、轮询、owner、转发循环）随
-/// 取消信号结束，不在列表里；列表非空时 Host 记 warn（桌面 E2E 也会因此失败）。
+/// 关闭报告（docs/specs/rust-u2-task-scope.md §5、§6.4）：服务装好、有一条 Renderer 连接与订阅、
+/// 页面登记的文件监听还在时，一次正常的 dispose 之后根作用域里没有需要中止的任务。常驻任务（监听、
+/// 轮询、owner、转发循环）随取消信号结束，不在列表里；列表非空时 Host 记 warn（桌面 E2E 也会因此失败）。
 #[tokio::test]
 async fn a_normal_dispose_leaves_no_tasks_to_abort() {
     let mut host = Host::spawn().await;
@@ -697,6 +697,16 @@ async fn a_normal_dispose_leaves_no_tasks_to_abort() {
     rpc.send(json!([100, 2, "setting", "get"]), Some(json!([])))
         .await;
     assert_eq!(rpc.next().await.0, json!([201, 2]));
+    // 页面不会在退出前逐个 unwatch：监听（单层与递归各一个）由 Host 的有序收尾释放。
+    let watched = tempfile::tempdir().unwrap();
+    for (id, recursive) in [(3, false), (4, true)] {
+        rpc.send(
+            json!([100, id, "file-watcher", "watch"]),
+            Some(json!([{"path": watched.path(), "recursive": recursive}])),
+        )
+        .await;
+        assert_eq!(rpc.next().await.0, json!([201, id]));
+    }
     host.send(json!({"type": "dispose"})).await;
     let mut reports = Vec::new();
     while let Ok(Ok(Some(line))) = tokio::time::timeout(STEP_TIMEOUT, host.stdout.next_line()).await
