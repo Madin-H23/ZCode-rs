@@ -3,19 +3,14 @@
 //! 用真实的 `createCredentialService`（经 tsx 运行 scripts/rust-host/credential-interop.ts）
 //! 读写同一个临时目录里的 credentials.json：Rust 写的 TS 能读，TS 写的 Rust 能读，
 //! 两边并发写入都不丢更新，固定 IV 的密文逐字节相同。没有安装 node_modules 时跳过。
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{Value, json};
 use zcode_host_services::account::credential::{CredentialCipher, CredentialStore};
 
-const SECRET: &str = "interop-secret";
+use super::common::repo_root;
 
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../..")
-        .canonicalize()
-        .unwrap()
-}
+const SECRET: &str = "interop-secret";
 
 fn tsx_available(root: &Path) -> bool {
     root.join("node_modules/.bin/tsx").exists()

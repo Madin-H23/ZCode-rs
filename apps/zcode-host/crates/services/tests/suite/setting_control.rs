@@ -5,18 +5,12 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use zcode_host_control::{ClientMode, ControlRouter, ControlSink, HostToMain};
+use zcode_host_control::{ClientMode, ControlRouter, ControlSink};
 use zcode_host_kit::{CallContext, RpcValue};
 use zcode_host_services::settings::{self, SettingStore};
 use zcode_host_services::settings_control;
 
-struct Control(mpsc::UnboundedSender<Value>);
-
-impl ControlSink for Control {
-    fn send(&self, message: HostToMain) {
-        let _ = self.0.send(serde_json::to_value(&message).unwrap());
-    }
-}
+use super::common::Control;
 
 struct Setup {
     _home: tempfile::TempDir,

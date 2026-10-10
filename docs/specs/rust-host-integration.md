@@ -146,7 +146,7 @@ UI importSelected(selections) ─► 每条 selection：重新扫描该类候选
 ## 6. 验收
 
 - `cargo test -p zcode-host-services --lib off_peak::credentials`：mock 与无账号栈、支持矩阵（个人 / Team / start plan / 无选中）、strict access、错误文案与 support 原因、Team 身份头只在组织与项目都有时发。
-- `cargo test -p zcode-host-services --test off_peak_account`：临时 HOME 的已登录 Z.ai 账号（Node 加密格式）+ 127.0.0.1 mock 后端：`getCodingPlanSupport` 为 `zai-personal`，逐请求鉴权与取号请求带 JWT、Coding Plan key、来源头与 `x-request-id`；active provider 换成另一家时为 `provider_identity_mismatch`；JWT 删除后为 `jwt_missing`，取号在发请求前失败。
+- `cargo test -p zcode-host-services --test all suite::off_peak_account::`：临时 HOME 的已登录 Z.ai 账号（Node 加密格式）+ 127.0.0.1 mock 后端：`getCodingPlanSupport` 为 `zai-personal`，逐请求鉴权与取号请求带 JWT、Coding Plan key、来源头与 `x-request-id`；active provider 换成另一家时为 `provider_identity_mismatch`；JWT 删除后为 `jwt_missing`，取号在发请求前失败。
 - `pnpm exec tsx scripts/rust-host/settings-sync-fixtures.ts --check` + `cargo test -p zcode-host-services --lib settings_sync`：同一棵来源树上真实 TS 服务与 Rust 的 `detect`（四类）、`importSelected`（symlink / copy、global / project、冲突、未知类别）结果和落盘文件逐项相同。
 - `pnpm exec tsx scripts/rust-host/zod-flatten-fixtures.ts --check` + `cargo test -p zcode-host-services --lib support::zod`：闲时与 automation 反向请求参数的 flatten 与 zod 4 相同。
 - `cargo test -p zcode-host-core`：RPC 观测的字段、错误分类、桩不记、200 条立即冲刷、shutdown 冲刷。

@@ -1,5 +1,5 @@
 // Rust Host 扩展服务与 TS 实现的跨进程互操作辅助（docs/specs/rust-host-extensions.md §3、§6）。
-// 由 apps/zcode-host/crates/services/tests/extensions_interop.rs 启动；所有路径都在测试给的临时目录内。
+// 由 apps/zcode-host/crates/services/tests/suite/extensions_interop.rs 启动；所有路径都在测试给的临时目录内。
 //   race <home> <count> <prefix>        用 TS 服务交替写 config.json（命令开关、MCP upsert）
 //   export-skills <home> <out>          用 TS skill-sync 导出全部用户技能归档
 //   extract-skills <archive> <dir>      用 TS 解包 skill 归档

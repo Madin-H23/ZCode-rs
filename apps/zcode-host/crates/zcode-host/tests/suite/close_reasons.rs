@@ -11,19 +11,16 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
-use tokio::net::TcpStream;
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use zcode_host_rpc::{FrameReader, Reader, codec, frame};
 
-const DEV_ORIGIN: &str = "http://localhost:5173";
-const STEP_TIMEOUT: Duration = Duration::from_secs(10);
+use super::common::{DEV_ORIGIN, Socket};
 
-type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct Host {
     /// 测试 Host 的 home 与数据根：绝不能读写开发机真实的 ~/.zcode。

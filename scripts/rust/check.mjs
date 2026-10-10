@@ -44,7 +44,7 @@ for (const workspace of workspaces) {
   ]);
   if (workspace === "apps/zcode-host") {
     // “只有 Host”形态：只有这两个 crate 按 feature 分支（runtime-link 的 embedded、zcode-host 的
-    // embedded-runtime）；--all-targets 也覆盖只在这个形态编译的 tests/host_only.rs。
+    // embedded-runtime）；--all-targets 也覆盖只在这个形态编译的 tests/suite/host_only.rs。
     await run("cargo", [
       "clippy",
       "--locked",

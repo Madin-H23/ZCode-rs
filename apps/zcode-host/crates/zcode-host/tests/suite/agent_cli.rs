@@ -31,6 +31,8 @@ use zcode_host_services::agent::{WorkspaceTarget, session};
 use zcode_host_services::providers::ProviderRuntime;
 use zcode_host_services::settings::SettingStore;
 
+use super::common::provider_config;
+
 const MOCK_REPLY: &str = "Hello from the mock model";
 
 /// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
@@ -147,35 +149,6 @@ async fn call(channel: &AgentChannel, context: &CallContext, method: &str, value
             .unwrap()
             .into_json(),
     }
-}
-
-/// 个人 provider 配置：一个指向本地 mock 的 OpenAI 兼容 provider。返回配置文件路径。
-fn provider_config(home: &Path, port: u16) -> PathBuf {
-    let config_dir = home.join(".zcode/v2");
-    std::fs::create_dir_all(&config_dir).unwrap();
-    let personal = config_dir.join("provider_config.json");
-    std::fs::write(
-        &personal,
-        json!({"schemaVersion": 1, "config": {
-            "providerOrder": ["new-provider"],
-            "providerConfigRules": {"providerRules": [{
-                "providerId": "new-provider", "providerName": "Mock",
-                "config": {
-                    "group": "standard-personal",
-                    "access": {"type": "api-key", "apiKey": "sk-test"},
-                    "api": {"type": "openai-chat-completions", "baseUrl": format!("http://127.0.0.1:{port}/v1")},
-                    "personalModelIds": ["my-model"], "modelOrder": ["my-model"],
-                },
-            }]},
-            "modelConfigRules": {
-                "providerModelRules": [{"providerId": "new-provider", "modelId": "my-model", "config": {"enabled": true}}],
-                "manualProviderModelRules": [],
-            },
-        }})
-        .to_string(),
-    )
-    .unwrap();
-    personal
 }
 
 fn builtin_providers() -> PathBuf {

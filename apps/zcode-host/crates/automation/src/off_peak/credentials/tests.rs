@@ -1,4 +1,4 @@
-//! 闲时凭据解析的单元测试；带真实账号栈的端到端在 tests/off_peak_account.rs。
+//! 闲时凭据解析的单元测试；带真实账号栈的端到端在 crates/services/tests/suite/off_peak_account.rs。
 use std::collections::BTreeMap;
 
 use serde_json::json;

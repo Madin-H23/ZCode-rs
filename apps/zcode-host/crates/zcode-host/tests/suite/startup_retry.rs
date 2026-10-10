@@ -13,8 +13,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use zcode_host_rpc::{FrameReader, Reader};
 
-/// 调度器对执行中闲时任务数的上报：与请求无关、随时可能到达，读“下一条控制消息”时跳过。
-const UNSOLICITED_REPORT: &str = "off-peak-active-count";
+use super::common::UNSOLICITED_REPORT;
+
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct Host {

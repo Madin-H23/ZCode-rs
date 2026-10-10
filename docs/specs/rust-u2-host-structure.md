@@ -30,7 +30,7 @@
 - 第 5 层的三个 crate 互不依赖。
 - 有环的两簇各自留在一个 crate 内（`sessions`、`automation`）。把它们再拆细需要先把环改成事件或端口，属于后续步骤。
 - `zcode-host-services` 重新导出所有模块（`pub use zcode_host_sessions::agent;` 等），外部的 `zcode_host_services::<module>` 路径不变。
-- `crates/services/tests/` 下的集成测试暂留原处，经门面的路径引用各层；随后续步骤逐个移到被测的那一层。核心对话链路（`agent_cli.rs`）已移到 `crates/zcode-host/tests/`：它的子进程链路用合并二进制的 CLI 入口（`CARGO_BIN_EXE_zcode-host`），只有二进制所在的 crate 能拿到。
+- `crates/services/tests/` 下的集成测试暂留原处，经门面的路径引用各层；随后续步骤逐个移到被测的那一层。核心对话链路（`agent_cli.rs`）已移到 `crates/zcode-host/tests/`（现在是 `tests/suite/` 下的模块，[rust-engineering-practices.md](rust-engineering-practices.md) §4.2）：它的子进程链路用合并二进制的 CLI 入口（`CARGO_BIN_EXE_zcode-host`），只有二进制所在的 crate 能拿到。
 - 层号与“只允许谁依赖”由 `scripts/rust/check-host-layers.mjs` 检查；脚本里第 1 层之下的基础编为 0–2，表中第 1 层起对应脚本的 3 起。
 
 ## 3. 规则

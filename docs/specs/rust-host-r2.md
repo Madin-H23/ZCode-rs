@@ -142,7 +142,7 @@ UI                      Scope                         AgentRuntime / CLI
 
 ## 6. 验收
 
-- `cargo test -p zcode-host-services --test agent_cli`：用 Rust CLI 的 release 构建和本地 mock 的 OpenAI 兼容端点，走完以下流程：握手、`existing-only` 的 dormant 错误、createSession（带首条输入）、订阅、收到流式回复、Host 观察者看到新会话、`readWorkspacePresentation`、订阅 sessions-index、拒绝不属于本连接的 resync、断开后回收进程。整个过程不需要真实凭据，也不读写开发者的 `~/.zcode`。
+- `cargo test -p zcode-host --test all suite::agent_cli::`：用 Rust CLI 的 release 构建和本地 mock 的 OpenAI 兼容端点，走完以下流程：握手、`existing-only` 的 dormant 错误、createSession（带首条输入）、订阅、收到流式回复、Host 观察者看到新会话、`readWorkspacePresentation`、订阅 sessions-index、拒绝不属于本连接的 resync、断开后回收进程。整个过程不需要真实凭据，也不读写开发者的 `~/.zcode`。
 - 单元测试覆盖：
   - NDJSON 分行（含 U+2028）、strict 信封、存储门禁、错误码透传；
   - 进程树升级回收、stderr 脱敏；

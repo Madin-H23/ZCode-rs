@@ -13,7 +13,7 @@
     reason = "集成测试从进程环境取 PATH，并为 mock 模型起任务"
 )]
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -30,6 +30,8 @@ use zcode_host_services::agent::{AgentRuntime, AgentRuntimeConfig, WorkspaceTarg
 use zcode_host_services::providers::ProviderRuntime;
 use zcode_host_services::settings::SettingStore;
 use zcode_host_services::tasks::agent_calls;
+
+use super::common::provider_config;
 
 const LIMIT: Duration = Duration::from_secs(60);
 const FAULT: &str = "fault-marker-b10-7c41";
@@ -392,35 +394,6 @@ fn send_text(workspace: &str, session: &str, command: &str, text: &str) -> Value
         "payload": {"text": text, "modelSelection": selection(), "requestedDelivery": "queue"},
         "issuedAt": 1,
     }})
-}
-
-/// 个人 provider 配置：一个指向本地 mock 的 OpenAI 兼容 provider。返回配置文件路径。
-fn provider_config(home: &Path, port: u16) -> PathBuf {
-    let config_dir = home.join(".zcode/v2");
-    std::fs::create_dir_all(&config_dir).unwrap();
-    let personal = config_dir.join("provider_config.json");
-    std::fs::write(
-        &personal,
-        json!({"schemaVersion": 1, "config": {
-            "providerOrder": ["new-provider"],
-            "providerConfigRules": {"providerRules": [{
-                "providerId": "new-provider", "providerName": "Mock",
-                "config": {
-                    "group": "standard-personal",
-                    "access": {"type": "api-key", "apiKey": "sk-test"},
-                    "api": {"type": "openai-chat-completions", "baseUrl": format!("http://127.0.0.1:{port}/v1")},
-                    "personalModelIds": ["my-model"], "modelOrder": ["my-model"],
-                },
-            }]},
-            "modelConfigRules": {
-                "providerModelRules": [{"providerId": "new-provider", "modelId": "my-model", "config": {"enabled": true}}],
-                "manualProviderModelRules": [],
-            },
-        }})
-        .to_string(),
-    )
-    .unwrap();
-    personal
 }
 
 /// 这次请求要回答的用户输入：最后一条不是系统提醒（`<…>` 包裹）的 user 消息。

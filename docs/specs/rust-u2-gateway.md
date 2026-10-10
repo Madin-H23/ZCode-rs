@@ -226,7 +226,7 @@ sequenceDiagram
   - 水位边沿与今天相同；越过上限时只关闭这一条连接。
   - `connection_closed` 恰好一次，且晚于该连接所有调用任务的结束。
   - 关闭原因（2.6）：每种触发（越过上限、`close_attachment`、拿不到 channel 表、`Channels::closed`、`shutdown`、对端断开、写失败）在 `Outbound::close_reason` 上得到对应的原因；多个触发时第一个生效；`shutdown` 之后接入的连接直接以 `HostShutdown` 关闭；`shutdown` 等连接收口、transport 释放 `Outbound`，至多到时限。
-- 集成测试（`crates/zcode-host/tests/close_reasons.rs`，真实二进制与 WebSocket）：调试构建以 `ZCODE_HOST_DEBUG_OUTBOUND_HARD_LIMIT` 设一个小上限，客户端不读、连续请求大应答，之后读到 Close 4001 `outbound-backlog`；`detach-service-port` 得到 4002 `detached`；`dispose` 得到 4005 `host-shutdown`，然后 Host 退出。
+- 集成测试（`crates/zcode-host/tests/suite/close_reasons.rs`，真实二进制与 WebSocket）：调试构建以 `ZCODE_HOST_DEBUG_OUTBOUND_HARD_LIMIT` 设一个小上限，客户端不读、连续请求大应答，之后读到 Close 4001 `outbound-backlog`；`detach-service-port` 得到 4002 `detached`；`dispose` 得到 4005 `host-shutdown`，然后 Host 退出。
 - 测试（`zcode-host-workspace` 的 `terminal`）：读终端输出的连接 saturated 时 PTY 不再被读（输出停止、写端阻塞），drained 后输出继续到结束；其他连接 saturated 不影响它；saturated 的连接关闭后恢复。
 - 桌面 E2E `gateway-backlog`：终端里运行 `yes` 一段时间，窗口的连接不被关闭，Ctrl+C 之后终端与对话都可用；Renderer 卡住数秒期间的多轮大输出完整显示。`gateway-ordering`：忙碌会话里连续发送的两条消息按发送顺序排队、按顺序执行；另一个会话流式输出期间应答权限与提问。`gateway-detach`：流式中途销毁窗口，Host 上它的连接被收口，run 继续，另一个窗口跟到结束；`resilience-reload` 另查 reload 后旧页面的连接被收口。`gateway-close-recovery`：以测试用的小上限启动，Renderer 卡住时终端大量输出，连接以 4001 关闭；窗口自己重新加载，接入同一个 Host（pid 不变），对话完整，没有停在“正在重连”；连续越过上限时自动重新接入有上限，之后显示“连接多次中断”页，点“重新加载”恢复（rust-host-resilience.md §2.5）。每个场景结束时 harness 断言 Host 日志没有任务 panic 与越过上限的关闭。
 - `tokio::spawn` 不出现在 `zcode-host-gateway`、`host-core` 与 `zcode-host` 中（任务都在作用域里）：`scripts/rust/check-host-spawns.mjs`（`pnpm check:rust` 的一步）扫描这三个 crate 的非测试代码，也禁止取运行时句柄自行 spawn。其余 crate 迁移后加入它的列表。

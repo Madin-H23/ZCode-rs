@@ -175,12 +175,12 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 
 迁移中发现并修复的泄漏（所有者结束后任务仍在运行）：
 
-| 位置                                               | 泄漏                                                                                                                                                                                                                           | 测试                                                                                                     |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `sessions/src/agent/runtime.rs` `Handler::request` | 反向请求的处理是分离的任务：实例结束后，一直等不到结果的处理仍在运行并持有已结束实例的 client                                                                                                                                  | `agent::lane_tests::an_ended_instance_leaves_no_tasks_behind`（修复前失败）                              |
-| `automation/src/off_peak/gateway.rs`               | mock 网关释放时只中止监听任务，已接受的连接任务是分离的，网关释放后仍在运行、连接不关闭                                                                                                                                        | `off_peak::tests::dropping_the_mock_gateway_ends_its_connections`（修复前失败）                          |
-| `remote/src/remote/media.rs`                       | 远端媒体代理 dispose 时只中止监听任务，已接受、还在等请求头的连接任务一直留着、连接不关闭                                                                                                                                      | `media::tests::dispose_ends_connections_the_proxy_accepted`                                              |
-| `workspace/src/workspace.rs` `Workspace::shutdown` | Host 退出的有序收尾不释放文件监听（Node 的 `disposeServiceResources` 会调用它的 `disposeAll`）：页面没有逐个 unwatch 的监听与它们的防抖任务一直留到进程结束，由关闭报告发现（桌面 E2E 的每个场景都报 `file-watcher-debounce`） | `zcode-host/tests/end_to_end.rs` `a_normal_dispose_leaves_no_tasks_to_abort`（加入文件监听后修复前失败） |
+| 位置                                               | 泄漏                                                                                                                                                                                                                           | 测试                                                                                                           |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `sessions/src/agent/runtime.rs` `Handler::request` | 反向请求的处理是分离的任务：实例结束后，一直等不到结果的处理仍在运行并持有已结束实例的 client                                                                                                                                  | `agent::lane_tests::an_ended_instance_leaves_no_tasks_behind`（修复前失败）                                    |
+| `automation/src/off_peak/gateway.rs`               | mock 网关释放时只中止监听任务，已接受的连接任务是分离的，网关释放后仍在运行、连接不关闭                                                                                                                                        | `off_peak::tests::dropping_the_mock_gateway_ends_its_connections`（修复前失败）                                |
+| `remote/src/remote/media.rs`                       | 远端媒体代理 dispose 时只中止监听任务，已接受、还在等请求头的连接任务一直留着、连接不关闭                                                                                                                                      | `media::tests::dispose_ends_connections_the_proxy_accepted`                                                    |
+| `workspace/src/workspace.rs` `Workspace::shutdown` | Host 退出的有序收尾不释放文件监听（Node 的 `disposeServiceResources` 会调用它的 `disposeAll`）：页面没有逐个 unwatch 的监听与它们的防抖任务一直留到进程结束，由关闭报告发现（桌面 E2E 的每个场景都报 `file-watcher-debounce`） | `zcode-host/tests/suite/end_to_end.rs` `a_normal_dispose_leaves_no_tasks_to_abort`（加入文件监听后修复前失败） |
 
 ### 6.2 有界通道
 
@@ -270,7 +270,7 @@ U2 的并发规则在 Host 业务 service 上的落地：每个任务有所有�
 - 由某个常驻任务持有的子作用域（例如 WebSocket 监听持有的 `host/websocket`）随它结束而释放，其中的任务被中止、不单独列出：Gateway 已先关闭全部连接并等过 transport 发 Close。
 - 二进制入口在退出前等控制写任务写完已入队的消息（上限 2 s）。缺陷修复：原来 `run` 返回时写任务随句柄被中止，关闭报告等最后几条日志可能还没写出就丢了。
 
-验收：`crates/zcode-host/tests/end_to_end.rs` 的 `a_normal_dispose_leaves_no_tasks_to_abort`（真实二进制：装好服务、有一条 Renderer 连接与订阅、单层与递归的文件监听各一个，dispose 后只有那条 info）；桌面 E2E 的每个场景在退出后检查 Host 日志里没有 `still running` / `aborting`。
+验收：`crates/zcode-host/tests/suite/end_to_end.rs` 的 `a_normal_dispose_leaves_no_tasks_to_abort`（真实二进制：装好服务、有一条 Renderer 连接与订阅、单层与递归的文件监听各一个，dispose 后只有那条 info）；桌面 E2E 的每个场景在退出后检查 Host 日志里没有 `still running` / `aborting`。
 
 控制通道（Host → Main 的 stdout）：控制消息与日志共用一条有界队列，写任务按入队顺序写出（一条日志与它前后的控制消息在 Main 看到的顺序，就是 Host 发出的顺序）。发送方是同步的 `ControlSink::send` / 日志，不能等：队列 65536 条，其中日志最多占 8192 条。日志占满它的名额时丢弃新日志并计数；整条队列满了说明 Main 已经很久不读 stdout，丢弃新消息并计数；写任务恢复时各补一条 warn / error 说明丢了多少。
 

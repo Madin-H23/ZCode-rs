@@ -24,7 +24,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
-use zcode_host_control::{ControlRouter, ControlSink, HostToMain};
+use zcode_host_control::{ControlRouter, ControlSink};
 use zcode_host_services::account::credential::CredentialStore;
 use zcode_host_services::agent::WorkspaceTarget;
 use zcode_host_services::automation::driver::{SendText, TerminalOutcome};
@@ -37,29 +37,10 @@ use zcode_host_services::remote::transport::ProcessTransport;
 use zcode_host_services::remote::{RemoteConfig, install_with};
 use zcode_host_services::settings::SettingStore;
 
+use super::common::{Control, chunk, find_node, server_bundle};
+
 const REPLY: &str = "Hello from the remote mock model";
 const PROMPT: &str = "hello remote agent";
-
-struct Control(mpsc::UnboundedSender<Value>);
-
-impl ControlSink for Control {
-    fn send(&self, message: HostToMain) {
-        let _ = self.0.send(serde_json::to_value(&message).unwrap());
-    }
-}
-
-fn find_node() -> Option<PathBuf> {
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths)
-            .map(|dir| dir.join("node"))
-            .find(|candidate| candidate.is_file())
-    })
-}
-
-fn server_bundle() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../packages/server/dist/remote/zcode-server.cjs")
-}
 
 fn cli_binary() -> Option<PathBuf> {
     let path = std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY")
@@ -124,13 +105,6 @@ async fn write_response(stream: &mut TcpStream, content_type: &str, body: &str) 
     );
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.shutdown().await;
-}
-
-fn chunk(delta: Value, finish: Value) -> Value {
-    json!({
-        "id": "mock", "object": "chat.completion.chunk", "created": 0, "model": "my-model",
-        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
-    })
 }
 
 /// OpenAI 兼容的流式模型：回复分两段文本。

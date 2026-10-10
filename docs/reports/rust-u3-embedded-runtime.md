@@ -11,12 +11,12 @@
 
 ## 方法
 
-测量代码是 `apps/zcode-host/crates/zcode-host/tests/control_latency.rs` 的 `runtime_link_comparison`（`#[ignore]`），与 R2 验收的 `control_rpc_p95_while_four_workspaces_stream` 共用 Host 启动、mock 模型与 RPC 客户端：
+测量代码是 `apps/zcode-host/crates/zcode-host/tests/suite/control_latency.rs` 的 `runtime_link_comparison`（`#[ignore]`），与 R2 验收的 `control_rpc_p95_while_four_workspaces_stream` 共用 Host 启动、mock 模型与 RPC 客户端：
 
 ```sh
 cd apps/zcode-host
 # 嵌入式（Host 的缺省链路）
-ZCODE_PERF_WORKSPACES=4 cargo test --release -p zcode-host --test control_latency runtime_link_comparison -- --ignored --nocapture
+ZCODE_PERF_WORKSPACES=4 cargo test --release -p zcode-host --test all suite::control_latency::runtime_link_comparison -- --ignored --nocapture
 # 子进程链路
 ZCODE_TEST_CLI_RUST_BINARY=$PWD/../zcode-cli-rust/target/release/zcode-cli-rust ZCODE_PERF_WORKSPACES=4 cargo test --release ...（同上）
 ```

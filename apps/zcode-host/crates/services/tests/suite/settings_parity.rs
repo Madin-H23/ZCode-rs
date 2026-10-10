@@ -3,7 +3,7 @@ use serde_json::Value;
 use zcode_host_services::settings::schema;
 
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("fixtures/settings.json")).unwrap()
+    serde_json::from_str(include_str!("../fixtures/settings.json")).unwrap()
 }
 
 #[test]

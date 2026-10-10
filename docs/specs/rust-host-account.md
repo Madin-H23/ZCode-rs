@@ -175,7 +175,7 @@ Feedback ──► UI {path, size}；上传后 cleanupPreparedLogArchive 删除�
 ## 6. 验收
 
 - `cargo test -p zcode-host-services --lib -- account:: providers:: settings_sync`：凭据格式、锁、损坏处理；ApiClient 的端点、来源头、代理 / No Proxy / CA（127.0.0.1 mock）；OAuth 轮询、回调、去重、退出、JWT 过期；账号 provider 解析；内置配置的物化、刷新租约与退避；反馈映射、上传、本地工单、Main 归档；monitor 映射与时间范围；资源样本公式。
-- `tests/account_interop.rs`：经 `scripts/rust-host/credential-interop.ts` 调真实 TS 实现——Rust 写 TS 读、TS 写 Rust 读、两边并发写不丢更新、固定 IV 密文逐字节相同、反馈脱敏两种模式逐字一致。
-- `tests/provider_interop.rs`：经 `scripts/rust-host/provider-config-interop.ts` 核对 Rust 写出的 `provider_config.json` 与 TS codec 逐字节相同。
-- `tests/account_cli.rs`：临时 HOME 里的已登录 Z.ai 账号 + mock 后端 + 真实 Rust CLI：账号 provider 进入模型选择、Coding Plan key 缓存、权益与用量面板、反向请求、Account Config 同步。
+- `crates/services/tests/suite/account_interop.rs`：经 `scripts/rust-host/credential-interop.ts` 调真实 TS 实现——Rust 写 TS 读、TS 写 Rust 读、两边并发写不丢更新、固定 IV 密文逐字节相同、反馈脱敏两种模式逐字一致。
+- `crates/services/tests/suite/provider_interop.rs`：经 `scripts/rust-host/provider-config-interop.ts` 核对 Rust 写出的 `provider_config.json` 与 TS codec 逐字节相同。
+- `crates/services/tests/suite/account_cli.rs`：临时 HOME 里的已登录 Z.ai 账号 + mock 后端 + 真实 Rust CLI：账号 provider 进入模型选择、Coding Plan key 缓存、权益与用量面板、反向请求、Account Config 同步。
 - 桌面 E2E：`scripts/rust-host/e2e/scenarios/account-logged-in.mjs`，隔离 HOME 里的 Node 格式加密凭据 + 127.0.0.1 mock 的 ZCode / Z.ai 后端：模型菜单出现账号 provider，余额与订阅按正确凭据查询，套餐 key 写回凭据库。不点登录，不访问真实服务。

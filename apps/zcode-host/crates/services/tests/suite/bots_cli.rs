@@ -10,7 +10,7 @@
     reason = "集成测试从进程环境取被测二进制与 PATH"
 )]
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -24,42 +24,10 @@ use zcode_host_services::bots::subscribe_conversation;
 use zcode_host_services::providers::ProviderRuntime;
 use zcode_host_services::settings::SettingStore;
 
+use super::common::{chunk, runtime_vars};
+
 const FIRST_REPLY: &str = "Hello from the mock model";
 const TOOL_REPLY: &str = "The tool said hi";
-
-/// runtime 的选择：缺省嵌入式（Host 的缺省链路）；`ZCODE_TEST_CLI_RUST_BINARY` 指向可执行文件时走子进程链路。
-fn runtime_vars() -> BTreeMap<String, String> {
-    match std::env::var_os("ZCODE_TEST_CLI_RUST_BINARY").map(PathBuf::from) {
-        Some(cli) => {
-            assert!(
-                cli.is_file(),
-                "ZCODE_TEST_CLI_RUST_BINARY is not a file: {}",
-                cli.display()
-            );
-            // 缺陷修复：这里原来递归调用 runtime_vars() 自己，设置该变量时栈溢出，子进程链路的差分
-            // 对照从未真正跑过；改为与 agent_cli.rs 相同的显式命令与 runtime 种类。
-            BTreeMap::from([
-                (
-                    "ZCODE_AGENT_SERVER_COMMAND".to_owned(),
-                    cli.to_string_lossy().into_owned(),
-                ),
-                (
-                    "ZCODE_AGENT_SERVER_RUNTIME".to_owned(),
-                    "zcode-cli-rust".to_owned(),
-                ),
-            ])
-        }
-        // 不设置任何选择变量：走 Host 的缺省链路（嵌入式）。
-        None => BTreeMap::new(),
-    }
-}
-
-fn chunk(delta: Value, finish: Value) -> Value {
-    json!({
-        "id": "mock", "object": "chat.completion.chunk", "created": 0, "model": "my-model",
-        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
-    })
-}
 
 /// 请求里没有工具结果且用户要求用工具时回一个 Bash 工具调用；其余回文本（两段 chunk）。
 fn respond(body: &str) -> String {
