@@ -13,6 +13,8 @@
 //!   → 出站队列关闭（transport 的写循环结束），中止连接作用域里的调用与订阅转发，等它们结束
 //!   → 各 channel 的 connection_closed（恰好一次）
 //! ```
+//!
+//! 每个关闭触发先在关闭开关上写下原因（第一个生效），出站队列关闭时带上它（§2.6）。
 use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
@@ -30,7 +32,7 @@ use zcode_host_rpc::codec::{self, RESPONSE_EVENT_FIRE, RESPONSE_PROMISE_SUCCESS}
 use zcode_host_rpc::{Request, RequestKind, RpcError, RpcValue, read_request};
 
 use crate::lanes::Ticket;
-use crate::outbound::{CloseSwitch, Outbound, Queue};
+use crate::outbound::{CloseReason, CloseSwitch, Held, Outbound, Queue};
 use crate::{AttachmentMeta, ChannelSource, Channels, Entry, Shared};
 
 /// 入站队列的容量（条）。满了以后 transport 停止读取，背压经 TCP 到达对端；连接循环处理一条请求
@@ -81,18 +83,29 @@ pub(crate) fn connect(
         client_mode: meta.client_mode,
         window_id: meta.window_id,
     };
-    shared.connections().insert(
-        id,
-        Entry {
-            meta,
-            close: close.clone(),
-            queue: queue.clone(),
-        },
-    );
+    {
+        let mut connections = shared.connections();
+        // 与 `Gateway::shutdown` 在同一把锁里：Host 退出之后接入的连接直接关闭（不发 `[200]`）。
+        if shared
+            .shutting_down
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            close.close(CloseReason::HostShutdown);
+        }
+        connections.insert(
+            id,
+            Entry {
+                meta,
+                close: close.clone(),
+                queue: queue.clone(),
+            },
+        );
+    }
     let registration = Registration {
         shared: shared.clone(),
         id,
         queue: queue.clone(),
+        close: close.clone(),
         scope: shared.root.child(format!("connection:{id}")),
     };
     let closed = close.subscribe();
@@ -106,29 +119,33 @@ pub(crate) fn connect(
             inbound: inbound_rx,
             queue: queue.clone(),
             edges,
+            close,
             closed,
+            _held: shared.in_use.hold(),
         }),
     ));
     Connection {
         id,
         inbound: Inbound(inbound),
-        outbound: Outbound(queue),
+        outbound: Outbound::new(queue, shared.in_use.hold()),
     }
 }
 
-/// 连接在注册表里的登记与它的作用域。正常收口由 [`Live::close`] 按顺序完成；循环被中止或 panic
-/// 时由这里兜底：排队中的调用离队，出站队列关闭（transport 随之结束），之后字段 `scope` 被释放，
-/// 作用域里的任务被中止。
+/// 连接在注册表里的登记与它的作用域。正常收口由 [`Live::close`] 按顺序完成；循环没有走到那里就
+/// 结束时（拿不到 channel 表、被中止或 panic）由这里兜底：排队中的调用离队，出站队列关闭（transport
+/// 随之结束；还没有原因时记为 `InternalError`），之后字段 `scope` 被释放，作用域里的任务被中止。
 struct Registration {
     shared: Arc<Shared>,
     id: u64,
     queue: Arc<Queue>,
+    close: CloseSwitch,
     scope: TaskScope,
 }
 
 impl Drop for Registration {
     fn drop(&mut self) {
         self.shared.lanes.withdraw_connection(self.id);
+        self.close.close(CloseReason::InternalError);
         self.queue.close();
         self.shared.connections().remove(&self.id);
     }
@@ -141,7 +158,10 @@ struct Loop {
     inbound: mpsc::Receiver<Vec<u8>>,
     queue: Arc<Queue>,
     edges: watch::Receiver<FlowState>,
-    closed: watch::Receiver<bool>,
+    close: CloseSwitch,
+    closed: watch::Receiver<Option<CloseReason>>,
+    /// 循环结束（收口完，含 `connection_closed`）或被丢弃时释放：`Gateway::shutdown` 等它。
+    _held: Held,
 }
 
 async fn run(state: Loop) {
@@ -152,11 +172,13 @@ async fn run(state: Loop) {
         mut inbound,
         queue,
         mut edges,
+        close,
         mut closed,
+        _held,
     } = state;
     let resolved = tokio::select! {
         biased;
-        _ = closed.wait_for(|closed| *closed) => None,
+        _ = closed.wait_for(Option::is_some) => None,
         channels = channels => channels,
     };
     // 拿不到 channel 表（Host 未就绪就退出、远端 scope 接入失败）：不发 `[200]`，直接关闭。
@@ -165,6 +187,7 @@ async fn run(state: Loop) {
         closed: mut ended,
     }) = resolved
     else {
+        close.close(CloseReason::ScopeUnavailable);
         return;
     };
     queue.push(codec::initialize());
@@ -183,8 +206,11 @@ async fn run(state: Loop) {
     loop {
         tokio::select! {
             biased;
-            _ = closed.wait_for(|closed| *closed) => break,
-            () = wait_ended(ended.as_mut()) => break,
+            _ = closed.wait_for(Option::is_some) => break,
+            () = wait_ended(ended.as_mut()) => {
+                close.close(CloseReason::ScopeClosed);
+                break;
+            }
             changed = edges.changed(), if edges_open => match changed {
                 Ok(()) => {
                     let state = *edges.borrow_and_update();
@@ -194,7 +220,10 @@ async fn run(state: Loop) {
             },
             message = inbound.recv() => match message {
                 Some(message) => live.handle(&message),
-                None => break,
+                None => {
+                    close.close(CloseReason::PeerClosed);
+                    break;
+                }
             },
         }
     }
@@ -432,10 +461,15 @@ impl Live {
         for entry in tasks {
             let _ = entry.task.await;
         }
+        let reason = registration.close.reason();
         drop(registration);
         // 4. 按连接持有状态的 channel 清理；每条连接只走到这里一次。
         self.registry.connection_closed(&self.context);
-        log::debug(format!("attachment {} closed", self.context.attachment_id));
+        log::debug(format!(
+            "attachment {} closed ({})",
+            self.context.attachment_id,
+            reason.map_or("unknown", CloseReason::as_str)
+        ));
     }
 }
 

@@ -157,7 +157,7 @@ sequenceDiagram
     participant M as Main（App Host owner）
     Note over P: 主线程卡住，不读 WebSocket
     H->>H: 出站积压越过上限：关闭连接，原因 OutboundBacklog
-    H-->>P: Close 4001 outbound-backlog（写完正在写的消息后发出，等对端回 Close 至多 1 s）
+    H-->>P: Close 4001 outbound-backlog（写完正在写的消息后发出，再等对端回 Close）
     P->>S: 读 60 s 内的自动重新接入记录（n − 1 次）
     alt n ≤ 3
         P->>S: 记下这一次

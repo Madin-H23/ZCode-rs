@@ -142,14 +142,14 @@ pub trait CallObserver: Send + Sync { fn call_finished(&self, channel: &str, met
 
 任务与作用域：
 
-| 任务                         | 作用域                 | 说明                                                                                                                                                                                        |
-| ---------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connection`（连接循环）     | `host`                 | 执行上面的收口；不在连接作用域里，否则会中止自己                                                                                                                                            |
-| `call`、`listen`             | `host/connection:<id>` | 作用域由连接循环持有                                                                                                                                                                        |
-| `socket`（WebSocket 读与写） | `host/websocket`       | 出站队列关闭后发 WebSocket Close，状态码与原因见 2.6；正在写的那条消息写完才发 Close，之后至多等 1 s（对端可能已经不读）并结束，释放 `Outbound`。对端断开时释放 `inbound`，Gateway 随之收口 |
+| 任务                         | 作用域                 | 说明                                                                                                                                                                                                                      |
+| ---------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connection`（连接循环）     | `host`                 | 执行上面的收口；不在连接作用域里，否则会中止自己                                                                                                                                                                          |
+| `call`、`listen`             | `host/connection:<id>` | 作用域由连接循环持有                                                                                                                                                                                                      |
+| `socket`（WebSocket 读与写） | `host/websocket`       | 出站队列关闭后发 WebSocket Close，状态码与原因见 2.6；正在写的那条消息写完才发 Close（至多等 1 s：对端可能已经不读），再等对端回 Close（至多 5 s），然后结束，释放 `Outbound`。对端断开时释放 `inbound`，Gateway 随之收口 |
 
 - 关闭的触发：transport 释放 `inbound`（对端断开）、`close_attachment`（Main 的 `detach-service-port`）、出站队列越过上限、transport 写失败（`Outbound::close`）、`Channels::closed`（远端 scope 的会话断开）、拿不到 channel 表、Host 退出（`Gateway::shutdown`）。每个触发对应一个关闭原因（2.6）。多个触发同时到达时只收口一次，原因取第一个关闭出站队列的触发。
-- Host 退出（Main 的 `dispose` 或控制通道关闭）：`HostCore::shutdown` 先调用 `Gateway::shutdown`，以 `HostShutdown` 关闭全部连接（出站队列与关闭开关一起关闭），之后接入的连接直接以同一原因关闭；等这些连接的 transport 发完 Close、释放 `Outbound`，至多 1 s；然后才停止各 service、关闭根作用域。等待期间连接循环照常收口（含 `connection_closed`，与窗口先于 Host 关闭时相同）；关闭根作用域时还没收口完的连接循环被中止，不再调用 `connection_closed`。修复前 Host 退出时直接关闭根作用域，socket 任务随之被中止，Renderer 收不到 Close，只看到 1006。
+- Host 退出（Main 的 `dispose` 或控制通道关闭）：`HostCore::shutdown` 先调用 `Gateway::shutdown`，以 `HostShutdown` 关闭全部连接（在关闭开关上写下原因，各连接循环随之按上面的顺序收口），之后接入的连接直接以同一原因关闭；等这些连接循环收口完、transport 发完 Close 并释放 `Outbound`，至多 1 s（对端不读时 transport 自己的时限更长，Host 不等它）；然后才停止各 service、关闭根作用域。等待期间连接循环照常收口（含 `connection_closed`，与窗口先于 Host 关闭时相同）；关闭根作用域时还没收口完的连接循环被中止，不再调用 `connection_closed`。修复前 Host 退出时直接关闭根作用域，socket 任务随之被中止，Renderer 收不到 Close，只看到 1006。
 - 连接循环没有走完收口就结束（被中止，或循环自身 panic）：排队的调用离队，出站队列以 `InternalError` 关闭（已经关闭的保持原来的原因），连接作用域被释放（其中的任务被中止），不调用 `connection_closed`。循环自身 panic 只会来自没有隔离的 channel 回调（例如 `connection_flow`），属于缺陷，panic 交给作用域上报。
 - handler panic：调用任务回 `[202]`（`<channel>.<method> failed: internal error in the Rust Host`），释放通道，再把 panic 交还给作用域上报（Host 日志 error：`task panicked: scope=host/connection:<id> task=call: …`）。`serial_key`、`listen` 或 `call` 返回 future 之前的同步部分 panic 时，连接循环回 `[202]`（订阅则不应答）并记 error 日志，循环继续。
 
@@ -190,7 +190,7 @@ sequenceDiagram
 
 - Gateway 为每条连接记一个关闭原因（`CloseReason`）：第一个触发写入，之后不再改变；出站队列关闭时带上它，transport 在 `Outbound::next` 返回 None 之后用 `Outbound::close_reason` 读取。原因经 Gateway 的接口交给 transport，transport 不解析日志、不自行推断。
 - WebSocket transport 把原因映射为 Close 帧：状态码在应用自定义范围 4000–4999（RFC 6455 §7.4.2），reason 是下表的短 ASCII 串（机器可读，诊断用；Renderer 只按状态码判断）。
-- 发送顺序：出站队列关闭时还没发送的消息丢弃；正在写的那一条写完后发 Close，然后继续读 socket（丢弃收到的数据），直到对端回 Close 或断开，才释放 TCP，整个过程至多 1 s。修复依据：对端还有没读完的数据时直接关闭 socket，TCP 会以 RST 结束，对端可能丢掉还没读到的 Close 帧，只看到 1006。
+- 发送顺序：出站队列关闭时还没发送的消息丢弃；正在写的那一条写完后发 Close（至多等 1 s：对端可能不读），然后继续读 socket（丢弃收到的数据），直到对端回 Close 或断开，才释放 TCP（至多等 5 s：对端要先读完排在 Close 前面的数据）。修复依据：对端还有没读完的数据时直接关闭 socket，TCP 会以 RST 结束，对端可能丢掉还没读到的 Close 帧，只看到 1006。
 
 | 触发                                                                    | `CloseReason`      | 状态码 | reason              | 此时的 Host      | Renderer 怎么做（窗口的连接，rust-host-resilience.md §2.5）                                                           |
 | ----------------------------------------------------------------------- | ------------------ | ------ | ------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------- |

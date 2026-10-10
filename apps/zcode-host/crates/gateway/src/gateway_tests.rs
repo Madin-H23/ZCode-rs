@@ -1,7 +1,8 @@
 //! Gateway 的行为测试（docs/specs/rust-u2-gateway.md §3）：进程内连接，不经 socket。
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tokio::sync::watch;
@@ -456,6 +457,7 @@ async fn closing_a_connection_drops_its_queued_calls_and_the_key_moves_on() {
     assert!(log.contains(&"dropped:1".to_owned()), "{log:?}");
     assert!(!log.contains(&"start:2".to_owned()), "{log:?}");
     assert_eq!(outbound.next().await, None);
+    assert_eq!(outbound.close_reason(), Some(CloseReason::PeerClosed));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -544,6 +546,11 @@ async fn exceeding_the_hard_limit_closes_only_that_connection() {
     stalled.call(2, "x", json!({"n": 2, "bytes": 600})).await;
     probe.wait_for(&format!("closed:{}", stalled.0.id)).await;
     assert!(stalled.ended().await);
+    assert_eq!(
+        stalled.0.outbound.close_reason(),
+        Some(CloseReason::OutboundBacklog)
+    );
+    assert_eq!(healthy.0.outbound.close_reason(), None);
     healthy.call(3, "x", json!({"n": 3})).await;
     assert_eq!(healthy.next().await.0, json!([201, 3]));
     let open: Vec<u64> = host
@@ -596,8 +603,15 @@ async fn close_attachment_closes_every_connection_of_the_attachment() {
     assert_eq!(host.gateway.close_attachment("a1"), 2);
     assert!(first.ended().await);
     assert!(second.ended().await);
+    for closed in [&first, &second] {
+        assert_eq!(
+            closed.0.outbound.close_reason(),
+            Some(CloseReason::Detached)
+        );
+    }
     other.call(1, "x", json!({"n": 1})).await;
     assert_eq!(other.next().await.0, json!([201, 1]));
+    assert_eq!(other.0.outbound.close_reason(), None);
 }
 
 #[tokio::test]
@@ -615,6 +629,10 @@ async fn the_channel_table_can_end_the_connection() {
     assert_eq!(client.next().await.0, json!([200]));
     end.send_replace(true);
     assert!(client.ended().await);
+    assert_eq!(
+        client.0.outbound.close_reason(),
+        Some(CloseReason::ScopeClosed)
+    );
     probe.wait_for(&format!("closed:{}", client.0.id)).await;
 }
 
@@ -623,7 +641,113 @@ async fn a_connection_without_a_channel_table_closes_without_initialize() {
     let host = host(OutboundLimits::default());
     let client = Client(host.gateway.connect(meta("a1"), Box::pin(async { None })));
     assert!(client.ended().await);
+    assert_eq!(
+        client.0.outbound.close_reason(),
+        Some(CloseReason::ScopeUnavailable)
+    );
     tokio::time::timeout(WAIT, client.0.inbound.closed())
         .await
         .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_transport_write_failure_closes_with_transport_failed() {
+    let host = host(OutboundLimits::default());
+    let (probe, registry) = probe_registry();
+    let client = connected(&host, "a1", &registry).await;
+    client.0.outbound.close();
+    assert!(client.ended().await);
+    assert_eq!(
+        client.0.outbound.close_reason(),
+        Some(CloseReason::TransportFailed)
+    );
+    probe.wait_for(&format!("closed:{}", client.0.id)).await;
+}
+
+/// 连接循环被中止（关闭根作用域）时没有走完收口：出站队列以 `InternalError` 关闭，不调用
+/// `connection_closed`（§2.4）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_aborted_connection_loop_closes_with_internal_error() {
+    let Host {
+        gateway, _scope, ..
+    } = host(OutboundLimits::default());
+    let (probe, registry) = probe_registry();
+    let client = Client(gateway.connect(meta("a1"), ready(&registry)));
+    assert_eq!(client.next().await.0, json!([200]));
+    drop(_scope);
+    assert!(client.ended().await);
+    assert_eq!(
+        client.0.outbound.close_reason(),
+        Some(CloseReason::InternalError)
+    );
+    assert!(gateway.connections().is_empty());
+    assert!(!probe.log().iter().any(|entry| entry.starts_with("closed:")));
+}
+
+/// Host 退出（§2.4、§2.6）：已就绪与还在等 channel 表的连接都以 `HostShutdown` 关闭，就绪的那条照常
+/// 收口（`connection_closed`）；`shutdown` 等 transport 释放 `Outbound` 才返回；之后接入的连接直接关闭。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_closes_every_connection_and_waits_for_the_transports() {
+    let host = host(OutboundLimits::default());
+    let (probe, registry) = probe_registry();
+    let live = connected(&host, "a1", &registry).await;
+    let live_id = live.0.id;
+    let pending = Client(
+        host.gateway
+            .connect(meta("a2"), Box::pin(std::future::pending())),
+    );
+    let released = Arc::new(AtomicUsize::new(0));
+    let transports: Vec<_> = [live, pending]
+        .into_iter()
+        .map(|client| {
+            let released = released.clone();
+            // 像 transport 一样：出站队列关闭后还要一点时间发 Close，之后才释放 Outbound。
+            tokio::spawn(async move {
+                while client.0.outbound.next().await.is_some() {}
+                let reason = client.0.outbound.close_reason();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                released.fetch_add(1, Ordering::SeqCst);
+                drop(client);
+                reason
+            })
+        })
+        .collect();
+    let started = Instant::now();
+    host.gateway.shutdown(WAIT).await;
+    assert_eq!(
+        released.load(Ordering::SeqCst),
+        2,
+        "shutdown returned before the transports released their Outbound"
+    );
+    assert!(started.elapsed() < WAIT);
+    for transport in transports {
+        assert_eq!(transport.await.unwrap(), Some(CloseReason::HostShutdown));
+    }
+    assert!(probe.log().contains(&format!("closed:{live_id}")));
+    assert!(host.gateway.connections().is_empty());
+
+    let late = Client(host.gateway.connect(meta("a3"), ready(&registry)));
+    assert!(late.ended().await, "no [200] after the shutdown began");
+    assert_eq!(
+        late.0.outbound.close_reason(),
+        Some(CloseReason::HostShutdown)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_stops_waiting_after_the_grace_period() {
+    let host = host(OutboundLimits::default());
+    let (_, registry) = probe_registry();
+    // 一个永远不释放 Outbound 的 transport（例如对端不读，Close 写不出去）。
+    let stuck = connected(&host, "a1", &registry).await;
+    let started = Instant::now();
+    host.gateway.shutdown(Duration::from_millis(100)).await;
+    let waited = started.elapsed();
+    assert!(waited >= Duration::from_millis(100), "{waited:?}");
+    assert!(waited < WAIT, "{waited:?}");
+    assert!(stuck.ended().await);
+    assert_eq!(
+        stuck.0.outbound.close_reason(),
+        Some(CloseReason::HostShutdown)
+    );
 }

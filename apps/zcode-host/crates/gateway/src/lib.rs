@@ -6,6 +6,7 @@
 //! - 连接注册表：每条连接的 id、attachment 元数据、任务作用域与关闭开关；
 //! - 每条连接的 `@zcode/rpc` 服务端循环（`connection.rs`）；
 //! - 每条连接一个按字节计数的出站队列与积压水位（`outbound.rs`）；
+//! - 每条连接的关闭原因（[`CloseReason`]），transport 据此告诉对端；
 //! - Host 级的串行键通道（`lanes.rs`）。
 //!
 //! 它只认识 [`zcode_host_kit::ServiceChannel`]，不认识任何业务 service；channel 表由组装层经 [`ChannelSource`] 给出。
@@ -17,21 +18,21 @@ mod outbound;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use tokio::sync::watch;
 use zcode_async::Spawner;
 use zcode_host_control::{AttachmentScope, ClientMode, WindowId};
-use zcode_host_kit::ChannelRegistry;
+use zcode_host_kit::{ChannelRegistry, log};
 use zcode_host_rpc::RpcError;
 
 pub use connection::{Connection, ConnectionClosed, Inbound};
-pub use outbound::{Outbound, OutboundLimits};
+pub use outbound::{CloseReason, Outbound, OutboundLimits};
 
 use lanes::Lanes;
-use outbound::{CloseSwitch, Queue};
+use outbound::{CloseSwitch, InUse, Queue};
 
 /// 签发 capability 时登记的 attachment 元数据；连接建立后成为它的可信上下文（`CallContext`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +90,11 @@ pub(crate) struct Shared {
     limits: OutboundLimits,
     next_connection: AtomicU64,
     connections: Mutex<HashMap<u64, Entry>>,
+    /// [`Gateway::shutdown`] 之后为 true：之后接入的连接直接以 `HostShutdown` 关闭。
+    /// 在连接表的锁内读写，与登记新连接互斥。
+    shutting_down: AtomicBool,
+    /// 连接循环与 transport 的 `Outbound`：`shutdown` 等它们都释放。
+    in_use: Arc<InUse>,
 }
 
 struct Entry {
@@ -118,6 +124,8 @@ impl Gateway {
                 limits,
                 next_connection: AtomicU64::new(1),
                 connections: Mutex::default(),
+                shutting_down: AtomicBool::new(false),
+                in_use: Arc::default(),
             }),
         }
     }
@@ -129,7 +137,8 @@ impl Gateway {
         connection::connect(&self.shared, meta, channels)
     }
 
-    /// 关闭某个 attachment 的全部连接（`detach-service-port`）。返回被关闭的连接数。
+    /// 关闭某个 attachment 的全部连接（`detach-service-port`，原因 [`CloseReason::Detached`]）。
+    /// 返回被关闭的连接数。
     pub fn close_attachment(&self, attachment_id: &str) -> usize {
         let closers: Vec<CloseSwitch> = self
             .shared
@@ -139,9 +148,45 @@ impl Gateway {
             .map(|entry| entry.close.clone())
             .collect();
         for closer in &closers {
-            closer.close();
+            closer.close(CloseReason::Detached);
         }
         closers.len()
+    }
+
+    /// Host 退出（docs/specs/rust-u2-gateway.md §2.4、§2.6）：以 [`CloseReason::HostShutdown`] 关闭全部
+    /// 连接，之后接入的连接直接以同一原因关闭；等连接收口完、各 transport 发完 Close 并释放
+    /// [`Outbound`]，至多 `grace`。
+    ///
+    /// 修复原因：之前 Host 退出时直接关闭根作用域，transport 任务随之被中止，对端收不到 Close，
+    /// 只看到连接异常断开（1006），无法与 Host 崩溃区分。
+    pub async fn shutdown(&self, grace: Duration) {
+        let closers: Vec<CloseSwitch> = {
+            let connections = self.shared.connections();
+            self.shared.shutting_down.store(true, Ordering::SeqCst);
+            connections
+                .values()
+                .map(|entry| entry.close.clone())
+                .collect()
+        };
+        for closer in &closers {
+            closer.close(CloseReason::HostShutdown);
+        }
+        let deadline = tokio::time::Instant::now() + grace;
+        loop {
+            // 先登记等待再检查，部件在两者之间释放也不会漏掉通知。
+            let mut changed = std::pin::pin!(self.shared.in_use.changed());
+            changed.as_mut().enable();
+            if self.shared.in_use.is_idle() {
+                return;
+            }
+            if tokio::time::timeout_at(deadline, changed).await.is_err() {
+                log::warn(format!(
+                    "{} connection(s) still open {grace:?} after closing them for the Host shutdown",
+                    self.shared.connections().len()
+                ));
+                return;
+            }
+        }
     }
 
     /// 当前的连接（按 id 排序），用于诊断。
