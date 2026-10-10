@@ -123,7 +123,7 @@ pub trait CallObserver: Send + Sync { fn call_finished(&self, channel: &str, met
 - **终端输出按连接流控**（`crates/workspace/src/terminal/flow.rs`）：读某个终端输出（`onDynamicData`）的连接里只要有一条处于 saturated，Host 就暂停读这个终端的 PTY；这些连接都 drained（或关闭、取消订阅）后恢复。PTY 缓冲写满后 shell 里的进程写阻塞，与真实终端相同；Ctrl+C 走输入方向，不受影响。连接先 saturated、后订阅时立即暂停。子进程退出后不再暂停，剩余输出照常读完。
   - 原因（2026-10-10 桌面 E2E）：PTY 读多快就入队多快，而 Renderer 渲染终端输出只有每秒几 MB。终端里运行 `yes`，积压每秒涨约 40–50 MB，8–11 s 越过上限，Gateway 关闭窗口的连接（调试与发布构建都会）；Gateway 之前的 Host 不关闭，但内存无界增长（24 s 到 1.2 GB）。
   - 其余事件源（文件监听等）仍不受约束，由上限兜底。
-- 上限关闭之后：Renderer 把连上之后的任何关闭都当成 Host 退出，显示“正在重连”并等待 Main 重启 Host；而 Host 仍在运行，Main 不会重启，窗口停在这一页，只能退出（`packages/desktop/src/renderer/src/hostConnectionLost.tsx`）。这是已知缺口，见 §4。
+- 上限关闭之后：Renderer 把连上之后的任何关闭都当成 Host 退出，显示“正在重连”并等待 Main 重启 Host；而 Host 仍在运行，Main 不会重启，窗口停在这一页，只能退出（`packages/desktop/src/renderer/src/hostConnectionLost.tsx`）。用户已决定恢复方式（§4），实现中。
 
 ### 2.4 连接关闭
 
@@ -185,9 +185,9 @@ sequenceDiagram
 
 ## 4. 本期不做
 
-| 项                                                                              | 去向与原因                                                                                                                     |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 方法表宏（参数与结果类型、能力检查、向 TS 导出）与 `zcode-gateway-legacy`       | U9（D-U5：从 U9 起以 Rust 方法表为契约来源）。在那之前契约来源仍是 TS，40 个 channel 继续由各 service 用 `ServiceBuilder` 注册 |
-| 按连接能力过滤方法（手机默认不能用终端等）                                      | U7                                                                                                                             |
-| 投递策略对象（`Continuous` / `Replayable`）与两份 delivery 的合并               | U3 B 期，与进程内类型化链路一起做                                                                                              |
-| 上限关闭后的 Renderer 恢复（Host 主动关闭连接时重新接入，而不是等待 Host 重启） | 待定：需要 Host 在 WebSocket Close 里给出原因，Renderer 据此 reload；终端流控之后正常使用不再到达上限                          |
+| 项                                                                              | 去向与原因                                                                                                                                     |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 方法表宏（参数与结果类型、能力检查、向 TS 导出）与 `zcode-gateway-legacy`       | U9（D-U5：从 U9 起以 Rust 方法表为契约来源）。在那之前契约来源仍是 TS，40 个 channel 继续由各 service 用 `ServiceBuilder` 注册                 |
+| 按连接能力过滤方法（手机默认不能用终端等）                                      | U7                                                                                                                                             |
+| 投递策略对象（`Continuous` / `Replayable`）与两份 delivery 的合并               | U3 B 期，与进程内类型化链路一起做                                                                                                              |
+| 上限关闭后的 Renderer 恢复（Host 主动关闭连接时重新接入，而不是等待 Host 重启） | 用户决定（2026-10-10）：Host 关闭连接时在 WebSocket Close 中给出原因，Renderer 据此重新加载页面、重新接入同一个 Host，不等待 Host 重启。实现中 |
