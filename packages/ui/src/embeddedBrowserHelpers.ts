@@ -18,6 +18,51 @@ export function isRecoverableBrowserGuestExitReason(reason: string): boolean {
   return RECOVERABLE_BROWSER_GUEST_EXIT_REASONS.has(reason);
 }
 
+/**
+ * 单 tab 原位自动重建的上限与健康判定时长。
+ *
+ * guest 被 Chromium 异常终止时界面会原位重建 `<webview>`；若页面自身处于
+ * 反复崩溃/被杀的循环（实测：页面 600ms 自刷新 → guest 分钟级涨数 GB 被
+ * OOM 杀 → 重建 → 再涨爆），无上限的重建只是把崩溃循环无限续命。
+ * 超过上限必须交还人工（guestFailure + 手动重建入口）。
+ */
+export const MAX_BROWSER_GUEST_AUTO_RECOVERIES = 3;
+/**
+ * guest 自上次恢复起稳定存活的时长；超过即认为恢复成功、连续计数清零。
+ * 必须明显大于实测换代周期（1~2 分钟），否则崩溃循环会被误判为"恢复成功"。
+ */
+export const BROWSER_GUEST_RECOVERY_HEALTHY_MS = 300_000;
+
+export interface BrowserGuestRecoveryDecision {
+  /** 本轮是否允许原位重建。 */
+  allowRebuild: boolean;
+  /** 并入本轮后的连续自动恢复次数；被闸住时原样返回、不递增。 */
+  consecutiveRecoveries: number;
+}
+
+/**
+ * 纯函数：按"自上次显式导航以来的连续自动恢复次数"决定本轮是否继续恢复。
+ *
+ * 不用滑动窗口计数：崩溃循环的换代周期（分钟级）会让窗口内稳态计数恒低于
+ * 上限，闸永不触发。改用连续计数，仅在 guest 稳定存活超过健康时长或
+ * 用户显式导航/手动重建时清零——无限循环确定性闸住，偶发崩溃不误伤。
+ */
+export function decideBrowserGuestRecovery(input: {
+  consecutiveRecoveries: number;
+  lastRecoveryAt: number | null;
+  now: number;
+}): BrowserGuestRecoveryDecision {
+  // 上次恢复后 guest 稳定活过了健康时长：视为恢复成功，连续计数重新起算。
+  const carriedCount =
+    input.lastRecoveryAt !== null && input.now - input.lastRecoveryAt >= BROWSER_GUEST_RECOVERY_HEALTHY_MS
+      ? 0
+      : input.consecutiveRecoveries;
+  if (carriedCount >= MAX_BROWSER_GUEST_AUTO_RECOVERIES) {
+    return { allowRebuild: false, consecutiveRecoveries: carriedCount };
+  }
+  return { allowRebuild: true, consecutiveRecoveries: carriedCount + 1 };
+}
+
 // Electron <webview> 标签的同步方法（getURL/canGoBack/loadURL/executeJavaScript 等）在
 // guest 尚未 attach（dom-ready 之前）或 guest frame 已销毁/重附过程中会同步抛出这两类错误。
 // 这些是 webview 生命周期里的预期竞态，不是真正的业务异常。若任由它们经由

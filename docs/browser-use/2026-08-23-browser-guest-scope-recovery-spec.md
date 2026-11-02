@@ -83,6 +83,7 @@ dispatch 前返回 `stale_guest`，不得把动作发送到 B。
 - main 为每个 tab 维护 attaching/recovering 的 single-flight；恢复成功后一次性唤醒所有 waiter。
 - scope mismatch 只触发一次受控 rebind/attach retry；不允许无界循环。
 - renderer 重建继续先等待 main 的 CDP detach ACK，再替换 webview。
+- renderer 侧原位重建同样有界：guest 以可恢复原因（`oom`/`memory-eviction`/`killed`/`crashed`/`abnormal-exit`）退出时，连续自动恢复上限 3 次；guest 稳定存活超过 5 分钟、或用户显式导航/手动重建后计数清零。超限即停止自动重建，进入终局失败态（`guestFailure` + 手动重建入口）等待用户操作。页面自身 reload 不经过清零路径，刷新死循环无法洗掉额度。
 - 正常 task/workspace 切换不卸载存活 guest；guest crash、eviction 或 attach timeout 才进入恢复。
 - 完整应用重启不恢复 Browser Tab；32-tab residency 和现有 close 语义保持不变。
 
@@ -97,6 +98,7 @@ dispatch 前返回 `stale_guest`，不得把动作发送到 B。
 | BGR-005 | Guest A 在命令等待期间被 B 替换 | 旧命令返回 `backend_unavailable`，不向 B dispatch           |
 | BGR-006 | 一次 rebind 仍失败              | 有界 retry 后返回 `backend_unavailable`，tab shell 不泄漏   |
 | BGR-007 | local/remote 相同 path          | workspaceIdentity/remoteSessionId 不串，命令与 tab 互不可见 |
+| BGR-008 | 可恢复原因连续退出              | 连续自动恢复第 4 次起不再重建，进入 guestFailure 终局态；显式导航后额度清零、可再恢复 |
 
 ## 5. Human Browser tab（`browser:*`）
 

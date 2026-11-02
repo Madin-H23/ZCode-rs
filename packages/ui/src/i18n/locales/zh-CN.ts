@@ -1492,6 +1492,7 @@ const zhCN: Record<string, string> = {
   "browser.guestFailed.retry": "重试浏览器",
   "browser.invalidUrl": "仅支持 http、https、file、about、data 地址",
   "browser.loadFailed": "页面加载失败：{message}",
+  "browser.guestRecoveryStopped": "渲染进程 {reason}（{exitCode}）；已连续自动恢复 {count} 次，已停止自动恢复，请手动刷新",
   "browser.loadError.title": "无法打开该页面",
   "browser.loadError.certTitle": "该站点的 HTTPS 证书不受信任",
   "browser.loadError.certHint":

@@ -1631,6 +1631,7 @@ const enUS: Record<string, string> = {
   "browser.guestFailed.retry": "Retry browser",
   "browser.invalidUrl": "Only http, https, file, about, and data URLs are supported",
   "browser.loadFailed": "Failed to load page: {message}",
+  "browser.guestRecoveryStopped": "Renderer process {reason} ({exitCode}); auto-recovery stopped after {count} consecutive attempts. Please reload the page manually.",
   "browser.loadError.title": "This page could not be opened",
   "browser.loadError.certTitle": "This site's HTTPS certificate is not trusted",
   "browser.loadError.certHint":

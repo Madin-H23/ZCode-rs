@@ -23,6 +23,7 @@ import type { HumanBrowserViewportPreferenceChangeSource } from "@/browser-use/u
 import {
   DEFAULT_BROWSER_URL,
   INITIAL_BROWSER_STATE,
+  decideBrowserGuestRecovery,
   displayBrowserUrl,
   isDefaultBrowserOpenableUrl,
   isRecoverableBrowserGuestExitReason,
@@ -230,6 +231,12 @@ export function UnifiedBrowserView({
   // 每次 rebind / 重新挂载都会再下载一次。
   const lastRestorableUrlRef = useRef<string | null>(null);
   const guestRecoveryInProgressRef = useRef(false);
+  // 连续原位自动恢复的计数与上次恢复时刻（唯一所有者，多处同写）；只由显式导航/
+  // 手动重建清零，guest 稳定存活超过健康时长也会由纯函数清零，页面自身 reload 不清零。
+  const guestRecoveryRef = useRef<{ count: number; lastRecoveryAt: number | null }>({
+    count: 0,
+    lastRecoveryAt: null,
+  });
   // 失败 guest 接到外部导航时，回执必须等替代 guest 实际接管 loadURL 后再完成。
   const pendingGuestNavigationCompletionRef = useRef<PendingGuestNavigationCompletion | null>(null);
   // guestId 上报去重：did-attach 与 dom-ready 会连续触发；只有 guest 或 active 状态变化才重报。
@@ -468,6 +475,25 @@ export function UnifiedBrowserView({
     return downloadNavigationRef.current.urls.has(url);
   }, []);
 
+  // guest 终局失败收口：错误态 + guestFailure（界面优先展示重建入口）+ 结束挂起的导航等待。
+  // 不可自动恢复与连续恢复超限两个分支共用；loadErrorCode 必须置空，否则错误态会继续挂着
+  // 上一次的证书指引（与其它失败分支一致）。
+  const showTerminalGuestFailure = useCallback(
+    (params: { exitCode: number; reason: string; message: string }) => {
+      setBrowserState((prev) => ({
+        ...prev,
+        errorMessage: params.message,
+        loadErrorCode: null,
+        guestFailure: { exitCode: params.exitCode, reason: params.reason },
+        isLoading: false,
+        isReady: false,
+      }));
+      // 已形成明确失败结果：结束等待，让上层不再永久挂起请求。
+      completePendingGuestNavigation();
+    },
+    [completePendingGuestNavigation],
+  );
+
   // ---- webview 事件接线 + did-attach 上报 guestId ----
   useEffect(() => {
     if (!webview) return;
@@ -603,23 +629,45 @@ export function UnifiedBrowserView({
           exitCode,
           reason,
         });
-        setBrowserState((prev) => ({
-          ...prev,
-          errorMessage: intl.formatMessage(
+        showTerminalGuestFailure({
+          exitCode,
+          reason,
+          message: intl.formatMessage(
             { id: "browser.loadFailed" },
             { message: `renderer ${reason} (${exitCode})` },
           ),
-          // renderer 退出后需要重建整个 guest，单纯重新导航无法恢复。
-          // guestFailure 让界面优先展示重建入口，而不是普通页面加载错误的重试入口。
-          guestFailure: { exitCode, reason },
-          isLoading: false,
-          isReady: false,
-        }));
-        // 替代 guest 若再次启动失败，已经形成明确失败结果；结束等待，让上层不再永久挂起请求。
-        completePendingGuestNavigation();
+        });
         return;
       }
       if (guestRecoveryInProgressRef.current) return;
+
+      // 防崩溃-重建死循环：连续自动恢复超限即交还人工，不再把崩溃循环无限续命。
+      const recoveryDecision = decideBrowserGuestRecovery({
+        consecutiveRecoveries: guestRecoveryRef.current.count,
+        lastRecoveryAt: guestRecoveryRef.current.lastRecoveryAt,
+        now: Date.now(),
+      });
+      if (!recoveryDecision.allowRebuild) {
+        logger.warn("[browser-use] guest renderer 反复异常退出，停止自动恢复", {
+          browserKey,
+          exitCode,
+          reason,
+          consecutiveRecoveries: recoveryDecision.consecutiveRecoveries,
+        });
+        showTerminalGuestFailure({
+          exitCode,
+          reason,
+          message: intl.formatMessage(
+            { id: "browser.guestRecoveryStopped" },
+            { reason, exitCode, count: recoveryDecision.consecutiveRecoveries },
+          ),
+        });
+        return;
+      }
+      guestRecoveryRef.current = {
+        count: recoveryDecision.consecutiveRecoveries,
+        lastRecoveryAt: Date.now(),
+      };
 
       guestRecoveryInProgressRef.current = true;
       const recoveryUrl = lastRestorableUrlRef.current;
@@ -706,6 +754,7 @@ export function UnifiedBrowserView({
     reportBrowserGuest,
     setGuestZoomFactor,
     settleRestorableUrl,
+    showTerminalGuestFailure,
     syncBrowserState,
     webview,
   ]);
@@ -809,6 +858,8 @@ export function UnifiedBrowserView({
         isLoading: Boolean(recoveryUrl),
         isReady: false,
       }));
+      // 手动重建＝新的恢复预算周期；自动恢复的额度在这里清零。
+      guestRecoveryRef.current = { count: 0, lastRecoveryAt: null };
       setWebviewGeneration((current) => current + 1);
       return true;
     },
@@ -858,6 +909,10 @@ export function UnifiedBrowserView({
         if (navigationTakenOver) await navigationTakenOver;
         return;
       }
+
+      // 显式导航＝新的恢复预算周期；页面自身 reload 不走 openUrl，不会误清额度。
+      // 必须放在去重早退之后：被去重掉的空操作导航不清预算。
+      guestRecoveryRef.current = { count: 0, lastRecoveryAt: null };
 
       setAddressValue(displayBrowserUrl(nextUrl));
       setHasNavigated(true);
